@@ -181,6 +181,22 @@ button {
   font-weight: 700;
 }
 
+.icon-badge {
+  align-items: center;
+  background: #e7f3ec;
+  border: 1px solid #b5dac7;
+  border-radius: 7px;
+  color: var(--accent-dark);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 900;
+  height: 24px;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0 5px;
+  text-transform: uppercase;
+}
+
 .section {
   background: var(--panel);
   border: 1px solid var(--line);

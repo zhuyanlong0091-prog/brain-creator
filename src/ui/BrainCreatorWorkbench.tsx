@@ -1,17 +1,9 @@
 "use client";
 
 import {
-  AlertTriangle,
-  Bot,
-  Boxes,
-  CheckCircle2,
-  KeyRound,
-  Play,
-  Search,
-  Sparkles,
-  Workflow
-} from "lucide-react";
-import { useMemo, useState } from "react";
+  useMemo,
+  useState
+} from "react";
 
 const workflow = [
   {
@@ -39,25 +31,25 @@ const workflow = [
 const panels = [
   {
     title: "页面建模",
-    icon: Workflow,
+    icon: "PM",
     body: "通过 URL 和鉴权资料生成 PageModel、LocatorPoint 与 ProbeResult。",
     status: "主入口"
   },
   {
     title: "训练室",
-    icon: Play,
+    icon: "TR",
     body: "录制业务操作，保存 ActionStep、Trace 和 API Flow。",
     status: "证据采集"
   },
   {
     title: "资产管理",
-    icon: Boxes,
+    icon: "AS",
     body: "统一查看页面模型、L 点、训练记录、用例和缺口。",
     status: "MVP"
   },
   {
     title: "缺口处理",
-    icon: AlertTriangle,
+    icon: "GP",
     body: "定位、鉴权、接口证据或断言不足时，回到上下文修复。",
     status: "强约束"
   }
@@ -102,11 +94,11 @@ export function BrainCreatorWorkbench() {
         </div>
         <div className="hero-actions">
           <button className="primary" onClick={() => setRanFlow(true)}>
-            <Sparkles size={18} aria-hidden="true" />
+            <IconBadge label="Run" />
             运行本地闭环
           </button>
           <button className="secondary">
-            <Search size={18} aria-hidden="true" />
+            <IconBadge label="Find" />
             查看资产
           </button>
         </div>
@@ -130,11 +122,10 @@ export function BrainCreatorWorkbench() {
 
       <section className="panel-grid" id="assets">
         {panels.map((panel) => {
-          const Icon = panel.icon;
           return (
             <article className="action-panel" key={panel.title}>
               <div className="panel-heading">
-                <Icon size={20} aria-hidden="true" />
+                <IconBadge label={panel.icon} />
                 <h3>{panel.title}</h3>
                 <span>{panel.status}</span>
               </div>
@@ -164,21 +155,29 @@ export function BrainCreatorWorkbench() {
 
       <section className="section concepts" id="gaps">
         <article>
-          <KeyRound size={20} aria-hidden="true" />
+          <IconBadge label="Key" />
           <h3>鉴权安全</h3>
           <p>响应中只返回脱敏后的密钥，日志和 UI 不展示原始 Token、Cookie 或密码。</p>
         </article>
         <article>
-          <Bot size={20} aria-hidden="true" />
+          <IconBadge label="AI" />
           <h3>生成约束</h3>
           <p>用例步骤必须绑定 PageModel、LocatorPoint 或 API Flow，缺证据则创建 Gap。</p>
         </article>
         <article>
-          <CheckCircle2 size={20} aria-hidden="true" />
+          <IconBadge label="OK" />
           <h3>验收闭环</h3>
           <p>每个阶段都要经过测试、构建和真实浏览器验证后才能进入发布。</p>
         </article>
       </section>
     </main>
+  );
+}
+
+function IconBadge({ label }: { label: string }) {
+  return (
+    <span className="icon-badge" aria-hidden="true">
+      {label}
+    </span>
   );
 }
