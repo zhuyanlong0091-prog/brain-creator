@@ -1,0 +1,384 @@
+import { InMemoryBrainCreatorRepository } from "./repository";
+import type {
+  ActionStep,
+  ApiFlow,
+  ApiRequest,
+  AssetSearchResult,
+  AuthProfile,
+  Gap,
+  GeneratedCase,
+  LocatorPoint,
+  PageModel,
+  ProbeResult,
+  TrainingSession
+} from "./types";
+
+type CreateAuthProfileInput = {
+  projectId: string;
+  env: string;
+  role: string;
+  loginMethod: AuthProfile["loginMethod"];
+  secrets: Record<string, string>;
+};
+
+type DiscoverPageInput = {
+  projectId: string;
+  route: string;
+  name: string;
+  authProfileId: string;
+  domText: string;
+};
+
+type CompleteTrainingInput = {
+  sessionId: string;
+  actions: Array<Omit<ActionStep, "id" | "sessionId" | "order">>;
+  apiRequests: ApiRequest[];
+};
+
+type GenerateCaseInput = {
+  projectId: string;
+  sourceRequirement: string;
+  pageModelId: string;
+};
+
+type SearchInput = {
+  projectId: string;
+  query: string;
+};
+
+const actionTerms = ["Create Order", "Submit", "Search", "Create", "Save", "Delete"];
+
+export class BrainCreatorService {
+  constructor(private readonly repository: InMemoryBrainCreatorRepository) {}
+
+  createAuthProfile(input: CreateAuthProfileInput): AuthProfile {
+    const now = timestamp();
+    const profile: AuthProfile = {
+      id: id("auth"),
+      projectId: input.projectId,
+      env: input.env,
+      role: input.role,
+      loginMethod: input.loginMethod,
+      encryptedSecrets: redactSecrets(input.secrets),
+      status: "pending",
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.repository.authProfiles.push(profile);
+    return profile;
+  }
+
+  verifyAuthProfile(idValue: string): AuthProfile {
+    const profile = this.repository.authProfiles.find((item) => item.id === idValue);
+    if (!profile) {
+      throw new Error("Auth profile not found");
+    }
+
+    profile.status = "succeeded";
+    profile.lastVerifiedAt = timestamp();
+    profile.updatedAt = profile.lastVerifiedAt;
+    return profile;
+  }
+
+  discoverPageModel(input: DiscoverPageInput): {
+    pageModel: PageModel;
+    locatorPoints: LocatorPoint[];
+    probeResult: ProbeResult;
+  } {
+    const now = timestamp();
+    const pageModel: PageModel = {
+      id: id("page"),
+      projectId: input.projectId,
+      route: input.route,
+      name: input.name,
+      version: 1,
+      domSnapshotId: id("dom"),
+      screenshotId: id("shot"),
+      status: "succeeded",
+      createdAt: now,
+      updatedAt: now
+    };
+
+    const locatorPoints = extractLocatorPoints(pageModel.id, input.domText);
+    const probeResult: ProbeResult = {
+      id: id("probe"),
+      pageModelId: pageModel.id,
+      type: "dom-scan",
+      result: `${locatorPoints.length} locator points found`,
+      issues: locatorPoints.length > 0 ? [] : ["No stable locator candidates found"],
+      createdAt: now
+    };
+
+    this.repository.pageModels.push(pageModel);
+    this.repository.locatorPoints.push(...locatorPoints);
+    this.repository.probeResults.push(probeResult);
+
+    if (locatorPoints.length === 0) {
+      this.repository.gaps.push(
+        this.createGap(input.projectId, "page-model", pageModel.id, "No locator evidence found")
+      );
+    }
+
+    return { pageModel, locatorPoints, probeResult };
+  }
+
+  getPageModel(pageModelId: string) {
+    const pageModel = this.repository.pageModels.find((item) => item.id === pageModelId);
+    if (!pageModel) {
+      throw new Error("Page model not found");
+    }
+    return {
+      pageModel,
+      locatorPoints: this.repository.locatorPoints.filter(
+        (point) => point.pageModelId === pageModelId
+      ),
+      probeResults: this.repository.probeResults.filter(
+        (probe) => probe.pageModelId === pageModelId
+      )
+    };
+  }
+
+  createTrainingSession(input: {
+    projectId: string;
+    pageModelId: string;
+  }): TrainingSession {
+    const now = timestamp();
+    const session: TrainingSession = {
+      id: id("session"),
+      projectId: input.projectId,
+      pageModelId: input.pageModelId,
+      videoUrl: `/artifacts/${input.projectId}/video-placeholder.webm`,
+      traceUrl: `/artifacts/${input.projectId}/trace-placeholder.zip`,
+      status: "running",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.trainingSessions.push(session);
+    return session;
+  }
+
+  completeTrainingSession(input: CompleteTrainingInput): {
+    session: TrainingSession;
+    actionSteps: ActionStep[];
+    apiFlow: ApiFlow;
+  } {
+    const session = this.repository.trainingSessions.find(
+      (item) => item.id === input.sessionId
+    );
+    if (!session) {
+      throw new Error("Training session not found");
+    }
+
+    const actionSteps = input.actions.map<ActionStep>((action, index) => ({
+      ...action,
+      id: id("step"),
+      sessionId: session.id,
+      order: index + 1
+    }));
+    const apiFlow: ApiFlow = {
+      id: id("flow"),
+      sessionId: session.id,
+      name: `API Flow for ${session.pageModelId}`,
+      requests: input.apiRequests,
+      dependencies: [],
+      assertions: input.apiRequests.map((request) => `${request.method} ${request.url} ${request.status}`)
+    };
+
+    session.status = "succeeded";
+    session.updatedAt = timestamp();
+    this.repository.actionSteps.push(...actionSteps);
+    this.repository.apiFlows.push(apiFlow);
+    return { session, actionSteps, apiFlow };
+  }
+
+  generateCase(input: GenerateCaseInput): GeneratedCase {
+    const locators = this.repository.locatorPoints.filter(
+      (point) => point.pageModelId === input.pageModelId
+    );
+    const matched = locators.filter((point) =>
+      input.sourceRequirement.toLowerCase().includes(point.text.toLowerCase())
+    );
+
+    if (locators.length === 0 || matched.length === 0) {
+      const gap = this.createGap(
+        input.projectId,
+        "generated-case",
+        input.pageModelId,
+        `No locator evidence can satisfy requirement: ${input.sourceRequirement}`
+      );
+      this.repository.gaps.push(gap);
+      const blocked: GeneratedCase = {
+        id: id("case"),
+        projectId: input.projectId,
+        sourceRequirement: input.sourceRequirement,
+        pageModelId: input.pageModelId,
+        steps: [],
+        status: "blocked",
+        gaps: [gap],
+        createdAt: timestamp()
+      };
+      this.repository.generatedCases.push(blocked);
+      return blocked;
+    }
+
+    const ready: GeneratedCase = {
+      id: id("case"),
+      projectId: input.projectId,
+      sourceRequirement: input.sourceRequirement,
+      pageModelId: input.pageModelId,
+      steps: matched.map((point, index) => ({
+        order: index + 1,
+        instruction: `Use ${point.name}`,
+        locatorPointId: point.id
+      })),
+      status: "ready",
+      gaps: [],
+      createdAt: timestamp()
+    };
+    this.repository.generatedCases.push(ready);
+    return ready;
+  }
+
+  searchAssets(input: SearchInput): AssetSearchResult[] {
+    const query = input.query.toLowerCase();
+    const includes = (value: string) => value.toLowerCase().includes(query);
+    const inProject = (projectId: string) => projectId === input.projectId;
+
+    const pageModels = this.repository.pageModels
+      .filter((item) => inProject(item.projectId) && includes(`${item.name} ${item.route}`))
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "page-model",
+        label: item.name,
+        projectId: item.projectId,
+        status: item.status
+      }));
+
+    const locators = this.repository.locatorPoints
+      .filter((item) => {
+        const page = this.repository.pageModels.find((model) => model.id === item.pageModelId);
+        return page ? inProject(page.projectId) && includes(`${item.name} ${item.text}`) : false;
+      })
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "locator-point",
+        label: item.name,
+        projectId: input.projectId
+      }));
+
+    const sessions = this.repository.trainingSessions
+      .filter((item) => inProject(item.projectId))
+      .filter((item) => {
+        const page = this.repository.pageModels.find((model) => model.id === item.pageModelId);
+        return page ? includes(page.name) || includes(page.route) : true;
+      })
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "training-session",
+        label: `Training ${item.id}`,
+        projectId: item.projectId,
+        status: item.status
+      }));
+
+    const apiFlows = this.repository.apiFlows
+      .filter((item) => includes(`${item.name} ${item.requests.map((request) => request.url).join(" ")}`))
+      .map<AssetSearchResult>((item) => {
+        const session = this.repository.trainingSessions.find(
+          (training) => training.id === item.sessionId
+        );
+        return {
+          id: item.id,
+          type: "api-flow",
+          label: item.name,
+          projectId: session?.projectId ?? input.projectId
+        };
+      })
+      .filter((item) => inProject(item.projectId));
+
+    const cases = this.repository.generatedCases
+      .filter((item) => inProject(item.projectId) && includes(item.sourceRequirement))
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "generated-case",
+        label: item.sourceRequirement,
+        projectId: item.projectId,
+        status: item.status
+      }));
+
+    const gaps = this.repository.gaps
+      .filter((item) => inProject(item.projectId) && includes(item.reason))
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "gap",
+        label: item.reason,
+        projectId: item.projectId,
+        status: item.status
+      }));
+
+    return [...pageModels, ...locators, ...sessions, ...apiFlows, ...cases, ...gaps];
+  }
+
+  resolveGap(gapId: string): Gap {
+    const gap = this.repository.gaps.find((item) => item.id === gapId);
+    if (!gap) {
+      throw new Error("Gap not found");
+    }
+
+    gap.status = "resolved";
+    gap.updatedAt = timestamp();
+    return gap;
+  }
+
+  private createGap(projectId: string, sourceType: string, sourceId: string, reason: string): Gap {
+    const now = timestamp();
+    return {
+      id: id("gap"),
+      projectId,
+      sourceType,
+      sourceId,
+      reason,
+      severity: "high",
+      owner: "qa",
+      status: "open",
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+}
+
+function redactSecrets(secrets: Record<string, string>) {
+  return Object.fromEntries(Object.keys(secrets).map((key) => [key, "[REDACTED]"]));
+}
+
+function extractLocatorPoints(pageModelId: string, domText: string): LocatorPoint[] {
+  return actionTerms
+    .sort((left, right) => right.length - left.length)
+    .filter((term) => domText.toLowerCase().includes(term.toLowerCase()))
+    .filter((term, index, terms) => {
+      const lower = term.toLowerCase();
+      return !terms.slice(0, index).some((previous) => previous.toLowerCase().includes(lower));
+    })
+    .map((term) => ({
+      id: id("locator"),
+      pageModelId,
+      name: term,
+      selector: `[data-brain-label="${slug(term)}"]`,
+      role: term === "Search" ? "searchbox" : "button",
+      text: term,
+      fallbackSelectors: [`text=${term}`, `role=${term === "Search" ? "searchbox" : "button"}`],
+      confidence: 0.92
+    }));
+}
+
+function id(prefix: string) {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function slug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function timestamp() {
+  return new Date().toISOString();
+}
