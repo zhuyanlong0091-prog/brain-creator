@@ -30,6 +30,11 @@ body {
     sans-serif;
 }
 
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
 button,
 input,
 textarea,
@@ -39,4 +44,260 @@ select {
 
 button {
   cursor: pointer;
+}
+
+.workspace {
+  min-height: 100vh;
+}
+
+.topbar {
+  align-items: center;
+  background: linear-gradient(110deg, #15221a, #1f684f);
+  color: #fffaf0;
+  display: flex;
+  gap: 14px;
+  min-height: 72px;
+  padding: 14px 28px;
+}
+
+.brand-mark {
+  align-items: center;
+  background: #f4fff8;
+  border-radius: 8px;
+  color: var(--accent-dark);
+  display: flex;
+  font-weight: 800;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.topbar h1,
+.topbar p,
+.hero h2,
+.section h2,
+.action-panel h3,
+.concepts h3,
+.workflow-card h3 {
+  margin: 0;
+}
+
+.topbar h1 {
+  font-size: 18px;
+}
+
+.topbar p {
+  color: #d7e8dc;
+  font-size: 12px;
+}
+
+.topbar nav {
+  display: flex;
+  gap: 22px;
+  margin-left: auto;
+}
+
+.topbar a {
+  color: #eff8f2;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.hero,
+.section,
+.panel-grid {
+  margin: 18px auto 0;
+  max-width: 1500px;
+  width: calc(100% - 48px);
+}
+
+.hero {
+  align-items: center;
+  background:
+    radial-gradient(circle at 10% 20%, #e4f7ec 0, transparent 24%),
+    linear-gradient(120deg, #fffcf5, #efe7d8);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 32px;
+  justify-content: space-between;
+  min-height: 180px;
+  padding: 34px 42px;
+}
+
+.hero h2 {
+  font-size: 30px;
+  line-height: 1.2;
+  margin-top: 18px;
+}
+
+.hero p,
+.section p,
+.action-panel p,
+.workflow-card p,
+.concepts p {
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.pill,
+.panel-heading span {
+  background: var(--accent-soft);
+  border: 1px solid #b6e8d1;
+  border-radius: 999px;
+  color: var(--accent-dark);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 10px;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.primary,
+.secondary {
+  align-items: center;
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+}
+
+.primary {
+  background: var(--accent);
+  border: 1px solid var(--accent-dark);
+  color: white;
+  font-weight: 800;
+}
+
+.secondary {
+  background: #fffaf1;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.section-title {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.workflow-grid,
+.panel-grid,
+.concepts,
+.stats {
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.workflow-card,
+.action-panel,
+.concepts article,
+.stat {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.workflow-card span {
+  align-items: center;
+  background: #143f34;
+  border-radius: 999px;
+  color: white;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 900;
+  height: 26px;
+  justify-content: center;
+  width: 36px;
+}
+
+.workflow-card h3 {
+  font-size: 18px;
+  margin-top: 16px;
+}
+
+.panel-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.panel-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.panel-heading span {
+  margin-left: auto;
+}
+
+.split {
+  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+}
+
+.stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stat strong {
+  color: var(--accent-dark);
+  display: block;
+  font-size: 30px;
+}
+
+.stat span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.concepts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.concepts article {
+  min-height: 150px;
+}
+
+@media (max-width: 900px) {
+  .topbar,
+  .hero,
+  .section-title,
+  .hero-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .topbar nav {
+    flex-wrap: wrap;
+    margin-left: 0;
+  }
+
+  .workflow-grid,
+  .panel-grid,
+  .concepts,
+  .stats,
+  .split {
+    grid-template-columns: 1fr;
+  }
 }
