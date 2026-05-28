@@ -28,7 +28,9 @@ test("runs the local Brain Creator workbench loop", async ({ page }) => {
   await page.getByLabel("密钥").fill("local-secret-token");
   await page.getByLabel("页面 Route").fill("/orders");
   await page.getByLabel("页面名称").fill("订单页面");
-  await page.getByLabel("资产搜索词").fill("订单");
+  await page.getByLabel("采集模式").selectOption("browser");
+  await page.getByLabel("目标 URL").fill("http://127.0.0.1:3000/fixtures/model-target");
+  await page.getByLabel("资产搜索词").fill("Fixture");
   await page.getByLabel("DOM 文本").fill("Create Order Submit Search");
   await page.getByLabel("自然语言需求").fill("Unknown approval path");
 
@@ -39,8 +41,11 @@ test("runs the local Brain Creator workbench loop", async ({ page }) => {
   await expect(resultCard("AuthProfile")).toContainText("succeeded");
 
   await page.getByRole("button", { name: "页面建模" }).click();
-  await expect(resultCard("PageModel")).toContainText("订单页面");
+  await expect(resultCard("PageModel")).toContainText("真实页面建模 Fixture");
+  await expect(resultCard("PageModel")).toContainText(".png");
   await expect(resultCard("LocatorPoint")).toContainText("Create Order");
+  await expect(resultCard("ProbeResult")).toContainText("browser-capture");
+  await expect(resultCard("ProbeResult")).toContainText("fixture console failure");
 
   await page.getByRole("button", { name: "创建训练" }).click();
   await expect(resultCard("TrainingSession")).toContainText("running");
@@ -62,7 +67,7 @@ test("runs the local Brain Creator workbench loop", async ({ page }) => {
   await expect(page.locator(".stat").filter({ hasText: "PageModel" })).toBeVisible();
   await expect(page.locator(".stat").filter({ hasText: "LocatorPoint" })).toBeVisible();
   await expect(page.locator(".stat").filter({ hasText: "Gap" })).toBeVisible();
-  await expect(page.locator(".stat strong").filter({ hasText: "3" })).toBeVisible();
+  await expect(page.locator(".stat strong").filter({ hasText: "2" })).toBeVisible();
   expect(apiResponses).toContain("POST /api/auth-profiles 200");
   expect(apiResponses.some((item) => /^POST \/api\/auth-profiles\/auth_.+\/verify 200$/.test(item))).toBe(true);
   expect(apiResponses).toContain("POST /api/page-models/discover 200");

@@ -1,4 +1,5 @@
 import { InMemoryBrainCreatorRepository } from "./repository";
+import type { PageCaptureResult } from "@/src/browser/pageCapture";
 import type {
   ActionStep,
   ApiFlow,
@@ -27,6 +28,9 @@ type DiscoverPageInput = {
   name: string;
   authProfileId: string;
   domText: string;
+  captureMode?: "manual" | "browser";
+  targetUrl?: string;
+  browserCapture?: PageCaptureResult;
 };
 
 type CompleteTrainingInput = {
@@ -66,6 +70,7 @@ export class BrainCreatorService {
     };
 
     this.repository.authProfiles.push(profile);
+    this.repository.persist();
     return profile;
   }
 
@@ -78,6 +83,7 @@ export class BrainCreatorService {
     profile.status = "succeeded";
     profile.lastVerifiedAt = timestamp();
     profile.updatedAt = profile.lastVerifiedAt;
+    this.repository.persist();
     return profile;
   }
 
@@ -87,26 +93,38 @@ export class BrainCreatorService {
     probeResult: ProbeResult;
   } {
     const now = timestamp();
+    const capture = input.captureMode === "browser" ? input.browserCapture : undefined;
     const pageModel: PageModel = {
       id: id("page"),
       projectId: input.projectId,
-      route: input.route,
-      name: input.name,
+      route: capture?.finalUrl ?? input.targetUrl ?? input.route,
+      name: capture?.title || input.name,
       version: 1,
       domSnapshotId: id("dom"),
-      screenshotId: id("shot"),
+      screenshotId: capture?.screenshotPath ?? id("shot"),
       status: "succeeded",
       createdAt: now,
       updatedAt: now
     };
 
-    const locatorPoints = extractLocatorPoints(pageModel.id, input.domText);
+    const locatorPoints = capture
+      ? locatorPointsFromCapture(pageModel.id, capture)
+      : extractLocatorPoints(pageModel.id, input.domText);
+    const issues = capture
+      ? [
+          ...capture.issues,
+          ...capture.consoleErrors.map((error) => `Console error: ${error}`),
+          ...capture.networkFailures.map((failure) => `Network failure: ${failure}`)
+        ]
+      : locatorPoints.length > 0
+        ? []
+        : ["No stable locator candidates found"];
     const probeResult: ProbeResult = {
       id: id("probe"),
       pageModelId: pageModel.id,
-      type: "dom-scan",
+      type: capture ? "browser-capture" : "dom-scan",
       result: `${locatorPoints.length} locator points found`,
-      issues: locatorPoints.length > 0 ? [] : ["No stable locator candidates found"],
+      issues,
       createdAt: now
     };
 
@@ -120,6 +138,7 @@ export class BrainCreatorService {
       );
     }
 
+    this.repository.persist();
     return { pageModel, locatorPoints, probeResult };
   }
 
@@ -155,6 +174,7 @@ export class BrainCreatorService {
       updatedAt: now
     };
     this.repository.trainingSessions.push(session);
+    this.repository.persist();
     return session;
   }
 
@@ -189,6 +209,7 @@ export class BrainCreatorService {
     session.updatedAt = timestamp();
     this.repository.actionSteps.push(...actionSteps);
     this.repository.apiFlows.push(apiFlow);
+    this.repository.persist();
     return { session, actionSteps, apiFlow };
   }
 
@@ -219,6 +240,7 @@ export class BrainCreatorService {
         createdAt: timestamp()
       };
       this.repository.generatedCases.push(blocked);
+      this.repository.persist();
       return blocked;
     }
 
@@ -237,6 +259,7 @@ export class BrainCreatorService {
       createdAt: timestamp()
     };
     this.repository.generatedCases.push(ready);
+    this.repository.persist();
     return ready;
   }
 
@@ -327,6 +350,7 @@ export class BrainCreatorService {
 
     gap.status = "resolved";
     gap.updatedAt = timestamp();
+    this.repository.persist();
     return gap;
   }
 
@@ -369,6 +393,22 @@ function extractLocatorPoints(pageModelId: string, domText: string): LocatorPoin
       fallbackSelectors: [`text=${term}`, `role=${term === "Search" ? "searchbox" : "button"}`],
       confidence: 0.92
     }));
+}
+
+function locatorPointsFromCapture(
+  pageModelId: string,
+  capture: PageCaptureResult
+): LocatorPoint[] {
+  return capture.interactiveElements.map((element) => ({
+    id: id("locator"),
+    pageModelId,
+    name: element.name,
+    selector: element.selector,
+    role: element.role,
+    text: element.text || element.name,
+    fallbackSelectors: [element.selector, `text=${element.text || element.name}`],
+    confidence: 0.96
+  }));
 }
 
 function id(prefix: string) {

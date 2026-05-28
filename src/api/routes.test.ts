@@ -126,4 +126,36 @@ describe("Brain Creator API routes", () => {
     expect(assets.data.length).toBeGreaterThan(0);
     expect(resolved.data.status).toBe("resolved");
   });
+
+  it("discovers a page model through browser capture mode", async () => {
+    const targetUrl = `data:text/html,${encodeURIComponent(`
+      <!doctype html>
+      <title>Browser API Fixture</title>
+      <main>
+        <button data-brain-label="create-order">Create Order</button>
+        <input aria-label="Search orders" />
+      </main>
+    `)}`;
+
+    const discovery = await read(
+      await discoverPageModel(
+        jsonRequest({
+          projectId: "project-1",
+          route: "/fallback",
+          name: "Fallback",
+          authProfileId: "auth_1",
+          domText: "",
+          captureMode: "browser",
+          targetUrl
+        })
+      )
+    );
+
+    expect(discovery.success).toBe(true);
+    expect(discovery.data.pageModel.name).toBe("Browser API Fixture");
+    expect(discovery.data.probeResult.type).toBe("browser-capture");
+    expect(discovery.data.locatorPoints.map((point: any) => point.name)).toEqual(
+      expect.arrayContaining(["Create Order", "Search orders"])
+    );
+  });
 });

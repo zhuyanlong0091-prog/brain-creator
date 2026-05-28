@@ -71,6 +71,14 @@ This phase intentionally keeps the in-memory repository and rule-based generatio
 
 The user-facing acceptance standard is simple: a non-technical user can open the local app, fill the workbench fields, click the workflow buttons in order, and see real API results, logs, statuses, assets, and resolved gaps on the page.
 
+## Phase 3: Browser-Backed Page Modeling Alpha
+
+The third MVP phase adds a real browser capture path while preserving the manual DOM text path. The workbench can now send `captureMode=manual` or `captureMode=browser` to page discovery.
+
+In browser mode, the API visits the target URL with Playwright Chromium, captures page title, final URL, body text, interactive elements, screenshot path, console errors, and network failures, then converts that evidence into PageModel, LocatorPoint, and ProbeResult assets. The browser capture runs synchronously for the local Alpha; no queue, worker pool, Redis, or external LLM is introduced.
+
+Local assets are persisted in a lightweight JSON file under the ignored `.brain-creator/` directory so data can be restored across service reloads during local development. Tests still reset to the in-memory repository to keep automation deterministic.
+
 ## Error Handling
 
 API responses use a consistent shape:

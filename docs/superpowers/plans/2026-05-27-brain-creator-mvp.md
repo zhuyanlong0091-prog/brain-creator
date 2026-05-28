@@ -109,3 +109,40 @@
 - [x] Step 2: Run `npm run build`; expected: production build succeeds.
 - [x] Step 3: Run `npm run test:e2e`; expected: Chromium completes the local loop with no console errors.
 - [x] Step 4: Review git diff and commit the local branch. Do not push or create PR until a Git remote exists.
+
+---
+
+### Task 8: Browser-Backed Page Modeling Alpha
+
+**Files:**
+- Create: `src/browser/pageCapture.ts`
+- Test: `src/browser/pageCapture.test.ts`
+- Modify: `src/domain/service.ts`
+- Test: `src/domain/service.test.ts`
+- Modify: `src/domain/repository.ts`
+- Test: `src/domain/repository.test.ts`
+- Modify: `app/api/page-models/discover/route.ts`
+- Test: `src/api/routes.test.ts`
+- Modify: `src/ui/BrainCreatorWorkbench.tsx`
+- Test: `src/ui/BrainCreatorWorkbench.test.tsx`
+- Create: `app/fixtures/model-target/page.tsx`
+- Modify: `tests/e2e/brain-creator.spec.ts`
+
+- [x] Step 1: Write failing capture-service tests for real DOM, controls, console errors, screenshots, and empty-page issues.
+- [x] Step 2: Implement Playwright Chromium capture with local screenshot artifacts.
+- [x] Step 3: Write failing repository test proving local assets restore after service recreation.
+- [x] Step 4: Implement JSON file persistence for local runtime and keep tests on in-memory reset.
+- [x] Step 5: Write failing domain/API/UI tests for `captureMode=browser`, `targetUrl`, and ProbeResult display.
+- [x] Step 6: Implement browser capture conversion into PageModel, LocatorPoint, and ProbeResult.
+- [x] Step 7: Add local fixture page and expand E2E to run the real browser modeling path.
+
+### Task 9: Phase 3 Verification
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-05-27-brain-creator-mvp-design.md`
+- Modify: `docs/superpowers/plans/2026-05-27-brain-creator-mvp.md`
+
+- [x] Step 1: Run `npm test`; expected: all unit, API, browser-capture, repository, and UI tests pass.
+- [x] Step 2: Run `npm run build`; expected: production build succeeds.
+- [x] Step 3: Run `npm run test:e2e`; expected: Chromium completes the real fixture-backed page modeling loop with no workbench console errors.
+- [x] Step 4: Review git diff and commit the local branch. Do not push or create PR until a Git remote exists.

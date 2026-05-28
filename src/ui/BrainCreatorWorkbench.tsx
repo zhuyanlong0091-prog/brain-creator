@@ -16,11 +16,18 @@ type PageDiscoveryResult = {
     id: string;
     name: string;
     status: string;
+    screenshotId?: string;
   };
   locatorPoints: Array<{
     id: string;
     name: string;
   }>;
+  probeResult: {
+    id: string;
+    type: string;
+    result: string;
+    issues: string[];
+  };
 };
 
 type TrainingSessionResult = {
@@ -130,6 +137,8 @@ export function BrainCreatorWorkbench() {
   const [secret, setSecret] = useState("secret-token");
   const [route, setRoute] = useState("/orders");
   const [pageName, setPageName] = useState("订单页面");
+  const [targetUrl, setTargetUrl] = useState("http://127.0.0.1:3000/fixtures/model-target");
+  const [captureMode, setCaptureMode] = useState<"manual" | "browser">("manual");
   const [domText, setDomText] = useState("Create Order Submit Search");
   const [requirement, setRequirement] = useState("Unknown approval path");
   const [assetQuery, setAssetQuery] = useState("订单");
@@ -203,6 +212,8 @@ export function BrainCreatorWorkbench() {
         route,
         name: pageName,
         authProfileId: profile?.id,
+        captureMode,
+        targetUrl,
         domText
       })
     );
@@ -403,6 +414,20 @@ export function BrainCreatorWorkbench() {
             资产搜索词
             <input value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} />
           </label>
+          <label>
+            采集模式
+            <select
+              value={captureMode}
+              onChange={(event) => setCaptureMode(event.target.value as "manual" | "browser")}
+            >
+              <option value="manual">手工输入</option>
+              <option value="browser">真实浏览器</option>
+            </select>
+          </label>
+          <label>
+            目标 URL
+            <input value={targetUrl} onChange={(event) => setTargetUrl(event.target.value)} />
+          </label>
           <label className="wide">
             DOM 文本
             <textarea value={domText} onChange={(event) => setDomText(event.target.value)} />
@@ -492,6 +517,7 @@ export function BrainCreatorWorkbench() {
         <ResultCard title="AuthProfile" value={authProfile} />
         <ResultCard title="PageModel" value={discovery?.pageModel ?? null} />
         <ResultCard title="LocatorPoint" value={discovery?.locatorPoints ?? []} />
+        <ResultCard title="ProbeResult" value={discovery?.probeResult ?? null} />
         <ResultCard title="TrainingSession" value={trainingSession} />
         <ResultCard title="ApiFlow" value={trainingCompletion?.apiFlow ?? null} />
         <ResultCard title="GeneratedCase" value={generatedCase} />

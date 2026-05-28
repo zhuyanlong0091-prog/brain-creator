@@ -21,17 +21,24 @@ describe("BrainCreatorWorkbench", () => {
     expect(screen.getByRole("button", { name: "运行本地闭环" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看资产" })).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "AuthProfile 结果" })).toBeInTheDocument();
+    expect(screen.getByLabelText("目标 URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("采集模式")).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "ProbeResult 结果" })).toBeInTheDocument();
     expect(screen.getAllByText("待执行").length).toBeGreaterThan(0);
   });
 
   it("runs the real API-backed local loop from the workbench", async () => {
     const user = userEvent.setup();
     const calls: string[] = [];
+    const requestBodies: unknown[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = input.toString();
         calls.push(url);
+        if (init?.body) {
+          requestBodies.push(JSON.parse(init.body.toString()));
+        }
         if (url === "/api/auth-profiles") {
           return json({ id: "auth_1", status: "pending", encryptedSecrets: { token: "[REDACTED]" } });
         }
@@ -79,6 +86,9 @@ describe("BrainCreatorWorkbench", () => {
 
     render(<BrainCreatorWorkbench />);
 
+    await user.selectOptions(screen.getByLabelText("采集模式"), "browser");
+    await user.clear(screen.getByLabelText("目标 URL"));
+    await user.type(screen.getByLabelText("目标 URL"), "http://127.0.0.1:3000/fixtures/model-target");
     await user.click(screen.getByRole("button", { name: "创建鉴权" }));
     await user.click(screen.getByRole("button", { name: "验证鉴权" }));
     await user.click(screen.getByRole("button", { name: "页面建模" }));
@@ -101,6 +111,12 @@ describe("BrainCreatorWorkbench", () => {
       "/api/assets/search?projectId=project-1&query=%E8%AE%A2%E5%8D%95",
       "/api/gaps/gap_1/resolve"
     ]);
+    expect(requestBodies).toContainEqual(
+      expect.objectContaining({
+        captureMode: "browser",
+        targetUrl: "http://127.0.0.1:3000/fixtures/model-target"
+      })
+    );
   });
 
   it("runs the one-click local loop without losing upstream API results", async () => {

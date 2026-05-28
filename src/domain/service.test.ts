@@ -53,6 +53,56 @@ describe("BrainCreatorService", () => {
     expect(result.probeResult.issues).toEqual([]);
   });
 
+  it("discovers a page model from browser capture evidence", () => {
+    const service = createService();
+
+    const result = service.discoverPageModel({
+      projectId: "project-1",
+      route: "/orders",
+      name: "Orders",
+      authProfileId: "auth_1",
+      domText: "",
+      captureMode: "browser",
+      targetUrl: "http://127.0.0.1:3000/fixtures/model-target",
+      browserCapture: {
+        title: "Orders Fixture",
+        finalUrl: "http://127.0.0.1:3000/fixtures/model-target",
+        domText: "Orders Create Order Search",
+        screenshotPath: "C:/tmp/orders.png",
+        interactiveElements: [
+          {
+            name: "Create Order",
+            role: "button",
+            text: "Create Order",
+            selector: "[data-brain-label=\"create-order\"]"
+          },
+          {
+            name: "Search orders",
+            role: "textbox",
+            text: "Search orders",
+            selector: "input[name=\"orders-search\"]"
+          }
+        ],
+        consoleErrors: ["fixture console failure"],
+        networkFailures: ["GET http://127.0.0.1:3000/missing.js"],
+        issues: []
+      }
+    });
+
+    expect(result.pageModel.route).toBe("http://127.0.0.1:3000/fixtures/model-target");
+    expect(result.pageModel.name).toBe("Orders Fixture");
+    expect(result.pageModel.screenshotId).toBe("C:/tmp/orders.png");
+    expect(result.locatorPoints.map((point) => point.name)).toEqual([
+      "Create Order",
+      "Search orders"
+    ]);
+    expect(result.probeResult.type).toBe("browser-capture");
+    expect(result.probeResult.issues).toEqual([
+      "Console error: fixture console failure",
+      "Network failure: GET http://127.0.0.1:3000/missing.js"
+    ]);
+  });
+
   it("creates a gap instead of hallucinating generated steps without locators", () => {
     const service = createService();
 
