@@ -35,13 +35,12 @@ test("runs the Preview-aligned Brain Creator workflow", async ({ page }) => {
   await page.getByLabel("页面 Route").fill("/orders");
   await page.getByLabel("页面名称").fill("订单页面");
   await page.getByLabel("采集模式").selectOption("browser");
-  await page.getByLabel("目标 URL").fill("http://127.0.0.1:3000/fixtures/model-target");
+  await page.getByLabel("目标 URL").fill("http://127.0.0.1:3000/fixtures/private-target");
   await page.getByRole("button", { name: "页面建模" }).click();
-  await expect(page.getByRole("article", { name: "PageModel 结果" })).toContainText("真实页面建模 Fixture");
+  await expect(page.getByRole("article", { name: "PageModel 结果" })).toContainText("私有页面建模 Fixture");
   await expect(page.getByRole("article", { name: "PageModel 结果" })).toContainText(".png");
-  await expect(page.getByRole("article", { name: "LocatorPoint 结果" })).toContainText("Create Order");
+  await expect(page.getByRole("article", { name: "LocatorPoint 结果" })).toContainText("Private Submit");
   await expect(page.getByRole("article", { name: "ProbeResult 结果" })).toContainText("browser-capture");
-  await expect(page.getByRole("article", { name: "ProbeResult 结果" })).toContainText("fixture console failure");
 
   await page.getByRole("tab", { name: "资产管理" }).click();
   await page.getByLabel("资产搜索词").fill("Fixture");

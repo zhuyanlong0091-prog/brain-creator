@@ -24,6 +24,29 @@ describe("BrainCreatorService", () => {
     expect(profile.status).toBe("pending");
   });
 
+  it("keeps auth secrets available for browser capture without returning them", () => {
+    const service = createService();
+    const profile = service.createAuthProfile({
+      projectId: "project-1",
+      env: "test",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: {
+        token: "private-token"
+      }
+    });
+
+    const captureAuth = service.getCaptureAuth(profile.id);
+
+    expect(profile.encryptedSecrets.token).toBe("[REDACTED]");
+    expect(captureAuth).toEqual({
+      loginMethod: "token",
+      secrets: {
+        token: "private-token"
+      }
+    });
+  });
+
   it("discovers a page model with locator points and probe result", () => {
     const service = createService();
     const profile = service.createAuthProfile({

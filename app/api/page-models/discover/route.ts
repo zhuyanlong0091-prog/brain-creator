@@ -5,14 +5,18 @@ import { capturePageEvidence } from "@/src/browser/pageCapture";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    const service = getBrainCreatorService();
     if (body.captureMode === "browser") {
       if (!body.targetUrl) {
         throw new Error("targetUrl is required for browser capture mode");
       }
       assertSafeCaptureUrl(body.targetUrl);
-      body.browserCapture = await capturePageEvidence({ targetUrl: body.targetUrl });
+      body.browserCapture = await capturePageEvidence({
+        targetUrl: body.targetUrl,
+        auth: service.getCaptureAuth(body.authProfileId)
+      });
     }
-    return ok(getBrainCreatorService().discoverPageModel(body));
+    return ok(service.discoverPageModel(body));
   } catch (error) {
     return fail(error);
   }

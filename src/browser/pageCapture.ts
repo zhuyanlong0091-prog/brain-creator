@@ -23,6 +23,12 @@ export type PageCaptureResult = {
 export type PageCaptureInput = {
   targetUrl: string;
   screenshotDir?: string;
+  auth?: PageCaptureAuth;
+};
+
+export type PageCaptureAuth = {
+  loginMethod: "password" | "cookie" | "token" | "script";
+  secrets: Record<string, string>;
 };
 
 const defaultChromiumExecutable =
@@ -41,7 +47,16 @@ export async function capturePageEvidence(input: PageCaptureInput): Promise<Page
   });
 
   try {
-    const page = await browser.newPage();
+    const context = await browser.newContext({
+      extraHTTPHeaders:
+        input.auth?.loginMethod === "token" && input.auth.secrets.token
+          ? { authorization: `Bearer ${input.auth.secrets.token}` }
+          : undefined
+    });
+    if (input.auth?.loginMethod === "cookie" && input.auth.secrets.cookie) {
+      await context.addCookies(parseCookieHeader(input.auth.secrets.cookie, input.targetUrl));
+    }
+    const page = await context.newPage();
     page.on("console", (message) => {
       if (message.type() === "error") {
         consoleErrors.push(message.text());
@@ -125,4 +140,20 @@ export async function capturePageEvidence(input: PageCaptureInput): Promise<Page
   } finally {
     await browser.close();
   }
+}
+
+function parseCookieHeader(cookieHeader: string, targetUrl: string) {
+  return cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [name, ...valueParts] = part.split("=");
+      return {
+        name,
+        value: valueParts.join("="),
+        url: targetUrl
+      };
+    })
+    .filter((cookie) => cookie.name && cookie.value);
 }

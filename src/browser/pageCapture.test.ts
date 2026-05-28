@@ -59,12 +59,51 @@ describe("capturePageEvidence", () => {
     expect(result.interactiveElements).toEqual([]);
     expect(result.issues).toContain("No interactive elements found");
   });
+
+  it("injects token auth when capturing a protected page", async () => {
+    const targetUrl = await serveProtectedByToken("private-token");
+    const screenshotDir = await tempDir();
+
+    const result = await capturePageEvidence({
+      targetUrl,
+      screenshotDir,
+      auth: {
+        loginMethod: "token",
+        secrets: {
+          token: "private-token"
+        }
+      }
+    });
+
+    expect(result.title).toBe("Private Fixture");
+    expect(result.domText).toContain("Private Submit");
+    expect(result.interactiveElements.map((item) => item.name)).toContain("Private Submit");
+  });
 });
 
 async function serve(html: string) {
   const server = createServer((_, response) => {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end(html);
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Test server did not expose a port");
+  }
+  return `http://127.0.0.1:${address.port}/`;
+}
+
+async function serveProtectedByToken(expectedToken: string) {
+  const server = createServer((request, response) => {
+    const authorized = request.headers.authorization === `Bearer ${expectedToken}`;
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(
+      authorized
+        ? `<!doctype html><title>Private Fixture</title><button data-brain-label="private-submit">Private Submit</button>`
+        : `<!doctype html><title>Unauthorized</title><main>Unauthorized</main>`
+    );
   });
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
