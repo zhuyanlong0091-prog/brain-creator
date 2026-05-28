@@ -39,6 +39,11 @@ type CompleteTrainingInput = {
   sessionId: string;
   actions: Array<Omit<ActionStep, "id" | "sessionId" | "order">>;
   apiRequests: ApiRequest[];
+  artifacts?: {
+    traceUrl: string;
+    harUrl: string;
+    screenshotUrl: string;
+  };
 };
 
 type GenerateCaseInput = {
@@ -232,6 +237,11 @@ export class BrainCreatorService {
 
     session.status = "succeeded";
     session.updatedAt = timestamp();
+    if (input.artifacts) {
+      session.traceUrl = input.artifacts.traceUrl;
+      session.harUrl = input.artifacts.harUrl;
+      session.screenshotUrl = input.artifacts.screenshotUrl;
+    }
     this.repository.actionSteps.push(...actionSteps);
     this.repository.apiFlows.push(apiFlow);
     this.repository.persist();

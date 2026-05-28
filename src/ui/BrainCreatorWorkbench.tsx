@@ -45,6 +45,9 @@ type PageDiscoveryResult = {
 type TrainingSessionResult = {
   id: string;
   status: string;
+  traceUrl?: string;
+  harUrl?: string;
+  screenshotUrl?: string;
 };
 
 type TrainingCompletionResult = {
@@ -278,10 +281,21 @@ export function BrainCreatorWorkbench() {
               assertion: "form opens"
             }
           ],
-          apiRequests: [{ method: "POST", url: "/api/orders", status: 201 }]
+          apiRequests: [{ method: "POST", url: "/api/orders", status: 201 }],
+          recordingMode: "browser",
+          targetUrl: targetUrlInputRef.current?.value || targetUrlRef.current,
+          authProfileId: authProfile?.id,
+          action: {
+            type: "click",
+            selector: page.locatorPoints[0]?.selector ?? "",
+            targetLocatorId: page.locatorPoints[0]?.id ?? "",
+            inputValue: "",
+            assertion: "request captured"
+          }
         }
       )
     );
+    setTrainingSession(result.session);
     setTrainingCompletion(result);
     return result;
   }
@@ -531,7 +545,7 @@ export function BrainCreatorWorkbench() {
         <ModuleHeader
           eyebrow="证据采集"
           title="训练室"
-          body="当前阶段保存本地训练草稿和 API Flow，还没有接入完整录制器。"
+          body="使用真实浏览器执行一次页面动作，保存 trace、HAR、截图和 API Flow 证据。"
         />
         <div className="step-actions">
           <StepButton

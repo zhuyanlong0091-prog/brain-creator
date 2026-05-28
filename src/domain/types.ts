@@ -60,6 +60,8 @@ export type TrainingSession = {
   pageModelId: string;
   videoUrl: string;
   traceUrl: string;
+  harUrl?: string;
+  screenshotUrl?: string;
   status: TaskStatus;
   createdAt: string;
   updatedAt: string;

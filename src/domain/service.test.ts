@@ -203,6 +203,42 @@ describe("BrainCreatorService", () => {
     );
   });
 
+  it("stores browser training artifacts on completion", () => {
+    const service = createService();
+    const session = service.createTrainingSession({
+      projectId: "project-1",
+      pageModelId: "page_1"
+    });
+
+    const completed = service.completeTrainingSession({
+      sessionId: session.id,
+      actions: [
+        {
+          type: "click",
+          targetLocatorId: "locator_1",
+          inputValue: "",
+          assertion: "request captured"
+        }
+      ],
+      apiRequests: [{ method: "POST", url: "/api/orders", status: 201 }],
+      artifacts: {
+        traceUrl: "C:/tmp/trace.zip",
+        harUrl: "C:/tmp/network.har",
+        screenshotUrl: "C:/tmp/screenshot.png"
+      }
+    });
+
+    expect(completed.session.status).toBe("succeeded");
+    expect(completed.session.traceUrl).toBe("C:/tmp/trace.zip");
+    expect(completed.session.harUrl).toBe("C:/tmp/network.har");
+    expect(completed.session.screenshotUrl).toBe("C:/tmp/screenshot.png");
+    expect(completed.apiFlow.requests[0]).toEqual({
+      method: "POST",
+      url: "/api/orders",
+      status: 201
+    });
+  });
+
   it("creates glossary terms and returns them from asset search", () => {
     const service = createService();
 

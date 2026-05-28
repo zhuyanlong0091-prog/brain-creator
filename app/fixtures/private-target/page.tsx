@@ -24,6 +24,15 @@ export default async function PrivateTargetFixturePage() {
       <button data-brain-label="private-submit" type="button">
         Private Submit
       </button>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+            document.querySelector("[data-brain-label='private-submit']").addEventListener("click", () => {
+              fetch("/api/orders", { method: "POST" });
+            });
+          `
+        }}
+      />
     </main>
   );
 }

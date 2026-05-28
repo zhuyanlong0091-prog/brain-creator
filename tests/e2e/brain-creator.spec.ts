@@ -51,6 +51,9 @@ test("runs the Preview-aligned Brain Creator workflow", async ({ page }) => {
   await page.getByRole("button", { name: "创建训练" }).click();
   await expect(page.getByRole("article", { name: "TrainingSession 结果" })).toContainText("running");
   await page.getByRole("button", { name: "完成训练" }).click();
+  await expect(page.getByRole("article", { name: "TrainingSession 结果" })).toContainText("trace.zip");
+  await expect(page.getByRole("article", { name: "TrainingSession 结果" })).toContainText("network.har");
+  await expect(page.getByRole("article", { name: "TrainingSession 结果" })).toContainText("screenshot.png");
   await expect(page.getByRole("article", { name: "ApiFlow 结果" })).toContainText("/api/orders");
 
   await page.getByRole("tab", { name: "自然语言用例生成" }).click();
