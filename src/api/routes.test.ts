@@ -8,6 +8,7 @@ import { POST as completeTrainingSession } from "../../app/api/training-sessions
 import { POST as generateCase } from "../../app/api/generated-cases/route";
 import { GET as searchAssets } from "../../app/api/assets/search/route";
 import { POST as resolveGap } from "../../app/api/gaps/[id]/resolve/route";
+import { GET as listGlossaryTerms, POST as createGlossaryTerm } from "../../app/api/glossary-terms/route";
 
 function jsonRequest(body: unknown) {
   return new Request("http://localhost/api", {
@@ -127,16 +128,7 @@ describe("Brain Creator API routes", () => {
     expect(resolved.data.status).toBe("resolved");
   });
 
-  it("discovers a page model through browser capture mode", async () => {
-    const targetUrl = `data:text/html,${encodeURIComponent(`
-      <!doctype html>
-      <title>Browser API Fixture</title>
-      <main>
-        <button data-brain-label="create-order">Create Order</button>
-        <input aria-label="Search orders" />
-      </main>
-    `)}`;
-
+  it("rejects unsafe browser capture URLs before opening a browser", async () => {
     const discovery = await read(
       await discoverPageModel(
         jsonRequest({
@@ -146,16 +138,64 @@ describe("Brain Creator API routes", () => {
           authProfileId: "auth_1",
           domText: "",
           captureMode: "browser",
-          targetUrl
+          targetUrl: "data:text/html,<button>Create Order</button>"
         })
       )
     );
 
-    expect(discovery.success).toBe(true);
-    expect(discovery.data.pageModel.name).toBe("Browser API Fixture");
-    expect(discovery.data.probeResult.type).toBe("browser-capture");
-    expect(discovery.data.locatorPoints.map((point: any) => point.name)).toEqual(
-      expect.arrayContaining(["Create Order", "Search orders"])
+    expect(discovery.success).toBe(false);
+    expect(discovery.errors[0]).toContain("Only http and https URLs can be captured");
+  });
+
+  it("creates glossary terms and exposes them through asset search", async () => {
+    const created = await read(
+      await createGlossaryTerm(
+        jsonRequest({
+          projectId: "project-1",
+          key: "order.submit",
+          zhCN: "提交订单",
+          enUS: "Submit order",
+          aliases: ["Create Order"],
+          pageScope: "/orders"
+        })
+      )
+    );
+    const assets = await read(
+      await searchAssets(
+        new Request("http://localhost/api/assets/search?projectId=project-1&query=submit")
+      )
+    );
+
+    expect(created.success).toBe(true);
+    expect(created.data.key).toBe("order.submit");
+    expect(assets.data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "glossary-term" })])
+    );
+  });
+
+  it("lists glossary terms through the glossary API", async () => {
+    await read(
+      await createGlossaryTerm(
+        jsonRequest({
+          projectId: "project-1",
+          key: "order.submit",
+          zhCN: "提交订单",
+          enUS: "Submit order",
+          aliases: ["Create Order"],
+          pageScope: "/orders"
+        })
+      )
+    );
+
+    const listed = await read(
+      await listGlossaryTerms(
+        new Request("http://localhost/api/glossary-terms?projectId=project-1&query=Create")
+      )
+    );
+
+    expect(listed.success).toBe(true);
+    expect(listed.data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: "order.submit" })])
     );
   });
 });

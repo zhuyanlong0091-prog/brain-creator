@@ -120,6 +120,18 @@ export type GeneratedStep = {
   locatorPointId: string;
 };
 
+export type GlossaryTerm = {
+  id: string;
+  projectId: string;
+  key: string;
+  zhCN: string;
+  enUS: string;
+  aliases: string[];
+  pageScope: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AssetSearchResult = {
   id: string;
   type:
@@ -129,7 +141,8 @@ export type AssetSearchResult = {
     | "training-session"
     | "api-flow"
     | "generated-case"
-    | "gap";
+    | "gap"
+    | "glossary-term";
   label: string;
   projectId: string;
   status?: string;

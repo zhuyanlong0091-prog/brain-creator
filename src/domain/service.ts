@@ -8,6 +8,7 @@ import type {
   AuthProfile,
   Gap,
   GeneratedCase,
+  GlossaryTerm,
   LocatorPoint,
   PageModel,
   ProbeResult,
@@ -48,6 +49,15 @@ type GenerateCaseInput = {
 type SearchInput = {
   projectId: string;
   query: string;
+};
+
+type CreateGlossaryTermInput = {
+  projectId: string;
+  key: string;
+  zhCN: string;
+  enUS: string;
+  aliases: string[];
+  pageScope: string;
 };
 
 const actionTerms = ["Create Order", "Submit", "Search", "Create", "Save", "Delete"];
@@ -263,6 +273,35 @@ export class BrainCreatorService {
     return ready;
   }
 
+  createGlossaryTerm(input: CreateGlossaryTermInput): GlossaryTerm {
+    const now = timestamp();
+    const term: GlossaryTerm = {
+      id: id("term"),
+      projectId: input.projectId,
+      key: input.key.trim(),
+      zhCN: input.zhCN.trim(),
+      enUS: input.enUS.trim(),
+      aliases: input.aliases.map((alias) => alias.trim()).filter(Boolean),
+      pageScope: input.pageScope.trim(),
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.repository.glossaryTerms.push(term);
+    this.repository.persist();
+    return term;
+  }
+
+  listGlossaryTerms(input: SearchInput): GlossaryTerm[] {
+    const query = input.query.toLowerCase();
+    const includes = (value: string) => value.toLowerCase().includes(query);
+    return this.repository.glossaryTerms.filter(
+      (item) =>
+        item.projectId === input.projectId &&
+        includes(`${item.key} ${item.zhCN} ${item.enUS} ${item.aliases.join(" ")} ${item.pageScope}`)
+    );
+  }
+
   searchAssets(input: SearchInput): AssetSearchResult[] {
     const query = input.query.toLowerCase();
     const includes = (value: string) => value.toLowerCase().includes(query);
@@ -339,7 +378,28 @@ export class BrainCreatorService {
         status: item.status
       }));
 
-    return [...pageModels, ...locators, ...sessions, ...apiFlows, ...cases, ...gaps];
+    const glossaryTerms = this.repository.glossaryTerms
+      .filter(
+        (item) =>
+          inProject(item.projectId) &&
+          includes(`${item.key} ${item.zhCN} ${item.enUS} ${item.aliases.join(" ")} ${item.pageScope}`)
+      )
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "glossary-term",
+        label: item.key,
+        projectId: item.projectId
+      }));
+
+    return [
+      ...pageModels,
+      ...locators,
+      ...sessions,
+      ...apiFlows,
+      ...cases,
+      ...gaps,
+      ...glossaryTerms
+    ];
   }
 
   resolveGap(gapId: string): Gap {

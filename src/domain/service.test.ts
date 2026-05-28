@@ -179,4 +179,63 @@ describe("BrainCreatorService", () => {
       ])
     );
   });
+
+  it("creates glossary terms and returns them from asset search", () => {
+    const service = createService();
+
+    const term = service.createGlossaryTerm({
+      projectId: "project-1",
+      key: "order.submit",
+      zhCN: "提交订单",
+      enUS: "Submit order",
+      aliases: ["下单", "Create Order"],
+      pageScope: "/orders"
+    });
+
+    expect(term.key).toBe("order.submit");
+    expect(term.aliases).toEqual(["下单", "Create Order"]);
+
+    const assets = service.searchAssets({
+      projectId: "project-1",
+      query: "submit"
+    });
+
+    expect(assets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: term.id,
+          type: "glossary-term",
+          label: "order.submit"
+        })
+      ])
+    );
+  });
+
+  it("lists glossary terms by project and query", () => {
+    const service = createService();
+    service.createGlossaryTerm({
+      projectId: "project-1",
+      key: "order.submit",
+      zhCN: "提交订单",
+      enUS: "Submit order",
+      aliases: ["下单"],
+      pageScope: "/orders"
+    });
+    service.createGlossaryTerm({
+      projectId: "project-2",
+      key: "invoice.submit",
+      zhCN: "提交发票",
+      enUS: "Submit invoice",
+      aliases: [],
+      pageScope: "/invoices"
+    });
+
+    const terms = service.listGlossaryTerms({
+      projectId: "project-1",
+      query: "下单"
+    });
+
+    expect(terms).toHaveLength(1);
+    expect(terms[0].key).toBe("order.submit");
+  });
 });

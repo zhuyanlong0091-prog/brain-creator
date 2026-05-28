@@ -6,6 +6,7 @@ import type {
   AuthProfile,
   Gap,
   GeneratedCase,
+  GlossaryTerm,
   LocatorPoint,
   PageModel,
   ProbeResult,
@@ -22,6 +23,7 @@ export class InMemoryBrainCreatorRepository {
   apiFlows: ApiFlow[] = [];
   generatedCases: GeneratedCase[] = [];
   gaps: Gap[] = [];
+  glossaryTerms: GlossaryTerm[] = [];
 
   persist() {
     return;
@@ -37,6 +39,7 @@ export class InMemoryBrainCreatorRepository {
     this.apiFlows = [];
     this.generatedCases = [];
     this.gaps = [];
+    this.glossaryTerms = [];
     this.persist();
   }
 }
@@ -52,6 +55,7 @@ type RepositorySnapshot = Pick<
   | "apiFlows"
   | "generatedCases"
   | "gaps"
+  | "glossaryTerms"
 >;
 
 export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorRepository {
@@ -79,6 +83,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     this.apiFlows = snapshot.apiFlows ?? [];
     this.generatedCases = snapshot.generatedCases ?? [];
     this.gaps = snapshot.gaps ?? [];
+    this.glossaryTerms = snapshot.glossaryTerms ?? [];
   }
 
   private snapshot(): RepositorySnapshot {
@@ -91,7 +96,8 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       actionSteps: this.actionSteps,
       apiFlows: this.apiFlows,
       generatedCases: this.generatedCases,
-      gaps: this.gaps
+      gaps: this.gaps,
+      glossaryTerms: this.glossaryTerms
     };
   }
 }

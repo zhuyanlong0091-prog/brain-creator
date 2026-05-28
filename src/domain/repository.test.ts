@@ -34,6 +34,28 @@ describe("JsonFileBrainCreatorRepository", () => {
       })
     ).toEqual(expect.arrayContaining([expect.objectContaining({ type: "page-model" })]));
   });
+
+  it("restores glossary terms after the service is recreated", async () => {
+    const filePath = join(await tempDir(), "assets.json");
+    const firstService = new BrainCreatorService(new JsonFileBrainCreatorRepository(filePath));
+    firstService.createGlossaryTerm({
+      projectId: "project-1",
+      key: "order.submit",
+      zhCN: "提交订单",
+      enUS: "Submit order",
+      aliases: ["Create Order"],
+      pageScope: "/orders"
+    });
+
+    const secondService = new BrainCreatorService(new JsonFileBrainCreatorRepository(filePath));
+
+    expect(
+      secondService.searchAssets({
+        projectId: "project-1",
+        query: "提交"
+      })
+    ).toEqual(expect.arrayContaining([expect.objectContaining({ type: "glossary-term" })]));
+  });
 });
 
 async function tempDir() {

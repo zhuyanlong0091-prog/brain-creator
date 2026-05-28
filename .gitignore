@@ -4,3 +4,4 @@ test-results/
 playwright-report/
 *.tgz
 .brain-creator/
+.gstack/

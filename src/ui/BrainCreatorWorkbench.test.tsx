@@ -12,19 +12,81 @@ describe("BrainCreatorWorkbench", () => {
     render(<BrainCreatorWorkbench />);
 
     expect(screen.getByRole("heading", { name: "Brain Creator" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "工作台" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "页面建模" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "训练室" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "自然语言用例生成" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "资产管理" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "鉴权管理" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "i18n 词根" })).toBeInTheDocument();
     expect(screen.getByText("01")).toBeInTheDocument();
     expect(screen.getByText("配置鉴权")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "页面建模" })).toHaveLength(2);
-    expect(screen.getAllByRole("heading", { name: "训练室" })).toHaveLength(2);
-    expect(screen.getByText("自然语言用例生成")).toBeInTheDocument();
-    expect(screen.getAllByText("缺口处理").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("定位规则说明")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "运行本地闭环" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看资产" })).toBeInTheDocument();
-    expect(screen.getByRole("article", { name: "AuthProfile 结果" })).toBeInTheDocument();
-    expect(screen.getByLabelText("目标 URL")).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "AuthProfile 结果" })).not.toBeInTheDocument();
+  });
+
+  it("switches between Preview modules and creates glossary terms from the i18n view", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString();
+        if (url === "/api/glossary-terms") {
+          return json({
+            id: "term_1",
+            projectId: "project-1",
+            key: "order.submit",
+            zhCN: "提交订单",
+            enUS: "Submit order",
+            aliases: ["Create Order"],
+            pageScope: "/orders"
+          });
+        }
+        if (url.startsWith("/api/glossary-terms?")) {
+          return json([
+            {
+              id: "term_1",
+              projectId: "project-1",
+              key: "order.submit",
+              zhCN: "提交订单",
+              enUS: "Submit order",
+              aliases: ["Create Order"],
+              pageScope: "/orders"
+            }
+          ]);
+        }
+        if (url.startsWith("/api/assets/search")) {
+          return json([{ id: "term_1", type: "glossary-term", label: "order.submit" }]);
+        }
+        return json(null, false, ["unexpected route"], 404);
+      })
+    );
+
+    render(<BrainCreatorWorkbench />);
+
+    await user.click(screen.getByRole("tab", { name: "页面建模" }));
     expect(screen.getByLabelText("采集模式")).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "ProbeResult 结果" })).toBeInTheDocument();
-    expect(screen.getAllByText("待执行").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("tab", { name: "资产管理" }));
+    expect(screen.getByRole("heading", { name: "资产管理" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "i18n 词根" }));
+    await user.clear(screen.getByLabelText("词根 Key"));
+    await user.type(screen.getByLabelText("词根 Key"), "order.submit");
+    await user.clear(screen.getByLabelText("中文名称"));
+    await user.type(screen.getByLabelText("中文名称"), "提交订单");
+    await user.clear(screen.getByLabelText("英文名称"));
+    await user.type(screen.getByLabelText("英文名称"), "Submit order");
+    await user.click(screen.getByRole("button", { name: "保存词根" }));
+
+    await waitFor(() => expect(screen.getByText("order.submit")).toBeInTheDocument());
+    expect(screen.getByText("提交订单")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "查询词根" }));
+    await waitFor(() => expect(screen.getByText("Submit order")).toBeInTheDocument());
   });
 
   it("runs the real API-backed local loop from the workbench", async () => {

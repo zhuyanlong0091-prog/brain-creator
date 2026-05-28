@@ -97,15 +97,35 @@ button {
   margin-left: auto;
 }
 
-.topbar a {
+.topbar a,
+.nav-tab {
   color: #eff8f2;
   font-size: 14px;
   font-weight: 700;
 }
 
+.nav-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.nav-tab.active {
+  background: #fffaf0;
+  color: var(--accent-dark);
+}
+
+.nav-tab:not(.active):hover {
+  background: rgba(255, 250, 240, 0.12);
+  border-color: rgba(255, 250, 240, 0.28);
+}
+
 .hero,
 .section,
-.panel-grid {
+.panel-grid,
+.module-shell {
   margin: 18px auto 0;
   max-width: 1500px;
   width: calc(100% - 48px);
@@ -219,7 +239,7 @@ button {
 }
 
 .workflow-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-top: 16px;
 }
 
@@ -252,7 +272,7 @@ button {
 }
 
 .panel-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .panel-heading {
@@ -288,7 +308,7 @@ button {
 }
 
 .concepts {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .concepts article {
@@ -298,6 +318,21 @@ button {
 .operate {
   display: grid;
   gap: 18px;
+}
+
+.module-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.module-shell .hero,
+.module-shell .section {
+  margin: 0;
+  width: 100%;
+}
+
+.module-hero {
+  min-height: 150px;
 }
 
 .operation-grid {
@@ -389,6 +424,63 @@ button {
   word-break: break-word;
 }
 
+.readable-list,
+.asset-group ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.readable-list li,
+.asset-group li {
+  background: #f7f2e9;
+  border-radius: 8px;
+  color: #26362f;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 9px 10px;
+  word-break: break-word;
+}
+
+.asset-groups,
+.glossary-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.asset-group {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.asset-group h3,
+.asset-group p {
+  margin: 0;
+}
+
+.asset-group p + p {
+  margin-top: 6px;
+}
+
+.asset-group li {
+  display: grid;
+  gap: 3px;
+}
+
+.asset-group li span,
+.hint {
+  color: var(--muted);
+}
+
+.compact-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .run-log {
   display: grid;
   gap: 8px;
@@ -430,6 +522,8 @@ button {
   .workflow-grid,
   .panel-grid,
   .concepts,
+  .asset-groups,
+  .glossary-list,
   .operation-grid,
   .result-grid,
   .stats,

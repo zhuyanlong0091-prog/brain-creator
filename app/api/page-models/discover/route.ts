@@ -9,10 +9,18 @@ export async function POST(request: Request) {
       if (!body.targetUrl) {
         throw new Error("targetUrl is required for browser capture mode");
       }
+      assertSafeCaptureUrl(body.targetUrl);
       body.browserCapture = await capturePageEvidence({ targetUrl: body.targetUrl });
     }
     return ok(getBrainCreatorService().discoverPageModel(body));
   } catch (error) {
     return fail(error);
+  }
+}
+
+function assertSafeCaptureUrl(targetUrl: string) {
+  const parsed = new URL(targetUrl);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Only http and https URLs can be captured");
   }
 }
