@@ -54,6 +54,23 @@ This keeps the MVP shippable while preserving the interfaces needed for the plan
 7. Case generation binds steps to existing locator points. If no binding is possible, a gap is created.
 8. Asset search returns a unified list for the workbench and asset page.
 
+## Phase 2: API-Backed Local Loop
+
+The second MVP phase turns the workbench from a visual demo into a usable local flow. The UI now owns the operating inputs and calls the existing local API routes directly:
+
+1. Create and verify an auth profile.
+2. Discover a page model and locator points from DOM text.
+3. Create and complete a training session.
+4. Save an API Flow placeholder from the completed training session.
+5. Generate a constrained natural-language case.
+6. Surface blocked generation as a Gap instead of inventing missing steps.
+7. Search local assets.
+8. Resolve the active Gap.
+
+This phase intentionally keeps the in-memory repository and rule-based generation. PostgreSQL, Redis, Playwright Worker, external target pages, and real LLM providers remain deferred so the local product loop can be verified end to end first.
+
+The user-facing acceptance standard is simple: a non-technical user can open the local app, fill the workbench fields, click the workflow buttons in order, and see real API results, logs, statuses, assets, and resolved gaps on the page.
+
 ## Error Handling
 
 API responses use a consistent shape:
@@ -79,4 +96,3 @@ Implementation follows TDD. Domain tests cover redaction, task state transitions
 - MVP scope is intentionally smaller than the final architecture.
 - The production stack is represented by stable interfaces rather than full infrastructure.
 - Git remote and external target credentials are explicit release blockers.
-

@@ -295,6 +295,124 @@ button {
   min-height: 150px;
 }
 
+.operate {
+  display: grid;
+  gap: 18px;
+}
+
+.operation-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.operation-grid label {
+  color: var(--ink);
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.operation-grid input,
+.operation-grid select,
+.operation-grid textarea {
+  background: #fffaf1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  min-height: 40px;
+  padding: 9px 10px;
+  width: 100%;
+}
+
+.operation-grid textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.operation-grid .wide {
+  grid-column: span 2;
+}
+
+.step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.step-button {
+  justify-content: space-between;
+  min-width: 136px;
+}
+
+.step-button small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.step-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.result-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.result-card {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 180px;
+  padding: 16px;
+}
+
+.result-card h3 {
+  margin: 0 0 10px;
+}
+
+.result-card pre {
+  background: #f7f2e9;
+  border-radius: 8px;
+  color: #26362f;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.run-log {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.run-log li {
+  border-left: 3px solid var(--accent);
+  display: grid;
+  gap: 3px;
+  padding-left: 10px;
+}
+
+.run-log li[data-status="failed"] {
+  border-left-color: var(--danger);
+}
+
+.run-log span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 @media (max-width: 900px) {
   .topbar,
   .hero,
@@ -312,8 +430,14 @@ button {
   .workflow-grid,
   .panel-grid,
   .concepts,
+  .operation-grid,
+  .result-grid,
   .stats,
   .split {
     grid-template-columns: 1fr;
+  }
+
+  .operation-grid .wide {
+    grid-column: span 1;
   }
 }

@@ -81,3 +81,31 @@
 - [ ] Step 3: Run build with `npm run build`.
 - [ ] Step 4: Run browser QA with `npm run test:e2e`.
 
+---
+
+### Task 6: API-Backed Workbench Loop
+
+**Files:**
+- Create: `src/ui/apiClient.ts`
+- Test: `src/ui/apiClient.test.ts`
+- Modify: `src/ui/BrainCreatorWorkbench.tsx`
+- Test: `src/ui/BrainCreatorWorkbench.test.tsx`
+- Modify: `tests/e2e/brain-creator.spec.ts`
+
+- [x] Step 1: Write failing API client tests for successful envelopes, failed envelopes, and network errors.
+- [x] Step 2: Implement the UI API client so components do not duplicate fetch handling.
+- [x] Step 3: Write failing workbench tests for step-by-step API execution and the one-click local loop.
+- [x] Step 4: Refactor the workbench so forms, buttons, logs, statuses, and result cards use real API responses.
+- [x] Step 5: Use local return values inside the one-click loop so downstream steps do not depend on delayed React state.
+- [x] Step 6: Expand browser QA to cover auth creation, verification, page modeling, training, completion, case generation, asset search, and gap resolution.
+
+### Task 7: Phase 2 Verification
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-05-27-brain-creator-mvp-design.md`
+- Modify: `docs/superpowers/plans/2026-05-27-brain-creator-mvp.md`
+
+- [x] Step 1: Run `npm test`; expected: all unit, API, and UI tests pass.
+- [x] Step 2: Run `npm run build`; expected: production build succeeds.
+- [x] Step 3: Run `npm run test:e2e`; expected: Chromium completes the local loop with no console errors.
+- [x] Step 4: Review git diff and commit the local branch. Do not push or create PR until a Git remote exists.
