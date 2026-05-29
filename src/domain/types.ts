@@ -7,6 +7,18 @@ export type TaskStatus =
 
 export type GapStatus = "open" | "resolved";
 
+export type SystemProfile = {
+  id: string;
+  name: string;
+  environment: string;
+  baseUrl: string;
+  defaultLocale: string;
+  urlAllowlist: string[];
+  status: TaskStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AuthProfile = {
   id: string;
   projectId: string;
@@ -137,6 +149,7 @@ export type GlossaryTerm = {
 export type AssetSearchResult = {
   id: string;
   type:
+    | "system-profile"
     | "auth-profile"
     | "page-model"
     | "locator-point"

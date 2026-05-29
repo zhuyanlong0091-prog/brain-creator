@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("runs the Preview-aligned Brain Creator workflow", async ({ page }) => {
+test("runs the multi-system Brain Creator workflow", async ({ page }) => {
   const consoleErrors: string[] = [];
   const apiResponses: string[] = [];
   page.on("console", (message) => {
@@ -18,10 +18,18 @@ test("runs the Preview-aligned Brain Creator workflow", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Brain Creator" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "工作台" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByText("定位规则说明")).toBeVisible();
+
+  await page.getByRole("button", { name: "进入业务系统接入" }).click();
+  await expect(page.getByRole("heading", { name: "业务系统接入" })).toBeVisible();
+  await page.getByLabel("系统名称").fill("Orders Console E2E");
+  await page.getByLabel("基础 URL").fill("http://127.0.0.1:3000/fixtures/private-target");
+  await page.getByLabel("URL 允许范围").fill("http://127.0.0.1:3000/fixtures/private-target");
+  await page.getByRole("button", { name: "创建业务系统" }).click();
+  await expect(page.getByText("可复用入口已建立")).toBeVisible();
+  await expect(page.getByText("当前系统：Orders Console E2E")).toBeVisible();
 
   await page.getByRole("tab", { name: "鉴权管理" }).click();
-  await page.getByLabel("项目 ID").fill("project-e2e");
+  await expect(page.getByText("当前系统：Orders Console E2E")).toBeVisible();
   await page.getByLabel("环境").fill("staging");
   await page.getByLabel("角色").fill("qa-admin");
   await page.getByLabel("登录方式").selectOption("token");
@@ -81,6 +89,7 @@ test("runs the Preview-aligned Brain Creator workflow", async ({ page }) => {
   await page.getByRole("button", { name: "搜索资产" }).click();
   await expect(page.getByRole("region", { name: "资产结果" })).toContainText("glossary-term");
 
+  expect(apiResponses).toContain("POST /api/system-profiles 200");
   expect(apiResponses).toContain("POST /api/auth-profiles 200");
   expect(apiResponses.some((item) => /^POST \/api\/auth-profiles\/auth_.+\/verify 200$/.test(item))).toBe(true);
   expect(apiResponses).toContain("POST /api/page-models/discover 200");

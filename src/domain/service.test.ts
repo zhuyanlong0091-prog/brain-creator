@@ -7,6 +7,88 @@ function createService() {
 }
 
 describe("BrainCreatorService", () => {
+  it("creates business systems that can be reused as isolated onboarding contexts", () => {
+    const service = createService();
+
+    const ordersSystem = service.createSystemProfile({
+      name: "Orders Console",
+      environment: "staging",
+      baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+    });
+    const crmSystem = service.createSystemProfile({
+      name: "CRM Console",
+      environment: "test",
+      baseUrl: "https://crm.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://crm.example.test"]
+    });
+
+    expect(ordersSystem).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^system_/),
+        name: "Orders Console",
+        environment: "staging",
+        status: "succeeded"
+      })
+    );
+    expect(service.listSystemProfiles().map((system) => system.name)).toEqual([
+      "Orders Console",
+      "CRM Console"
+    ]);
+    expect(crmSystem.id).not.toBe(ordersSystem.id);
+  });
+
+  it("prevents page modeling and case generation from crossing business systems", () => {
+    const service = createService();
+    const ordersSystem = service.createSystemProfile({
+      name: "Orders Console",
+      environment: "staging",
+      baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+    });
+    const crmSystem = service.createSystemProfile({
+      name: "CRM Console",
+      environment: "test",
+      baseUrl: "https://crm.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://crm.example.test"]
+    });
+    const auth = service.createAuthProfile({
+      projectId: ordersSystem.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const discovery = service.discoverPageModel({
+      projectId: ordersSystem.id,
+      route: "/orders",
+      name: "Orders",
+      authProfileId: auth.id,
+      domText: "Create Order Submit Search"
+    });
+
+    expect(() =>
+      service.discoverPageModel({
+        projectId: crmSystem.id,
+        route: "/crm",
+        name: "CRM",
+        authProfileId: auth.id,
+        domText: "Create"
+      })
+    ).toThrow("Auth profile belongs to another business system");
+    expect(() =>
+      service.generateCase({
+        projectId: crmSystem.id,
+        sourceRequirement: "Create Order",
+        pageModelId: discovery.pageModel.id
+      })
+    ).toThrow("Page model belongs to another business system");
+  });
+
   it("redacts auth secrets in returned profiles", () => {
     const service = createService();
 

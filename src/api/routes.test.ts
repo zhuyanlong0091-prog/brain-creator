@@ -9,6 +9,7 @@ import { POST as generateCase } from "../../app/api/generated-cases/route";
 import { GET as searchAssets } from "../../app/api/assets/search/route";
 import { POST as resolveGap } from "../../app/api/gaps/[id]/resolve/route";
 import { GET as listGlossaryTerms, POST as createGlossaryTerm } from "../../app/api/glossary-terms/route";
+import { GET as listSystemProfiles, POST as createSystemProfile } from "../../app/api/system-profiles/route";
 
 function jsonRequest(body: unknown) {
   return new Request("http://localhost/api", {
@@ -31,6 +32,31 @@ async function read(response: Response) {
 
 describe("Brain Creator API routes", () => {
   beforeEach(() => resetBrainCreatorService());
+
+  it("creates and lists business systems as reusable onboarding entries", async () => {
+    const created = await read(
+      await createSystemProfile(
+        jsonRequest({
+          name: "Orders Console",
+          environment: "staging",
+          baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+        })
+      )
+    );
+    const listed = await read(await listSystemProfiles(new Request("http://localhost/api/system-profiles")));
+
+    expect(created.success).toBe(true);
+    expect(created.data.id).toMatch(/^system_/);
+    expect(listed.data).toEqual([
+      expect.objectContaining({
+        id: created.data.id,
+        name: "Orders Console",
+        environment: "staging"
+      })
+    ]);
+  });
 
   it("creates and verifies an auth profile without exposing secrets", async () => {
     const created = await read(

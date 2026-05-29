@@ -13,8 +13,17 @@ import type {
   LocatorPoint,
   PageModel,
   ProbeResult,
+  SystemProfile,
   TrainingSession
 } from "./types";
+
+type CreateSystemProfileInput = {
+  name: string;
+  environment: string;
+  baseUrl: string;
+  defaultLocale: string;
+  urlAllowlist: string[];
+};
 
 type CreateAuthProfileInput = {
   projectId: string;
@@ -71,6 +80,33 @@ const actionTerms = ["Create Order", "Submit", "Search", "Create", "Save", "Dele
 export class BrainCreatorService {
   constructor(private readonly repository: InMemoryBrainCreatorRepository) {}
 
+  createSystemProfile(input: CreateSystemProfileInput): SystemProfile {
+    assertHttpUrl(input.baseUrl, "baseUrl");
+    for (const allowedUrl of input.urlAllowlist) {
+      assertHttpUrl(allowedUrl, "urlAllowlist");
+    }
+    const now = timestamp();
+    const profile: SystemProfile = {
+      id: id("system"),
+      name: input.name.trim(),
+      environment: input.environment.trim(),
+      baseUrl: input.baseUrl.trim(),
+      defaultLocale: input.defaultLocale.trim() || "zh-CN",
+      urlAllowlist: input.urlAllowlist.map((url) => url.trim()).filter(Boolean),
+      status: "succeeded",
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.repository.systemProfiles.push(profile);
+    this.repository.persist();
+    return profile;
+  }
+
+  listSystemProfiles(): SystemProfile[] {
+    return [...this.repository.systemProfiles];
+  }
+
   createAuthProfile(input: CreateAuthProfileInput): AuthProfile {
     const now = timestamp();
     const profile: AuthProfile = {
@@ -122,6 +158,7 @@ export class BrainCreatorService {
     locatorPoints: LocatorPoint[];
     probeResult: ProbeResult;
   } {
+    this.assertAuthProfileMatchesProject(input.authProfileId, input.projectId);
     const now = timestamp();
     const capture = input.captureMode === "browser" ? input.browserCapture : undefined;
     const pageModel: PageModel = {
@@ -192,6 +229,7 @@ export class BrainCreatorService {
     projectId: string;
     pageModelId: string;
   }): TrainingSession {
+    this.assertPageModelMatchesProject(input.pageModelId, input.projectId);
     const now = timestamp();
     const session: TrainingSession = {
       id: id("session"),
@@ -279,6 +317,7 @@ export class BrainCreatorService {
   }
 
   generateCase(input: GenerateCaseInput): GeneratedCase {
+    this.assertPageModelMatchesProject(input.pageModelId, input.projectId);
     const locators = this.repository.locatorPoints.filter(
       (point) => point.pageModelId === input.pageModelId
     );
@@ -361,6 +400,17 @@ export class BrainCreatorService {
     const query = input.query.toLowerCase();
     const includes = (value: string) => value.toLowerCase().includes(query);
     const inProject = (projectId: string) => projectId === input.projectId;
+
+    const systems = this.repository.systemProfiles
+      .filter((item) => item.id === input.projectId || includes(`${item.name} ${item.environment} ${item.baseUrl}`))
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "system-profile",
+        label: item.name,
+        projectId: item.id,
+        status: item.status
+      }))
+      .filter((item) => item.projectId === input.projectId || input.projectId === "all");
 
     const pageModels = this.repository.pageModels
       .filter((item) => inProject(item.projectId) && includes(`${item.name} ${item.route}`))
@@ -447,6 +497,7 @@ export class BrainCreatorService {
       }));
 
     return [
+      ...systems,
       ...pageModels,
       ...locators,
       ...sessions,
@@ -483,6 +534,30 @@ export class BrainCreatorService {
       createdAt: now,
       updatedAt: now
     };
+  }
+
+  private assertAuthProfileMatchesProject(authProfileId: string | undefined, projectId: string) {
+    if (!authProfileId) {
+      return;
+    }
+    const profile = this.repository.authProfiles.find((item) => item.id === authProfileId);
+    if (profile && profile.projectId !== projectId) {
+      throw new Error("Auth profile belongs to another business system");
+    }
+  }
+
+  private assertPageModelMatchesProject(pageModelId: string, projectId: string) {
+    const pageModel = this.repository.pageModels.find((item) => item.id === pageModelId);
+    if (pageModel && pageModel.projectId !== projectId) {
+      throw new Error("Page model belongs to another business system");
+    }
+  }
+}
+
+function assertHttpUrl(value: string, fieldName: string) {
+  const parsed = new URL(value);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${fieldName} must use http or https`);
   }
 }
 

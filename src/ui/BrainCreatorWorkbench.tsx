@@ -6,6 +6,7 @@ import { apiRequest, postJson } from "./apiClient";
 type StepStatus = "idle" | "running" | "succeeded" | "failed";
 type ViewKey =
   | "workbench"
+  | "systems"
   | "page-modeling"
   | "training"
   | "case-generation"
@@ -17,6 +18,16 @@ type AuthProfileResult = {
   id: string;
   status: string;
   encryptedSecrets: Record<string, string>;
+};
+
+type SystemProfileResult = {
+  id: string;
+  name: string;
+  environment: string;
+  baseUrl: string;
+  defaultLocale: string;
+  urlAllowlist: string[];
+  status: string;
 };
 
 type PageDiscoveryResult = {
@@ -113,6 +124,7 @@ const statusLabels: Record<StepStatus, string> = {
 
 const views: Array<{ key: ViewKey; label: string }> = [
   { key: "workbench", label: "工作台" },
+  { key: "systems", label: "业务系统" },
   { key: "page-modeling", label: "页面建模" },
   { key: "training", label: "训练室" },
   { key: "case-generation", label: "自然语言用例生成" },
@@ -162,6 +174,14 @@ const concepts = [
 
 export function BrainCreatorWorkbench() {
   const [activeView, setActiveView] = useState<ViewKey>("workbench");
+  const [systemName, setSystemName] = useState("Orders Console");
+  const [systemBaseUrl, setSystemBaseUrl] = useState(
+    "http://127.0.0.1:3000/fixtures/private-target"
+  );
+  const [systemLocale, setSystemLocale] = useState("zh-CN");
+  const [systemAllowlist, setSystemAllowlist] = useState(
+    "http://127.0.0.1:3000/fixtures/private-target"
+  );
   const [projectId, setProjectId] = useState("project-1");
   const [env, setEnv] = useState("test");
   const [role, setRole] = useState("qa");
@@ -184,6 +204,8 @@ export function BrainCreatorWorkbench() {
   const [statuses, setStatuses] = useState<Record<string, StepStatus>>({});
   const [logs, setLogs] = useState<RunLog[]>([]);
 
+  const [systems, setSystems] = useState<SystemProfileResult[]>([]);
+  const [currentSystem, setCurrentSystem] = useState<SystemProfileResult | null>(null);
   const [authProfile, setAuthProfile] = useState<AuthProfileResult | null>(null);
   const [discovery, setDiscovery] = useState<PageDiscoveryResult | null>(null);
   const [trainingSession, setTrainingSession] = useState<TrainingSessionResult | null>(null);
@@ -198,12 +220,13 @@ export function BrainCreatorWorkbench() {
 
   const stats = useMemo(
     () => [
+      { label: "System", value: systems.length ? String(systems.length) : "0" },
       { label: "AuthProfile", value: authProfile ? "1" : "0" },
       { label: "PageModel", value: discovery ? "1" : "0" },
       { label: "LocatorPoint", value: String(discovery?.locatorPoints.length ?? 0) },
       { label: "Gap", value: String(generatedCase?.gaps.length ?? 0) }
     ],
-    [authProfile, discovery, generatedCase]
+    [authProfile, discovery, generatedCase, systems.length]
   );
 
   async function runStep<T>(key: string, title: string, action: () => Promise<T>) {
@@ -219,6 +242,33 @@ export function BrainCreatorWorkbench() {
       addLog(title, "failed", message);
       throw error;
     }
+  }
+
+  async function createSystemProfile() {
+    const system = await runStep("system", "创建业务系统", () =>
+      postJson<SystemProfileResult>("/api/system-profiles", {
+        name: systemName,
+        environment: env,
+        baseUrl: systemBaseUrl,
+        defaultLocale: systemLocale,
+        urlAllowlist: systemAllowlist
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      })
+    );
+    setSystems((current) => [system, ...current.filter((item) => item.id !== system.id)]);
+    setCurrentSystem(system);
+    setProjectId(system.id);
+    setEnv(system.environment);
+    setTargetUrl(system.baseUrl);
+    targetUrlRef.current = system.baseUrl;
+    if (targetUrlInputRef.current) {
+      targetUrlInputRef.current.value = system.baseUrl;
+    }
+    setAssetQuery(system.name);
+    addLog("业务系统接入", "succeeded", `当前系统：${system.name}`);
+    return system;
   }
 
   async function createAuthProfile() {
@@ -420,6 +470,7 @@ export function BrainCreatorWorkbench() {
       </header>
 
       {activeView === "workbench" ? renderWorkbench() : null}
+      {activeView === "systems" ? renderSystems() : null}
       {activeView === "page-modeling" ? renderPageModeling() : null}
       {activeView === "training" ? renderTrainingRoom() : null}
       {activeView === "case-generation" ? renderCaseGeneration() : null}
@@ -442,6 +493,10 @@ export function BrainCreatorWorkbench() {
             </p>
           </div>
           <div className="hero-actions">
+            <button className="primary" onClick={() => setActiveView("systems")} type="button">
+              <IconBadge label="Sys" />
+              进入业务系统接入
+            </button>
             <button className="primary" onClick={() => void runLocalLoop()} type="button">
               <IconBadge label="Run" />
               运行本地闭环
@@ -519,6 +574,73 @@ export function BrainCreatorWorkbench() {
     );
   }
 
+  function renderSystems() {
+    return (
+      <section className="module-shell">
+        <ModuleHeader
+          eyebrow="可复用主入口"
+          title="业务系统接入"
+          body="先把一个真实业务系统接入 Brain Creator，再在该系统下配置鉴权、页面建模、训练和用例生成。"
+        />
+        <div className="operation-grid">
+          <label>
+            系统名称
+            <input value={systemName} onChange={(event) => setSystemName(event.target.value)} />
+          </label>
+          <label>
+            环境
+            <input value={env} onChange={(event) => setEnv(event.target.value)} />
+          </label>
+          <label>
+            基础 URL
+            <input value={systemBaseUrl} onChange={(event) => setSystemBaseUrl(event.target.value)} />
+          </label>
+          <label>
+            默认语言
+            <input value={systemLocale} onChange={(event) => setSystemLocale(event.target.value)} />
+          </label>
+          <label className="wide">
+            URL 允许范围
+            <input
+              value={systemAllowlist}
+              onChange={(event) => setSystemAllowlist(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="step-actions">
+          <StepButton
+            label="创建业务系统"
+            status={statuses.system}
+            onClick={createSystemProfile}
+          />
+          <button className="secondary step-button" onClick={() => setActiveView("auth")} type="button">
+            <span>下一步：配置鉴权</span>
+            <small aria-hidden="true">入口</small>
+          </button>
+        </div>
+        <section className="section asset-groups" aria-label="业务系统结果">
+          {currentSystem ? (
+            <article className="asset-group">
+              <h3>当前系统：{currentSystem.name}</h3>
+              <p>可复用入口已建立</p>
+              <p>{currentSystem.environment}</p>
+              <p>{currentSystem.baseUrl}</p>
+            </article>
+          ) : (
+            <p className="hint">还没有接入业务系统。先创建系统，再进入鉴权管理和页面建模。</p>
+          )}
+          {systems.map((system) => (
+            <article className="asset-group" key={system.id}>
+              <h3>{system.name}</h3>
+              <p>{system.environment}</p>
+              <p>{system.status}</p>
+            </article>
+          ))}
+        </section>
+      </section>
+    );
+  }
+
   function renderPageModeling() {
     return (
       <section className="module-shell">
@@ -527,6 +649,7 @@ export function BrainCreatorWorkbench() {
           title="页面建模"
           body="输入页面地址或 DOM 文本，沉淀 PageModel、L 点和探针结果。"
         />
+        <CurrentSystemNote />
         <QuickFlowControls includeAuth={false} />
         <div className="step-actions">
           <StepButton
@@ -587,6 +710,7 @@ export function BrainCreatorWorkbench() {
           title="自然语言用例生成"
           body="输入需求，系统只基于已有页面资产生成步骤；证据不足时创建缺口。"
         />
+        <CurrentSystemNote />
         <div className="operation-grid compact-form">
           <label className="wide">
             自然语言需求
@@ -624,6 +748,7 @@ export function BrainCreatorWorkbench() {
           title="资产管理"
           body="按类型查看本地资产，包含页面模型、L 点、训练记录、API Flow、用例、缺口和词根。"
         />
+        <CurrentSystemNote />
         <div className="operation-grid compact-form">
           <label>
             资产搜索词
@@ -664,6 +789,7 @@ export function BrainCreatorWorkbench() {
           title="鉴权管理"
           body="维护测试环境账号和登录资料。密钥、Token、Cookie 在响应和页面上只显示脱敏值。"
         />
+        <CurrentSystemNote />
         <QuickFlowControls onlyAuth />
         <div className="step-actions">
           <StepButton label="创建鉴权" status={statuses.auth} onClick={createAuthProfile} />
@@ -690,6 +816,7 @@ export function BrainCreatorWorkbench() {
           title="i18n 词根"
           body="维护多语言文本词根，让页面定位和自然语言名称在中英文环境里更稳定。"
         />
+        <CurrentSystemNote />
         <div className="operation-grid">
           <label>
             词根 Key
@@ -734,6 +861,26 @@ export function BrainCreatorWorkbench() {
             ))
           )}
         </section>
+      </section>
+    );
+  }
+
+  function CurrentSystemNote() {
+    return (
+      <section className="section split" aria-label="当前业务系统">
+        <div>
+          <h2>{currentSystem ? `当前系统：${currentSystem.name}` : "请先接入业务系统"}</h2>
+          <p>
+            {currentSystem
+              ? "后续鉴权、页面建模、训练和用例生成都会归属到这个系统。"
+              : "不同业务系统的资产会隔离保存，避免页面模型、鉴权和训练证据串用。"}
+          </p>
+        </div>
+        <div className="step-actions">
+          <button className="secondary" onClick={() => setActiveView("systems")} type="button">
+            进入业务系统接入
+          </button>
+        </div>
       </section>
     );
   }

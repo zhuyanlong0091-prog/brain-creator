@@ -27,6 +27,39 @@ describe("BrainCreatorWorkbench", () => {
     expect(screen.queryByRole("article", { name: "AuthProfile 结果" })).not.toBeInTheDocument();
   });
 
+  it("creates a business system before downstream modules become actionable", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString();
+        if (url === "/api/system-profiles") {
+          return json({
+            id: "system_1",
+            name: "Orders Console",
+            environment: "staging",
+            baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+            defaultLocale: "zh-CN",
+            urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"],
+            status: "succeeded"
+          });
+        }
+        return json(null, false, ["unexpected route"], 404);
+      })
+    );
+
+    render(<BrainCreatorWorkbench />);
+
+    await user.click(screen.getByRole("button", { name: "进入业务系统接入" }));
+    expect(screen.getByRole("heading", { name: "业务系统接入" })).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("系统名称"));
+    await user.type(screen.getByLabelText("系统名称"), "Orders Console");
+    await user.click(screen.getByRole("button", { name: "创建业务系统" }));
+
+    await waitFor(() => expect(screen.getByText("当前系统：Orders Console")).toBeInTheDocument());
+    expect(screen.getByText("可复用入口已建立")).toBeInTheDocument();
+  });
+
   it("switches between Preview modules and creates glossary terms from the i18n view", async () => {
     const user = userEvent.setup();
     vi.stubGlobal(
