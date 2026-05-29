@@ -68,6 +68,23 @@ describe("runAgent", () => {
     expect(run.error).toBe("generator failed");
     expect(run.logs).toEqual(["generator failed"]);
   });
+
+  it("records runner errors as failed agent runs", async () => {
+    const run = await runAgent({
+      systemId: "system_1",
+      agent: "planner",
+      inputSummary: "planner timeout",
+      args: ["--prompt", "specs/_context/system_1-prompt.md"],
+      outputPaths: [],
+      runner: async () => {
+        throw new Error("Command timed out after 1000ms");
+      }
+    });
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe("Command timed out after 1000ms");
+    expect(run.logs).toEqual(["Command timed out after 1000ms"]);
+  });
 });
 
 describe("generatePlanDraft", () => {
@@ -170,6 +187,68 @@ describe("runChain", () => {
 
     expect(result.chainRun.status).toBe("failed");
     expect(result.generateRun.status).toBe("succeeded");
+  });
+
+  it("runs healer and retries the generated test until it succeeds", async () => {
+    const workDir = await tempDir();
+    const commands: string[][] = [];
+    let testAttempts = 0;
+
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      testCase: approvedTestCase(),
+      runner: async (_command, args) => {
+        commands.push(args);
+        if (args[1] === "test") {
+          testAttempts += 1;
+          return testAttempts === 1
+            ? { exitCode: 1, stdout: "", stderr: "first test failed" }
+            : { exitCode: 0, stdout: "test passed after heal", stderr: "" };
+        }
+        return { exitCode: 0, stdout: `${args.join(" ")} ok`, stderr: "" };
+      }
+    });
+
+    expect(commands).toEqual([
+      expect.arrayContaining(["playwright", "agent", "generator"]),
+      ["playwright", "test", result.testPath],
+      expect.arrayContaining(["playwright", "agent", "healer"]),
+      ["playwright", "test", result.testPath]
+    ]);
+    expect(result.chainRun.status).toBe("succeeded");
+    expect(result.chainRun.healRunId).toEqual(expect.stringMatching(/^agent_/));
+    expect(result.healerRuns).toHaveLength(1);
+  });
+
+  it("creates a gap after healer retries are exhausted", async () => {
+    const workDir = await tempDir();
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      testCase: approvedTestCase(),
+      maxHealAttempts: 2,
+      runner: async (_command, args) => ({
+        exitCode: args[1] === "test" ? 1 : 0,
+        stdout: "",
+        stderr: args[1] === "test" ? "assertion failed" : ""
+      })
+    });
+
+    expect(result.chainRun.status).toBe("failed");
+    expect(result.healerRuns).toHaveLength(2);
+    expect(result.chainRun.gaps).toEqual([
+      expect.objectContaining({
+        id: expect.stringMatching(/^gap_/),
+        projectId: "system_1",
+        sourceType: "healer-skip",
+        sourceId: approvedTestCase().id,
+        reason: expect.stringContaining("assertion failed"),
+        status: "open"
+      })
+    ]);
   });
 });
 
