@@ -124,7 +124,15 @@ describe("BrainCreatorWorkbench", () => {
         if (url === "/api/training-sessions/session_1/complete") {
           return json({
             session: { id: "session_1", status: "succeeded" },
-            actionSteps: [{ id: "step_1" }],
+            actionSteps: [
+              {
+                id: "step_1",
+                type: "click",
+                targetLocatorId: "locator_1",
+                assertion: "request captured",
+                order: 1
+              }
+            ],
             apiFlow: { id: "flow_1", requests: [{ url: "/api/orders" }] }
           });
         }
@@ -156,6 +164,7 @@ describe("BrainCreatorWorkbench", () => {
     await user.click(screen.getByRole("button", { name: "页面建模" }));
     await user.click(screen.getByRole("button", { name: "创建训练" }));
     await user.click(screen.getByRole("button", { name: "完成训练" }));
+    await expect(screen.findByRole("article", { name: "ActionStep 结果" })).resolves.toHaveTextContent("request captured");
     await user.click(screen.getByRole("button", { name: "生成用例" }));
     await user.click(screen.getByRole("button", { name: "搜索资产" }));
     await user.click(screen.getByRole("button", { name: "处理缺口" }));
@@ -208,7 +217,15 @@ describe("BrainCreatorWorkbench", () => {
         if (url === "/api/training-sessions/session_1/complete") {
           return json({
             session: { id: "session_1", status: "succeeded" },
-            actionSteps: [{ id: "step_1" }],
+            actionSteps: [
+              {
+                id: "step_1",
+                type: "click",
+                targetLocatorId: "locator_1",
+                assertion: "request captured",
+                order: 1
+              }
+            ],
             apiFlow: { id: "flow_1", requests: [{ url: "/api/orders" }] }
           });
         }

@@ -212,6 +212,7 @@ export class BrainCreatorService {
     session: TrainingSession;
     actionSteps: ActionStep[];
     apiFlow: ApiFlow;
+    gaps: Gap[];
   } {
     const session = this.repository.trainingSessions.find(
       (item) => item.id === input.sessionId
@@ -235,7 +236,19 @@ export class BrainCreatorService {
       assertions: input.apiRequests.map((request) => `${request.method} ${request.url} ${request.status}`)
     };
 
-    session.status = "succeeded";
+    const gaps =
+      input.artifacts && input.apiRequests.length === 0
+        ? [
+            this.createGap(
+              session.projectId,
+              "training-session",
+              session.id,
+              "No API requests captured during training"
+            )
+          ]
+        : [];
+
+    session.status = gaps.length > 0 ? "failed" : "succeeded";
     session.updatedAt = timestamp();
     if (input.artifacts) {
       session.traceUrl = input.artifacts.traceUrl;
@@ -244,8 +257,25 @@ export class BrainCreatorService {
     }
     this.repository.actionSteps.push(...actionSteps);
     this.repository.apiFlows.push(apiFlow);
+    this.repository.gaps.push(...gaps);
     this.repository.persist();
-    return { session, actionSteps, apiFlow };
+    return { session, actionSteps, apiFlow, gaps };
+  }
+
+  failTrainingSession(sessionId: string, reason: string): {
+    session: TrainingSession;
+    gap: Gap;
+  } {
+    const session = this.repository.trainingSessions.find((item) => item.id === sessionId);
+    if (!session) {
+      throw new Error("Training session not found");
+    }
+    const gap = this.createGap(session.projectId, "training-session", session.id, reason);
+    session.status = "failed";
+    session.updatedAt = timestamp();
+    this.repository.gaps.push(gap);
+    this.repository.persist();
+    return { session, gap };
   }
 
   generateCase(input: GenerateCaseInput): GeneratedCase {

@@ -55,11 +55,18 @@ type TrainingCompletionResult = {
     id: string;
     status: string;
   };
-  actionSteps: Array<{ id: string }>;
+  actionSteps: Array<{
+    id: string;
+    type: string;
+    targetLocatorId: string;
+    assertion: string;
+    order: number;
+  }>;
   apiFlow: {
     id: string;
     requests: Array<{ url: string }>;
   };
+  gaps?: Array<{ id: string; reason: string; status?: string }>;
 };
 
 type GeneratedCaseResult = {
@@ -564,7 +571,9 @@ export function BrainCreatorWorkbench() {
         {!pageReady ? <p className="hint">请先完成页面建模，再进入训练室。</p> : null}
         <section className="section result-grid" aria-label="训练室结果">
           <SummaryCard title="TrainingSession 结果" value={trainingSession} />
+          <SummaryCard title="ActionStep 结果" value={trainingCompletion?.actionSteps ?? []} />
           <SummaryCard title="ApiFlow 结果" value={trainingCompletion?.apiFlow ?? null} />
+          <SummaryCard title="TrainingGap 结果" value={trainingCompletion?.gaps ?? []} />
         </section>
       </section>
     );
@@ -937,6 +946,7 @@ export function BrainCreatorWorkbench() {
         <SummaryCard title="PageModel 结果" value={discovery?.pageModel ?? null} />
         <SummaryCard title="LocatorPoint 结果" value={discovery?.locatorPoints ?? []} />
         <SummaryCard title="TrainingSession 结果" value={trainingSession} />
+        <SummaryCard title="ActionStep 结果" value={trainingCompletion?.actionSteps ?? []} />
         <SummaryCard title="ApiFlow 结果" value={trainingCompletion?.apiFlow ?? null} />
         <SummaryCard title="GeneratedCase 结果" value={generatedCase} />
         <SummaryCard title="Assets 结果" value={assets} />
@@ -1021,7 +1031,12 @@ function formatValue(value: unknown) {
     return String(value);
   }
   const item = value as Record<string, unknown>;
-  const summary = [item.type, item.label ?? item.name ?? item.reason, item.status, item.id]
+  const summary = [
+    item.type,
+    item.label ?? item.name ?? item.reason ?? item.assertion ?? item.url,
+    item.status,
+    item.id
+  ]
     .filter(Boolean)
     .join(" · ");
   return summary || JSON.stringify(item);

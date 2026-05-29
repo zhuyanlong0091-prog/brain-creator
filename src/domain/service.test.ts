@@ -239,6 +239,62 @@ describe("BrainCreatorService", () => {
     });
   });
 
+  it("creates a training gap when browser recording has no API requests", () => {
+    const service = createService();
+    const session = service.createTrainingSession({
+      projectId: "project-1",
+      pageModelId: "page_1"
+    });
+
+    const completed = service.completeTrainingSession({
+      sessionId: session.id,
+      actions: [
+        {
+          type: "click",
+          targetLocatorId: "locator_1",
+          inputValue: "",
+          assertion: "request captured"
+        }
+      ],
+      apiRequests: [],
+      artifacts: {
+        traceUrl: "C:/tmp/trace.zip",
+        harUrl: "C:/tmp/network.har",
+        screenshotUrl: "C:/tmp/screenshot.png"
+      }
+    });
+
+    expect(completed.session.status).toBe("failed");
+    expect(completed.gaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceType: "training-session",
+          sourceId: session.id,
+          reason: "No API requests captured during training"
+        })
+      ])
+    );
+  });
+
+  it("marks training failed when browser recording cannot run", () => {
+    const service = createService();
+    const session = service.createTrainingSession({
+      projectId: "project-1",
+      pageModelId: "page_1"
+    });
+
+    const failed = service.failTrainingSession(session.id, "Training action selector is required");
+
+    expect(failed.session.status).toBe("failed");
+    expect(failed.gap).toEqual(
+      expect.objectContaining({
+        sourceType: "training-session",
+        sourceId: session.id,
+        reason: "Training action selector is required"
+      })
+    );
+  });
+
   it("creates glossary terms and returns them from asset search", () => {
     const service = createService();
 

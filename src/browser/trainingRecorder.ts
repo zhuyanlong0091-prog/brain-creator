@@ -36,6 +36,9 @@ const defaultChromiumExecutable =
 export async function recordTrainingEvidence(
   input: TrainingRecordInput
 ): Promise<TrainingRecordResult> {
+  if (!input.action.selector) {
+    throw new Error("Training action selector is required");
+  }
   const artifactDir = input.artifactDir ?? join(process.cwd(), ".brain-creator", "training");
   await mkdir(artifactDir, { recursive: true });
   const traceUrl = join(artifactDir, "trace.zip");
