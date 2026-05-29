@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BrainCreatorService } from "./service";
-import { InMemoryBrainCreatorRepository } from "./repository";
+import { BrainCreatorService } from "./service.js";
+import { InMemoryBrainCreatorRepository } from "./repository.js";
 
 function createService() {
   return new BrainCreatorService(new InMemoryBrainCreatorRepository());

@@ -5,3 +5,5 @@ playwright-report/
 *.tgz
 .brain-creator/
 .gstack/
+/specs/
+/tests/seed-*.spec.ts

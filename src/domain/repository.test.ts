@@ -4,8 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { BrainCreatorService } from "./service";
-import { JsonFileBrainCreatorRepository } from "./repository";
+import { BrainCreatorService } from "./service.js";
+import { JsonFileBrainCreatorRepository } from "./repository.js";
 
 const tempDirs: string[] = [];
 

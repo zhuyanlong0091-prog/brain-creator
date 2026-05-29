@@ -12,7 +12,7 @@ import type {
   ProbeResult,
   SystemProfile,
   TrainingSession
-} from "./types";
+} from "./types.js";
 
 export class InMemoryBrainCreatorRepository {
   systemProfiles: SystemProfile[] = [];
