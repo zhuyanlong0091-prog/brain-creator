@@ -1,12 +1,94 @@
 import { describe, expect, it } from "vitest";
-import { BrainCreatorService } from "./service";
-import { InMemoryBrainCreatorRepository } from "./repository";
+import { BrainCreatorService } from "./service.js";
+import { InMemoryBrainCreatorRepository } from "./repository.js";
 
 function createService() {
   return new BrainCreatorService(new InMemoryBrainCreatorRepository());
 }
 
 describe("BrainCreatorService", () => {
+  it("creates business systems that can be reused as isolated onboarding contexts", () => {
+    const service = createService();
+
+    const ordersSystem = service.createSystemProfile({
+      name: "Orders Console",
+      environment: "staging",
+      baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+    });
+    const crmSystem = service.createSystemProfile({
+      name: "CRM Console",
+      environment: "test",
+      baseUrl: "https://crm.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://crm.example.test"]
+    });
+
+    expect(ordersSystem).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^system_/),
+        name: "Orders Console",
+        environment: "staging",
+        status: "succeeded"
+      })
+    );
+    expect(service.listSystemProfiles().map((system) => system.name)).toEqual([
+      "Orders Console",
+      "CRM Console"
+    ]);
+    expect(crmSystem.id).not.toBe(ordersSystem.id);
+  });
+
+  it("prevents page modeling and case generation from crossing business systems", () => {
+    const service = createService();
+    const ordersSystem = service.createSystemProfile({
+      name: "Orders Console",
+      environment: "staging",
+      baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+    });
+    const crmSystem = service.createSystemProfile({
+      name: "CRM Console",
+      environment: "test",
+      baseUrl: "https://crm.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://crm.example.test"]
+    });
+    const auth = service.createAuthProfile({
+      projectId: ordersSystem.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const discovery = service.discoverPageModel({
+      projectId: ordersSystem.id,
+      route: "/orders",
+      name: "Orders",
+      authProfileId: auth.id,
+      domText: "Create Order Submit Search"
+    });
+
+    expect(() =>
+      service.discoverPageModel({
+        projectId: crmSystem.id,
+        route: "/crm",
+        name: "CRM",
+        authProfileId: auth.id,
+        domText: "Create"
+      })
+    ).toThrow("Auth profile belongs to another business system");
+    expect(() =>
+      service.generateCase({
+        projectId: crmSystem.id,
+        sourceRequirement: "Create Order",
+        pageModelId: discovery.pageModel.id
+      })
+    ).toThrow("Page model belongs to another business system");
+  });
+
   it("redacts auth secrets in returned profiles", () => {
     const service = createService();
 
@@ -201,6 +283,125 @@ describe("BrainCreatorService", () => {
         "generated-case"
       ])
     );
+  });
+
+  it("summarizes onboarding completeness for a business system", () => {
+    const service = createService();
+    const system = service.createSystemProfile({
+      name: "Orders Console",
+      environment: "staging",
+      baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+    });
+    const profile = service.createAuthProfile({
+      projectId: system.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const discovery = service.discoverPageModel({
+      projectId: system.id,
+      route: "/orders",
+      name: "Orders",
+      authProfileId: profile.id,
+      domText: "Create Order Submit"
+    });
+    const session = service.createTrainingSession({
+      projectId: system.id,
+      pageModelId: discovery.pageModel.id
+    });
+    service.completeTrainingSession({
+      sessionId: session.id,
+      actions: [
+        {
+          type: "click",
+          targetLocatorId: discovery.locatorPoints[0].id,
+          inputValue: "",
+          assertion: "request captured"
+        }
+      ],
+      apiRequests: [{ method: "POST", url: "/api/orders", status: 201 }]
+    });
+    service.generateCase({
+      projectId: system.id,
+      sourceRequirement: "Unknown approval path",
+      pageModelId: discovery.pageModel.id
+    });
+
+    const overview = service.getSystemOverview(system.id);
+
+    expect(overview.completeness).toEqual({
+      authConfigured: true,
+      pageModeled: true,
+      trainingEvidence: true,
+      caseGenerated: true,
+      openGaps: 1
+    });
+    expect(overview.assetCounts).toEqual(
+      expect.objectContaining({
+        pageModels: 1,
+        locatorPoints: 2,
+        trainingSessions: 1,
+        apiFlows: 1,
+        generatedCases: 1,
+        gaps: 1
+      })
+    );
+  });
+
+  it("returns page model asset details with linked evidence inside the same system", () => {
+    const service = createService();
+    const system = service.createSystemProfile({
+      name: "Orders Console",
+      environment: "staging",
+      baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+    });
+    const profile = service.createAuthProfile({
+      projectId: system.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const discovery = service.discoverPageModel({
+      projectId: system.id,
+      route: "/orders",
+      name: "Orders",
+      authProfileId: profile.id,
+      domText: "Create Order Submit"
+    });
+    const session = service.createTrainingSession({
+      projectId: system.id,
+      pageModelId: discovery.pageModel.id
+    });
+    service.completeTrainingSession({
+      sessionId: session.id,
+      actions: [
+        {
+          type: "click",
+          targetLocatorId: discovery.locatorPoints[0].id,
+          inputValue: "",
+          assertion: "request captured"
+        }
+      ],
+      apiRequests: [{ method: "POST", url: "/api/orders", status: 201 }]
+    });
+
+    const detail = service.getAssetDetail({
+      projectId: system.id,
+      type: "page-model",
+      id: discovery.pageModel.id
+    });
+
+    expect(detail.asset).toEqual(expect.objectContaining({ id: discovery.pageModel.id }));
+    expect(detail.related.locatorPoints).toHaveLength(2);
+    expect(detail.related.probeResults).toHaveLength(1);
+    expect(detail.related.trainingSessions).toHaveLength(1);
+    expect(detail.related.apiFlows).toHaveLength(1);
   });
 
   it("stores browser training artifacts on completion", () => {

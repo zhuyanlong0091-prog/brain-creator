@@ -4,8 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { BrainCreatorService } from "./service";
-import { JsonFileBrainCreatorRepository } from "./repository";
+import { BrainCreatorService } from "./service.js";
+import { JsonFileBrainCreatorRepository } from "./repository.js";
 
 const tempDirs: string[] = [];
 
@@ -14,6 +14,27 @@ afterEach(async () => {
 });
 
 describe("JsonFileBrainCreatorRepository", () => {
+  it("restores business systems after the service is recreated", async () => {
+    const filePath = join(await tempDir(), "assets.json");
+    const firstService = new BrainCreatorService(new JsonFileBrainCreatorRepository(filePath));
+    const system = firstService.createSystemProfile({
+      name: "Orders Console",
+      environment: "staging",
+      baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+    });
+
+    const secondService = new BrainCreatorService(new JsonFileBrainCreatorRepository(filePath));
+
+    expect(secondService.listSystemProfiles()).toEqual([
+      expect.objectContaining({
+        id: system.id,
+        name: "Orders Console"
+      })
+    ]);
+  });
+
   it("restores page assets after the service is recreated", async () => {
     const filePath = join(await tempDir(), "assets.json");
     const firstService = new BrainCreatorService(new JsonFileBrainCreatorRepository(filePath));

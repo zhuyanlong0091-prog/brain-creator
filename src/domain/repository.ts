@@ -10,10 +10,12 @@ import type {
   LocatorPoint,
   PageModel,
   ProbeResult,
+  SystemProfile,
   TrainingSession
-} from "./types";
+} from "./types.js";
 
 export class InMemoryBrainCreatorRepository {
+  systemProfiles: SystemProfile[] = [];
   authProfiles: AuthProfile[] = [];
   pageModels: PageModel[] = [];
   locatorPoints: LocatorPoint[] = [];
@@ -30,6 +32,7 @@ export class InMemoryBrainCreatorRepository {
   }
 
   reset() {
+    this.systemProfiles = [];
     this.authProfiles = [];
     this.pageModels = [];
     this.locatorPoints = [];
@@ -46,6 +49,7 @@ export class InMemoryBrainCreatorRepository {
 
 type RepositorySnapshot = Pick<
   InMemoryBrainCreatorRepository,
+  | "systemProfiles"
   | "authProfiles"
   | "pageModels"
   | "locatorPoints"
@@ -74,6 +78,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       return;
     }
     const snapshot = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<RepositorySnapshot>;
+    this.systemProfiles = snapshot.systemProfiles ?? [];
     this.authProfiles = snapshot.authProfiles ?? [];
     this.pageModels = snapshot.pageModels ?? [];
     this.locatorPoints = snapshot.locatorPoints ?? [];
@@ -88,6 +93,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
 
   private snapshot(): RepositorySnapshot {
     return {
+      systemProfiles: this.systemProfiles,
       authProfiles: this.authProfiles,
       pageModels: this.pageModels,
       locatorPoints: this.locatorPoints,

@@ -1,6 +1,6 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { InMemoryBrainCreatorRepository } from "./repository";
-import type { PageCaptureAuth, PageCaptureResult } from "@/src/browser/pageCapture";
+import { InMemoryBrainCreatorRepository } from "./repository.js";
+import { decryptSecrets, encryptSecrets, redactSecrets } from "../shared/crypto.js";
+import { id } from "../shared/id.js";
 import type {
   ActionStep,
   ApiFlow,
@@ -13,8 +13,38 @@ import type {
   LocatorPoint,
   PageModel,
   ProbeResult,
+  SystemProfile,
   TrainingSession
-} from "./types";
+} from "./types.js";
+
+type PageCaptureAuth = {
+  loginMethod: AuthProfile["loginMethod"];
+  secrets: Record<string, string>;
+};
+
+type PageCaptureResult = {
+  title: string;
+  finalUrl: string;
+  domText: string;
+  screenshotPath: string;
+  interactiveElements: Array<{
+    name: string;
+    role: string;
+    text: string;
+    selector: string;
+  }>;
+  consoleErrors: string[];
+  networkFailures: string[];
+  issues: string[];
+};
+
+type CreateSystemProfileInput = {
+  name: string;
+  environment: string;
+  baseUrl: string;
+  defaultLocale: string;
+  urlAllowlist: string[];
+};
 
 type CreateAuthProfileInput = {
   projectId: string;
@@ -57,6 +87,12 @@ type SearchInput = {
   query: string;
 };
 
+type AssetDetailInput = {
+  projectId: string;
+  type: AssetSearchResult["type"];
+  id: string;
+};
+
 type CreateGlossaryTermInput = {
   projectId: string;
   key: string;
@@ -70,6 +106,84 @@ const actionTerms = ["Create Order", "Submit", "Search", "Create", "Save", "Dele
 
 export class BrainCreatorService {
   constructor(private readonly repository: InMemoryBrainCreatorRepository) {}
+
+  createSystemProfile(input: CreateSystemProfileInput): SystemProfile {
+    assertHttpUrl(input.baseUrl, "baseUrl");
+    for (const allowedUrl of input.urlAllowlist) {
+      assertHttpUrl(allowedUrl, "urlAllowlist");
+    }
+    const now = timestamp();
+    const profile: SystemProfile = {
+      id: id("system"),
+      name: input.name.trim(),
+      environment: input.environment.trim(),
+      baseUrl: input.baseUrl.trim(),
+      defaultLocale: input.defaultLocale.trim() || "zh-CN",
+      urlAllowlist: input.urlAllowlist.map((url) => url.trim()).filter(Boolean),
+      status: "succeeded",
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.repository.systemProfiles.push(profile);
+    this.repository.persist();
+    return profile;
+  }
+
+  listSystemProfiles(): SystemProfile[] {
+    return [...this.repository.systemProfiles];
+  }
+
+  getSystemOverview(systemId: string) {
+    const system = this.repository.systemProfiles.find((item) => item.id === systemId);
+    if (!system) {
+      throw new Error("Business system not found");
+    }
+    const pageModelIds = this.repository.pageModels
+      .filter((item) => item.projectId === systemId)
+      .map((item) => item.id);
+    const trainingSessionIds = this.repository.trainingSessions
+      .filter((item) => item.projectId === systemId)
+      .map((item) => item.id);
+    const authProfiles = this.repository.authProfiles.filter((item) => item.projectId === systemId);
+    const generatedCases = this.repository.generatedCases.filter(
+      (item) => item.projectId === systemId
+    );
+    const gaps = this.repository.gaps.filter((item) => item.projectId === systemId);
+    const apiFlows = this.repository.apiFlows.filter((item) =>
+      trainingSessionIds.includes(item.sessionId)
+    );
+
+    return {
+      system,
+      completeness: {
+        authConfigured: authProfiles.length > 0,
+        pageModeled: pageModelIds.length > 0,
+        trainingEvidence: trainingSessionIds.length > 0 && apiFlows.length > 0,
+        caseGenerated: generatedCases.length > 0,
+        openGaps: gaps.filter((gap) => gap.status === "open").length
+      },
+      assetCounts: {
+        authProfiles: authProfiles.length,
+        pageModels: pageModelIds.length,
+        locatorPoints: this.repository.locatorPoints.filter((item) =>
+          pageModelIds.includes(item.pageModelId)
+        ).length,
+        probeResults: this.repository.probeResults.filter((item) =>
+          pageModelIds.includes(item.pageModelId)
+        ).length,
+        trainingSessions: trainingSessionIds.length,
+        actionSteps: this.repository.actionSteps.filter((item) =>
+          trainingSessionIds.includes(item.sessionId)
+        ).length,
+        apiFlows: apiFlows.length,
+        generatedCases: generatedCases.length,
+        gaps: gaps.length,
+        glossaryTerms: this.repository.glossaryTerms.filter((item) => item.projectId === systemId)
+          .length
+      }
+    };
+  }
 
   createAuthProfile(input: CreateAuthProfileInput): AuthProfile {
     const now = timestamp();
@@ -122,6 +236,7 @@ export class BrainCreatorService {
     locatorPoints: LocatorPoint[];
     probeResult: ProbeResult;
   } {
+    this.assertAuthProfileMatchesProject(input.authProfileId, input.projectId);
     const now = timestamp();
     const capture = input.captureMode === "browser" ? input.browserCapture : undefined;
     const pageModel: PageModel = {
@@ -192,6 +307,7 @@ export class BrainCreatorService {
     projectId: string;
     pageModelId: string;
   }): TrainingSession {
+    this.assertPageModelMatchesProject(input.pageModelId, input.projectId);
     const now = timestamp();
     const session: TrainingSession = {
       id: id("session"),
@@ -279,6 +395,7 @@ export class BrainCreatorService {
   }
 
   generateCase(input: GenerateCaseInput): GeneratedCase {
+    this.assertPageModelMatchesProject(input.pageModelId, input.projectId);
     const locators = this.repository.locatorPoints.filter(
       (point) => point.pageModelId === input.pageModelId
     );
@@ -361,6 +478,17 @@ export class BrainCreatorService {
     const query = input.query.toLowerCase();
     const includes = (value: string) => value.toLowerCase().includes(query);
     const inProject = (projectId: string) => projectId === input.projectId;
+
+    const systems = this.repository.systemProfiles
+      .filter((item) => item.id === input.projectId || includes(`${item.name} ${item.environment} ${item.baseUrl}`))
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "system-profile",
+        label: item.name,
+        projectId: item.id,
+        status: item.status
+      }))
+      .filter((item) => item.projectId === input.projectId || input.projectId === "all");
 
     const pageModels = this.repository.pageModels
       .filter((item) => inProject(item.projectId) && includes(`${item.name} ${item.route}`))
@@ -447,6 +575,7 @@ export class BrainCreatorService {
       }));
 
     return [
+      ...systems,
       ...pageModels,
       ...locators,
       ...sessions,
@@ -455,6 +584,54 @@ export class BrainCreatorService {
       ...gaps,
       ...glossaryTerms
     ];
+  }
+
+  getAssetDetail(input: AssetDetailInput) {
+    if (input.type === "page-model") {
+      const pageModel = this.repository.pageModels.find((item) => item.id === input.id);
+      if (!pageModel) {
+        throw new Error("Asset not found");
+      }
+      if (pageModel.projectId !== input.projectId) {
+        throw new Error("Asset belongs to another business system");
+      }
+      const trainingSessions = this.repository.trainingSessions.filter(
+        (item) => item.pageModelId === pageModel.id && item.projectId === input.projectId
+      );
+      const sessionIds = trainingSessions.map((session) => session.id);
+      return {
+        type: input.type,
+        asset: pageModel,
+        related: {
+          locatorPoints: this.repository.locatorPoints.filter(
+            (item) => item.pageModelId === pageModel.id
+          ),
+          probeResults: this.repository.probeResults.filter(
+            (item) => item.pageModelId === pageModel.id
+          ),
+          trainingSessions,
+          actionSteps: this.repository.actionSteps.filter((item) =>
+            sessionIds.includes(item.sessionId)
+          ),
+          apiFlows: this.repository.apiFlows.filter((item) =>
+            sessionIds.includes(item.sessionId)
+          ),
+          generatedCases: this.repository.generatedCases.filter(
+            (item) => item.pageModelId === pageModel.id && item.projectId === input.projectId
+          ),
+          gaps: this.repository.gaps.filter(
+            (item) => item.projectId === input.projectId && item.sourceId === pageModel.id
+          )
+        }
+      };
+    }
+
+    const asset = this.findAsset(input);
+    return {
+      type: input.type,
+      asset,
+      related: {}
+    };
   }
 
   resolveGap(gapId: string): Gap {
@@ -484,6 +661,64 @@ export class BrainCreatorService {
       updatedAt: now
     };
   }
+
+  private assertAuthProfileMatchesProject(authProfileId: string | undefined, projectId: string) {
+    if (!authProfileId) {
+      return;
+    }
+    const profile = this.repository.authProfiles.find((item) => item.id === authProfileId);
+    if (profile && profile.projectId !== projectId) {
+      throw new Error("Auth profile belongs to another business system");
+    }
+  }
+
+  private assertPageModelMatchesProject(pageModelId: string, projectId: string) {
+    const pageModel = this.repository.pageModels.find((item) => item.id === pageModelId);
+    if (pageModel && pageModel.projectId !== projectId) {
+      throw new Error("Page model belongs to another business system");
+    }
+  }
+
+  private findAsset(input: AssetDetailInput) {
+    const pageIds = this.repository.pageModels
+      .filter((item) => item.projectId === input.projectId)
+      .map((item) => item.id);
+    const sessionIds = this.repository.trainingSessions
+      .filter((item) => item.projectId === input.projectId)
+      .map((item) => item.id);
+    const candidates: Record<string, unknown[]> = {
+      "system-profile": this.repository.systemProfiles.filter((item) => item.id === input.projectId),
+      "auth-profile": this.repository.authProfiles.filter((item) => item.projectId === input.projectId),
+      "locator-point": this.repository.locatorPoints.filter((item) =>
+        pageIds.includes(item.pageModelId)
+      ),
+      "training-session": this.repository.trainingSessions.filter(
+        (item) => item.projectId === input.projectId
+      ),
+      "api-flow": this.repository.apiFlows.filter((item) => sessionIds.includes(item.sessionId)),
+      "generated-case": this.repository.generatedCases.filter(
+        (item) => item.projectId === input.projectId
+      ),
+      gap: this.repository.gaps.filter((item) => item.projectId === input.projectId),
+      "glossary-term": this.repository.glossaryTerms.filter(
+        (item) => item.projectId === input.projectId
+      )
+    };
+    const asset = candidates[input.type]?.find(
+      (item) => (item as { id?: string }).id === input.id
+    );
+    if (!asset) {
+      throw new Error("Asset not found");
+    }
+    return asset;
+  }
+}
+
+function assertHttpUrl(value: string, fieldName: string) {
+  const parsed = new URL(value);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${fieldName} must use http or https`);
+  }
 }
 
 function publicAuthProfile(profile: AuthProfile): AuthProfile {
@@ -491,60 +726,6 @@ function publicAuthProfile(profile: AuthProfile): AuthProfile {
     ...profile,
     encryptedSecrets: redactSecrets(profile.encryptedSecrets)
   };
-}
-
-function redactSecrets(secrets: Record<string, string>) {
-  return Object.fromEntries(Object.keys(secrets).map((key) => [key, "[REDACTED]"]));
-}
-
-function encryptSecrets(secrets: Record<string, string>) {
-  return Object.fromEntries(
-    Object.entries(secrets).map(([key, value]) => [key, encryptSecretValue(value)])
-  );
-}
-
-function decryptSecrets(secrets: Record<string, string>) {
-  return Object.fromEntries(
-    Object.entries(secrets)
-      .filter(([, value]) => value.startsWith("enc:"))
-      .map(([key, value]) => [key, decryptSecretValue(value)])
-  );
-}
-
-function encryptSecretValue(value: string) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", localSecretKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return [
-    "enc",
-    "v1",
-    iv.toString("base64url"),
-    cipher.getAuthTag().toString("base64url"),
-    encrypted.toString("base64url")
-  ].join(":");
-}
-
-function decryptSecretValue(value: string) {
-  const [, version, iv, tag, encrypted] = value.split(":");
-  if (version !== "v1") {
-    return Buffer.from(value.slice("enc:".length), "base64").toString("utf8");
-  }
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    localSecretKey(),
-    Buffer.from(iv, "base64url")
-  );
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encrypted, "base64url")),
-    decipher.final()
-  ]).toString("utf8");
-}
-
-function localSecretKey() {
-  return createHash("sha256")
-    .update(process.env.BRAIN_CREATOR_SECRET_KEY ?? process.cwd())
-    .digest();
 }
 
 function extractLocatorPoints(pageModelId: string, domText: string): LocatorPoint[] {
@@ -581,10 +762,6 @@ function locatorPointsFromCapture(
     fallbackSelectors: [element.selector, `text=${element.text || element.name}`],
     confidence: 0.96
   }));
-}
-
-function id(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function slug(value: string) {
