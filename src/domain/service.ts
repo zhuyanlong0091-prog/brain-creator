@@ -66,6 +66,12 @@ type SearchInput = {
   query: string;
 };
 
+type AssetDetailInput = {
+  projectId: string;
+  type: AssetSearchResult["type"];
+  id: string;
+};
+
 type CreateGlossaryTermInput = {
   projectId: string;
   key: string;
@@ -105,6 +111,57 @@ export class BrainCreatorService {
 
   listSystemProfiles(): SystemProfile[] {
     return [...this.repository.systemProfiles];
+  }
+
+  getSystemOverview(systemId: string) {
+    const system = this.repository.systemProfiles.find((item) => item.id === systemId);
+    if (!system) {
+      throw new Error("Business system not found");
+    }
+    const pageModelIds = this.repository.pageModels
+      .filter((item) => item.projectId === systemId)
+      .map((item) => item.id);
+    const trainingSessionIds = this.repository.trainingSessions
+      .filter((item) => item.projectId === systemId)
+      .map((item) => item.id);
+    const authProfiles = this.repository.authProfiles.filter((item) => item.projectId === systemId);
+    const generatedCases = this.repository.generatedCases.filter(
+      (item) => item.projectId === systemId
+    );
+    const gaps = this.repository.gaps.filter((item) => item.projectId === systemId);
+    const apiFlows = this.repository.apiFlows.filter((item) =>
+      trainingSessionIds.includes(item.sessionId)
+    );
+
+    return {
+      system,
+      completeness: {
+        authConfigured: authProfiles.length > 0,
+        pageModeled: pageModelIds.length > 0,
+        trainingEvidence: trainingSessionIds.length > 0 && apiFlows.length > 0,
+        caseGenerated: generatedCases.length > 0,
+        openGaps: gaps.filter((gap) => gap.status === "open").length
+      },
+      assetCounts: {
+        authProfiles: authProfiles.length,
+        pageModels: pageModelIds.length,
+        locatorPoints: this.repository.locatorPoints.filter((item) =>
+          pageModelIds.includes(item.pageModelId)
+        ).length,
+        probeResults: this.repository.probeResults.filter((item) =>
+          pageModelIds.includes(item.pageModelId)
+        ).length,
+        trainingSessions: trainingSessionIds.length,
+        actionSteps: this.repository.actionSteps.filter((item) =>
+          trainingSessionIds.includes(item.sessionId)
+        ).length,
+        apiFlows: apiFlows.length,
+        generatedCases: generatedCases.length,
+        gaps: gaps.length,
+        glossaryTerms: this.repository.glossaryTerms.filter((item) => item.projectId === systemId)
+          .length
+      }
+    };
   }
 
   createAuthProfile(input: CreateAuthProfileInput): AuthProfile {
@@ -508,6 +565,54 @@ export class BrainCreatorService {
     ];
   }
 
+  getAssetDetail(input: AssetDetailInput) {
+    if (input.type === "page-model") {
+      const pageModel = this.repository.pageModels.find((item) => item.id === input.id);
+      if (!pageModel) {
+        throw new Error("Asset not found");
+      }
+      if (pageModel.projectId !== input.projectId) {
+        throw new Error("Asset belongs to another business system");
+      }
+      const trainingSessions = this.repository.trainingSessions.filter(
+        (item) => item.pageModelId === pageModel.id && item.projectId === input.projectId
+      );
+      const sessionIds = trainingSessions.map((session) => session.id);
+      return {
+        type: input.type,
+        asset: pageModel,
+        related: {
+          locatorPoints: this.repository.locatorPoints.filter(
+            (item) => item.pageModelId === pageModel.id
+          ),
+          probeResults: this.repository.probeResults.filter(
+            (item) => item.pageModelId === pageModel.id
+          ),
+          trainingSessions,
+          actionSteps: this.repository.actionSteps.filter((item) =>
+            sessionIds.includes(item.sessionId)
+          ),
+          apiFlows: this.repository.apiFlows.filter((item) =>
+            sessionIds.includes(item.sessionId)
+          ),
+          generatedCases: this.repository.generatedCases.filter(
+            (item) => item.pageModelId === pageModel.id && item.projectId === input.projectId
+          ),
+          gaps: this.repository.gaps.filter(
+            (item) => item.projectId === input.projectId && item.sourceId === pageModel.id
+          )
+        }
+      };
+    }
+
+    const asset = this.findAsset(input);
+    return {
+      type: input.type,
+      asset,
+      related: {}
+    };
+  }
+
   resolveGap(gapId: string): Gap {
     const gap = this.repository.gaps.find((item) => item.id === gapId);
     if (!gap) {
@@ -551,6 +656,40 @@ export class BrainCreatorService {
     if (pageModel && pageModel.projectId !== projectId) {
       throw new Error("Page model belongs to another business system");
     }
+  }
+
+  private findAsset(input: AssetDetailInput) {
+    const pageIds = this.repository.pageModels
+      .filter((item) => item.projectId === input.projectId)
+      .map((item) => item.id);
+    const sessionIds = this.repository.trainingSessions
+      .filter((item) => item.projectId === input.projectId)
+      .map((item) => item.id);
+    const candidates: Record<string, unknown[]> = {
+      "system-profile": this.repository.systemProfiles.filter((item) => item.id === input.projectId),
+      "auth-profile": this.repository.authProfiles.filter((item) => item.projectId === input.projectId),
+      "locator-point": this.repository.locatorPoints.filter((item) =>
+        pageIds.includes(item.pageModelId)
+      ),
+      "training-session": this.repository.trainingSessions.filter(
+        (item) => item.projectId === input.projectId
+      ),
+      "api-flow": this.repository.apiFlows.filter((item) => sessionIds.includes(item.sessionId)),
+      "generated-case": this.repository.generatedCases.filter(
+        (item) => item.projectId === input.projectId
+      ),
+      gap: this.repository.gaps.filter((item) => item.projectId === input.projectId),
+      "glossary-term": this.repository.glossaryTerms.filter(
+        (item) => item.projectId === input.projectId
+      )
+    };
+    const asset = candidates[input.type]?.find(
+      (item) => (item as { id?: string }).id === input.id
+    );
+    if (!asset) {
+      throw new Error("Asset not found");
+    }
+    return asset;
   }
 }
 

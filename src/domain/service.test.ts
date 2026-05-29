@@ -285,6 +285,125 @@ describe("BrainCreatorService", () => {
     );
   });
 
+  it("summarizes onboarding completeness for a business system", () => {
+    const service = createService();
+    const system = service.createSystemProfile({
+      name: "Orders Console",
+      environment: "staging",
+      baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+    });
+    const profile = service.createAuthProfile({
+      projectId: system.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const discovery = service.discoverPageModel({
+      projectId: system.id,
+      route: "/orders",
+      name: "Orders",
+      authProfileId: profile.id,
+      domText: "Create Order Submit"
+    });
+    const session = service.createTrainingSession({
+      projectId: system.id,
+      pageModelId: discovery.pageModel.id
+    });
+    service.completeTrainingSession({
+      sessionId: session.id,
+      actions: [
+        {
+          type: "click",
+          targetLocatorId: discovery.locatorPoints[0].id,
+          inputValue: "",
+          assertion: "request captured"
+        }
+      ],
+      apiRequests: [{ method: "POST", url: "/api/orders", status: 201 }]
+    });
+    service.generateCase({
+      projectId: system.id,
+      sourceRequirement: "Unknown approval path",
+      pageModelId: discovery.pageModel.id
+    });
+
+    const overview = service.getSystemOverview(system.id);
+
+    expect(overview.completeness).toEqual({
+      authConfigured: true,
+      pageModeled: true,
+      trainingEvidence: true,
+      caseGenerated: true,
+      openGaps: 1
+    });
+    expect(overview.assetCounts).toEqual(
+      expect.objectContaining({
+        pageModels: 1,
+        locatorPoints: 2,
+        trainingSessions: 1,
+        apiFlows: 1,
+        generatedCases: 1,
+        gaps: 1
+      })
+    );
+  });
+
+  it("returns page model asset details with linked evidence inside the same system", () => {
+    const service = createService();
+    const system = service.createSystemProfile({
+      name: "Orders Console",
+      environment: "staging",
+      baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+    });
+    const profile = service.createAuthProfile({
+      projectId: system.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const discovery = service.discoverPageModel({
+      projectId: system.id,
+      route: "/orders",
+      name: "Orders",
+      authProfileId: profile.id,
+      domText: "Create Order Submit"
+    });
+    const session = service.createTrainingSession({
+      projectId: system.id,
+      pageModelId: discovery.pageModel.id
+    });
+    service.completeTrainingSession({
+      sessionId: session.id,
+      actions: [
+        {
+          type: "click",
+          targetLocatorId: discovery.locatorPoints[0].id,
+          inputValue: "",
+          assertion: "request captured"
+        }
+      ],
+      apiRequests: [{ method: "POST", url: "/api/orders", status: 201 }]
+    });
+
+    const detail = service.getAssetDetail({
+      projectId: system.id,
+      type: "page-model",
+      id: discovery.pageModel.id
+    });
+
+    expect(detail.asset).toEqual(expect.objectContaining({ id: discovery.pageModel.id }));
+    expect(detail.related.locatorPoints).toHaveLength(2);
+    expect(detail.related.probeResults).toHaveLength(1);
+    expect(detail.related.trainingSessions).toHaveLength(1);
+    expect(detail.related.apiFlows).toHaveLength(1);
+  });
+
   it("stores browser training artifacts on completion", () => {
     const service = createService();
     const session = service.createTrainingSession({

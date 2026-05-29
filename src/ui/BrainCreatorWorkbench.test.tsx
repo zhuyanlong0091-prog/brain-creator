@@ -122,6 +122,74 @@ describe("BrainCreatorWorkbench", () => {
     await waitFor(() => expect(screen.getByText("Submit order")).toBeInTheDocument());
   });
 
+  it("shows business system asset overview and page model detail in asset management", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString();
+        if (url === "/api/system-profiles") {
+          return json({
+            id: "system_1",
+            name: "Orders Console",
+            environment: "staging",
+            baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+            defaultLocale: "zh-CN",
+            urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"],
+            status: "succeeded"
+          });
+        }
+        if (url === "/api/system-profiles/system_1/overview") {
+          return json({
+            system: { id: "system_1", name: "Orders Console" },
+            completeness: {
+              authConfigured: true,
+              pageModeled: true,
+              trainingEvidence: false,
+              caseGenerated: false,
+              openGaps: 1
+            },
+            assetCounts: { pageModels: 1, locatorPoints: 2, trainingSessions: 0 }
+          });
+        }
+        if (url.startsWith("/api/assets/search")) {
+          return json([{ id: "page_1", type: "page-model", label: "Orders" }]);
+        }
+        if (url.startsWith("/api/assets/detail")) {
+          return json({
+            type: "page-model",
+            asset: { id: "page_1", name: "Orders", status: "succeeded" },
+            related: {
+              locatorPoints: [{ id: "locator_1", name: "Create Order" }],
+              probeResults: [{ id: "probe_1", type: "dom-scan" }],
+              trainingSessions: [],
+              apiFlows: [],
+              generatedCases: [],
+              gaps: []
+            }
+          });
+        }
+        return json(null, false, ["unexpected route"], 404);
+      })
+    );
+
+    render(<BrainCreatorWorkbench />);
+
+    await user.click(screen.getByRole("button", { name: "进入业务系统接入" }));
+    await user.click(screen.getByRole("button", { name: "创建业务系统" }));
+    await user.click(screen.getByRole("tab", { name: "资产管理" }));
+    await user.click(screen.getByRole("button", { name: "刷新系统概览" }));
+
+    await waitFor(() => expect(screen.getByText("接入完整度")).toBeInTheDocument());
+    expect(screen.getByText("页面建模：已完成")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "搜索资产" }));
+    await user.click(await screen.findByRole("button", { name: "查看 Orders 详情" }));
+
+    await waitFor(() => expect(screen.getByText("资产详情")).toBeInTheDocument());
+    expect(screen.getByText(/Create Order/)).toBeInTheDocument();
+  });
+
   it("runs the real API-backed local loop from the workbench", async () => {
     const user = userEvent.setup();
     const calls: string[] = [];

@@ -98,6 +98,24 @@ type AssetResult = {
   status?: string;
 };
 
+type SystemOverviewResult = {
+  system: { id: string; name: string };
+  completeness: {
+    authConfigured: boolean;
+    pageModeled: boolean;
+    trainingEvidence: boolean;
+    caseGenerated: boolean;
+    openGaps: number;
+  };
+  assetCounts: Record<string, number>;
+};
+
+type AssetDetailResult = {
+  type: string;
+  asset: Record<string, unknown>;
+  related: Record<string, unknown[]>;
+};
+
 type GlossaryTermResult = {
   id: string;
   projectId: string;
@@ -213,6 +231,8 @@ export function BrainCreatorWorkbench() {
     useState<TrainingCompletionResult | null>(null);
   const [generatedCase, setGeneratedCase] = useState<GeneratedCaseResult | null>(null);
   const [assets, setAssets] = useState<AssetResult[]>([]);
+  const [systemOverview, setSystemOverview] = useState<SystemOverviewResult | null>(null);
+  const [assetDetail, setAssetDetail] = useState<AssetDetailResult | null>(null);
   const [glossaryTerms, setGlossaryTerms] = useState<GlossaryTermResult[]>([]);
 
   const activeGap = generatedCase?.gaps.find((gap) => gap.status !== "resolved");
@@ -377,6 +397,28 @@ export function BrainCreatorWorkbench() {
     );
     setAssets(result);
     return result;
+  }
+
+  async function refreshSystemOverview() {
+    if (!currentSystem) return;
+    const overview = await runStep("overview", "刷新系统概览", () =>
+      apiRequest<SystemOverviewResult>(`/api/system-profiles/${currentSystem.id}/overview`)
+    );
+    setSystemOverview(overview);
+    return overview;
+  }
+
+  async function loadAssetDetail(asset: AssetResult) {
+    const query = new URLSearchParams({
+      projectId,
+      type: asset.type,
+      id: asset.id
+    });
+    const detail = await runStep("assetDetail", "查看资产详情", () =>
+      apiRequest<AssetDetailResult>(`/api/assets/detail?${query.toString()}`)
+    );
+    setAssetDetail(detail);
+    return detail;
   }
 
   async function resolveGap() {
@@ -749,6 +791,8 @@ export function BrainCreatorWorkbench() {
           body="按类型查看本地资产，包含页面模型、L 点、训练记录、API Flow、用例、缺口和词根。"
         />
         <CurrentSystemNote />
+        <SystemOverviewPanel overview={systemOverview} />
+        <AssetDetailPanel detail={assetDetail} />
         <div className="operation-grid compact-form">
           <label>
             资产搜索词
@@ -770,6 +814,9 @@ export function BrainCreatorWorkbench() {
                     <li key={item.id}>
                       <strong>{item.label}</strong>
                       <span>{item.status ?? item.id}</span>
+                      <button className="secondary" onClick={() => void loadAssetDetail(item)} type="button">
+                        查看 {item.label} 详情
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -877,10 +924,83 @@ export function BrainCreatorWorkbench() {
           </p>
         </div>
         <div className="step-actions">
+          <button
+            className="secondary"
+            disabled={!currentSystem}
+            onClick={() => void refreshSystemOverview()}
+            type="button"
+          >
+            刷新系统概览
+          </button>
           <button className="secondary" onClick={() => setActiveView("systems")} type="button">
             进入业务系统接入
           </button>
         </div>
+      </section>
+    );
+  }
+
+  function SystemOverviewPanel({ overview }: { overview: SystemOverviewResult | null }) {
+    if (!overview) {
+      return null;
+    }
+    const completionRows = [
+      ["鉴权", overview.completeness.authConfigured],
+      ["页面建模", overview.completeness.pageModeled],
+      ["训练证据", overview.completeness.trainingEvidence],
+      ["用例生成", overview.completeness.caseGenerated]
+    ] as const;
+    return (
+      <section className="section asset-groups" aria-label="系统概览">
+        <article className="asset-group">
+          <h3>接入完整度</h3>
+          <ul>
+            {completionRows.map(([label, done]) => (
+              <li key={label}>
+                <strong>{label}：{done ? "已完成" : "未完成"}</strong>
+              </li>
+            ))}
+            <li>
+              <strong>开放缺口：{overview.completeness.openGaps}</strong>
+            </li>
+          </ul>
+        </article>
+        <article className="asset-group">
+          <h3>资产数量</h3>
+          <ReadableValue value={overview.assetCounts} />
+        </article>
+      </section>
+    );
+  }
+
+  function AssetDetailPanel({ detail }: { detail: AssetDetailResult | null }) {
+    if (!detail) {
+      return null;
+    }
+    const relatedEntries = Object.entries(detail.related).filter(
+      ([, value]) => Array.isArray(value) && value.length > 0
+    );
+    return (
+      <section className="section result-grid" aria-label="资产详情">
+        <article className="result-card">
+          <h3>资产详情</h3>
+          <ReadableValue value={detail.asset} />
+        </article>
+        <article className="result-card">
+          <h3>关联资产</h3>
+          {relatedEntries.length === 0 ? (
+            <p>暂无关联资产。</p>
+          ) : (
+            <ul className="readable-list">
+              {relatedEntries.map(([type, items]) => (
+                <li key={type}>
+                  <strong>{type}</strong>
+                  <ReadableValue value={items} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </article>
       </section>
     );
   }

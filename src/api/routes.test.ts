@@ -7,9 +7,11 @@ import { POST as createTrainingSession } from "../../app/api/training-sessions/r
 import { POST as completeTrainingSession } from "../../app/api/training-sessions/[id]/complete/route";
 import { POST as generateCase } from "../../app/api/generated-cases/route";
 import { GET as searchAssets } from "../../app/api/assets/search/route";
+import { GET as getAssetDetail } from "../../app/api/assets/detail/route";
 import { POST as resolveGap } from "../../app/api/gaps/[id]/resolve/route";
 import { GET as listGlossaryTerms, POST as createGlossaryTerm } from "../../app/api/glossary-terms/route";
 import { GET as listSystemProfiles, POST as createSystemProfile } from "../../app/api/system-profiles/route";
+import { GET as getSystemOverview } from "../../app/api/system-profiles/[id]/overview/route";
 
 function jsonRequest(body: unknown) {
   return new Request("http://localhost/api", {
@@ -152,6 +154,60 @@ describe("Brain Creator API routes", () => {
     expect(generated.data.status).toBe("blocked");
     expect(assets.data.length).toBeGreaterThan(0);
     expect(resolved.data.status).toBe("resolved");
+  });
+
+  it("returns system overview and asset detail for the selected business system", async () => {
+    const system = await read(
+      await createSystemProfile(
+        jsonRequest({
+          name: "Orders Console",
+          environment: "staging",
+          baseUrl: "http://127.0.0.1:3000/fixtures/private-target",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["http://127.0.0.1:3000/fixtures/private-target"]
+        })
+      )
+    );
+    const auth = await read(
+      await createAuthProfile(
+        jsonRequest({
+          projectId: system.data.id,
+          env: "staging",
+          role: "qa",
+          loginMethod: "token",
+          secrets: { token: "secret" }
+        })
+      )
+    );
+    const discovery = await read(
+      await discoverPageModel(
+        jsonRequest({
+          projectId: system.data.id,
+          route: "/orders",
+          name: "Orders",
+          authProfileId: auth.data.id,
+          domText: "Create Order Submit"
+        })
+      )
+    );
+
+    const overview = await read(
+      await getSystemOverview(new Request("http://localhost/api"), {
+        params: Promise.resolve({ id: system.data.id })
+      })
+    );
+    const detail = await read(
+      await getAssetDetail(
+        new Request(
+          `http://localhost/api/assets/detail?projectId=${system.data.id}&type=page-model&id=${discovery.data.pageModel.id}`
+        )
+      )
+    );
+
+    expect(overview.success).toBe(true);
+    expect(overview.data.completeness.pageModeled).toBe(true);
+    expect(detail.success).toBe(true);
+    expect(detail.data.related.locatorPoints).toHaveLength(2);
   });
 
   it("rejects unsafe browser capture URLs before opening a browser", async () => {
