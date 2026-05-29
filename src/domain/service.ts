@@ -3,17 +3,23 @@ import { decryptSecrets, encryptSecrets, redactSecrets } from "../shared/crypto.
 import { id } from "../shared/id.js";
 import type {
   ActionStep,
+  AgentRun,
   ApiFlow,
   ApiRequest,
   AssetSearchResult,
   AuthProfile,
+  BusinessRule,
+  ChainRun,
   Gap,
   GeneratedCase,
   GlossaryTerm,
   LocatorPoint,
   PageModel,
   ProbeResult,
+  RuleCheckResult,
   SystemProfile,
+  TestCase,
+  TestCaseScenario,
   TrainingSession
 } from "./types.js";
 
@@ -102,6 +108,21 @@ type CreateGlossaryTermInput = {
   pageScope: string;
 };
 
+type CreateBusinessRuleInput = {
+  systemId: string;
+  name: string;
+  condition: string;
+  severity: BusinessRule["severity"];
+};
+
+type CreateTestCaseInput = {
+  systemId: string;
+  requirement: string;
+  scenarios: TestCaseScenario[];
+  newTerms: TestCase["newTerms"];
+  ruleCheckResult: RuleCheckResult;
+};
+
 const actionTerms = ["Create Order", "Submit", "Search", "Create", "Save", "Delete"];
 
 export class BrainCreatorService {
@@ -180,7 +201,12 @@ export class BrainCreatorService {
         generatedCases: generatedCases.length,
         gaps: gaps.length,
         glossaryTerms: this.repository.glossaryTerms.filter((item) => item.projectId === systemId)
-          .length
+          .length,
+        businessRules: this.repository.businessRules.filter((item) => item.systemId === systemId)
+          .length,
+        testCases: this.repository.testCases.filter((item) => item.systemId === systemId).length,
+        agentRuns: this.repository.agentRuns.filter((item) => item.systemId === systemId).length,
+        chainRuns: this.repository.chainRuns.filter((item) => item.systemId === systemId).length
       }
     };
   }
@@ -474,6 +500,126 @@ export class BrainCreatorService {
     );
   }
 
+  createBusinessRule(input: CreateBusinessRuleInput): BusinessRule {
+    const rule: BusinessRule = {
+      id: id("rule"),
+      systemId: input.systemId,
+      name: input.name.trim(),
+      condition: input.condition.trim(),
+      severity: input.severity,
+      createdAt: timestamp()
+    };
+    this.repository.businessRules.push(rule);
+    this.repository.persist();
+    return rule;
+  }
+
+  listBusinessRules(systemId: string): BusinessRule[] {
+    return this.repository.businessRules.filter((rule) => rule.systemId === systemId);
+  }
+
+  deleteBusinessRule(ruleId: string): void {
+    const originalLength = this.repository.businessRules.length;
+    this.repository.businessRules = this.repository.businessRules.filter(
+      (rule) => rule.id !== ruleId
+    );
+    if (this.repository.businessRules.length === originalLength) {
+      throw new Error("Business rule not found");
+    }
+    this.repository.persist();
+  }
+
+  createTestCase(input: CreateTestCaseInput): TestCase {
+    const now = timestamp();
+    const testCase: TestCase = {
+      id: id("case"),
+      systemId: input.systemId,
+      requirement: input.requirement.trim(),
+      status: "draft",
+      scenarios: input.scenarios,
+      newTerms: input.newTerms,
+      ruleCheckResult: input.ruleCheckResult,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.testCases.push(testCase);
+    this.repository.persist();
+    return testCase;
+  }
+
+  getTestCase(caseId: string): TestCase {
+    const testCase = this.repository.testCases.find((item) => item.id === caseId);
+    if (!testCase) {
+      throw new Error("Test case not found");
+    }
+    return testCase;
+  }
+
+  listTestCases(systemId: string): TestCase[] {
+    return this.repository.testCases.filter((testCase) => testCase.systemId === systemId);
+  }
+
+  approveTestCase(caseId: string): TestCase {
+    const testCase = this.getTestCase(caseId);
+    testCase.status = "approved";
+    testCase.updatedAt = timestamp();
+    this.repository.persist();
+    return testCase;
+  }
+
+  updateTestCaseScenarios(caseId: string, scenarios: TestCaseScenario[]): TestCase {
+    const testCase = this.getTestCase(caseId);
+    testCase.scenarios = scenarios;
+    testCase.updatedAt = timestamp();
+    this.repository.persist();
+    return testCase;
+  }
+
+  recordAgentRun(run: AgentRun): void {
+    this.repository.agentRuns.push(run);
+    this.repository.persist();
+  }
+
+  getAgentRun(runId: string): AgentRun {
+    const run = this.repository.agentRuns.find((item) => item.id === runId);
+    if (!run) {
+      throw new Error("Agent run not found");
+    }
+    return run;
+  }
+
+  listAgentRuns(systemId: string): AgentRun[] {
+    return this.repository.agentRuns.filter((run) => run.systemId === systemId);
+  }
+
+  recordChainRun(run: ChainRun): void {
+    this.repository.chainRuns.push(run);
+    const testCase = this.repository.testCases.find((item) => item.id === run.testCaseId);
+    if (testCase) {
+      testCase.chainRunId = run.id;
+      if (run.status === "succeeded") {
+        testCase.status = "passed";
+      }
+      if (run.status === "failed") {
+        testCase.status = "failed";
+      }
+      testCase.updatedAt = run.completedAt ?? timestamp();
+    }
+    this.repository.persist();
+  }
+
+  getChainRun(chainId: string): ChainRun {
+    const run = this.repository.chainRuns.find((item) => item.id === chainId);
+    if (!run) {
+      throw new Error("Chain run not found");
+    }
+    return run;
+  }
+
+  listChainRuns(systemId: string): ChainRun[] {
+    return this.repository.chainRuns.filter((run) => run.systemId === systemId);
+  }
+
   searchAssets(input: SearchInput): AssetSearchResult[] {
     const query = input.query.toLowerCase();
     const includes = (value: string) => value.toLowerCase().includes(query);
@@ -574,6 +720,71 @@ export class BrainCreatorService {
         projectId: item.projectId
       }));
 
+    const businessRules = this.repository.businessRules
+      .filter(
+        (item) =>
+          inProject(item.systemId) && includes(`${item.name} ${item.condition} ${item.severity}`)
+      )
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "business-rule",
+        label: item.name,
+        projectId: item.systemId,
+        status: item.severity
+      }));
+
+    const testCases = this.repository.testCases
+      .filter(
+        (item) =>
+          inProject(item.systemId) &&
+          includes(
+            `${item.requirement} ${item.scenarios.map((scenario) => scenario.title).join(" ")}`
+          )
+      )
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "test-case",
+        label: item.requirement,
+        projectId: item.systemId,
+        status: item.status
+      }));
+
+    const agentRuns = this.repository.agentRuns
+      .filter(
+        (item) =>
+          inProject(item.systemId) &&
+          includes(`${item.agent} ${item.inputSummary} ${item.outputPaths.join(" ")}`)
+      )
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "agent-run",
+        label: `${item.agent} ${item.inputSummary}`,
+        projectId: item.systemId,
+        status: item.status
+      }));
+
+    const chainRuns = this.repository.chainRuns
+      .filter((item) => {
+        const testCase = this.repository.testCases.find(
+          (candidate) => candidate.id === item.testCaseId
+        );
+        return (
+          inProject(item.systemId) &&
+          includes(
+            `${item.testCaseId} ${testCase?.requirement ?? ""} ${item.specPath ?? ""} ${
+              item.testPath ?? ""
+            }`
+          )
+        );
+      })
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "chain-run",
+        label: `Chain run for ${item.testCaseId}`,
+        projectId: item.systemId,
+        status: item.status
+      }));
+
     return [
       ...systems,
       ...pageModels,
@@ -582,7 +793,11 @@ export class BrainCreatorService {
       ...apiFlows,
       ...cases,
       ...gaps,
-      ...glossaryTerms
+      ...glossaryTerms,
+      ...businessRules,
+      ...testCases,
+      ...agentRuns,
+      ...chainRuns
     ];
   }
 
@@ -702,7 +917,13 @@ export class BrainCreatorService {
       gap: this.repository.gaps.filter((item) => item.projectId === input.projectId),
       "glossary-term": this.repository.glossaryTerms.filter(
         (item) => item.projectId === input.projectId
-      )
+      ),
+      "business-rule": this.repository.businessRules.filter(
+        (item) => item.systemId === input.projectId
+      ),
+      "test-case": this.repository.testCases.filter((item) => item.systemId === input.projectId),
+      "agent-run": this.repository.agentRuns.filter((item) => item.systemId === input.projectId),
+      "chain-run": this.repository.chainRuns.filter((item) => item.systemId === input.projectId)
     };
     const asset = candidates[input.type]?.find(
       (item) => (item as { id?: string }).id === input.id

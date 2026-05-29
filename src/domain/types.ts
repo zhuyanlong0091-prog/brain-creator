@@ -7,6 +7,23 @@ export type TaskStatus =
 
 export type GapStatus = "open" | "resolved";
 
+export type AssetType =
+  | "system-profile"
+  | "auth-profile"
+  | "page-model"
+  | "locator-point"
+  | "training-session"
+  | "api-flow"
+  | "generated-case"
+  | "gap"
+  | "glossary-term"
+  | "business-rule"
+  | "test-case"
+  | "test-spec"
+  | "test-file"
+  | "agent-run"
+  | "chain-run";
+
 export type SystemProfile = {
   id: string;
   name: string;
@@ -146,18 +163,88 @@ export type GlossaryTerm = {
   updatedAt: string;
 };
 
+export type BusinessRule = {
+  id: string;
+  systemId: string;
+  name: string;
+  condition: string;
+  severity: "block" | "warn";
+  createdAt: string;
+};
+
+export type TestCaseStatus = "draft" | "approved" | "generating" | "passed" | "failed";
+
+export type TestCase = {
+  id: string;
+  systemId: string;
+  requirement: string;
+  status: TestCaseStatus;
+  scenarios: TestCaseScenario[];
+  newTerms: GlossaryTerm[];
+  ruleCheckResult: RuleCheckResult;
+  specId?: string;
+  testFileId?: string;
+  chainRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TestCaseScenario = {
+  id: string;
+  title: string;
+  priority: "critical" | "high" | "medium" | "low";
+  steps: TestCaseStep[];
+  businessRuleRef?: string;
+};
+
+export type TestCaseStep = {
+  action: "navigate" | "fill" | "click" | "assert" | "wait" | "select";
+  target: string;
+  value?: string;
+  expected?: string;
+};
+
+export type RuleCheckResult = {
+  passed: boolean;
+  checks: Array<{
+    ruleId: string;
+    ruleName: string;
+    covered: boolean;
+    detail: string;
+  }>;
+};
+
+export type AgentRun = {
+  id: string;
+  systemId: string;
+  agent: "planner" | "generator" | "healer";
+  status: TaskStatus;
+  inputSummary: string;
+  outputPaths: string[];
+  duration: number;
+  logs: string[];
+  error?: string;
+  createdAt: string;
+};
+
+export type ChainRun = {
+  id: string;
+  systemId: string;
+  testCaseId: string;
+  status: "running" | "succeeded" | "partial" | "failed";
+  planRunId?: string;
+  generateRunId?: string;
+  healRunId?: string;
+  specPath?: string;
+  testPath?: string;
+  gaps: Gap[];
+  createdAt: string;
+  completedAt?: string;
+};
+
 export type AssetSearchResult = {
   id: string;
-  type:
-    | "system-profile"
-    | "auth-profile"
-    | "page-model"
-    | "locator-point"
-    | "training-session"
-    | "api-flow"
-    | "generated-case"
-    | "gap"
-    | "glossary-term";
+  type: AssetType;
   label: string;
   projectId: string;
   status?: string;

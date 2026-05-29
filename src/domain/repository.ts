@@ -2,8 +2,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
   ActionStep,
+  AgentRun,
   ApiFlow,
   AuthProfile,
+  BusinessRule,
+  ChainRun,
   Gap,
   GeneratedCase,
   GlossaryTerm,
@@ -11,6 +14,7 @@ import type {
   PageModel,
   ProbeResult,
   SystemProfile,
+  TestCase,
   TrainingSession
 } from "./types.js";
 
@@ -26,6 +30,10 @@ export class InMemoryBrainCreatorRepository {
   generatedCases: GeneratedCase[] = [];
   gaps: Gap[] = [];
   glossaryTerms: GlossaryTerm[] = [];
+  businessRules: BusinessRule[] = [];
+  testCases: TestCase[] = [];
+  agentRuns: AgentRun[] = [];
+  chainRuns: ChainRun[] = [];
 
   persist() {
     return;
@@ -43,6 +51,10 @@ export class InMemoryBrainCreatorRepository {
     this.generatedCases = [];
     this.gaps = [];
     this.glossaryTerms = [];
+    this.businessRules = [];
+    this.testCases = [];
+    this.agentRuns = [];
+    this.chainRuns = [];
     this.persist();
   }
 }
@@ -60,6 +72,10 @@ type RepositorySnapshot = Pick<
   | "generatedCases"
   | "gaps"
   | "glossaryTerms"
+  | "businessRules"
+  | "testCases"
+  | "agentRuns"
+  | "chainRuns"
 >;
 
 export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorRepository {
@@ -89,6 +105,10 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     this.generatedCases = snapshot.generatedCases ?? [];
     this.gaps = snapshot.gaps ?? [];
     this.glossaryTerms = snapshot.glossaryTerms ?? [];
+    this.businessRules = snapshot.businessRules ?? [];
+    this.testCases = snapshot.testCases ?? [];
+    this.agentRuns = snapshot.agentRuns ?? [];
+    this.chainRuns = snapshot.chainRuns ?? [];
   }
 
   private snapshot(): RepositorySnapshot {
@@ -103,7 +123,11 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       apiFlows: this.apiFlows,
       generatedCases: this.generatedCases,
       gaps: this.gaps,
-      glossaryTerms: this.glossaryTerms
+      glossaryTerms: this.glossaryTerms,
+      businessRules: this.businessRules,
+      testCases: this.testCases,
+      agentRuns: this.agentRuns,
+      chainRuns: this.chainRuns
     };
   }
 }
