@@ -554,4 +554,211 @@ describe("BrainCreatorService", () => {
     expect(terms).toHaveLength(1);
     expect(terms[0].key).toBe("order.submit");
   });
+
+  it("manages business rules per system", () => {
+    const service = createService();
+
+    const rule = service.createBusinessRule({
+      systemId: "system-1",
+      name: "Payment amount check",
+      condition: "Payment flow must verify order amount",
+      severity: "block"
+    });
+    service.createBusinessRule({
+      systemId: "system-2",
+      name: "CRM owner check",
+      condition: "Lead must have an owner",
+      severity: "warn"
+    });
+
+    expect(rule).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^rule_/),
+        systemId: "system-1",
+        name: "Payment amount check",
+        severity: "block"
+      })
+    );
+    expect(service.listBusinessRules("system-1")).toEqual([rule]);
+
+    service.deleteBusinessRule(rule.id);
+
+    expect(service.listBusinessRules("system-1")).toEqual([]);
+    expect(service.listBusinessRules("system-2")).toHaveLength(1);
+  });
+
+  it("creates, updates, approves, and lists structured test cases per system", () => {
+    const service = createService();
+
+    const testCase = service.createTestCase({
+      systemId: "system-1",
+      requirement: "测试购买机器人的完整流程",
+      scenarios: [
+        {
+          id: "scenario_1",
+          title: "购买机器人",
+          priority: "critical",
+          steps: [
+            { action: "navigate", target: "商品列表" },
+            { action: "click", target: "机器人商品" },
+            { action: "assert", target: "订单金额", expected: "金额正确" }
+          ],
+          businessRuleRef: "rule_1"
+        }
+      ],
+      newTerms: [
+        {
+          id: "term_candidate_1",
+          projectId: "system-1",
+          key: "product.robot",
+          zhCN: "机器人",
+          enUS: "Robot",
+          aliases: ["Robot"],
+          pageScope: "/products",
+          createdAt: "2026-05-29T00:00:00.000Z",
+          updatedAt: "2026-05-29T00:00:00.000Z"
+        }
+      ],
+      ruleCheckResult: {
+        passed: true,
+        checks: [
+          {
+            ruleId: "rule_1",
+            ruleName: "Payment amount check",
+            covered: true,
+            detail: "订单金额断言已覆盖"
+          }
+        ]
+      }
+    });
+
+    expect(testCase.status).toBe("draft");
+    expect(service.getTestCase(testCase.id)).toEqual(testCase);
+    expect(service.listTestCases("system-1")).toEqual([testCase]);
+
+    const updated = service.updateTestCaseScenarios(testCase.id, [
+      {
+        id: "scenario_2",
+        title: "购买机器人并校验支付金额",
+        priority: "critical",
+        steps: [{ action: "assert", target: "支付金额", expected: "等于订单金额" }]
+      }
+    ]);
+    const approved = service.approveTestCase(testCase.id);
+
+    expect(updated.scenarios[0].title).toBe("购买机器人并校验支付金额");
+    expect(approved.status).toBe("approved");
+    expect(service.listTestCases("missing-system")).toEqual([]);
+  });
+
+  it("records agent and chain runs per system", () => {
+    const service = createService();
+    const agentRun = {
+      id: "agent_1",
+      systemId: "system-1",
+      agent: "planner" as const,
+      status: "succeeded" as const,
+      inputSummary: "测试购买机器人",
+      outputPaths: ["specs/robot-purchase.md"],
+      duration: 1200,
+      logs: ["planner completed"],
+      createdAt: "2026-05-29T00:00:00.000Z"
+    };
+    const chainRun = {
+      id: "chain_1",
+      systemId: "system-1",
+      testCaseId: "case_1",
+      status: "succeeded" as const,
+      planRunId: agentRun.id,
+      specPath: "specs/robot-purchase.md",
+      testPath: "tests/generated/robot-purchase.spec.ts",
+      gaps: [],
+      createdAt: "2026-05-29T00:00:00.000Z",
+      completedAt: "2026-05-29T00:01:00.000Z"
+    };
+
+    service.recordAgentRun(agentRun);
+    service.recordChainRun(chainRun);
+
+    expect(service.getAgentRun(agentRun.id)).toEqual(agentRun);
+    expect(service.listAgentRuns("system-1")).toEqual([agentRun]);
+    expect(service.getChainRun(chainRun.id)).toEqual(chainRun);
+    expect(service.listChainRuns("system-1")).toEqual([chainRun]);
+  });
+
+  it("searches v2 business rules, test cases, and run history as system assets", () => {
+    const service = createService();
+    service.createBusinessRule({
+      systemId: "system-1",
+      name: "Robot payment rule",
+      condition: "购买机器人必须校验支付金额",
+      severity: "block"
+    });
+    const testCase = service.createTestCase({
+      systemId: "system-1",
+      requirement: "测试购买 robot 机器人",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    service.recordAgentRun({
+      id: "agent_1",
+      systemId: "system-1",
+      agent: "planner",
+      status: "succeeded",
+      inputSummary: "Planner explored robot purchase",
+      outputPaths: ["specs/robot.md"],
+      duration: 10,
+      logs: [],
+      createdAt: "2026-05-29T00:00:00.000Z"
+    });
+    service.recordChainRun({
+      id: "chain_1",
+      systemId: "system-1",
+      testCaseId: testCase.id,
+      status: "succeeded",
+      specPath: "specs/robot.md",
+      testPath: "tests/generated/robot.spec.ts",
+      gaps: [],
+      createdAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    const assets = service.searchAssets({ projectId: "system-1", query: "robot" });
+
+    expect(assets.map((asset) => asset.type)).toEqual(
+      expect.arrayContaining(["business-rule", "test-case", "agent-run", "chain-run"])
+    );
+  });
+
+  it("returns v2 asset details inside the same system", () => {
+    const service = createService();
+    const rule = service.createBusinessRule({
+      systemId: "system-1",
+      name: "Robot payment rule",
+      condition: "购买机器人必须校验支付金额",
+      severity: "block"
+    });
+    const testCase = service.createTestCase({
+      systemId: "system-1",
+      requirement: "测试购买 robot 机器人",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+
+    expect(
+      service.getAssetDetail({
+        projectId: "system-1",
+        type: "business-rule",
+        id: rule.id
+      }).asset
+    ).toEqual(rule);
+    expect(
+      service.getAssetDetail({
+        projectId: "system-1",
+        type: "test-case",
+        id: testCase.id
+      }).asset
+    ).toEqual(testCase);
+  });
 });

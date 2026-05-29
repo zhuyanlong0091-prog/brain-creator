@@ -77,6 +77,63 @@ describe("JsonFileBrainCreatorRepository", () => {
       })
     ).toEqual(expect.arrayContaining([expect.objectContaining({ type: "glossary-term" })]));
   });
+
+  it("restores v2 business rules, test cases, and run records after recreation", async () => {
+    const filePath = join(await tempDir(), "assets.json");
+    const firstService = new BrainCreatorService(new JsonFileBrainCreatorRepository(filePath));
+    const rule = firstService.createBusinessRule({
+      systemId: "system-1",
+      name: "Robot payment rule",
+      condition: "购买机器人必须校验支付金额",
+      severity: "block"
+    });
+    const testCase = firstService.createTestCase({
+      systemId: "system-1",
+      requirement: "测试购买机器人",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: {
+        passed: true,
+        checks: [{ ruleId: rule.id, ruleName: rule.name, covered: true, detail: "covered" }]
+      }
+    });
+    firstService.recordAgentRun({
+      id: "agent_1",
+      systemId: "system-1",
+      agent: "planner",
+      status: "succeeded",
+      inputSummary: "Planner explored robot purchase",
+      outputPaths: ["specs/robot.md"],
+      duration: 10,
+      logs: [],
+      createdAt: "2026-05-29T00:00:00.000Z"
+    });
+    firstService.recordChainRun({
+      id: "chain_1",
+      systemId: "system-1",
+      testCaseId: testCase.id,
+      status: "succeeded",
+      specPath: "specs/robot.md",
+      testPath: "tests/generated/robot.spec.ts",
+      gaps: [],
+      createdAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    const secondService = new BrainCreatorService(new JsonFileBrainCreatorRepository(filePath));
+
+    expect(secondService.listBusinessRules("system-1")).toEqual([
+      expect.objectContaining({ id: rule.id })
+    ]);
+    expect(secondService.listTestCases("system-1")).toEqual([
+      expect.objectContaining({ id: testCase.id })
+    ]);
+    expect(secondService.listAgentRuns("system-1")).toEqual([
+      expect.objectContaining({ id: "agent_1" })
+    ]);
+    expect(secondService.listChainRuns("system-1")).toEqual([
+      expect.objectContaining({ id: "chain_1" })
+    ]);
+  });
 });
 
 async function tempDir() {
