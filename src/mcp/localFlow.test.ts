@@ -109,6 +109,23 @@ describe("Brain Creator local MCP flow", () => {
         query: ""
       })
     );
+    const updatedTerm = dataOf(
+      await handleBrainCreatorTool(context, "bc_update_term", {
+        projectId: system.id,
+        termId: terms[0].id,
+        key: "checkout.robot",
+        zhCN: terms[0].zhCN,
+        enUS: "Robot checkout",
+        aliases: ["robot order"],
+        pageScope: "/checkout"
+      })
+    );
+    const deletedTerm = dataOf(
+      await handleBrainCreatorTool(context, "bc_delete_term", {
+        projectId: system.id,
+        termId: updatedTerm.id
+      })
+    );
     const cases = dataOf(
       await handleBrainCreatorTool(context, "bc_list_cases", {
         systemId: system.id
@@ -123,6 +140,8 @@ describe("Brain Creator local MCP flow", () => {
 
     expect(confirmedTerms.confirmedTerms.length).toBeGreaterThan(0);
     expect(terms.length).toBe(confirmedTerms.confirmedTerms.length);
+    expect(updatedTerm.key).toBe("checkout.robot");
+    expect(deletedTerm.id).toBe(updatedTerm.id);
     expect(updatedPlan.scenarios[0].title).toContain("璁㈠崟閲戦");
     expect(run.chainRun.status).toBe("succeeded");
     expect(cases).toEqual([expect.objectContaining({ id: draft.testCase.id })]);

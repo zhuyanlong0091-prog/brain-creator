@@ -11,6 +11,8 @@ describe("BRAIN_CREATOR_TOOLS", () => {
       "bc_verify_auth",
       "bc_add_term",
       "bc_list_terms",
+      "bc_update_term",
+      "bc_delete_term",
       "bc_batch_confirm_terms",
       "bc_add_rule",
       "bc_list_rules",

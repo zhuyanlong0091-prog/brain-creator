@@ -555,6 +555,64 @@ describe("BrainCreatorService", () => {
     expect(terms[0].key).toBe("order.submit");
   });
 
+  it("updates and deletes glossary terms inside one business system", () => {
+    const service = createService();
+    const term = service.createGlossaryTerm({
+      projectId: "system-1",
+      key: "order.submit",
+      zhCN: "Submit order",
+      enUS: "Submit order",
+      aliases: ["checkout"],
+      pageScope: "/orders"
+    });
+    service.createGlossaryTerm({
+      projectId: "system-2",
+      key: "crm.lead",
+      zhCN: "Lead",
+      enUS: "Lead",
+      aliases: [],
+      pageScope: "/leads"
+    });
+
+    const updated = service.updateGlossaryTerm({
+      projectId: "system-1",
+      termId: term.id,
+      key: "checkout.submit",
+      zhCN: "Submit checkout",
+      enUS: "Submit checkout",
+      aliases: ["place order"],
+      pageScope: "/checkout"
+    });
+
+    expect(updated).toEqual(
+      expect.objectContaining({
+        id: term.id,
+        key: "checkout.submit",
+        aliases: ["place order"],
+        pageScope: "/checkout"
+      })
+    );
+    expect(() =>
+      service.updateGlossaryTerm({
+        projectId: "system-2",
+        termId: term.id,
+        key: "wrong.system",
+        zhCN: "Wrong",
+        enUS: "Wrong",
+        aliases: [],
+        pageScope: "/"
+      })
+    ).toThrow("Glossary term belongs to another business system");
+
+    const deleted = service.deleteGlossaryTerm({
+      projectId: "system-1",
+      termId: term.id
+    });
+
+    expect(deleted.id).toBe(term.id);
+    expect(service.listGlossaryTerms({ projectId: "system-1", query: "" })).toEqual([]);
+  });
+
   it("confirms planner-discovered terms into the system glossary", () => {
     const service = createService();
     const testCase = service.createTestCase({

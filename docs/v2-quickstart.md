@@ -86,6 +86,8 @@ After `bc_generate_plan`, review returned `newTerms`. Use `bc_batch_confirm_term
 
 Use `bc_list_terms` to inspect the current glossary for a system.
 
+Use `bc_update_term` to correct a term and `bc_delete_term` to remove terms that should not become reusable system knowledge.
+
 ### 4. Add Business Rules
 
 Use `bc_add_rule` before planning tests.
@@ -158,9 +160,11 @@ The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 8. `bc_approve_plan`
 9. `bc_run_chain`
 10. `bc_list_terms`
-11. `bc_list_cases`
-12. `bc_list_gaps`
-13. `bc_search_assets`
+11. `bc_update_term`
+12. `bc_delete_term`
+13. `bc_list_cases`
+14. `bc_list_gaps`
+15. `bc_search_assets`
 
 Run it with:
 

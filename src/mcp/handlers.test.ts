@@ -237,6 +237,50 @@ describe("handleBrainCreatorTool", () => {
     expect(terms).toEqual([expect.objectContaining({ key: "product.robot" })]);
   });
 
+  it("updates and deletes glossary terms through MCP", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const term = dataOf(
+      await handleBrainCreatorTool(context, "bc_add_term", {
+        projectId: system.id,
+        key: "order.submit",
+        zhCN: "Submit order",
+        enUS: "Submit order",
+        aliases: ["checkout"],
+        pageScope: "/orders"
+      })
+    );
+
+    const updated = dataOf(
+      await handleBrainCreatorTool(context, "bc_update_term", {
+        projectId: system.id,
+        termId: term.id,
+        key: "checkout.submit",
+        zhCN: "Submit checkout",
+        enUS: "Submit checkout",
+        aliases: ["place order"],
+        pageScope: "/checkout"
+      })
+    );
+    const deleted = dataOf(
+      await handleBrainCreatorTool(context, "bc_delete_term", {
+        projectId: system.id,
+        termId: term.id
+      })
+    );
+
+    expect(updated).toEqual(expect.objectContaining({ key: "checkout.submit" }));
+    expect(deleted).toEqual(expect.objectContaining({ id: term.id }));
+  });
+
   it("runs an approved chain and records chain output through MCP", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({

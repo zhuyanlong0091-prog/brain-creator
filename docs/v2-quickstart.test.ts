@@ -12,6 +12,8 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("bc_add_term");
     expect(content).toContain("bc_batch_confirm_terms");
     expect(content).toContain("bc_list_terms");
+    expect(content).toContain("bc_update_term");
+    expect(content).toContain("bc_delete_term");
     expect(content).toContain("bc_add_rule");
     expect(content).toContain("bc_generate_plan");
     expect(content).toContain("bc_update_plan");

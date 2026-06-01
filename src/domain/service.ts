@@ -118,6 +118,15 @@ type CreateGlossaryTermInput = {
   pageScope: string;
 };
 
+type UpdateGlossaryTermInput = CreateGlossaryTermInput & {
+  termId: string;
+};
+
+type DeleteGlossaryTermInput = {
+  projectId: string;
+  termId: string;
+};
+
 type ConfirmCandidateTermsInput = {
   caseId: string;
   confirmTermIds: string[];
@@ -514,6 +523,39 @@ export class BrainCreatorService {
         item.projectId === input.projectId &&
         includes(`${item.key} ${item.zhCN} ${item.enUS} ${item.aliases.join(" ")} ${item.pageScope}`)
     );
+  }
+
+  updateGlossaryTerm(input: UpdateGlossaryTermInput): GlossaryTerm {
+    const term = this.repository.glossaryTerms.find((item) => item.id === input.termId);
+    if (!term) {
+      throw new Error("Glossary term not found");
+    }
+    if (term.projectId !== input.projectId) {
+      throw new Error("Glossary term belongs to another business system");
+    }
+
+    term.key = input.key.trim();
+    term.zhCN = input.zhCN.trim();
+    term.enUS = input.enUS.trim();
+    term.aliases = input.aliases.map((alias) => alias.trim()).filter(Boolean);
+    term.pageScope = input.pageScope.trim();
+    term.updatedAt = timestamp();
+    this.repository.persist();
+    return term;
+  }
+
+  deleteGlossaryTerm(input: DeleteGlossaryTermInput): GlossaryTerm {
+    const index = this.repository.glossaryTerms.findIndex((item) => item.id === input.termId);
+    if (index < 0) {
+      throw new Error("Glossary term not found");
+    }
+    const [term] = this.repository.glossaryTerms.splice(index, 1);
+    if (term.projectId !== input.projectId) {
+      this.repository.glossaryTerms.splice(index, 0, term);
+      throw new Error("Glossary term belongs to another business system");
+    }
+    this.repository.persist();
+    return term;
   }
 
   confirmCandidateTerms(input: ConfirmCandidateTermsInput): {

@@ -9,6 +9,8 @@ export type BrainCreatorToolName =
   | "bc_verify_auth"
   | "bc_add_term"
   | "bc_list_terms"
+  | "bc_update_term"
+  | "bc_delete_term"
   | "bc_batch_confirm_terms"
   | "bc_add_rule"
   | "bc_list_rules"
@@ -103,6 +105,29 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({
       projectId: z.string(),
       query: z.string().default("")
+    })
+  },
+  {
+    name: "bc_update_term",
+    title: "Update glossary term",
+    description: "Update a glossary term inside a business system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      termId: z.string(),
+      key: z.string(),
+      zhCN: z.string(),
+      enUS: z.string(),
+      aliases: z.array(z.string()).default([]),
+      pageScope: z.string().default("/")
+    })
+  },
+  {
+    name: "bc_delete_term",
+    title: "Delete glossary term",
+    description: "Delete a glossary term from a business system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      termId: z.string()
     })
   },
   {

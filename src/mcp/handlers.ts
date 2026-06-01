@@ -96,6 +96,25 @@ export async function handleBrainCreatorTool(
             query: optionalStringArg(input, "query") ?? ""
           })
         );
+      case "bc_update_term":
+        return textResult(
+          context.service.updateGlossaryTerm({
+            projectId: stringArg(input, "projectId"),
+            termId: stringArg(input, "termId"),
+            key: stringArg(input, "key"),
+            zhCN: stringArg(input, "zhCN"),
+            enUS: stringArg(input, "enUS"),
+            aliases: stringArrayArg(input, "aliases"),
+            pageScope: optionalStringArg(input, "pageScope") ?? "/"
+          })
+        );
+      case "bc_delete_term":
+        return textResult(
+          context.service.deleteGlossaryTerm({
+            projectId: stringArg(input, "projectId"),
+            termId: stringArg(input, "termId")
+          })
+        );
       case "bc_batch_confirm_terms":
         return textResult(
           context.service.confirmCandidateTerms({
