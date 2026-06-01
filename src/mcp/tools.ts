@@ -17,6 +17,7 @@ export type BrainCreatorToolName =
   | "bc_generate_plan"
   | "bc_update_plan"
   | "bc_approve_plan"
+  | "bc_run_agent"
   | "bc_run_chain"
   | "bc_list_cases"
   | "bc_list_gaps"
@@ -196,6 +197,19 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     title: "Approve test plan",
     description: "Approve a draft test case before code generation.",
     inputSchema: z.object({ caseId: z.string() })
+  },
+  {
+    name: "bc_run_agent",
+    title: "Run agent",
+    description: "Run a single Planner, Generator, or Healer agent and record the AgentRun.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      agent: z.enum(["planner", "generator", "healer"]),
+      inputSummary: z.string(),
+      args: z.array(z.string()).default([]),
+      outputPaths: z.array(z.string()).default([]),
+      timeoutMs: z.number().int().positive().optional()
+    })
   },
   {
     name: "bc_run_chain",

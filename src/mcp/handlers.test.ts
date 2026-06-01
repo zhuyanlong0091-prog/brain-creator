@@ -335,6 +335,80 @@ describe("handleBrainCreatorTool", () => {
     ]);
   });
 
+  it("runs a single agent and records the agent run through MCP", async () => {
+    const calls: string[][] = [];
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json"),
+      runner: async (_command, args) => {
+        calls.push(args);
+        return { exitCode: 0, stdout: "planner ok", stderr: "" };
+      }
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+
+    const run = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_agent", {
+        systemId: system.id,
+        agent: "planner",
+        inputSummary: "Explore robot purchase",
+        args: ["--prompt", "specs/_context/system-prompt.md"],
+        outputPaths: ["specs/robot.md"]
+      })
+    );
+
+    expect(calls).toEqual([
+      ["playwright", "agent", "planner", "--prompt", "specs/_context/system-prompt.md"]
+    ]);
+    expect(run).toEqual(
+      expect.objectContaining({
+        systemId: system.id,
+        agent: "planner",
+        status: "succeeded",
+        inputSummary: "Explore robot purchase"
+      })
+    );
+    expect(context.service.listAgentRuns(system.id)).toEqual([
+      expect.objectContaining({ id: run.id, agent: "planner" })
+    ]);
+  });
+
+  it("records a failed single agent run when no bridge is configured", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+
+    const run = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_agent", {
+        systemId: system.id,
+        agent: "planner",
+        inputSummary: "Explore robot purchase",
+        args: [],
+        outputPaths: []
+      })
+    );
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("Claude subagent bridge required");
+    expect(context.service.listAgentRuns(system.id)).toEqual([
+      expect.objectContaining({ id: run.id, status: "failed" })
+    ]);
+  });
+
   it("lists test cases, lists gaps, and resolves a gap through MCP", async () => {
     const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
     const system = dataOf(

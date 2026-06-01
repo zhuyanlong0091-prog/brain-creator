@@ -123,13 +123,19 @@ Use `bc_approve_plan` only after the user confirms the test intent.
 
 The approved TestCase is the boundary between planning and code generation.
 
-### 8. Run The Chain
+### 8. Run A Single Agent
+
+Use `bc_run_agent` with `systemId`, `agent`, `inputSummary`, `args`, and `outputPaths` when debugging Planner, Generator, or Healer independently.
+
+This records an AgentRun for traceability. It is a diagnostic entry point and does not replace `bc_run_chain` for approved test execution.
+
+### 9. Run The Chain
 
 Use `bc_run_chain` with the approved `caseId`.
 
 The chain serializes scenarios to a Markdown spec, calls the generator, runs Playwright tests, and invokes the healer when tests fail. If healing is exhausted, the ChainRun contains an open `healer-skip` Gap.
 
-### 9. Review Cases And Gaps
+### 10. Review Cases And Gaps
 
 Use `bc_list_cases` with the selected `systemId` to review draft, approved, passed, and failed test cases.
 
@@ -137,7 +143,7 @@ Use `bc_list_gaps` with `projectId` and optional `status` to review open or reso
 
 Use `bc_resolve_gap` with `projectId` and `gapId` after the user confirms the missing evidence or issue has been handled.
 
-### 10. Search Assets
+### 11. Search Assets
 
 Use `bc_search_assets` with:
 
@@ -158,13 +164,14 @@ The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 6. `bc_batch_confirm_terms`
 7. `bc_update_plan`
 8. `bc_approve_plan`
-9. `bc_run_chain`
-10. `bc_list_terms`
-11. `bc_update_term`
-12. `bc_delete_term`
-13. `bc_list_cases`
-14. `bc_list_gaps`
-15. `bc_search_assets`
+9. `bc_run_agent`
+10. `bc_run_chain`
+11. `bc_list_terms`
+12. `bc_update_term`
+13. `bc_delete_term`
+14. `bc_list_cases`
+15. `bc_list_gaps`
+16. `bc_search_assets`
 
 Run it with:
 

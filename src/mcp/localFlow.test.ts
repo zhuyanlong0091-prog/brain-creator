@@ -91,6 +91,15 @@ describe("Brain Creator local MCP flow", () => {
     await handleBrainCreatorTool(context, "bc_approve_plan", {
       caseId: draft.testCase.id
     });
+    const agentRun = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_agent", {
+        systemId: system.id,
+        agent: "planner",
+        inputSummary: "Smoke single planner run",
+        args: ["--prompt", "specs/_context/smoke.md"],
+        outputPaths: ["specs/smoke.md"]
+      })
+    );
     const run = dataOf(
       await handleBrainCreatorTool(context, "bc_run_chain", {
         caseId: draft.testCase.id
@@ -143,6 +152,7 @@ describe("Brain Creator local MCP flow", () => {
     expect(updatedTerm.key).toBe("checkout.robot");
     expect(deletedTerm.id).toBe(updatedTerm.id);
     expect(updatedPlan.scenarios[0].title).toContain("璁㈠崟閲戦");
+    expect(agentRun.status).toBe("succeeded");
     expect(run.chainRun.status).toBe("succeeded");
     expect(cases).toEqual([expect.objectContaining({ id: draft.testCase.id })]);
     expect(gaps).toEqual([]);

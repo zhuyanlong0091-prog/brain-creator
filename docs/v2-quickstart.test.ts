@@ -18,6 +18,7 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("bc_generate_plan");
     expect(content).toContain("bc_update_plan");
     expect(content).toContain("bc_approve_plan");
+    expect(content).toContain("bc_run_agent");
     expect(content).toContain("bc_run_chain");
     expect(content).toContain("bc_list_cases");
     expect(content).toContain("bc_list_gaps");

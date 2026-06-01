@@ -6,11 +6,12 @@ import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   commandRunnerAgentBridge,
   generatePlanDraft,
+  runAgent,
   runChain,
   type AgentBridge,
   type CommandRunner
 } from "../agent/orchestrator.js";
-import type { AuthProfile, TestCaseScenario, TestCaseStep } from "../domain/types.js";
+import type { AgentRun, AuthProfile, TestCaseScenario, TestCaseStep } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
 export type BrainCreatorMcpContext = {
@@ -145,6 +146,8 @@ export async function handleBrainCreatorTool(
         );
       case "bc_approve_plan":
         return textResult(context.service.approveTestCase(stringArg(input, "caseId")));
+      case "bc_run_agent":
+        return textResult(await runSingleAgent(context, input));
       case "bc_run_chain":
         return textResult(await runApprovedChain(context, input));
       case "bc_list_cases":
@@ -233,6 +236,26 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   return result;
 }
 
+async function runSingleAgent(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+  if (!system) {
+    throw new Error("Business system not found");
+  }
+  const agentRun = await runAgent({
+    systemId,
+    agent: agentArg(input, "agent"),
+    inputSummary: stringArg(input, "inputSummary"),
+    args: stringArrayArg(input, "args"),
+    outputPaths: stringArrayArg(input, "outputPaths"),
+    cwd: context.workDir,
+    timeoutMs: optionalNumberArg(input, "timeoutMs"),
+    agentBridge: context.agentBridge
+  });
+  context.service.recordAgentRun(agentRun);
+  return agentRun;
+}
+
 function findAuthProfile(context: BrainCreatorMcpContext, systemId: string): AuthProfile {
   const profile = context.repository.authProfiles.find((item) => item.projectId === systemId);
   if (!profile) {
@@ -310,6 +333,14 @@ function gapStatusArg(input: Record<string, unknown>, key: string) {
     throw new Error(`${key} is invalid`);
   }
   return value;
+}
+
+function agentArg(input: Record<string, unknown>, key: string): AgentRun["agent"] {
+  const value = stringArg(input, key);
+  if (!["planner", "generator", "healer"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as AgentRun["agent"];
 }
 
 function scenarioArrayArg(input: Record<string, unknown>, key: string): TestCaseScenario[] {
