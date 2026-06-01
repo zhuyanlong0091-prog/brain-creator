@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "brain-creator": {
+      "command": "npm",
+      "args": [
+        "run",
+        "mcp"
+      ]
+    },
+    "playwright-test": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "playwright",
+        "run-test-mcp-server"
+      ]
+    }
+  }
+}

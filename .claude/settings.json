@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "brain-creator": {
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "cwd": "."
+    }
+  }
+}
