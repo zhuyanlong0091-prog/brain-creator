@@ -31,6 +31,15 @@ Claude Code integration is declared in:
 
 Playwright agent prompts and agent definitions are generated under `.claude/agents` and `.claude/prompts`.
 
+Planner, Generator, and Healer execution is intentionally routed through an explicit `AgentBridge`.
+When no bridge is configured, Brain Creator returns a clear failure:
+
+```text
+Claude subagent bridge required
+```
+
+Local tests can provide a mock command bridge, but production MCP usage should run these steps through Claude subagents rather than a direct Playwright CLI command.
+
 ## Core Flow
 
 ### 1. Create A Business System
@@ -137,7 +146,7 @@ Brain Creator runtime files are written under `.brain-creator/` by default. Plan
 ## Known Limits
 
 - The current MVP is local-first and uses JSON persistence.
-- `bc_generate_plan` and `bc_run_chain` are tested with mockable runners; full Claude Code plus real Playwright Agent validation is still a follow-up.
+- `bc_generate_plan` and `bc_run_chain` are tested with mockable AgentBridge implementations; full Claude Code subagent validation is still a follow-up.
 - The current Playwright CLI does not expose `playwright agent`; `npx playwright init-agents` generates Claude agent definitions and prompts, so real Planner/Generator/Healer execution needs the Claude subagent bridge rather than the placeholder CLI command.
 - The Healer loop is bounded and creates a Gap when it cannot fix a failing generated test.
 - No Web UI is included in v2.

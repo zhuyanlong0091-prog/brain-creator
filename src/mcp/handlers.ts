@@ -3,7 +3,13 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
 import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
 import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
-import { generatePlanDraft, runChain, type CommandRunner } from "../agent/orchestrator.js";
+import {
+  commandRunnerAgentBridge,
+  generatePlanDraft,
+  runChain,
+  type AgentBridge,
+  type CommandRunner
+} from "../agent/orchestrator.js";
 import type { AuthProfile } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
@@ -11,12 +17,14 @@ export type BrainCreatorMcpContext = {
   repository: JsonFileBrainCreatorRepository;
   service: BrainCreatorService;
   workDir: string;
+  agentBridge?: AgentBridge;
   runner?: CommandRunner;
 };
 
 type CreateContextInput = {
   dataFilePath?: string;
   workDir?: string;
+  agentBridge?: AgentBridge;
   runner?: CommandRunner;
 };
 
@@ -31,6 +39,8 @@ export function createBrainCreatorMcpContext(
     repository,
     service: new BrainCreatorService(repository),
     workDir,
+    agentBridge:
+      input.agentBridge ?? (input.runner ? commandRunnerAgentBridge(input.runner) : undefined),
     runner: input.runner
   };
 }
@@ -118,7 +128,7 @@ async function generatePlan(context: BrainCreatorMcpContext, input: Record<strin
     glossaryTerms: context.service.listGlossaryTerms({ projectId: systemId, query: "" }),
     businessRules: context.service.listBusinessRules(systemId),
     specPath,
-    runner: context.runner
+    agentBridge: context.agentBridge
   });
   context.service.recordAgentRun(result.agentRun);
   const testCase = context.service.createTestCase({
@@ -143,6 +153,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     system,
     authProfile,
     testCase,
+    agentBridge: context.agentBridge,
     runner: context.runner,
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
   });
