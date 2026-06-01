@@ -13,6 +13,7 @@ export type BrainCreatorToolName =
   | "bc_add_rule"
   | "bc_list_rules"
   | "bc_generate_plan"
+  | "bc_update_plan"
   | "bc_approve_plan"
   | "bc_run_chain"
   | "bc_list_cases"
@@ -139,6 +140,30 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       systemId: z.string(),
       requirement: z.string(),
       specPath: z.string().optional()
+    })
+  },
+  {
+    name: "bc_update_plan",
+    title: "Update test plan",
+    description: "Replace scenarios on a draft structured test case before approval.",
+    inputSchema: z.object({
+      caseId: z.string(),
+      scenarios: z.array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          priority: z.enum(["critical", "high", "medium", "low"]),
+          businessRuleRef: z.string().optional(),
+          steps: z.array(
+            z.object({
+              action: z.enum(["navigate", "fill", "click", "assert", "wait", "select"]),
+              target: z.string(),
+              value: z.string().optional(),
+              expected: z.string().optional()
+            })
+          )
+        })
+      )
     })
   },
   {

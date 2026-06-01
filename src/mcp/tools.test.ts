@@ -15,6 +15,7 @@ describe("BRAIN_CREATOR_TOOLS", () => {
       "bc_add_rule",
       "bc_list_rules",
       "bc_generate_plan",
+      "bc_update_plan",
       "bc_approve_plan",
       "bc_run_chain",
       "bc_list_cases",

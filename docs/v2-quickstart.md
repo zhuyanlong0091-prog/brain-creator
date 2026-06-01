@@ -109,19 +109,25 @@ The planner flow builds context, writes a prompt, writes a seed file, invokes th
 
 Review the returned scenarios, new terms, and rule check result with the user.
 
-### 6. Approve The Plan
+### 6. Update The Draft Plan
+
+Use `bc_update_plan` with `caseId` and replacement `scenarios` when the user wants to adjust the structured draft before approval.
+
+Only draft test cases can be updated. After approval, the test case becomes the execution contract for Generator and Healer.
+
+### 7. Approve The Plan
 
 Use `bc_approve_plan` only after the user confirms the test intent.
 
 The approved TestCase is the boundary between planning and code generation.
 
-### 7. Run The Chain
+### 8. Run The Chain
 
 Use `bc_run_chain` with the approved `caseId`.
 
 The chain serializes scenarios to a Markdown spec, calls the generator, runs Playwright tests, and invokes the healer when tests fail. If healing is exhausted, the ChainRun contains an open `healer-skip` Gap.
 
-### 8. Review Cases And Gaps
+### 9. Review Cases And Gaps
 
 Use `bc_list_cases` with the selected `systemId` to review draft, approved, passed, and failed test cases.
 
@@ -129,7 +135,7 @@ Use `bc_list_gaps` with `projectId` and optional `status` to review open or reso
 
 Use `bc_resolve_gap` with `projectId` and `gapId` after the user confirms the missing evidence or issue has been handled.
 
-### 9. Search Assets
+### 10. Search Assets
 
 Use `bc_search_assets` with:
 
@@ -148,12 +154,13 @@ The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 4. `bc_add_rule`
 5. `bc_generate_plan`
 6. `bc_batch_confirm_terms`
-7. `bc_approve_plan`
-8. `bc_run_chain`
-9. `bc_list_terms`
-10. `bc_list_cases`
-11. `bc_list_gaps`
-12. `bc_search_assets`
+7. `bc_update_plan`
+8. `bc_approve_plan`
+9. `bc_run_chain`
+10. `bc_list_terms`
+11. `bc_list_cases`
+12. `bc_list_gaps`
+13. `bc_search_assets`
 
 Run it with:
 

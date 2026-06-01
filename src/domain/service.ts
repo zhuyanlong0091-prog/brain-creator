@@ -625,6 +625,9 @@ export class BrainCreatorService {
 
   updateTestCaseScenarios(caseId: string, scenarios: TestCaseScenario[]): TestCase {
     const testCase = this.getTestCase(caseId);
+    if (testCase.status !== "draft") {
+      throw new Error("Only draft test cases can be updated");
+    }
     testCase.scenarios = scenarios;
     testCase.updatedAt = timestamp();
     this.repository.persist();

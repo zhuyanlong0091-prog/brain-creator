@@ -124,6 +124,57 @@ describe("handleBrainCreatorTool", () => {
     expect(approved.status).toBe("approved");
   });
 
+  it("updates a draft test plan through MCP before approval", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+
+    const updated = dataOf(
+      await handleBrainCreatorTool(context, "bc_update_plan", {
+        caseId: testCase.id,
+        scenarios: [
+          {
+            id: "scenario_1",
+            title: "Validate robot checkout",
+            priority: "critical",
+            businessRuleRef: "rule_1",
+            steps: [
+              { action: "navigate", target: "Product list" },
+              { action: "click", target: "Robot product" },
+              { action: "assert", target: "Order amount", expected: "Matches product price" }
+            ]
+          }
+        ]
+      })
+    );
+
+    expect(updated.scenarios).toEqual([
+      expect.objectContaining({
+        id: "scenario_1",
+        title: "Validate robot checkout",
+        priority: "critical",
+        businessRuleRef: "rule_1",
+        steps: expect.arrayContaining([
+          expect.objectContaining({ action: "assert", target: "Order amount" })
+        ])
+      })
+    ]);
+  });
+
   it("adds, lists, and batch confirms glossary terms through MCP", async () => {
     const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
     const system = dataOf(

@@ -698,6 +698,29 @@ describe("BrainCreatorService", () => {
     expect(service.listTestCases("missing-system")).toEqual([]);
   });
 
+  it("does not update scenarios after a test case is approved", () => {
+    const service = createService();
+    const testCase = service.createTestCase({
+      systemId: "system-1",
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    service.approveTestCase(testCase.id);
+
+    expect(() =>
+      service.updateTestCaseScenarios(testCase.id, [
+        {
+          id: "scenario_1",
+          title: "Change after approval",
+          priority: "high",
+          steps: [{ action: "assert", target: "Order status", expected: "Paid" }]
+        }
+      ])
+    ).toThrow("Only draft test cases can be updated");
+  });
+
   it("records agent and chain runs per system", () => {
     const service = createService();
     const agentRun = {

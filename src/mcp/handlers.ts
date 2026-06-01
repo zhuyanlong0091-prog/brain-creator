@@ -10,7 +10,7 @@ import {
   type AgentBridge,
   type CommandRunner
 } from "../agent/orchestrator.js";
-import type { AuthProfile } from "../domain/types.js";
+import type { AuthProfile, TestCaseScenario, TestCaseStep } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
 export type BrainCreatorMcpContext = {
@@ -117,6 +117,13 @@ export async function handleBrainCreatorTool(
         return textResult(context.service.listBusinessRules(stringArg(input, "systemId")));
       case "bc_generate_plan":
         return textResult(await generatePlan(context, input));
+      case "bc_update_plan":
+        return textResult(
+          context.service.updateTestCaseScenarios(
+            stringArg(input, "caseId"),
+            scenarioArrayArg(input, "scenarios")
+          )
+        );
       case "bc_approve_plan":
         return textResult(context.service.approveTestCase(stringArg(input, "caseId")));
       case "bc_run_chain":
@@ -284,4 +291,59 @@ function gapStatusArg(input: Record<string, unknown>, key: string) {
     throw new Error(`${key} is invalid`);
   }
   return value;
+}
+
+function scenarioArrayArg(input: Record<string, unknown>, key: string): TestCaseScenario[] {
+  const value = input[key];
+  if (!Array.isArray(value)) {
+    throw new Error(`${key} must be an array`);
+  }
+  return value.map((scenario, index) => {
+    if (!scenario || typeof scenario !== "object" || Array.isArray(scenario)) {
+      throw new Error(`${key}[${index}] must be an object`);
+    }
+    const record = scenario as Record<string, unknown>;
+    return {
+      id: stringArg(record, "id"),
+      title: stringArg(record, "title"),
+      priority: priorityArg(record, "priority"),
+      steps: stepArrayArg(record, "steps"),
+      businessRuleRef: optionalStringArg(record, "businessRuleRef")
+    };
+  });
+}
+
+function stepArrayArg(input: Record<string, unknown>, key: string): TestCaseStep[] {
+  const value = input[key];
+  if (!Array.isArray(value)) {
+    throw new Error(`${key} must be an array`);
+  }
+  return value.map((step, index) => {
+    if (!step || typeof step !== "object" || Array.isArray(step)) {
+      throw new Error(`${key}[${index}] must be an object`);
+    }
+    const record = step as Record<string, unknown>;
+    return {
+      action: actionArg(record, "action"),
+      target: stringArg(record, "target"),
+      value: optionalStringArg(record, "value"),
+      expected: optionalStringArg(record, "expected")
+    };
+  });
+}
+
+function priorityArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (!["critical", "high", "medium", "low"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as TestCaseScenario["priority"];
+}
+
+function actionArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (!["navigate", "fill", "click", "assert", "wait", "select"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as TestCaseStep["action"];
 }
