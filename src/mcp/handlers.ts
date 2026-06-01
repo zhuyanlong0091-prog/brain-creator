@@ -121,6 +121,22 @@ export async function handleBrainCreatorTool(
         return textResult(context.service.approveTestCase(stringArg(input, "caseId")));
       case "bc_run_chain":
         return textResult(await runApprovedChain(context, input));
+      case "bc_list_cases":
+        return textResult(context.service.listTestCases(stringArg(input, "systemId")));
+      case "bc_list_gaps":
+        return textResult(
+          context.service.listGaps({
+            projectId: stringArg(input, "projectId"),
+            status: gapStatusArg(input, "status")
+          })
+        );
+      case "bc_resolve_gap":
+        return textResult(
+          context.service.resolveGap({
+            projectId: stringArg(input, "projectId"),
+            gapId: stringArg(input, "gapId")
+          })
+        );
       case "bc_search_assets":
         return textResult(
           context.service.searchAssets({
@@ -254,6 +270,17 @@ function loginMethodArg(input: Record<string, unknown>, key: string) {
 function severityArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
   if (value !== "block" && value !== "warn") {
+    throw new Error(`${key} is invalid`);
+  }
+  return value;
+}
+
+function gapStatusArg(input: Record<string, unknown>, key: string) {
+  const value = optionalStringArg(input, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value !== "open" && value !== "resolved") {
     throw new Error(`${key} is invalid`);
   }
   return value;

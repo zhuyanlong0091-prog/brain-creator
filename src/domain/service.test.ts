@@ -733,6 +733,41 @@ describe("BrainCreatorService", () => {
     expect(service.listChainRuns("system-1")).toEqual([chainRun]);
   });
 
+  it("lists and resolves gaps per system without crossing system boundaries", () => {
+    const service = createService();
+    const session = service.createTrainingSession({
+      projectId: "system-1",
+      pageModelId: "page_1"
+    });
+    const failed = service.failTrainingSession(session.id, "No API requests captured");
+    service.failTrainingSession(
+      service.createTrainingSession({ projectId: "system-2", pageModelId: "page_2" }).id,
+      "Other system gap"
+    );
+
+    expect(service.listGaps({ projectId: "system-1", status: "open" })).toEqual([
+      expect.objectContaining({
+        id: failed.gap.id,
+        projectId: "system-1",
+        status: "open"
+      })
+    ]);
+
+    const resolved = service.resolveGap({
+      projectId: "system-1",
+      gapId: failed.gap.id
+    });
+
+    expect(resolved.status).toBe("resolved");
+    expect(service.listGaps({ projectId: "system-1", status: "open" })).toEqual([]);
+    expect(() =>
+      service.resolveGap({
+        projectId: "system-2",
+        gapId: failed.gap.id
+      })
+    ).toThrow("Gap belongs to another business system");
+  });
+
   it("searches v2 business rules, test cases, and run history as system assets", () => {
     const service = createService();
     service.createBusinessRule({

@@ -121,7 +121,15 @@ Use `bc_run_chain` with the approved `caseId`.
 
 The chain serializes scenarios to a Markdown spec, calls the generator, runs Playwright tests, and invokes the healer when tests fail. If healing is exhausted, the ChainRun contains an open `healer-skip` Gap.
 
-### 8. Search Assets
+### 8. Review Cases And Gaps
+
+Use `bc_list_cases` with the selected `systemId` to review draft, approved, passed, and failed test cases.
+
+Use `bc_list_gaps` with `projectId` and optional `status` to review open or resolved gaps.
+
+Use `bc_resolve_gap` with `projectId` and `gapId` after the user confirms the missing evidence or issue has been handled.
+
+### 9. Search Assets
 
 Use `bc_search_assets` with:
 
@@ -143,7 +151,9 @@ The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 7. `bc_approve_plan`
 8. `bc_run_chain`
 9. `bc_list_terms`
-10. `bc_search_assets`
+10. `bc_list_cases`
+11. `bc_list_gaps`
+12. `bc_search_assets`
 
 Run it with:
 

@@ -239,6 +239,53 @@ describe("handleBrainCreatorTool", () => {
       expect.objectContaining({ agent: "generator" })
     ]);
   });
+
+  it("lists test cases, lists gaps, and resolves a gap through MCP", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    const session = context.service.createTrainingSession({
+      projectId: system.id,
+      pageModelId: "page_1"
+    });
+    const failed = context.service.failTrainingSession(session.id, "No API requests captured");
+
+    const cases = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_cases", {
+        systemId: system.id
+      })
+    );
+    const gaps = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_gaps", {
+        projectId: system.id,
+        status: "open"
+      })
+    );
+    const resolved = dataOf(
+      await handleBrainCreatorTool(context, "bc_resolve_gap", {
+        projectId: system.id,
+        gapId: failed.gap.id
+      })
+    );
+
+    expect(cases).toEqual([expect.objectContaining({ id: testCase.id })]);
+    expect(gaps).toEqual([expect.objectContaining({ id: failed.gap.id, status: "open" })]);
+    expect(resolved.status).toBe("resolved");
+  });
 });
 
 function dataOf(result: CallToolResult) {

@@ -15,6 +15,9 @@ export type BrainCreatorToolName =
   | "bc_generate_plan"
   | "bc_approve_plan"
   | "bc_run_chain"
+  | "bc_list_cases"
+  | "bc_list_gaps"
+  | "bc_resolve_gap"
   | "bc_search_assets";
 
 type ToolDefinition = {
@@ -151,6 +154,30 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({
       caseId: z.string(),
       maxHealAttempts: z.number().int().min(0).max(10).optional()
+    })
+  },
+  {
+    name: "bc_list_cases",
+    title: "List test cases",
+    description: "List structured test cases for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
+  },
+  {
+    name: "bc_list_gaps",
+    title: "List gaps",
+    description: "List open or resolved gaps for a business system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      status: z.enum(["open", "resolved"]).optional()
+    })
+  },
+  {
+    name: "bc_resolve_gap",
+    title: "Resolve gap",
+    description: "Mark a gap resolved inside a business system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      gapId: z.string()
     })
   },
   {

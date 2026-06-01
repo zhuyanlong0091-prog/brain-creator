@@ -93,6 +93,16 @@ type SearchInput = {
   query: string;
 };
 
+type ListGapsInput = {
+  projectId: string;
+  status?: Gap["status"];
+};
+
+type ResolveGapInput = {
+  projectId: string;
+  gapId: string;
+};
+
 type AssetDetailInput = {
   projectId: string;
   type: AssetSearchResult["type"];
@@ -895,10 +905,21 @@ export class BrainCreatorService {
     };
   }
 
-  resolveGap(gapId: string): Gap {
-    const gap = this.repository.gaps.find((item) => item.id === gapId);
+  listGaps(input: ListGapsInput): Gap[] {
+    return this.repository.gaps.filter(
+      (gap) =>
+        gap.projectId === input.projectId &&
+        (input.status === undefined || gap.status === input.status)
+    );
+  }
+
+  resolveGap(input: ResolveGapInput): Gap {
+    const gap = this.repository.gaps.find((item) => item.id === input.gapId);
     if (!gap) {
       throw new Error("Gap not found");
+    }
+    if (gap.projectId !== input.projectId) {
+      throw new Error("Gap belongs to another business system");
     }
 
     gap.status = "resolved";

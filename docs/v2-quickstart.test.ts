@@ -16,6 +16,9 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("bc_generate_plan");
     expect(content).toContain("bc_approve_plan");
     expect(content).toContain("bc_run_chain");
+    expect(content).toContain("bc_list_cases");
+    expect(content).toContain("bc_list_gaps");
+    expect(content).toContain("bc_resolve_gap");
     expect(content).toContain("bc_search_assets");
     expect(content).toContain("npm test");
     expect(content).toContain("npx tsc --noEmit");

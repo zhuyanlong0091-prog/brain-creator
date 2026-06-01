@@ -17,6 +17,9 @@ describe("BRAIN_CREATOR_TOOLS", () => {
       "bc_generate_plan",
       "bc_approve_plan",
       "bc_run_chain",
+      "bc_list_cases",
+      "bc_list_gaps",
+      "bc_resolve_gap",
       "bc_search_assets"
     ]);
   });

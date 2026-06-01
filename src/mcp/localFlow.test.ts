@@ -92,10 +92,23 @@ describe("Brain Creator local MCP flow", () => {
         query: ""
       })
     );
+    const cases = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_cases", {
+        systemId: system.id
+      })
+    );
+    const gaps = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_gaps", {
+        projectId: system.id,
+        status: "open"
+      })
+    );
 
     expect(confirmedTerms.confirmedTerms.length).toBeGreaterThan(0);
     expect(terms.length).toBe(confirmedTerms.confirmedTerms.length);
     expect(run.chainRun.status).toBe("succeeded");
+    expect(cases).toEqual([expect.objectContaining({ id: draft.testCase.id })]);
+    expect(gaps).toEqual([]);
     expect(assets.map((asset: { type: string }) => asset.type)).toEqual(
       expect.arrayContaining(["test-case", "agent-run", "chain-run"])
     );
