@@ -555,6 +555,53 @@ describe("BrainCreatorService", () => {
     expect(terms[0].key).toBe("order.submit");
   });
 
+  it("confirms planner-discovered terms into the system glossary", () => {
+    const service = createService();
+    const testCase = service.createTestCase({
+      systemId: "system-1",
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [
+        {
+          id: "term_candidate_1",
+          projectId: "system-1",
+          key: "product.robot",
+          zhCN: "Robot product",
+          enUS: "Robot product",
+          aliases: ["robot"],
+          pageScope: "/products",
+          createdAt: "2026-05-29T00:00:00.000Z",
+          updatedAt: "2026-05-29T00:00:00.000Z"
+        },
+        {
+          id: "term_candidate_2",
+          projectId: "system-1",
+          key: "checkout.total",
+          zhCN: "Order amount",
+          enUS: "Order amount",
+          aliases: [],
+          pageScope: "/checkout",
+          createdAt: "2026-05-29T00:00:00.000Z",
+          updatedAt: "2026-05-29T00:00:00.000Z"
+        }
+      ],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+
+    const result = service.confirmCandidateTerms({
+      caseId: testCase.id,
+      confirmTermIds: ["term_candidate_1"],
+      ignoreTermIds: ["term_candidate_2"]
+    });
+
+    expect(result.confirmedTerms.map((term) => term.key)).toEqual(["product.robot"]);
+    expect(result.ignoredTerms.map((term) => term.key)).toEqual(["checkout.total"]);
+    expect(result.testCase.newTerms).toEqual([]);
+    expect(service.listGlossaryTerms({ projectId: "system-1", query: "robot" })).toEqual([
+      expect.objectContaining({ id: "term_candidate_1", key: "product.robot" })
+    ]);
+  });
+
   it("manages business rules per system", () => {
     const service = createService();
 

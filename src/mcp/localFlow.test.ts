@@ -64,6 +64,13 @@ describe("Brain Creator local MCP flow", () => {
         requirement: "测试购买机器人"
       })
     );
+    const confirmedTerms = dataOf(
+      await handleBrainCreatorTool(context, "bc_batch_confirm_terms", {
+        caseId: draft.testCase.id,
+        confirmTermIds: draft.testCase.newTerms.map((term: { id: string }) => term.id),
+        ignoreTermIds: []
+      })
+    );
     await handleBrainCreatorTool(context, "bc_approve_plan", {
       caseId: draft.testCase.id
     });
@@ -79,6 +86,15 @@ describe("Brain Creator local MCP flow", () => {
       })
     );
 
+    const terms = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_terms", {
+        projectId: system.id,
+        query: ""
+      })
+    );
+
+    expect(confirmedTerms.confirmedTerms.length).toBeGreaterThan(0);
+    expect(terms.length).toBe(confirmedTerms.confirmedTerms.length);
     expect(run.chainRun.status).toBe("succeeded");
     expect(assets.map((asset: { type: string }) => asset.type)).toEqual(
       expect.arrayContaining(["test-case", "agent-run", "chain-run"])

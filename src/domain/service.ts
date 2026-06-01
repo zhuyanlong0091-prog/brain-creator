@@ -108,6 +108,12 @@ type CreateGlossaryTermInput = {
   pageScope: string;
 };
 
+type ConfirmCandidateTermsInput = {
+  caseId: string;
+  confirmTermIds: string[];
+  ignoreTermIds: string[];
+};
+
 type CreateBusinessRuleInput = {
   systemId: string;
   name: string;
@@ -498,6 +504,46 @@ export class BrainCreatorService {
         item.projectId === input.projectId &&
         includes(`${item.key} ${item.zhCN} ${item.enUS} ${item.aliases.join(" ")} ${item.pageScope}`)
     );
+  }
+
+  confirmCandidateTerms(input: ConfirmCandidateTermsInput): {
+    confirmedTerms: GlossaryTerm[];
+    ignoredTerms: GlossaryTerm[];
+    testCase: TestCase;
+    glossaryTerms: GlossaryTerm[];
+  } {
+    const testCase = this.getTestCase(input.caseId);
+    const confirmIds = new Set(input.confirmTermIds);
+    const ignoreIds = new Set(input.ignoreTermIds);
+    const confirmedTerms = testCase.newTerms.filter((term) => confirmIds.has(term.id));
+    const ignoredTerms = testCase.newTerms.filter((term) => ignoreIds.has(term.id));
+    const handledIds = new Set([...input.confirmTermIds, ...input.ignoreTermIds]);
+    const now = timestamp();
+
+    for (const term of confirmedTerms) {
+      const exists = this.repository.glossaryTerms.some(
+        (item) =>
+          item.projectId === testCase.systemId &&
+          (item.id === term.id || item.key === term.key || item.zhCN === term.zhCN)
+      );
+      if (!exists) {
+        this.repository.glossaryTerms.push({
+          ...term,
+          projectId: testCase.systemId,
+          updatedAt: now
+        });
+      }
+    }
+
+    testCase.newTerms = testCase.newTerms.filter((term) => !handledIds.has(term.id));
+    testCase.updatedAt = now;
+    this.repository.persist();
+    return {
+      confirmedTerms,
+      ignoredTerms,
+      testCase,
+      glossaryTerms: this.listGlossaryTerms({ projectId: testCase.systemId, query: "" })
+    };
   }
 
   createBusinessRule(input: CreateBusinessRuleInput): BusinessRule {

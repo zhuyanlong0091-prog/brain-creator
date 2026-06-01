@@ -78,6 +78,32 @@ export async function handleBrainCreatorTool(
         );
       case "bc_verify_auth":
         return textResult(context.service.verifyAuthProfile(stringArg(input, "id")));
+      case "bc_add_term":
+        return textResult(
+          context.service.createGlossaryTerm({
+            projectId: stringArg(input, "projectId"),
+            key: stringArg(input, "key"),
+            zhCN: stringArg(input, "zhCN"),
+            enUS: stringArg(input, "enUS"),
+            aliases: stringArrayArg(input, "aliases"),
+            pageScope: optionalStringArg(input, "pageScope") ?? "/"
+          })
+        );
+      case "bc_list_terms":
+        return textResult(
+          context.service.listGlossaryTerms({
+            projectId: stringArg(input, "projectId"),
+            query: optionalStringArg(input, "query") ?? ""
+          })
+        );
+      case "bc_batch_confirm_terms":
+        return textResult(
+          context.service.confirmCandidateTerms({
+            caseId: stringArg(input, "caseId"),
+            confirmTermIds: stringArrayArg(input, "confirmTermIds"),
+            ignoreTermIds: stringArrayArg(input, "ignoreTermIds")
+          })
+        );
       case "bc_add_rule":
         return textResult(
           context.service.createBusinessRule({

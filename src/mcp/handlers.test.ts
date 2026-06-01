@@ -124,6 +124,68 @@ describe("handleBrainCreatorTool", () => {
     expect(approved.status).toBe("approved");
   });
 
+  it("adds, lists, and batch confirms glossary terms through MCP", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const manualTerm = dataOf(
+      await handleBrainCreatorTool(context, "bc_add_term", {
+        projectId: system.id,
+        key: "order.submit",
+        zhCN: "Submit order",
+        enUS: "Submit order",
+        aliases: ["checkout"],
+        pageScope: "/orders"
+      })
+    );
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [
+        {
+          id: "term_candidate_1",
+          projectId: system.id,
+          key: "product.robot",
+          zhCN: "Robot product",
+          enUS: "Robot product",
+          aliases: ["robot"],
+          pageScope: "/products",
+          createdAt: "2026-05-29T00:00:00.000Z",
+          updatedAt: "2026-05-29T00:00:00.000Z"
+        }
+      ],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+
+    const confirmed = dataOf(
+      await handleBrainCreatorTool(context, "bc_batch_confirm_terms", {
+        caseId: testCase.id,
+        confirmTermIds: ["term_candidate_1"],
+        ignoreTermIds: []
+      })
+    );
+    const terms = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_terms", {
+        projectId: system.id,
+        query: "robot"
+      })
+    );
+
+    expect(manualTerm.key).toBe("order.submit");
+    expect(confirmed.confirmedTerms).toEqual([
+      expect.objectContaining({ key: "product.robot" })
+    ]);
+    expect(terms).toEqual([expect.objectContaining({ key: "product.robot" })]);
+  });
+
   it("runs an approved chain and records chain output through MCP", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({

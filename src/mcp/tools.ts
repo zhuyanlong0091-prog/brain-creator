@@ -7,6 +7,9 @@ export type BrainCreatorToolName =
   | "bc_system_overview"
   | "bc_create_auth"
   | "bc_verify_auth"
+  | "bc_add_term"
+  | "bc_list_terms"
+  | "bc_batch_confirm_terms"
   | "bc_add_rule"
   | "bc_list_rules"
   | "bc_generate_plan"
@@ -75,6 +78,38 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     title: "Verify auth profile",
     description: "Mark an auth profile verified for local MVP use.",
     inputSchema: z.object({ id: z.string() })
+  },
+  {
+    name: "bc_add_term",
+    title: "Add glossary term",
+    description: "Add a business glossary term for a system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      key: z.string(),
+      zhCN: z.string(),
+      enUS: z.string(),
+      aliases: z.array(z.string()).default([]),
+      pageScope: z.string().default("/")
+    })
+  },
+  {
+    name: "bc_list_terms",
+    title: "List glossary terms",
+    description: "List glossary terms for a system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      query: z.string().default("")
+    })
+  },
+  {
+    name: "bc_batch_confirm_terms",
+    title: "Confirm candidate terms",
+    description: "Confirm or ignore Planner-discovered glossary term candidates from a draft test case.",
+    inputSchema: z.object({
+      caseId: z.string(),
+      confirmTermIds: z.array(z.string()).default([]),
+      ignoreTermIds: z.array(z.string()).default([])
+    })
   },
   {
     name: "bc_add_rule",

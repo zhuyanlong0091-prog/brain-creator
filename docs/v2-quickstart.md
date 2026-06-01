@@ -69,7 +69,24 @@ Supported login methods:
 
 Use `bc_verify_auth` after creating a profile. Returned auth profiles redact secrets. Local generated seed files may contain secrets and should not be copied into chat or committed if they contain real credentials.
 
-### 3. Add Business Rules
+### 3. Add Glossary Terms
+
+Use `bc_add_term` to seed important business language before planning.
+
+Required inputs:
+
+- `projectId`
+- `key`
+- `zhCN`
+- `enUS`
+- `aliases`
+- `pageScope`
+
+After `bc_generate_plan`, review returned `newTerms`. Use `bc_batch_confirm_terms` with the draft `caseId` to add confirmed candidates to the system glossary and remove ignored candidates from the draft case.
+
+Use `bc_list_terms` to inspect the current glossary for a system.
+
+### 4. Add Business Rules
 
 Use `bc_add_rule` before planning tests.
 
@@ -81,7 +98,7 @@ Rules should be deterministic and concrete. For example:
 
 Use `severity: "block"` for required coverage and `severity: "warn"` for advisory checks. Use `bc_list_rules` to review current rules.
 
-### 4. Generate A Draft Plan
+### 5. Generate A Draft Plan
 
 Use `bc_generate_plan` with:
 
@@ -92,19 +109,19 @@ The planner flow builds context, writes a prompt, writes a seed file, invokes th
 
 Review the returned scenarios, new terms, and rule check result with the user.
 
-### 5. Approve The Plan
+### 6. Approve The Plan
 
 Use `bc_approve_plan` only after the user confirms the test intent.
 
 The approved TestCase is the boundary between planning and code generation.
 
-### 6. Run The Chain
+### 7. Run The Chain
 
 Use `bc_run_chain` with the approved `caseId`.
 
 The chain serializes scenarios to a Markdown spec, calls the generator, runs Playwright tests, and invokes the healer when tests fail. If healing is exhausted, the ChainRun contains an open `healer-skip` Gap.
 
-### 7. Search Assets
+### 8. Search Assets
 
 Use `bc_search_assets` with:
 
@@ -119,11 +136,14 @@ The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 
 1. `bc_create_system`
 2. `bc_create_auth`
-3. `bc_add_rule`
-4. `bc_generate_plan`
-5. `bc_approve_plan`
-6. `bc_run_chain`
-7. `bc_search_assets`
+3. `bc_add_term`
+4. `bc_add_rule`
+5. `bc_generate_plan`
+6. `bc_batch_confirm_terms`
+7. `bc_approve_plan`
+8. `bc_run_chain`
+9. `bc_list_terms`
+10. `bc_search_assets`
 
 Run it with:
 
