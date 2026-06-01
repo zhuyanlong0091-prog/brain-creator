@@ -1,0 +1,22 @@
+import { readFile } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
+
+describe("v2 quickstart documentation", () => {
+  it("documents the full Brain Creator MCP workflow and verification commands", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+
+    expect(content).toContain("# Brain Creator v2 Quickstart");
+    expect(content).toContain("npm run mcp");
+    expect(content).toContain("bc_create_system");
+    expect(content).toContain("bc_create_auth");
+    expect(content).toContain("bc_add_rule");
+    expect(content).toContain("bc_generate_plan");
+    expect(content).toContain("bc_approve_plan");
+    expect(content).toContain("bc_run_chain");
+    expect(content).toContain("bc_search_assets");
+    expect(content).toContain("npm test");
+    expect(content).toContain("npx tsc --noEmit");
+    expect(content).toContain("Known Limits");
+    expect(content).toContain("current Playwright CLI does not expose `playwright agent`");
+  });
+});
