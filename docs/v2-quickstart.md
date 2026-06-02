@@ -149,6 +149,8 @@ Use `bc_list_chain_runs` with the selected `systemId` to review generator/test/h
 
 Use `bc_list_specs` and `bc_list_tests` with the selected `systemId` to review generated Markdown specs and Playwright test file paths.
 
+Use `bc_read_spec` and `bc_read_test` with `systemId` and a listed artifact `path` to inspect generated content. Reads are limited to recorded artifacts inside the local workspace.
+
 Use `bc_list_cases` with the selected `systemId` to review draft, approved, passed, and failed test cases.
 
 Use `bc_list_gaps` with `projectId` and optional `status` to review open or resolved gaps.
@@ -186,12 +188,14 @@ The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 16. `bc_list_chain_runs`
 17. `bc_list_specs`
 18. `bc_list_tests`
-19. `bc_list_terms`
-20. `bc_update_term`
-21. `bc_delete_term`
-22. `bc_list_cases`
-23. `bc_list_gaps`
-24. `bc_search_assets`
+19. `bc_read_spec`
+20. `bc_read_test`
+21. `bc_list_terms`
+22. `bc_update_term`
+23. `bc_delete_term`
+24. `bc_list_cases`
+25. `bc_list_gaps`
+26. `bc_search_assets`
 
 Run it with:
 

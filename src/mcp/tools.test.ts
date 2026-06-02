@@ -28,6 +28,8 @@ describe("BRAIN_CREATOR_TOOLS", () => {
       "bc_list_chain_runs",
       "bc_list_specs",
       "bc_list_tests",
+      "bc_read_spec",
+      "bc_read_test",
       "bc_list_cases",
       "bc_list_gaps",
       "bc_resolve_gap",
