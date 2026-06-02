@@ -371,7 +371,13 @@ describe("handleBrainCreatorTool", () => {
     const context = createBrainCreatorMcpContext({
       dataFilePath: join(workDir, "assets.json"),
       workDir,
-      runner: async (_command, args) => ({ exitCode: 0, stdout: args.join(" "), stderr: "" })
+      runner: async (_command, args) => {
+        const outputIndex = args.indexOf("--output");
+        if (outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: args.join(" "), stderr: "" };
+      }
     });
     const system = dataOf(
       await handleBrainCreatorTool(context, "bc_create_system", {
@@ -415,15 +421,93 @@ describe("handleBrainCreatorTool", () => {
         systemId: system.id
       })
     );
+    const specs = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_specs", {
+        systemId: system.id
+      })
+    );
+    const tests = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_tests", {
+        systemId: system.id
+      })
+    );
+    const specContent = dataOf(
+      await handleBrainCreatorTool(context, "bc_read_spec", {
+        systemId: system.id,
+        path: result.chainRun.specPath
+      })
+    );
+    const testContent = dataOf(
+      await handleBrainCreatorTool(context, "bc_read_test", {
+        systemId: system.id,
+        path: result.chainRun.testPath
+      })
+    );
 
     expect(result.chainRun.status).toBe("succeeded");
     expect(chainRuns).toEqual([expect.objectContaining({ id: result.chainRun.id })]);
+    expect(specs).toEqual([
+      expect.objectContaining({ type: "test-spec", path: result.chainRun.specPath })
+    ]);
+    expect(tests).toEqual([
+      expect.objectContaining({ type: "test-file", path: result.chainRun.testPath })
+    ]);
+    expect(specContent).toEqual(
+      expect.objectContaining({
+        type: "test-spec",
+        path: result.chainRun.specPath,
+        content: expect.stringContaining("## Scenario")
+      })
+    );
+    expect(testContent).toEqual(
+      expect.objectContaining({
+        type: "test-file",
+        path: result.chainRun.testPath,
+        content: expect.stringContaining("@playwright/test")
+      })
+    );
     expect(context.service.listChainRuns(system.id)).toEqual([
       expect.objectContaining({ id: result.chainRun.id })
     ]);
     expect(context.service.listAgentRuns(system.id)).toEqual([
       expect.objectContaining({ agent: "generator" })
     ]);
+  });
+
+  it("rejects artifact reads outside the workspace even when the path is recorded", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    context.service.recordAgentRun({
+      id: "agent_outside",
+      systemId: system.id,
+      agent: "planner",
+      status: "succeeded",
+      inputSummary: "Unsafe path",
+      outputPaths: [join(workDir, "..", "outside.md")],
+      duration: 1,
+      logs: [],
+      createdAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    const result = await handleBrainCreatorTool(context, "bc_read_spec", {
+      systemId: system.id,
+      path: join(workDir, "..", "outside.md")
+    });
+
+    expect(result.isError).toBe(true);
+    expect(errorOf(result)).toContain("Artifact path must stay inside workspace");
   });
 
   it("runs a single agent and records the agent run through MCP", async () => {
@@ -560,6 +644,14 @@ function dataOf(result: CallToolResult) {
     throw new Error("Expected text result");
   }
   return JSON.parse(firstContent.text).data;
+}
+
+function errorOf(result: CallToolResult) {
+  const firstContent = result.content[0];
+  if (firstContent.type !== "text") {
+    throw new Error("Expected text result");
+  }
+  return JSON.parse(firstContent.text).errors.join("\n");
 }
 
 async function tempDir() {

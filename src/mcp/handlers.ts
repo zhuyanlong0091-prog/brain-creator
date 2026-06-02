@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
 import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
@@ -12,7 +13,13 @@ import {
   type AgentBridge,
   type CommandRunner
 } from "../agent/orchestrator.js";
-import type { AgentRun, AuthProfile, TestCaseScenario, TestCaseStep } from "../domain/types.js";
+import type {
+  AgentRun,
+  AuthProfile,
+  TestArtifact,
+  TestCaseScenario,
+  TestCaseStep
+} from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
 export type BrainCreatorMcpContext = {
@@ -166,6 +173,14 @@ export async function handleBrainCreatorTool(
         return textResult(await runApprovedChain(context, input));
       case "bc_list_chain_runs":
         return textResult(context.service.listChainRuns(stringArg(input, "systemId")));
+      case "bc_list_specs":
+        return textResult(context.service.listTestSpecs(stringArg(input, "systemId")));
+      case "bc_list_tests":
+        return textResult(context.service.listTestFiles(stringArg(input, "systemId")));
+      case "bc_read_spec":
+        return textResult(await readArtifact(context, input, "test-spec"));
+      case "bc_read_test":
+        return textResult(await readArtifact(context, input, "test-file"));
       case "bc_list_cases":
         return textResult(context.service.listTestCases(stringArg(input, "systemId")));
       case "bc_list_gaps":
@@ -288,6 +303,36 @@ async function runSingleAgent(context: BrainCreatorMcpContext, input: Record<str
   return agentRun;
 }
 
+async function readArtifact(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>,
+  type: TestArtifact["type"]
+) {
+  const systemId = stringArg(input, "systemId");
+  const requestedPath = stringArg(input, "path");
+  const resolvedPath = resolveWorkspacePath(context.workDir, requestedPath);
+  const artifacts =
+    type === "test-spec"
+      ? context.service.listTestSpecs(systemId)
+      : context.service.listTestFiles(systemId);
+  const artifact = artifacts.find((item) => {
+    try {
+      return resolveWorkspacePath(context.workDir, item.path) === resolvedPath;
+    } catch {
+      return false;
+    }
+  });
+  if (!artifact) {
+    throw new Error("Artifact not found");
+  }
+  const content = await readFile(resolvedPath, "utf8");
+  return {
+    ...artifact,
+    content,
+    bytes: Buffer.byteLength(content, "utf8")
+  };
+}
+
 function findAuthProfile(context: BrainCreatorMcpContext, systemId: string): AuthProfile {
   const profile = context.repository.authProfiles.find((item) => item.projectId === systemId);
   if (!profile) {
@@ -309,6 +354,18 @@ function findAuthProfileById(
     throw new Error("Auth profile belongs to another business system");
   }
   return profile;
+}
+
+function resolveWorkspacePath(workDir: string, candidatePath: string) {
+  const root = resolve(workDir);
+  const candidate = isAbsolute(candidatePath)
+    ? resolve(candidatePath)
+    : resolve(root, candidatePath);
+  const offset = relative(root, candidate);
+  if (offset.startsWith("..") || isAbsolute(offset)) {
+    throw new Error("Artifact path must stay inside workspace");
+  }
+  return candidate;
 }
 
 function textResult(data: unknown): CallToolResult {
