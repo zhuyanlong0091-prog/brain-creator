@@ -16,10 +16,12 @@ export type BrainCreatorToolName =
   | "bc_batch_confirm_terms"
   | "bc_add_rule"
   | "bc_list_rules"
+  | "bc_delete_rule"
   | "bc_generate_plan"
   | "bc_update_plan"
   | "bc_approve_plan"
   | "bc_run_agent"
+  | "bc_list_agent_runs"
   | "bc_run_chain"
   | "bc_list_chain_runs"
   | "bc_list_cases"
@@ -178,6 +180,15 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({ systemId: z.string() })
   },
   {
+    name: "bc_delete_rule",
+    title: "Delete business rule",
+    description: "Delete a business rule from a business system.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      ruleId: z.string()
+    })
+  },
+  {
     name: "bc_generate_plan",
     title: "Generate test plan",
     description: "Run planner flow and store a draft structured test case.",
@@ -229,6 +240,12 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       outputPaths: z.array(z.string()).default([]),
       timeoutMs: z.number().int().positive().optional()
     })
+  },
+  {
+    name: "bc_list_agent_runs",
+    title: "List agent runs",
+    description: "List Planner, Generator, and Healer agent runs for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
   },
   {
     name: "bc_run_chain",

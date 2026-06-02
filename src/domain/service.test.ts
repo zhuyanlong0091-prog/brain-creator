@@ -686,7 +686,13 @@ describe("BrainCreatorService", () => {
     );
     expect(service.listBusinessRules("system-1")).toEqual([rule]);
 
-    service.deleteBusinessRule(rule.id);
+    expect(service.deleteBusinessRule({ systemId: "system-1", ruleId: rule.id })).toEqual(rule);
+    expect(() =>
+      service.deleteBusinessRule({
+        systemId: "system-1",
+        ruleId: service.listBusinessRules("system-2")[0].id
+      })
+    ).toThrow("Business rule belongs to another business system");
 
     expect(service.listBusinessRules("system-1")).toEqual([]);
     expect(service.listBusinessRules("system-2")).toHaveLength(1);

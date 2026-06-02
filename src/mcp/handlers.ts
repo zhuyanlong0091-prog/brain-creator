@@ -140,6 +140,13 @@ export async function handleBrainCreatorTool(
         );
       case "bc_list_rules":
         return textResult(context.service.listBusinessRules(stringArg(input, "systemId")));
+      case "bc_delete_rule":
+        return textResult(
+          context.service.deleteBusinessRule({
+            systemId: stringArg(input, "systemId"),
+            ruleId: stringArg(input, "ruleId")
+          })
+        );
       case "bc_generate_plan":
         return textResult(await generatePlan(context, input));
       case "bc_update_plan":
@@ -153,6 +160,8 @@ export async function handleBrainCreatorTool(
         return textResult(context.service.approveTestCase(stringArg(input, "caseId")));
       case "bc_run_agent":
         return textResult(await runSingleAgent(context, input));
+      case "bc_list_agent_runs":
+        return textResult(context.service.listAgentRuns(stringArg(input, "systemId")));
       case "bc_run_chain":
         return textResult(await runApprovedChain(context, input));
       case "bc_list_chain_runs":

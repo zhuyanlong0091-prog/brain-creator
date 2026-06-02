@@ -140,6 +140,11 @@ type CreateBusinessRuleInput = {
   severity: BusinessRule["severity"];
 };
 
+type DeleteBusinessRuleInput = {
+  systemId: string;
+  ruleId: string;
+};
+
 type CreateTestCaseInput = {
   systemId: string;
   requirement: string;
@@ -622,15 +627,18 @@ export class BrainCreatorService {
     return this.repository.businessRules.filter((rule) => rule.systemId === systemId);
   }
 
-  deleteBusinessRule(ruleId: string): void {
-    const originalLength = this.repository.businessRules.length;
-    this.repository.businessRules = this.repository.businessRules.filter(
-      (rule) => rule.id !== ruleId
-    );
-    if (this.repository.businessRules.length === originalLength) {
+  deleteBusinessRule(input: DeleteBusinessRuleInput): BusinessRule {
+    const index = this.repository.businessRules.findIndex((rule) => rule.id === input.ruleId);
+    if (index < 0) {
       throw new Error("Business rule not found");
     }
+    const [rule] = this.repository.businessRules.splice(index, 1);
+    if (rule.systemId !== input.systemId) {
+      this.repository.businessRules.splice(index, 0, rule);
+      throw new Error("Business rule belongs to another business system");
+    }
     this.repository.persist();
+    return rule;
   }
 
   createTestCase(input: CreateTestCaseInput): TestCase {

@@ -74,6 +74,20 @@ describe("Brain Creator local MCP flow", () => {
       condition: "必须校验订单金额",
       severity: "block"
     });
+    const temporaryRule = dataOf(
+      await handleBrainCreatorTool(context, "bc_add_rule", {
+        systemId: system.id,
+        name: "Temporary audit rule",
+        condition: "Temporary rule for delete flow",
+        severity: "warn"
+      })
+    );
+    const deletedRule = dataOf(
+      await handleBrainCreatorTool(context, "bc_delete_rule", {
+        systemId: system.id,
+        ruleId: temporaryRule.id
+      })
+    );
     const draft = dataOf(
       await handleBrainCreatorTool(context, "bc_generate_plan", {
         systemId: system.id,
@@ -114,6 +128,11 @@ describe("Brain Creator local MCP flow", () => {
         inputSummary: "Smoke single planner run",
         args: ["--prompt", "specs/_context/smoke.md"],
         outputPaths: ["specs/smoke.md"]
+      })
+    );
+    const agentRuns = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_agent_runs", {
+        systemId: system.id
       })
     );
     const run = dataOf(
@@ -178,11 +197,13 @@ describe("Brain Creator local MCP flow", () => {
     ]);
     expect(JSON.stringify(seed)).not.toContain("secret-token");
     expect(await readFile(seed.seedPath, "utf8")).toContain("secret-token");
+    expect(deletedRule.id).toBe(temporaryRule.id);
     expect(terms.length).toBe(confirmedTerms.confirmedTerms.length);
     expect(updatedTerm.key).toBe("checkout.robot");
     expect(deletedTerm.id).toBe(updatedTerm.id);
     expect(updatedPlan.scenarios[0].title).toContain("璁㈠崟閲戦");
     expect(agentRun.status).toBe("succeeded");
+    expect(agentRuns).toEqual(expect.arrayContaining([expect.objectContaining({ id: agentRun.id })]));
     expect(run.chainRun.status).toBe("succeeded");
     expect(chainRuns).toEqual([expect.objectContaining({ id: run.chainRun.id })]);
     expect(cases).toEqual([expect.objectContaining({ id: draft.testCase.id })]);

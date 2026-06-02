@@ -13,5 +13,6 @@ Use Brain Creator MCP rules to capture business quality gates before planning te
 2. Use `severity: "block"` for required coverage.
 3. Use `severity: "warn"` for advisory checks.
 4. Call `bc_list_rules` before generating a plan.
+5. Call `bc_delete_rule` only after the user confirms the rule no longer applies to the selected system.
 
 QualityGate checks are deterministic in v2 MVP, so rules should use clear domain terms such as order amount or payment status.

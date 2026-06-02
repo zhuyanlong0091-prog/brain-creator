@@ -46,6 +46,12 @@ describe("handleBrainCreatorTool", () => {
         query: "payment"
       })
     );
+    const deletedRule = dataOf(
+      await handleBrainCreatorTool(context, "bc_delete_rule", {
+        systemId: system.id,
+        ruleId: rule.id
+      })
+    );
 
     expect(system.name).toBe("Orders Console");
     expect(auth.encryptedSecrets.token).toBe("[REDACTED]");
@@ -58,6 +64,8 @@ describe("handleBrainCreatorTool", () => {
         })
       ])
     );
+    expect(deletedRule).toEqual(expect.objectContaining({ id: rule.id }));
+    expect(context.service.listBusinessRules(system.id)).toEqual([]);
   });
 
   it("lists auth profiles without exposing secrets and generates local seed metadata", async () => {
@@ -446,6 +454,11 @@ describe("handleBrainCreatorTool", () => {
         outputPaths: ["specs/robot.md"]
       })
     );
+    const agentRuns = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_agent_runs", {
+        systemId: system.id
+      })
+    );
 
     expect(calls).toEqual([
       ["playwright", "agent", "planner", "--prompt", "specs/_context/system-prompt.md"]
@@ -461,6 +474,7 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.listAgentRuns(system.id)).toEqual([
       expect.objectContaining({ id: run.id, agent: "planner" })
     ]);
+    expect(agentRuns).toEqual([expect.objectContaining({ id: run.id, agent: "planner" })]);
   });
 
   it("records a failed single agent run when no bridge is configured", async () => {

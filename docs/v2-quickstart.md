@@ -104,6 +104,8 @@ Rules should be deterministic and concrete. For example:
 
 Use `severity: "block"` for required coverage and `severity: "warn"` for advisory checks. Use `bc_list_rules` to review current rules.
 
+Use `bc_delete_rule` with `systemId` and `ruleId` only when the user confirms a rule should no longer gate that system's generated cases. Rules cannot be deleted across systems.
+
 ### 5. Generate A Draft Plan
 
 Use `bc_generate_plan` with:
@@ -132,6 +134,8 @@ The approved TestCase is the boundary between planning and code generation.
 Use `bc_run_agent` with `systemId`, `agent`, `inputSummary`, `args`, and `outputPaths` when debugging Planner, Generator, or Healer independently.
 
 This records an AgentRun for traceability. It is a diagnostic entry point and does not replace `bc_run_chain` for approved test execution.
+
+Use `bc_list_agent_runs` with the selected `systemId` to review Planner, Generator, and Healer run history.
 
 ### 9. Run The Chain
 
@@ -169,19 +173,21 @@ The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 5. `bc_generate_seed`
 6. `bc_add_term`
 7. `bc_add_rule`
-8. `bc_generate_plan`
-9. `bc_batch_confirm_terms`
-10. `bc_update_plan`
-11. `bc_approve_plan`
-12. `bc_run_agent`
-13. `bc_run_chain`
-14. `bc_list_chain_runs`
-15. `bc_list_terms`
-16. `bc_update_term`
-17. `bc_delete_term`
-18. `bc_list_cases`
-19. `bc_list_gaps`
-20. `bc_search_assets`
+8. `bc_delete_rule`
+9. `bc_generate_plan`
+10. `bc_batch_confirm_terms`
+11. `bc_update_plan`
+12. `bc_approve_plan`
+13. `bc_run_agent`
+14. `bc_list_agent_runs`
+15. `bc_run_chain`
+16. `bc_list_chain_runs`
+17. `bc_list_terms`
+18. `bc_update_term`
+19. `bc_delete_term`
+20. `bc_list_cases`
+21. `bc_list_gaps`
+22. `bc_search_assets`
 
 Run it with:
 
