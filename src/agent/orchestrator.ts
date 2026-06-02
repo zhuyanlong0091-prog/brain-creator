@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { buildAgentPrompt } from "./promptBuilder.js";
 import { generateSeedFile } from "./seedGenerator.js";
 import { formatScenariosAsMarkdown, parseSpecMarkdown } from "./caseFormatter.js";
@@ -184,6 +184,7 @@ export async function runChain(input: RunChainInput) {
   const generatedDir = join(input.workDir, "tests", "generated");
   const specPath = join(specsDir, `${input.testCase.id}.md`);
   const testPath = join(generatedDir, `${input.testCase.id}.spec.ts`);
+  const testRunPath = relative(input.workDir, testPath).replace(/\\/g, "/");
   await mkdir(specsDir, { recursive: true });
   await mkdir(generatedDir, { recursive: true });
   await writeFile(specPath, formatScenariosAsMarkdown(input.testCase.scenarios), "utf8");
@@ -206,7 +207,7 @@ export async function runChain(input: RunChainInput) {
   const runner = input.runner ?? spawnCommand;
   let testResult: CommandResult =
     generateRun.status === "succeeded"
-      ? await runner("npx", ["playwright", "test", testPath], {
+      ? await runner("npx", ["playwright", "test", testRunPath], {
           cwd: input.workDir
         })
       : {
@@ -235,7 +236,7 @@ export async function runChain(input: RunChainInput) {
     if (healerRun.status !== "succeeded") {
       break;
     }
-    testResult = await runner("npx", ["playwright", "test", testPath], {
+    testResult = await runner("npx", ["playwright", "test", testRunPath], {
       cwd: input.workDir
     });
   }
@@ -248,7 +249,7 @@ export async function runChain(input: RunChainInput) {
             input.system.id,
             "healer-skip",
             input.testCase.id,
-            testResult.stderr || generateRun.error || "Generated test chain failed"
+            testResult.stderr || testResult.stdout || generateRun.error || "Generated test chain failed"
           )
         ]
       : [];
@@ -290,9 +291,9 @@ export async function spawnCommand(
   options: { cwd?: string; timeoutMs?: number } = {}
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      shell: process.platform === "win32"
+    const normalized = normalizeCommand(command, args);
+    const child = spawn(normalized.command, normalized.args, {
+      cwd: options.cwd
     });
     let stdout = "";
     let stderr = "";
@@ -318,6 +319,16 @@ export async function spawnCommand(
       resolve({ exitCode: exitCode ?? 1, stdout, stderr });
     });
   });
+}
+
+function normalizeCommand(command: string, args: string[]) {
+  if (command === "npx" && args[0] === "playwright") {
+    return {
+      command: process.execPath,
+      args: [join(process.cwd(), "node_modules", "@playwright", "test", "cli.js"), ...args.slice(1)]
+    };
+  }
+  return { command, args };
 }
 
 function safeAuthSummary(profile: AuthProfile): AuthProfile {

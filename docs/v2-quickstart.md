@@ -31,14 +31,22 @@ Claude Code integration is declared in:
 
 Playwright agent prompts and agent definitions are generated under `.claude/agents` and `.claude/prompts`.
 
-Planner, Generator, and Healer execution is intentionally routed through an explicit `AgentBridge`.
+Planner, Generator, and Healer execution is routed through an explicit `AgentBridge`.
 When no bridge is configured, Brain Creator returns a clear failure:
 
 ```text
 Claude subagent bridge required
 ```
 
-Local tests can provide a mock command bridge, but production MCP usage should run these steps through Claude subagents rather than a direct Playwright CLI command.
+For local MCP usage, configure a Claude subprocess bridge:
+
+```bash
+BRAIN_CREATOR_AGENT_COMMAND=claude
+BRAIN_CREATOR_AGENT_ARGS='["--print"]'
+BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
+```
+
+The bridge sends a subagent prompt over stdin and records stdout/stderr into `AgentRun` logs. Tests use a real Node subprocess fixture for this contract; production usage should point the command to Claude Code or a wrapper that can dispatch `#playwright-test-planner`, `#playwright-test-generator`, and `#playwright-test-healer`.
 
 ## Core Flow
 
@@ -151,6 +159,8 @@ Use `bc_list_specs` and `bc_list_tests` with the selected `systemId` to review g
 
 Use `bc_read_spec` and `bc_read_test` with `systemId` and a listed artifact `path` to inspect generated content. Reads are limited to recorded artifacts inside the local workspace.
 
+Use `bc_artifact_overview` with `systemId` when the user needs a non-path-oriented summary of generated artifact counts and latest content snippets.
+
 Use `bc_list_cases` with the selected `systemId` to review draft, approved, passed, and failed test cases.
 
 Use `bc_list_gaps` with `projectId` and optional `status` to review open or resolved gaps.
@@ -190,12 +200,13 @@ The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 18. `bc_list_tests`
 19. `bc_read_spec`
 20. `bc_read_test`
-21. `bc_list_terms`
-22. `bc_update_term`
-23. `bc_delete_term`
-24. `bc_list_cases`
-25. `bc_list_gaps`
-26. `bc_search_assets`
+21. `bc_artifact_overview`
+22. `bc_list_terms`
+23. `bc_update_term`
+24. `bc_delete_term`
+25. `bc_list_cases`
+26. `bc_list_gaps`
+27. `bc_search_assets`
 
 Run it with:
 
@@ -218,8 +229,8 @@ Brain Creator runtime files are written under `.brain-creator/` by default. Plan
 ## Known Limits
 
 - The current MVP is local-first and uses JSON persistence.
-- `bc_generate_plan` and `bc_run_chain` are tested with mockable AgentBridge implementations; full Claude Code subagent validation is still a follow-up.
-- The current Playwright CLI does not expose `playwright agent`; `npx playwright init-agents` generates Claude agent definitions and prompts, so real Planner/Generator/Healer execution needs the Claude subagent bridge rather than the placeholder CLI command.
+- `bc_generate_plan` and `bc_run_chain` are tested with mockable and subprocess AgentBridge implementations; full Claude Code subagent validation in a live Claude Code session is still a follow-up.
+- The current Playwright CLI does not expose `playwright agent`; `npx playwright init-agents` generates Claude agent definitions and prompts, so Planner/Generator/Healer execution should use the Claude subprocess bridge rather than a Playwright CLI placeholder.
 - The Healer loop is bounded and creates a Gap when it cannot fix a failing generated test.
 - No Web UI is included in v2.
 - PostgreSQL, CI integration, LLM quality review, and multi-agent parallelism are out of scope for this phase.

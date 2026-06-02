@@ -28,6 +28,7 @@ export type BrainCreatorToolName =
   | "bc_list_tests"
   | "bc_read_spec"
   | "bc_read_test"
+  | "bc_artifact_overview"
   | "bc_list_cases"
   | "bc_list_gaps"
   | "bc_resolve_gap"
@@ -295,6 +296,12 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       systemId: z.string(),
       path: z.string()
     })
+  },
+  {
+    name: "bc_artifact_overview",
+    title: "Artifact overview",
+    description: "Summarize generated spec and test artifacts for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
   },
   {
     name: "bc_list_cases",

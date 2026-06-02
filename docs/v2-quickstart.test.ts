@@ -29,6 +29,7 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("bc_list_tests");
     expect(content).toContain("bc_read_spec");
     expect(content).toContain("bc_read_test");
+    expect(content).toContain("bc_artifact_overview");
     expect(content).toContain("bc_list_cases");
     expect(content).toContain("bc_list_gaps");
     expect(content).toContain("bc_resolve_gap");

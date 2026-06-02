@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    exclude: ["**/node_modules/**", "**/.git/**", "tests/e2e/**", "tests/generated/**"]
+    exclude: ["**/node_modules/**", "**/.git/**", "**/.brain-creator-test/**", "tests/e2e/**", "tests/generated/**"]
   },
   resolve: {
     alias: {

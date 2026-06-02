@@ -14,9 +14,10 @@ Use Brain Creator MCP asset search to inspect what has already been created for 
 3. Call `bc_list_chain_runs` with `systemId` when the user asks for generator/test/healer chain history.
 4. Call `bc_list_specs` and `bc_list_tests` with `systemId` when the user asks for generated spec or test file paths.
 5. Call `bc_read_spec` or `bc_read_test` only for paths returned by the list tools.
-6. Call `bc_list_gaps` with `projectId` and optional `status` when the user asks what is blocked.
-7. Call `bc_resolve_gap` only after the user confirms a gap has been handled.
-8. Call `bc_search_assets` with `projectId` and a short query for broad asset lookup.
-9. Keep results scoped to the current system.
+6. Call `bc_artifact_overview` when the user needs a concise generated-artifact summary without inspecting raw paths first.
+7. Call `bc_list_gaps` with `projectId` and optional `status` when the user asks what is blocked.
+8. Call `bc_resolve_gap` only after the user confirms a gap has been handled.
+9. Call `bc_search_assets` with `projectId` and a short query for broad asset lookup.
+10. Keep results scoped to the current system.
 
 Asset search is for review and traceability. It is not a substitute for user approval of a generated plan.
