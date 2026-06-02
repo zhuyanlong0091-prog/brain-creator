@@ -10,9 +10,10 @@ Use Brain Creator MCP asset search to inspect what has already been created for 
 ## Workflow
 
 1. Call `bc_list_cases` with `systemId` when the user asks for test history.
-2. Call `bc_list_gaps` with `projectId` and optional `status` when the user asks what is blocked.
-3. Call `bc_resolve_gap` only after the user confirms a gap has been handled.
-4. Call `bc_search_assets` with `projectId` and a short query for broad asset lookup.
-5. Keep results scoped to the current system.
+2. Call `bc_list_chain_runs` with `systemId` when the user asks for generator/test/healer run history.
+3. Call `bc_list_gaps` with `projectId` and optional `status` when the user asks what is blocked.
+4. Call `bc_resolve_gap` only after the user confirms a gap has been handled.
+5. Call `bc_search_assets` with `projectId` and a short query for broad asset lookup.
+6. Keep results scoped to the current system.
 
 Asset search is for review and traceability. It is not a substitute for user approval of a generated plan.

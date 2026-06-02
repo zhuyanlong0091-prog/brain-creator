@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -58,6 +58,83 @@ describe("handleBrainCreatorTool", () => {
         })
       ])
     );
+  });
+
+  it("lists auth profiles without exposing secrets and generates local seed metadata", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const otherSystem = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Billing Console",
+        environment: "staging",
+        baseUrl: "https://billing.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://billing.example.test"]
+      })
+    );
+    const auth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "staging",
+        role: "qa-admin",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: otherSystem.id,
+      env: "staging",
+      role: "auditor",
+      loginMethod: "cookie",
+      secrets: { cookie: "other-secret" }
+    });
+    await handleBrainCreatorTool(context, "bc_verify_auth", {
+      id: auth.id
+    });
+
+    const authProfiles = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_auth", {
+        systemId: system.id
+      })
+    );
+    const seed = dataOf(
+      await handleBrainCreatorTool(context, "bc_generate_seed", {
+        systemId: system.id,
+        authProfileId: auth.id
+      })
+    );
+
+    const seedContent = await readFile(seed.seedPath, "utf8");
+    expect(authProfiles).toEqual([
+      expect.objectContaining({
+        id: auth.id,
+        projectId: system.id,
+        encryptedSecrets: { token: "[REDACTED]" },
+        status: "succeeded"
+      })
+    ]);
+    expect(JSON.stringify(authProfiles)).not.toContain("secret-token");
+    expect(seed).toEqual(
+      expect.objectContaining({
+        seedPath: expect.stringContaining(`seed-${system.id}.spec.ts`),
+        loginMethod: "token",
+        secretKeys: ["token"]
+      })
+    );
+    expect(JSON.stringify(seed)).not.toContain("secret-token");
+    expect(seedContent).toContain("secret-token");
   });
 
   it("generates a draft plan and stores an approved test case", async () => {
@@ -325,8 +402,14 @@ describe("handleBrainCreatorTool", () => {
         caseId: testCase.id
       })
     );
+    const chainRuns = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_chain_runs", {
+        systemId: system.id
+      })
+    );
 
     expect(result.chainRun.status).toBe("succeeded");
+    expect(chainRuns).toEqual([expect.objectContaining({ id: result.chainRun.id })]);
     expect(context.service.listChainRuns(system.id)).toEqual([
       expect.objectContaining({ id: result.chainRun.id })
     ]);

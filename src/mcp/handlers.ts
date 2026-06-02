@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
 import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
+import { generateSeedFile } from "../agent/seedGenerator.js";
 import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   commandRunnerAgentBridge,
@@ -77,8 +78,12 @@ export async function handleBrainCreatorTool(
             secrets: recordArg(input, "secrets")
           })
         );
+      case "bc_list_auth":
+        return textResult(context.service.listAuthProfiles(stringArg(input, "systemId")));
       case "bc_verify_auth":
         return textResult(context.service.verifyAuthProfile(stringArg(input, "id")));
+      case "bc_generate_seed":
+        return textResult(await generateSeed(context, input));
       case "bc_add_term":
         return textResult(
           context.service.createGlossaryTerm({
@@ -150,6 +155,8 @@ export async function handleBrainCreatorTool(
         return textResult(await runSingleAgent(context, input));
       case "bc_run_chain":
         return textResult(await runApprovedChain(context, input));
+      case "bc_list_chain_runs":
+        return textResult(context.service.listChainRuns(stringArg(input, "systemId")));
       case "bc_list_cases":
         return textResult(context.service.listTestCases(stringArg(input, "systemId")));
       case "bc_list_gaps":
@@ -236,6 +243,22 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   return result;
 }
 
+async function generateSeed(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+  if (!system) {
+    throw new Error("Business system not found");
+  }
+  const authProfile = optionalStringArg(input, "authProfileId")
+    ? findAuthProfileById(context, systemId, optionalStringArg(input, "authProfileId")!)
+    : findAuthProfile(context, systemId);
+  return generateSeedFile({
+    outputDir: optionalStringArg(input, "outputDir") ?? join(context.workDir, "tests"),
+    system,
+    authProfile
+  });
+}
+
 async function runSingleAgent(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const systemId = stringArg(input, "systemId");
   const system = context.repository.systemProfiles.find((item) => item.id === systemId);
@@ -260,6 +283,21 @@ function findAuthProfile(context: BrainCreatorMcpContext, systemId: string): Aut
   const profile = context.repository.authProfiles.find((item) => item.projectId === systemId);
   if (!profile) {
     throw new Error("Auth profile not found");
+  }
+  return profile;
+}
+
+function findAuthProfileById(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  authProfileId: string
+): AuthProfile {
+  const profile = context.repository.authProfiles.find((item) => item.id === authProfileId);
+  if (!profile) {
+    throw new Error("Auth profile not found");
+  }
+  if (profile.projectId !== systemId) {
+    throw new Error("Auth profile belongs to another business system");
   }
   return profile;
 }

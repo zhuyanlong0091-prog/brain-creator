@@ -6,7 +6,9 @@ export type BrainCreatorToolName =
   | "bc_list_systems"
   | "bc_system_overview"
   | "bc_create_auth"
+  | "bc_list_auth"
   | "bc_verify_auth"
+  | "bc_generate_seed"
   | "bc_add_term"
   | "bc_list_terms"
   | "bc_update_term"
@@ -19,6 +21,7 @@ export type BrainCreatorToolName =
   | "bc_approve_plan"
   | "bc_run_agent"
   | "bc_run_chain"
+  | "bc_list_chain_runs"
   | "bc_list_cases"
   | "bc_list_gaps"
   | "bc_resolve_gap"
@@ -81,10 +84,26 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     })
   },
   {
+    name: "bc_list_auth",
+    title: "List auth profiles",
+    description: "List redacted auth profiles for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
+  },
+  {
     name: "bc_verify_auth",
     title: "Verify auth profile",
     description: "Mark an auth profile verified for local MVP use.",
     inputSchema: z.object({ id: z.string() })
+  },
+  {
+    name: "bc_generate_seed",
+    title: "Generate seed file",
+    description: "Generate a local Playwright seed fixture from a business system auth profile.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      authProfileId: z.string().optional(),
+      outputDir: z.string().optional()
+    })
   },
   {
     name: "bc_add_term",
@@ -219,6 +238,12 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       caseId: z.string(),
       maxHealAttempts: z.number().int().min(0).max(10).optional()
     })
+  },
+  {
+    name: "bc_list_chain_runs",
+    title: "List chain runs",
+    description: "List generator/test/healer chain runs for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
   },
   {
     name: "bc_list_cases",

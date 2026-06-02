@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,13 +45,29 @@ describe("Brain Creator local MCP flow", () => {
         urlAllowlist: ["https://shop.example.test"]
       })
     );
-    await handleBrainCreatorTool(context, "bc_create_auth", {
-      projectId: system.id,
-      env: "staging",
-      role: "qa-admin",
-      loginMethod: "token",
-      secrets: { token: "secret-token" }
+    const auth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "staging",
+        role: "qa-admin",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_verify_auth", {
+      id: auth.id
     });
+    const authProfiles = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_auth", {
+        systemId: system.id
+      })
+    );
+    const seed = dataOf(
+      await handleBrainCreatorTool(context, "bc_generate_seed", {
+        systemId: system.id,
+        authProfileId: auth.id
+      })
+    );
     await handleBrainCreatorTool(context, "bc_add_rule", {
       systemId: system.id,
       name: "Payment amount rule",
@@ -105,6 +121,11 @@ describe("Brain Creator local MCP flow", () => {
         caseId: draft.testCase.id
       })
     );
+    const chainRuns = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_chain_runs", {
+        systemId: system.id
+      })
+    );
     const assets = dataOf(
       await handleBrainCreatorTool(context, "bc_search_assets", {
         projectId: system.id,
@@ -148,12 +169,22 @@ describe("Brain Creator local MCP flow", () => {
     );
 
     expect(confirmedTerms.confirmedTerms.length).toBeGreaterThan(0);
+    expect(authProfiles).toEqual([
+      expect.objectContaining({
+        id: auth.id,
+        encryptedSecrets: { token: "[REDACTED]" },
+        status: "succeeded"
+      })
+    ]);
+    expect(JSON.stringify(seed)).not.toContain("secret-token");
+    expect(await readFile(seed.seedPath, "utf8")).toContain("secret-token");
     expect(terms.length).toBe(confirmedTerms.confirmedTerms.length);
     expect(updatedTerm.key).toBe("checkout.robot");
     expect(deletedTerm.id).toBe(updatedTerm.id);
     expect(updatedPlan.scenarios[0].title).toContain("璁㈠崟閲戦");
     expect(agentRun.status).toBe("succeeded");
     expect(run.chainRun.status).toBe("succeeded");
+    expect(chainRuns).toEqual([expect.objectContaining({ id: run.chainRun.id })]);
     expect(cases).toEqual([expect.objectContaining({ id: draft.testCase.id })]);
     expect(gaps).toEqual([]);
     expect(assets.map((asset: { type: string }) => asset.type)).toEqual(

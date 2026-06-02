@@ -9,7 +9,9 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("npm run mcp");
     expect(content).toContain("bc_create_system");
     expect(content).toContain("bc_create_auth");
+    expect(content).toContain("bc_list_auth");
     expect(content).toContain("bc_add_term");
+    expect(content).toContain("bc_generate_seed");
     expect(content).toContain("bc_batch_confirm_terms");
     expect(content).toContain("bc_list_terms");
     expect(content).toContain("bc_update_term");
@@ -20,6 +22,7 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("bc_approve_plan");
     expect(content).toContain("bc_run_agent");
     expect(content).toContain("bc_run_chain");
+    expect(content).toContain("bc_list_chain_runs");
     expect(content).toContain("bc_list_cases");
     expect(content).toContain("bc_list_gaps");
     expect(content).toContain("bc_resolve_gap");

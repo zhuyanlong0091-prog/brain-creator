@@ -67,7 +67,11 @@ Supported login methods:
 - `token`
 - `script`
 
-Use `bc_verify_auth` after creating a profile. Returned auth profiles redact secrets. Local generated seed files may contain secrets and should not be copied into chat or committed if they contain real credentials.
+Use `bc_list_auth` to inspect the current system's auth profiles. Returned auth profiles redact secrets.
+
+Use `bc_verify_auth` after creating a profile.
+
+Use `bc_generate_seed` with `systemId` and optional `authProfileId` to write the local Playwright seed fixture. The tool returns only metadata such as `seedPath`, `loginMethod`, and `secretKeys`. Local generated seed files may contain secrets and should not be copied into chat or committed if they contain real credentials.
 
 ### 3. Add Glossary Terms
 
@@ -137,6 +141,8 @@ The chain serializes scenarios to a Markdown spec, calls the generator, runs Pla
 
 ### 10. Review Cases And Gaps
 
+Use `bc_list_chain_runs` with the selected `systemId` to review generator/test/healer execution history.
+
 Use `bc_list_cases` with the selected `systemId` to review draft, approved, passed, and failed test cases.
 
 Use `bc_list_gaps` with `projectId` and optional `status` to review open or resolved gaps.
@@ -158,20 +164,24 @@ The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 
 1. `bc_create_system`
 2. `bc_create_auth`
-3. `bc_add_term`
-4. `bc_add_rule`
-5. `bc_generate_plan`
-6. `bc_batch_confirm_terms`
-7. `bc_update_plan`
-8. `bc_approve_plan`
-9. `bc_run_agent`
-10. `bc_run_chain`
-11. `bc_list_terms`
-12. `bc_update_term`
-13. `bc_delete_term`
-14. `bc_list_cases`
-15. `bc_list_gaps`
-16. `bc_search_assets`
+3. `bc_verify_auth`
+4. `bc_list_auth`
+5. `bc_generate_seed`
+6. `bc_add_term`
+7. `bc_add_rule`
+8. `bc_generate_plan`
+9. `bc_batch_confirm_terms`
+10. `bc_update_plan`
+11. `bc_approve_plan`
+12. `bc_run_agent`
+13. `bc_run_chain`
+14. `bc_list_chain_runs`
+15. `bc_list_terms`
+16. `bc_update_term`
+17. `bc_delete_term`
+18. `bc_list_cases`
+19. `bc_list_gaps`
+20. `bc_search_assets`
 
 Run it with:
 

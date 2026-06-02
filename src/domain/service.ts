@@ -268,6 +268,12 @@ export class BrainCreatorService {
     return publicAuthProfile(profile);
   }
 
+  listAuthProfiles(systemId: string): AuthProfile[] {
+    return this.repository.authProfiles
+      .filter((profile) => profile.projectId === systemId)
+      .map((profile) => publicAuthProfile(profile));
+  }
+
   getCaptureAuth(idValue?: string): PageCaptureAuth | undefined {
     if (!idValue) {
       return undefined;
