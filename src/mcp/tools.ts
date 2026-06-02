@@ -6,12 +6,27 @@ export type BrainCreatorToolName =
   | "bc_list_systems"
   | "bc_system_overview"
   | "bc_create_auth"
+  | "bc_list_auth"
   | "bc_verify_auth"
+  | "bc_generate_seed"
+  | "bc_add_term"
+  | "bc_list_terms"
+  | "bc_update_term"
+  | "bc_delete_term"
+  | "bc_batch_confirm_terms"
   | "bc_add_rule"
   | "bc_list_rules"
+  | "bc_delete_rule"
   | "bc_generate_plan"
+  | "bc_update_plan"
   | "bc_approve_plan"
+  | "bc_run_agent"
+  | "bc_list_agent_runs"
   | "bc_run_chain"
+  | "bc_list_chain_runs"
+  | "bc_list_cases"
+  | "bc_list_gaps"
+  | "bc_resolve_gap"
   | "bc_search_assets";
 
 type ToolDefinition = {
@@ -71,10 +86,81 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     })
   },
   {
+    name: "bc_list_auth",
+    title: "List auth profiles",
+    description: "List redacted auth profiles for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
+  },
+  {
     name: "bc_verify_auth",
     title: "Verify auth profile",
     description: "Mark an auth profile verified for local MVP use.",
     inputSchema: z.object({ id: z.string() })
+  },
+  {
+    name: "bc_generate_seed",
+    title: "Generate seed file",
+    description: "Generate a local Playwright seed fixture from a business system auth profile.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      authProfileId: z.string().optional(),
+      outputDir: z.string().optional()
+    })
+  },
+  {
+    name: "bc_add_term",
+    title: "Add glossary term",
+    description: "Add a business glossary term for a system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      key: z.string(),
+      zhCN: z.string(),
+      enUS: z.string(),
+      aliases: z.array(z.string()).default([]),
+      pageScope: z.string().default("/")
+    })
+  },
+  {
+    name: "bc_list_terms",
+    title: "List glossary terms",
+    description: "List glossary terms for a system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      query: z.string().default("")
+    })
+  },
+  {
+    name: "bc_update_term",
+    title: "Update glossary term",
+    description: "Update a glossary term inside a business system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      termId: z.string(),
+      key: z.string(),
+      zhCN: z.string(),
+      enUS: z.string(),
+      aliases: z.array(z.string()).default([]),
+      pageScope: z.string().default("/")
+    })
+  },
+  {
+    name: "bc_delete_term",
+    title: "Delete glossary term",
+    description: "Delete a glossary term from a business system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      termId: z.string()
+    })
+  },
+  {
+    name: "bc_batch_confirm_terms",
+    title: "Confirm candidate terms",
+    description: "Confirm or ignore Planner-discovered glossary term candidates from a draft test case.",
+    inputSchema: z.object({
+      caseId: z.string(),
+      confirmTermIds: z.array(z.string()).default([]),
+      ignoreTermIds: z.array(z.string()).default([])
+    })
   },
   {
     name: "bc_add_rule",
@@ -94,6 +180,15 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({ systemId: z.string() })
   },
   {
+    name: "bc_delete_rule",
+    title: "Delete business rule",
+    description: "Delete a business rule from a business system.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      ruleId: z.string()
+    })
+  },
+  {
     name: "bc_generate_plan",
     title: "Generate test plan",
     description: "Run planner flow and store a draft structured test case.",
@@ -104,10 +199,53 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     })
   },
   {
+    name: "bc_update_plan",
+    title: "Update test plan",
+    description: "Replace scenarios on a draft structured test case before approval.",
+    inputSchema: z.object({
+      caseId: z.string(),
+      scenarios: z.array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          priority: z.enum(["critical", "high", "medium", "low"]),
+          businessRuleRef: z.string().optional(),
+          steps: z.array(
+            z.object({
+              action: z.enum(["navigate", "fill", "click", "assert", "wait", "select"]),
+              target: z.string(),
+              value: z.string().optional(),
+              expected: z.string().optional()
+            })
+          )
+        })
+      )
+    })
+  },
+  {
     name: "bc_approve_plan",
     title: "Approve test plan",
     description: "Approve a draft test case before code generation.",
     inputSchema: z.object({ caseId: z.string() })
+  },
+  {
+    name: "bc_run_agent",
+    title: "Run agent",
+    description: "Run a single Planner, Generator, or Healer agent and record the AgentRun.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      agent: z.enum(["planner", "generator", "healer"]),
+      inputSummary: z.string(),
+      args: z.array(z.string()).default([]),
+      outputPaths: z.array(z.string()).default([]),
+      timeoutMs: z.number().int().positive().optional()
+    })
+  },
+  {
+    name: "bc_list_agent_runs",
+    title: "List agent runs",
+    description: "List Planner, Generator, and Healer agent runs for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
   },
   {
     name: "bc_run_chain",
@@ -116,6 +254,36 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({
       caseId: z.string(),
       maxHealAttempts: z.number().int().min(0).max(10).optional()
+    })
+  },
+  {
+    name: "bc_list_chain_runs",
+    title: "List chain runs",
+    description: "List generator/test/healer chain runs for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
+  },
+  {
+    name: "bc_list_cases",
+    title: "List test cases",
+    description: "List structured test cases for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
+  },
+  {
+    name: "bc_list_gaps",
+    title: "List gaps",
+    description: "List open or resolved gaps for a business system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      status: z.enum(["open", "resolved"]).optional()
+    })
+  },
+  {
+    name: "bc_resolve_gap",
+    title: "Resolve gap",
+    description: "Mark a gap resolved inside a business system.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      gapId: z.string()
     })
   },
   {

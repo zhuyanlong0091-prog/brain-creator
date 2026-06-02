@@ -13,6 +13,8 @@ Use Brain Creator MCP planning to generate structured scenarios before code gene
 2. Ensure auth and business rules exist.
 3. Call `bc_generate_plan` with `systemId` and the user's requirement.
 4. Present the draft scenarios, new term candidates, and rule check results to the user.
-5. Call `bc_approve_plan` only after the user confirms the test intent.
+5. Call `bc_update_plan` if the user wants to edit scenarios before approval.
+6. Call `bc_approve_plan` only after the user confirms the test intent.
 
 Planning must not generate test code directly. The user should confirm the structured plan first.
+Approved plans are execution contracts and should not be changed silently.

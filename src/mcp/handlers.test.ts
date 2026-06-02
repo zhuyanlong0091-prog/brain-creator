@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -46,6 +46,12 @@ describe("handleBrainCreatorTool", () => {
         query: "payment"
       })
     );
+    const deletedRule = dataOf(
+      await handleBrainCreatorTool(context, "bc_delete_rule", {
+        systemId: system.id,
+        ruleId: rule.id
+      })
+    );
 
     expect(system.name).toBe("Orders Console");
     expect(auth.encryptedSecrets.token).toBe("[REDACTED]");
@@ -58,6 +64,85 @@ describe("handleBrainCreatorTool", () => {
         })
       ])
     );
+    expect(deletedRule).toEqual(expect.objectContaining({ id: rule.id }));
+    expect(context.service.listBusinessRules(system.id)).toEqual([]);
+  });
+
+  it("lists auth profiles without exposing secrets and generates local seed metadata", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const otherSystem = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Billing Console",
+        environment: "staging",
+        baseUrl: "https://billing.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://billing.example.test"]
+      })
+    );
+    const auth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "staging",
+        role: "qa-admin",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: otherSystem.id,
+      env: "staging",
+      role: "auditor",
+      loginMethod: "cookie",
+      secrets: { cookie: "other-secret" }
+    });
+    await handleBrainCreatorTool(context, "bc_verify_auth", {
+      id: auth.id
+    });
+
+    const authProfiles = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_auth", {
+        systemId: system.id
+      })
+    );
+    const seed = dataOf(
+      await handleBrainCreatorTool(context, "bc_generate_seed", {
+        systemId: system.id,
+        authProfileId: auth.id
+      })
+    );
+
+    const seedContent = await readFile(seed.seedPath, "utf8");
+    expect(authProfiles).toEqual([
+      expect.objectContaining({
+        id: auth.id,
+        projectId: system.id,
+        encryptedSecrets: { token: "[REDACTED]" },
+        status: "succeeded"
+      })
+    ]);
+    expect(JSON.stringify(authProfiles)).not.toContain("secret-token");
+    expect(seed).toEqual(
+      expect.objectContaining({
+        seedPath: expect.stringContaining(`seed-${system.id}.spec.ts`),
+        loginMethod: "token",
+        secretKeys: ["token"]
+      })
+    );
+    expect(JSON.stringify(seed)).not.toContain("secret-token");
+    expect(seedContent).toContain("secret-token");
   });
 
   it("generates a draft plan and stores an approved test case", async () => {
@@ -124,6 +209,163 @@ describe("handleBrainCreatorTool", () => {
     expect(approved.status).toBe("approved");
   });
 
+  it("updates a draft test plan through MCP before approval", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+
+    const updated = dataOf(
+      await handleBrainCreatorTool(context, "bc_update_plan", {
+        caseId: testCase.id,
+        scenarios: [
+          {
+            id: "scenario_1",
+            title: "Validate robot checkout",
+            priority: "critical",
+            businessRuleRef: "rule_1",
+            steps: [
+              { action: "navigate", target: "Product list" },
+              { action: "click", target: "Robot product" },
+              { action: "assert", target: "Order amount", expected: "Matches product price" }
+            ]
+          }
+        ]
+      })
+    );
+
+    expect(updated.scenarios).toEqual([
+      expect.objectContaining({
+        id: "scenario_1",
+        title: "Validate robot checkout",
+        priority: "critical",
+        businessRuleRef: "rule_1",
+        steps: expect.arrayContaining([
+          expect.objectContaining({ action: "assert", target: "Order amount" })
+        ])
+      })
+    ]);
+  });
+
+  it("adds, lists, and batch confirms glossary terms through MCP", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const manualTerm = dataOf(
+      await handleBrainCreatorTool(context, "bc_add_term", {
+        projectId: system.id,
+        key: "order.submit",
+        zhCN: "Submit order",
+        enUS: "Submit order",
+        aliases: ["checkout"],
+        pageScope: "/orders"
+      })
+    );
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [
+        {
+          id: "term_candidate_1",
+          projectId: system.id,
+          key: "product.robot",
+          zhCN: "Robot product",
+          enUS: "Robot product",
+          aliases: ["robot"],
+          pageScope: "/products",
+          createdAt: "2026-05-29T00:00:00.000Z",
+          updatedAt: "2026-05-29T00:00:00.000Z"
+        }
+      ],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+
+    const confirmed = dataOf(
+      await handleBrainCreatorTool(context, "bc_batch_confirm_terms", {
+        caseId: testCase.id,
+        confirmTermIds: ["term_candidate_1"],
+        ignoreTermIds: []
+      })
+    );
+    const terms = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_terms", {
+        projectId: system.id,
+        query: "robot"
+      })
+    );
+
+    expect(manualTerm.key).toBe("order.submit");
+    expect(confirmed.confirmedTerms).toEqual([
+      expect.objectContaining({ key: "product.robot" })
+    ]);
+    expect(terms).toEqual([expect.objectContaining({ key: "product.robot" })]);
+  });
+
+  it("updates and deletes glossary terms through MCP", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const term = dataOf(
+      await handleBrainCreatorTool(context, "bc_add_term", {
+        projectId: system.id,
+        key: "order.submit",
+        zhCN: "Submit order",
+        enUS: "Submit order",
+        aliases: ["checkout"],
+        pageScope: "/orders"
+      })
+    );
+
+    const updated = dataOf(
+      await handleBrainCreatorTool(context, "bc_update_term", {
+        projectId: system.id,
+        termId: term.id,
+        key: "checkout.submit",
+        zhCN: "Submit checkout",
+        enUS: "Submit checkout",
+        aliases: ["place order"],
+        pageScope: "/checkout"
+      })
+    );
+    const deleted = dataOf(
+      await handleBrainCreatorTool(context, "bc_delete_term", {
+        projectId: system.id,
+        termId: term.id
+      })
+    );
+
+    expect(updated).toEqual(expect.objectContaining({ key: "checkout.submit" }));
+    expect(deleted).toEqual(expect.objectContaining({ id: term.id }));
+  });
+
   it("runs an approved chain and records chain output through MCP", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
@@ -168,14 +410,147 @@ describe("handleBrainCreatorTool", () => {
         caseId: testCase.id
       })
     );
+    const chainRuns = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_chain_runs", {
+        systemId: system.id
+      })
+    );
 
     expect(result.chainRun.status).toBe("succeeded");
+    expect(chainRuns).toEqual([expect.objectContaining({ id: result.chainRun.id })]);
     expect(context.service.listChainRuns(system.id)).toEqual([
       expect.objectContaining({ id: result.chainRun.id })
     ]);
     expect(context.service.listAgentRuns(system.id)).toEqual([
       expect.objectContaining({ agent: "generator" })
     ]);
+  });
+
+  it("runs a single agent and records the agent run through MCP", async () => {
+    const calls: string[][] = [];
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json"),
+      runner: async (_command, args) => {
+        calls.push(args);
+        return { exitCode: 0, stdout: "planner ok", stderr: "" };
+      }
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+
+    const run = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_agent", {
+        systemId: system.id,
+        agent: "planner",
+        inputSummary: "Explore robot purchase",
+        args: ["--prompt", "specs/_context/system-prompt.md"],
+        outputPaths: ["specs/robot.md"]
+      })
+    );
+    const agentRuns = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_agent_runs", {
+        systemId: system.id
+      })
+    );
+
+    expect(calls).toEqual([
+      ["playwright", "agent", "planner", "--prompt", "specs/_context/system-prompt.md"]
+    ]);
+    expect(run).toEqual(
+      expect.objectContaining({
+        systemId: system.id,
+        agent: "planner",
+        status: "succeeded",
+        inputSummary: "Explore robot purchase"
+      })
+    );
+    expect(context.service.listAgentRuns(system.id)).toEqual([
+      expect.objectContaining({ id: run.id, agent: "planner" })
+    ]);
+    expect(agentRuns).toEqual([expect.objectContaining({ id: run.id, agent: "planner" })]);
+  });
+
+  it("records a failed single agent run when no bridge is configured", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+
+    const run = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_agent", {
+        systemId: system.id,
+        agent: "planner",
+        inputSummary: "Explore robot purchase",
+        args: [],
+        outputPaths: []
+      })
+    );
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("Claude subagent bridge required");
+    expect(context.service.listAgentRuns(system.id)).toEqual([
+      expect.objectContaining({ id: run.id, status: "failed" })
+    ]);
+  });
+
+  it("lists test cases, lists gaps, and resolves a gap through MCP", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    const session = context.service.createTrainingSession({
+      projectId: system.id,
+      pageModelId: "page_1"
+    });
+    const failed = context.service.failTrainingSession(session.id, "No API requests captured");
+
+    const cases = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_cases", {
+        systemId: system.id
+      })
+    );
+    const gaps = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_gaps", {
+        projectId: system.id,
+        status: "open"
+      })
+    );
+    const resolved = dataOf(
+      await handleBrainCreatorTool(context, "bc_resolve_gap", {
+        projectId: system.id,
+        gapId: failed.gap.id
+      })
+    );
+
+    expect(cases).toEqual([expect.objectContaining({ id: testCase.id })]);
+    expect(gaps).toEqual([expect.objectContaining({ id: failed.gap.id, status: "open" })]);
+    expect(resolved.status).toBe("resolved");
   });
 });
 

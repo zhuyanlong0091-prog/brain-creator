@@ -555,6 +555,111 @@ describe("BrainCreatorService", () => {
     expect(terms[0].key).toBe("order.submit");
   });
 
+  it("updates and deletes glossary terms inside one business system", () => {
+    const service = createService();
+    const term = service.createGlossaryTerm({
+      projectId: "system-1",
+      key: "order.submit",
+      zhCN: "Submit order",
+      enUS: "Submit order",
+      aliases: ["checkout"],
+      pageScope: "/orders"
+    });
+    service.createGlossaryTerm({
+      projectId: "system-2",
+      key: "crm.lead",
+      zhCN: "Lead",
+      enUS: "Lead",
+      aliases: [],
+      pageScope: "/leads"
+    });
+
+    const updated = service.updateGlossaryTerm({
+      projectId: "system-1",
+      termId: term.id,
+      key: "checkout.submit",
+      zhCN: "Submit checkout",
+      enUS: "Submit checkout",
+      aliases: ["place order"],
+      pageScope: "/checkout"
+    });
+
+    expect(updated).toEqual(
+      expect.objectContaining({
+        id: term.id,
+        key: "checkout.submit",
+        aliases: ["place order"],
+        pageScope: "/checkout"
+      })
+    );
+    expect(() =>
+      service.updateGlossaryTerm({
+        projectId: "system-2",
+        termId: term.id,
+        key: "wrong.system",
+        zhCN: "Wrong",
+        enUS: "Wrong",
+        aliases: [],
+        pageScope: "/"
+      })
+    ).toThrow("Glossary term belongs to another business system");
+
+    const deleted = service.deleteGlossaryTerm({
+      projectId: "system-1",
+      termId: term.id
+    });
+
+    expect(deleted.id).toBe(term.id);
+    expect(service.listGlossaryTerms({ projectId: "system-1", query: "" })).toEqual([]);
+  });
+
+  it("confirms planner-discovered terms into the system glossary", () => {
+    const service = createService();
+    const testCase = service.createTestCase({
+      systemId: "system-1",
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [
+        {
+          id: "term_candidate_1",
+          projectId: "system-1",
+          key: "product.robot",
+          zhCN: "Robot product",
+          enUS: "Robot product",
+          aliases: ["robot"],
+          pageScope: "/products",
+          createdAt: "2026-05-29T00:00:00.000Z",
+          updatedAt: "2026-05-29T00:00:00.000Z"
+        },
+        {
+          id: "term_candidate_2",
+          projectId: "system-1",
+          key: "checkout.total",
+          zhCN: "Order amount",
+          enUS: "Order amount",
+          aliases: [],
+          pageScope: "/checkout",
+          createdAt: "2026-05-29T00:00:00.000Z",
+          updatedAt: "2026-05-29T00:00:00.000Z"
+        }
+      ],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+
+    const result = service.confirmCandidateTerms({
+      caseId: testCase.id,
+      confirmTermIds: ["term_candidate_1"],
+      ignoreTermIds: ["term_candidate_2"]
+    });
+
+    expect(result.confirmedTerms.map((term) => term.key)).toEqual(["product.robot"]);
+    expect(result.ignoredTerms.map((term) => term.key)).toEqual(["checkout.total"]);
+    expect(result.testCase.newTerms).toEqual([]);
+    expect(service.listGlossaryTerms({ projectId: "system-1", query: "robot" })).toEqual([
+      expect.objectContaining({ id: "term_candidate_1", key: "product.robot" })
+    ]);
+  });
+
   it("manages business rules per system", () => {
     const service = createService();
 
@@ -581,7 +686,13 @@ describe("BrainCreatorService", () => {
     );
     expect(service.listBusinessRules("system-1")).toEqual([rule]);
 
-    service.deleteBusinessRule(rule.id);
+    expect(service.deleteBusinessRule({ systemId: "system-1", ruleId: rule.id })).toEqual(rule);
+    expect(() =>
+      service.deleteBusinessRule({
+        systemId: "system-1",
+        ruleId: service.listBusinessRules("system-2")[0].id
+      })
+    ).toThrow("Business rule belongs to another business system");
 
     expect(service.listBusinessRules("system-1")).toEqual([]);
     expect(service.listBusinessRules("system-2")).toHaveLength(1);
@@ -651,6 +762,29 @@ describe("BrainCreatorService", () => {
     expect(service.listTestCases("missing-system")).toEqual([]);
   });
 
+  it("does not update scenarios after a test case is approved", () => {
+    const service = createService();
+    const testCase = service.createTestCase({
+      systemId: "system-1",
+      requirement: "Plan robot purchase",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    service.approveTestCase(testCase.id);
+
+    expect(() =>
+      service.updateTestCaseScenarios(testCase.id, [
+        {
+          id: "scenario_1",
+          title: "Change after approval",
+          priority: "high",
+          steps: [{ action: "assert", target: "Order status", expected: "Paid" }]
+        }
+      ])
+    ).toThrow("Only draft test cases can be updated");
+  });
+
   it("records agent and chain runs per system", () => {
     const service = createService();
     const agentRun = {
@@ -684,6 +818,41 @@ describe("BrainCreatorService", () => {
     expect(service.listAgentRuns("system-1")).toEqual([agentRun]);
     expect(service.getChainRun(chainRun.id)).toEqual(chainRun);
     expect(service.listChainRuns("system-1")).toEqual([chainRun]);
+  });
+
+  it("lists and resolves gaps per system without crossing system boundaries", () => {
+    const service = createService();
+    const session = service.createTrainingSession({
+      projectId: "system-1",
+      pageModelId: "page_1"
+    });
+    const failed = service.failTrainingSession(session.id, "No API requests captured");
+    service.failTrainingSession(
+      service.createTrainingSession({ projectId: "system-2", pageModelId: "page_2" }).id,
+      "Other system gap"
+    );
+
+    expect(service.listGaps({ projectId: "system-1", status: "open" })).toEqual([
+      expect.objectContaining({
+        id: failed.gap.id,
+        projectId: "system-1",
+        status: "open"
+      })
+    ]);
+
+    const resolved = service.resolveGap({
+      projectId: "system-1",
+      gapId: failed.gap.id
+    });
+
+    expect(resolved.status).toBe("resolved");
+    expect(service.listGaps({ projectId: "system-1", status: "open" })).toEqual([]);
+    expect(() =>
+      service.resolveGap({
+        projectId: "system-2",
+        gapId: failed.gap.id
+      })
+    ).toThrow("Gap belongs to another business system");
   });
 
   it("searches v2 business rules, test cases, and run history as system assets", () => {

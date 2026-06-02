@@ -93,6 +93,16 @@ type SearchInput = {
   query: string;
 };
 
+type ListGapsInput = {
+  projectId: string;
+  status?: Gap["status"];
+};
+
+type ResolveGapInput = {
+  projectId: string;
+  gapId: string;
+};
+
 type AssetDetailInput = {
   projectId: string;
   type: AssetSearchResult["type"];
@@ -108,11 +118,31 @@ type CreateGlossaryTermInput = {
   pageScope: string;
 };
 
+type UpdateGlossaryTermInput = CreateGlossaryTermInput & {
+  termId: string;
+};
+
+type DeleteGlossaryTermInput = {
+  projectId: string;
+  termId: string;
+};
+
+type ConfirmCandidateTermsInput = {
+  caseId: string;
+  confirmTermIds: string[];
+  ignoreTermIds: string[];
+};
+
 type CreateBusinessRuleInput = {
   systemId: string;
   name: string;
   condition: string;
   severity: BusinessRule["severity"];
+};
+
+type DeleteBusinessRuleInput = {
+  systemId: string;
+  ruleId: string;
 };
 
 type CreateTestCaseInput = {
@@ -241,6 +271,12 @@ export class BrainCreatorService {
     profile.updatedAt = profile.lastVerifiedAt;
     this.repository.persist();
     return publicAuthProfile(profile);
+  }
+
+  listAuthProfiles(systemId: string): AuthProfile[] {
+    return this.repository.authProfiles
+      .filter((profile) => profile.projectId === systemId)
+      .map((profile) => publicAuthProfile(profile));
   }
 
   getCaptureAuth(idValue?: string): PageCaptureAuth | undefined {
@@ -500,6 +536,79 @@ export class BrainCreatorService {
     );
   }
 
+  updateGlossaryTerm(input: UpdateGlossaryTermInput): GlossaryTerm {
+    const term = this.repository.glossaryTerms.find((item) => item.id === input.termId);
+    if (!term) {
+      throw new Error("Glossary term not found");
+    }
+    if (term.projectId !== input.projectId) {
+      throw new Error("Glossary term belongs to another business system");
+    }
+
+    term.key = input.key.trim();
+    term.zhCN = input.zhCN.trim();
+    term.enUS = input.enUS.trim();
+    term.aliases = input.aliases.map((alias) => alias.trim()).filter(Boolean);
+    term.pageScope = input.pageScope.trim();
+    term.updatedAt = timestamp();
+    this.repository.persist();
+    return term;
+  }
+
+  deleteGlossaryTerm(input: DeleteGlossaryTermInput): GlossaryTerm {
+    const index = this.repository.glossaryTerms.findIndex((item) => item.id === input.termId);
+    if (index < 0) {
+      throw new Error("Glossary term not found");
+    }
+    const [term] = this.repository.glossaryTerms.splice(index, 1);
+    if (term.projectId !== input.projectId) {
+      this.repository.glossaryTerms.splice(index, 0, term);
+      throw new Error("Glossary term belongs to another business system");
+    }
+    this.repository.persist();
+    return term;
+  }
+
+  confirmCandidateTerms(input: ConfirmCandidateTermsInput): {
+    confirmedTerms: GlossaryTerm[];
+    ignoredTerms: GlossaryTerm[];
+    testCase: TestCase;
+    glossaryTerms: GlossaryTerm[];
+  } {
+    const testCase = this.getTestCase(input.caseId);
+    const confirmIds = new Set(input.confirmTermIds);
+    const ignoreIds = new Set(input.ignoreTermIds);
+    const confirmedTerms = testCase.newTerms.filter((term) => confirmIds.has(term.id));
+    const ignoredTerms = testCase.newTerms.filter((term) => ignoreIds.has(term.id));
+    const handledIds = new Set([...input.confirmTermIds, ...input.ignoreTermIds]);
+    const now = timestamp();
+
+    for (const term of confirmedTerms) {
+      const exists = this.repository.glossaryTerms.some(
+        (item) =>
+          item.projectId === testCase.systemId &&
+          (item.id === term.id || item.key === term.key || item.zhCN === term.zhCN)
+      );
+      if (!exists) {
+        this.repository.glossaryTerms.push({
+          ...term,
+          projectId: testCase.systemId,
+          updatedAt: now
+        });
+      }
+    }
+
+    testCase.newTerms = testCase.newTerms.filter((term) => !handledIds.has(term.id));
+    testCase.updatedAt = now;
+    this.repository.persist();
+    return {
+      confirmedTerms,
+      ignoredTerms,
+      testCase,
+      glossaryTerms: this.listGlossaryTerms({ projectId: testCase.systemId, query: "" })
+    };
+  }
+
   createBusinessRule(input: CreateBusinessRuleInput): BusinessRule {
     const rule: BusinessRule = {
       id: id("rule"),
@@ -518,15 +627,18 @@ export class BrainCreatorService {
     return this.repository.businessRules.filter((rule) => rule.systemId === systemId);
   }
 
-  deleteBusinessRule(ruleId: string): void {
-    const originalLength = this.repository.businessRules.length;
-    this.repository.businessRules = this.repository.businessRules.filter(
-      (rule) => rule.id !== ruleId
-    );
-    if (this.repository.businessRules.length === originalLength) {
+  deleteBusinessRule(input: DeleteBusinessRuleInput): BusinessRule {
+    const index = this.repository.businessRules.findIndex((rule) => rule.id === input.ruleId);
+    if (index < 0) {
       throw new Error("Business rule not found");
     }
+    const [rule] = this.repository.businessRules.splice(index, 1);
+    if (rule.systemId !== input.systemId) {
+      this.repository.businessRules.splice(index, 0, rule);
+      throw new Error("Business rule belongs to another business system");
+    }
     this.repository.persist();
+    return rule;
   }
 
   createTestCase(input: CreateTestCaseInput): TestCase {
@@ -569,6 +681,9 @@ export class BrainCreatorService {
 
   updateTestCaseScenarios(caseId: string, scenarios: TestCaseScenario[]): TestCase {
     const testCase = this.getTestCase(caseId);
+    if (testCase.status !== "draft") {
+      throw new Error("Only draft test cases can be updated");
+    }
     testCase.scenarios = scenarios;
     testCase.updatedAt = timestamp();
     this.repository.persist();
@@ -849,10 +964,21 @@ export class BrainCreatorService {
     };
   }
 
-  resolveGap(gapId: string): Gap {
-    const gap = this.repository.gaps.find((item) => item.id === gapId);
+  listGaps(input: ListGapsInput): Gap[] {
+    return this.repository.gaps.filter(
+      (gap) =>
+        gap.projectId === input.projectId &&
+        (input.status === undefined || gap.status === input.status)
+    );
+  }
+
+  resolveGap(input: ResolveGapInput): Gap {
+    const gap = this.repository.gaps.find((item) => item.id === input.gapId);
     if (!gap) {
       throw new Error("Gap not found");
+    }
+    if (gap.projectId !== input.projectId) {
+      throw new Error("Gap belongs to another business system");
     }
 
     gap.status = "resolved";

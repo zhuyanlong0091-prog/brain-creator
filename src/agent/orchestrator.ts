@@ -30,13 +30,25 @@ export type CommandRunner = (
   options?: { cwd?: string; timeoutMs?: number }
 ) => Promise<CommandResult>;
 
+export type AgentBridgeInput = {
+  systemId: string;
+  agent: AgentRun["agent"];
+  inputSummary: string;
+  args: string[];
+  outputPaths: string[];
+  cwd?: string;
+  timeoutMs?: number;
+};
+
+export type AgentBridge = (input: AgentBridgeInput) => Promise<CommandResult>;
+
 type RunAgentInput = {
   systemId: string;
   agent: AgentRun["agent"];
   inputSummary: string;
   args: string[];
   outputPaths: string[];
-  runner?: CommandRunner;
+  agentBridge?: AgentBridge;
   cwd?: string;
   timeoutMs?: number;
 };
@@ -49,7 +61,7 @@ type GeneratePlanDraftInput = {
   glossaryTerms: GlossaryTerm[];
   businessRules: BusinessRule[];
   specPath: string;
-  runner?: CommandRunner;
+  agentBridge?: AgentBridge;
 };
 
 type RunChainInput = {
@@ -57,20 +69,17 @@ type RunChainInput = {
   system: SystemProfile;
   authProfile: AuthProfile;
   testCase: TestCase;
+  agentBridge?: AgentBridge;
   runner?: CommandRunner;
   maxHealAttempts?: number;
 };
 
 export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
   const start = Date.now();
-  const runner = input.runner ?? spawnCommand;
+  const agentBridge = input.agentBridge ?? missingAgentBridge;
   let result: CommandResult;
   try {
-    result = await runner(
-      "npx",
-      ["playwright", "agent", input.agent, ...input.args],
-      { cwd: input.cwd, timeoutMs: input.timeoutMs }
-    );
+    result = await agentBridge(input);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
@@ -103,6 +112,14 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
   };
 }
 
+export function commandRunnerAgentBridge(runner: CommandRunner): AgentBridge {
+  return (input) =>
+    runner("npx", ["playwright", "agent", input.agent, ...input.args], {
+      cwd: input.cwd,
+      timeoutMs: input.timeoutMs
+    });
+}
+
 export async function generatePlanDraft(input: GeneratePlanDraftInput) {
   const contextDir = join(input.workDir, "specs", "_context");
   const seedDir = join(input.workDir, "tests");
@@ -128,8 +145,11 @@ export async function generatePlanDraft(input: GeneratePlanDraftInput) {
     args: ["--prompt", prompt.promptPath, "--seed", seed.seedPath, "--output", input.specPath],
     outputPaths: [input.specPath],
     cwd: input.workDir,
-    runner: input.runner
+    agentBridge: input.agentBridge
   });
+  if (agentRun.status !== "succeeded") {
+    throw new Error(agentRun.error ?? "Planner agent failed");
+  }
 
   const specContent = await readFile(input.specPath, "utf8");
   const scenarios = parseSpecMarkdown(specContent);
@@ -180,13 +200,20 @@ export async function runChain(input: RunChainInput) {
     args: ["--spec", specPath, "--seed", seed.seedPath, "--output", testPath],
     outputPaths: [testPath],
     cwd: input.workDir,
-    runner: input.runner
+    agentBridge: input.agentBridge
   });
 
   const runner = input.runner ?? spawnCommand;
-  let testResult = await runner("npx", ["playwright", "test", testPath], {
-    cwd: input.workDir
-  });
+  let testResult: CommandResult =
+    generateRun.status === "succeeded"
+      ? await runner("npx", ["playwright", "test", testPath], {
+          cwd: input.workDir
+        })
+      : {
+          exitCode: 1,
+          stdout: "",
+          stderr: generateRun.error ?? "Generator agent failed"
+        };
   const healerRuns: AgentRun[] = [];
   const maxHealAttempts = input.maxHealAttempts ?? 3;
 
@@ -202,7 +229,7 @@ export async function runChain(input: RunChainInput) {
       args: ["--test", testPath, "--error", testResult.stderr || testResult.stdout],
       outputPaths: [testPath],
       cwd: input.workDir,
-      runner: input.runner
+      agentBridge: input.agentBridge
     });
     healerRuns.push(healerRun);
     if (healerRun.status !== "succeeded") {
@@ -245,6 +272,15 @@ export async function runChain(input: RunChainInput) {
     healerRuns,
     specPath,
     testPath
+  };
+}
+
+async function missingAgentBridge(): Promise<CommandResult> {
+  return {
+    exitCode: 1,
+    stdout: "",
+    stderr:
+      "Claude subagent bridge required: current Playwright CLI does not expose `playwright agent`; provide an AgentBridge or run through Claude subagents."
   };
 }
 

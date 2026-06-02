@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { generatePlanDraft, runAgent, runChain } from "./orchestrator.js";
+import { commandRunnerAgentBridge, generatePlanDraft, runAgent, runChain } from "./orchestrator.js";
 import { encryptSecrets } from "../shared/crypto.js";
 import type {
   AuthProfile,
@@ -19,7 +19,21 @@ afterEach(async () => {
 });
 
 describe("runAgent", () => {
-  it("records a succeeded Playwright agent run from a command runner", async () => {
+  it("fails clearly when no Claude subagent bridge is configured", async () => {
+    const run = await runAgent({
+      systemId: "system_1",
+      agent: "planner",
+      inputSummary: "planner bridge missing",
+      args: ["--prompt", "specs/_context/system_1-prompt.md"],
+      outputPaths: ["specs/robot.md"]
+    });
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("Claude subagent bridge required");
+    expect(run.logs).toEqual([expect.stringContaining("Claude subagent bridge required")]);
+  });
+
+  it("records a succeeded Playwright agent run from an explicit command bridge", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
 
     const run = await runAgent({
@@ -28,10 +42,10 @@ describe("runAgent", () => {
       inputSummary: "测试购买机器人",
       args: ["--prompt", "specs/_context/system_1-prompt.md"],
       outputPaths: ["specs/robot.md"],
-      runner: async (command, args) => {
+      agentBridge: commandRunnerAgentBridge(async (command, args) => {
         calls.push({ command, args });
         return { exitCode: 0, stdout: "planner ok", stderr: "" };
-      }
+      })
     });
 
     expect(calls).toEqual([
@@ -61,7 +75,7 @@ describe("runAgent", () => {
       inputSummary: "生成购买机器人测试",
       args: ["--spec", "specs/robot.md"],
       outputPaths: [],
-      runner: async () => ({ exitCode: 1, stdout: "", stderr: "generator failed" })
+      agentBridge: async () => ({ exitCode: 1, stdout: "", stderr: "generator failed" })
     });
 
     expect(run.status).toBe("failed");
@@ -76,7 +90,7 @@ describe("runAgent", () => {
       inputSummary: "planner timeout",
       args: ["--prompt", "specs/_context/system_1-prompt.md"],
       outputPaths: [],
-      runner: async () => {
+      agentBridge: async () => {
         throw new Error("Command timed out after 1000ms");
       }
     });
@@ -101,7 +115,7 @@ describe("generatePlanDraft", () => {
       glossaryTerms: [robotTerm()],
       businessRules: [paymentRule()],
       specPath,
-      runner: async (_command, args) => {
+      agentBridge: commandRunnerAgentBridge(async (_command, args) => {
         calls.push(args);
         await writeFile(
           specPath,
@@ -117,7 +131,7 @@ describe("generatePlanDraft", () => {
           "utf8"
         );
         return { exitCode: 0, stdout: "planner wrote spec", stderr: "" };
-      }
+      })
     });
 
     expect(calls[0]).toEqual(
@@ -148,6 +162,10 @@ describe("runChain", () => {
       system: systemProfile(),
       authProfile: authProfile(),
       testCase,
+      agentBridge: commandRunnerAgentBridge(async (_command, args) => {
+        commands.push(args);
+        return { exitCode: 0, stdout: `${args.join(" ")} ok`, stderr: "" };
+      }),
       runner: async (_command, args) => {
         commands.push(args);
         return { exitCode: 0, stdout: `${args.join(" ")} ok`, stderr: "" };
@@ -178,11 +196,13 @@ describe("runChain", () => {
       system: systemProfile(),
       authProfile: authProfile(),
       testCase: approvedTestCase(),
+      agentBridge: async () => ({ exitCode: 0, stdout: "agent ok", stderr: "" }),
       runner: async (_command, args) => ({
         exitCode: args[1] === "test" ? 1 : 0,
         stdout: "",
         stderr: args[1] === "test" ? "test failed" : ""
-      })
+      }),
+      maxHealAttempts: 0
     });
 
     expect(result.chainRun.status).toBe("failed");
@@ -199,6 +219,10 @@ describe("runChain", () => {
       system: systemProfile(),
       authProfile: authProfile(),
       testCase: approvedTestCase(),
+      agentBridge: commandRunnerAgentBridge(async (_command, args) => {
+        commands.push(args);
+        return { exitCode: 0, stdout: `${args.join(" ")} ok`, stderr: "" };
+      }),
       runner: async (_command, args) => {
         commands.push(args);
         if (args[1] === "test") {
@@ -230,6 +254,7 @@ describe("runChain", () => {
       authProfile: authProfile(),
       testCase: approvedTestCase(),
       maxHealAttempts: 2,
+      agentBridge: async () => ({ exitCode: 0, stdout: "agent ok", stderr: "" }),
       runner: async (_command, args) => ({
         exitCode: args[1] === "test" ? 1 : 0,
         stdout: "",

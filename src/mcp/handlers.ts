@@ -2,21 +2,31 @@ import { join } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
 import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
+import { generateSeedFile } from "../agent/seedGenerator.js";
 import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
-import { generatePlanDraft, runChain, type CommandRunner } from "../agent/orchestrator.js";
-import type { AuthProfile } from "../domain/types.js";
+import {
+  commandRunnerAgentBridge,
+  generatePlanDraft,
+  runAgent,
+  runChain,
+  type AgentBridge,
+  type CommandRunner
+} from "../agent/orchestrator.js";
+import type { AgentRun, AuthProfile, TestCaseScenario, TestCaseStep } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
 export type BrainCreatorMcpContext = {
   repository: JsonFileBrainCreatorRepository;
   service: BrainCreatorService;
   workDir: string;
+  agentBridge?: AgentBridge;
   runner?: CommandRunner;
 };
 
 type CreateContextInput = {
   dataFilePath?: string;
   workDir?: string;
+  agentBridge?: AgentBridge;
   runner?: CommandRunner;
 };
 
@@ -31,6 +41,8 @@ export function createBrainCreatorMcpContext(
     repository,
     service: new BrainCreatorService(repository),
     workDir,
+    agentBridge:
+      input.agentBridge ?? (input.runner ? commandRunnerAgentBridge(input.runner) : undefined),
     runner: input.runner
   };
 }
@@ -66,8 +78,57 @@ export async function handleBrainCreatorTool(
             secrets: recordArg(input, "secrets")
           })
         );
+      case "bc_list_auth":
+        return textResult(context.service.listAuthProfiles(stringArg(input, "systemId")));
       case "bc_verify_auth":
         return textResult(context.service.verifyAuthProfile(stringArg(input, "id")));
+      case "bc_generate_seed":
+        return textResult(await generateSeed(context, input));
+      case "bc_add_term":
+        return textResult(
+          context.service.createGlossaryTerm({
+            projectId: stringArg(input, "projectId"),
+            key: stringArg(input, "key"),
+            zhCN: stringArg(input, "zhCN"),
+            enUS: stringArg(input, "enUS"),
+            aliases: stringArrayArg(input, "aliases"),
+            pageScope: optionalStringArg(input, "pageScope") ?? "/"
+          })
+        );
+      case "bc_list_terms":
+        return textResult(
+          context.service.listGlossaryTerms({
+            projectId: stringArg(input, "projectId"),
+            query: optionalStringArg(input, "query") ?? ""
+          })
+        );
+      case "bc_update_term":
+        return textResult(
+          context.service.updateGlossaryTerm({
+            projectId: stringArg(input, "projectId"),
+            termId: stringArg(input, "termId"),
+            key: stringArg(input, "key"),
+            zhCN: stringArg(input, "zhCN"),
+            enUS: stringArg(input, "enUS"),
+            aliases: stringArrayArg(input, "aliases"),
+            pageScope: optionalStringArg(input, "pageScope") ?? "/"
+          })
+        );
+      case "bc_delete_term":
+        return textResult(
+          context.service.deleteGlossaryTerm({
+            projectId: stringArg(input, "projectId"),
+            termId: stringArg(input, "termId")
+          })
+        );
+      case "bc_batch_confirm_terms":
+        return textResult(
+          context.service.confirmCandidateTerms({
+            caseId: stringArg(input, "caseId"),
+            confirmTermIds: stringArrayArg(input, "confirmTermIds"),
+            ignoreTermIds: stringArrayArg(input, "ignoreTermIds")
+          })
+        );
       case "bc_add_rule":
         return textResult(
           context.service.createBusinessRule({
@@ -79,12 +140,48 @@ export async function handleBrainCreatorTool(
         );
       case "bc_list_rules":
         return textResult(context.service.listBusinessRules(stringArg(input, "systemId")));
+      case "bc_delete_rule":
+        return textResult(
+          context.service.deleteBusinessRule({
+            systemId: stringArg(input, "systemId"),
+            ruleId: stringArg(input, "ruleId")
+          })
+        );
       case "bc_generate_plan":
         return textResult(await generatePlan(context, input));
+      case "bc_update_plan":
+        return textResult(
+          context.service.updateTestCaseScenarios(
+            stringArg(input, "caseId"),
+            scenarioArrayArg(input, "scenarios")
+          )
+        );
       case "bc_approve_plan":
         return textResult(context.service.approveTestCase(stringArg(input, "caseId")));
+      case "bc_run_agent":
+        return textResult(await runSingleAgent(context, input));
+      case "bc_list_agent_runs":
+        return textResult(context.service.listAgentRuns(stringArg(input, "systemId")));
       case "bc_run_chain":
         return textResult(await runApprovedChain(context, input));
+      case "bc_list_chain_runs":
+        return textResult(context.service.listChainRuns(stringArg(input, "systemId")));
+      case "bc_list_cases":
+        return textResult(context.service.listTestCases(stringArg(input, "systemId")));
+      case "bc_list_gaps":
+        return textResult(
+          context.service.listGaps({
+            projectId: stringArg(input, "projectId"),
+            status: gapStatusArg(input, "status")
+          })
+        );
+      case "bc_resolve_gap":
+        return textResult(
+          context.service.resolveGap({
+            projectId: stringArg(input, "projectId"),
+            gapId: stringArg(input, "gapId")
+          })
+        );
       case "bc_search_assets":
         return textResult(
           context.service.searchAssets({
@@ -118,7 +215,7 @@ async function generatePlan(context: BrainCreatorMcpContext, input: Record<strin
     glossaryTerms: context.service.listGlossaryTerms({ projectId: systemId, query: "" }),
     businessRules: context.service.listBusinessRules(systemId),
     specPath,
-    runner: context.runner
+    agentBridge: context.agentBridge
   });
   context.service.recordAgentRun(result.agentRun);
   const testCase = context.service.createTestCase({
@@ -143,6 +240,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     system,
     authProfile,
     testCase,
+    agentBridge: context.agentBridge,
     runner: context.runner,
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
   });
@@ -154,10 +252,61 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   return result;
 }
 
+async function generateSeed(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+  if (!system) {
+    throw new Error("Business system not found");
+  }
+  const authProfile = optionalStringArg(input, "authProfileId")
+    ? findAuthProfileById(context, systemId, optionalStringArg(input, "authProfileId")!)
+    : findAuthProfile(context, systemId);
+  return generateSeedFile({
+    outputDir: optionalStringArg(input, "outputDir") ?? join(context.workDir, "tests"),
+    system,
+    authProfile
+  });
+}
+
+async function runSingleAgent(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+  if (!system) {
+    throw new Error("Business system not found");
+  }
+  const agentRun = await runAgent({
+    systemId,
+    agent: agentArg(input, "agent"),
+    inputSummary: stringArg(input, "inputSummary"),
+    args: stringArrayArg(input, "args"),
+    outputPaths: stringArrayArg(input, "outputPaths"),
+    cwd: context.workDir,
+    timeoutMs: optionalNumberArg(input, "timeoutMs"),
+    agentBridge: context.agentBridge
+  });
+  context.service.recordAgentRun(agentRun);
+  return agentRun;
+}
+
 function findAuthProfile(context: BrainCreatorMcpContext, systemId: string): AuthProfile {
   const profile = context.repository.authProfiles.find((item) => item.projectId === systemId);
   if (!profile) {
     throw new Error("Auth profile not found");
+  }
+  return profile;
+}
+
+function findAuthProfileById(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  authProfileId: string
+): AuthProfile {
+  const profile = context.repository.authProfiles.find((item) => item.id === authProfileId);
+  if (!profile) {
+    throw new Error("Auth profile not found");
+  }
+  if (profile.projectId !== systemId) {
+    throw new Error("Auth profile belongs to another business system");
   }
   return profile;
 }
@@ -220,4 +369,78 @@ function severityArg(input: Record<string, unknown>, key: string) {
     throw new Error(`${key} is invalid`);
   }
   return value;
+}
+
+function gapStatusArg(input: Record<string, unknown>, key: string) {
+  const value = optionalStringArg(input, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value !== "open" && value !== "resolved") {
+    throw new Error(`${key} is invalid`);
+  }
+  return value;
+}
+
+function agentArg(input: Record<string, unknown>, key: string): AgentRun["agent"] {
+  const value = stringArg(input, key);
+  if (!["planner", "generator", "healer"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as AgentRun["agent"];
+}
+
+function scenarioArrayArg(input: Record<string, unknown>, key: string): TestCaseScenario[] {
+  const value = input[key];
+  if (!Array.isArray(value)) {
+    throw new Error(`${key} must be an array`);
+  }
+  return value.map((scenario, index) => {
+    if (!scenario || typeof scenario !== "object" || Array.isArray(scenario)) {
+      throw new Error(`${key}[${index}] must be an object`);
+    }
+    const record = scenario as Record<string, unknown>;
+    return {
+      id: stringArg(record, "id"),
+      title: stringArg(record, "title"),
+      priority: priorityArg(record, "priority"),
+      steps: stepArrayArg(record, "steps"),
+      businessRuleRef: optionalStringArg(record, "businessRuleRef")
+    };
+  });
+}
+
+function stepArrayArg(input: Record<string, unknown>, key: string): TestCaseStep[] {
+  const value = input[key];
+  if (!Array.isArray(value)) {
+    throw new Error(`${key} must be an array`);
+  }
+  return value.map((step, index) => {
+    if (!step || typeof step !== "object" || Array.isArray(step)) {
+      throw new Error(`${key}[${index}] must be an object`);
+    }
+    const record = step as Record<string, unknown>;
+    return {
+      action: actionArg(record, "action"),
+      target: stringArg(record, "target"),
+      value: optionalStringArg(record, "value"),
+      expected: optionalStringArg(record, "expected")
+    };
+  });
+}
+
+function priorityArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (!["critical", "high", "medium", "low"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as TestCaseScenario["priority"];
+}
+
+function actionArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (!["navigate", "fill", "click", "assert", "wait", "select"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as TestCaseStep["action"];
 }
