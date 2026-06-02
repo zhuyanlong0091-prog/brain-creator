@@ -24,6 +24,8 @@ export type BrainCreatorToolName =
   | "bc_list_agent_runs"
   | "bc_run_chain"
   | "bc_list_chain_runs"
+  | "bc_list_specs"
+  | "bc_list_tests"
   | "bc_list_cases"
   | "bc_list_gaps"
   | "bc_resolve_gap"
@@ -260,6 +262,18 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_list_chain_runs",
     title: "List chain runs",
     description: "List generator/test/healer chain runs for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
+  },
+  {
+    name: "bc_list_specs",
+    title: "List test specs",
+    description: "List generated Markdown test specs for a business system.",
+    inputSchema: z.object({ systemId: z.string() })
+  },
+  {
+    name: "bc_list_tests",
+    title: "List test files",
+    description: "List generated Playwright test files for a business system.",
     inputSchema: z.object({ systemId: z.string() })
   },
   {

@@ -145,6 +145,16 @@ describe("Brain Creator local MCP flow", () => {
         systemId: system.id
       })
     );
+    const specs = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_specs", {
+        systemId: system.id
+      })
+    );
+    const tests = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_tests", {
+        systemId: system.id
+      })
+    );
     const assets = dataOf(
       await handleBrainCreatorTool(context, "bc_search_assets", {
         projectId: system.id,
@@ -206,6 +216,12 @@ describe("Brain Creator local MCP flow", () => {
     expect(agentRuns).toEqual(expect.arrayContaining([expect.objectContaining({ id: agentRun.id })]));
     expect(run.chainRun.status).toBe("succeeded");
     expect(chainRuns).toEqual([expect.objectContaining({ id: run.chainRun.id })]);
+    expect(specs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "test-spec", path: run.chainRun.specPath })
+    ]));
+    expect(tests).toEqual([
+      expect.objectContaining({ type: "test-file", path: run.chainRun.testPath })
+    ]);
     expect(cases).toEqual([expect.objectContaining({ id: draft.testCase.id })]);
     expect(gaps).toEqual([]);
     expect(assets.map((asset: { type: string }) => asset.type)).toEqual(

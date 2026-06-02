@@ -18,6 +18,7 @@ import type {
   ProbeResult,
   RuleCheckResult,
   SystemProfile,
+  TestArtifact,
   TestCase,
   TestCaseScenario,
   TrainingSession
@@ -735,6 +736,14 @@ export class BrainCreatorService {
     return this.repository.chainRuns.filter((run) => run.systemId === systemId);
   }
 
+  listTestSpecs(systemId: string): TestArtifact[] {
+    return this.listTestArtifacts(systemId, "test-spec");
+  }
+
+  listTestFiles(systemId: string): TestArtifact[] {
+    return this.listTestArtifacts(systemId, "test-file");
+  }
+
   searchAssets(input: SearchInput): AssetSearchResult[] {
     const query = input.query.toLowerCase();
     const includes = (value: string) => value.toLowerCase().includes(query);
@@ -1059,6 +1068,62 @@ export class BrainCreatorService {
     }
     return asset;
   }
+
+  private listTestArtifacts(
+    systemId: string,
+    type: TestArtifact["type"]
+  ): TestArtifact[] {
+    const byPath = new Map<string, TestArtifact>();
+    const add = (artifact: TestArtifact) => {
+      if (!byPath.has(artifact.path)) {
+        byPath.set(artifact.path, artifact);
+      }
+    };
+
+    for (const run of this.repository.agentRuns.filter((item) => item.systemId === systemId)) {
+      run.outputPaths
+        .filter((path) => matchesArtifactType(path, type))
+        .forEach((path, index) =>
+          add({
+            id: `${type}_${run.id}_${index + 1}`,
+            systemId,
+            type,
+            path,
+            sourceType: "agent-run",
+            sourceId: run.id,
+            status: run.status,
+            createdAt: run.createdAt
+          })
+        );
+    }
+
+    for (const run of this.repository.chainRuns.filter((item) => item.systemId === systemId)) {
+      const path = type === "test-spec" ? run.specPath : run.testPath;
+      if (path) {
+        add({
+          id: `${type}_${run.id}`,
+          systemId,
+          type,
+          path,
+          sourceType: "chain-run",
+          sourceId: run.id,
+          status: run.status,
+          createdAt: run.completedAt ?? run.createdAt,
+          testCaseId: run.testCaseId
+        });
+      }
+    }
+
+    return [...byPath.values()];
+  }
+}
+
+function matchesArtifactType(path: string, type: TestArtifact["type"]) {
+  const lowerPath = path.toLowerCase();
+  if (type === "test-spec") {
+    return lowerPath.endsWith(".md") || lowerPath.endsWith(".markdown");
+  }
+  return lowerPath.endsWith(".spec.ts");
 }
 
 function assertHttpUrl(value: string, fieldName: string) {

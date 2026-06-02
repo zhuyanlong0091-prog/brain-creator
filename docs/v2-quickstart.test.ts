@@ -25,6 +25,8 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("bc_list_agent_runs");
     expect(content).toContain("bc_run_chain");
     expect(content).toContain("bc_list_chain_runs");
+    expect(content).toContain("bc_list_specs");
+    expect(content).toContain("bc_list_tests");
     expect(content).toContain("bc_list_cases");
     expect(content).toContain("bc_list_gaps");
     expect(content).toContain("bc_resolve_gap");

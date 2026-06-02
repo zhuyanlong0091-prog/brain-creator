@@ -166,6 +166,10 @@ export async function handleBrainCreatorTool(
         return textResult(await runApprovedChain(context, input));
       case "bc_list_chain_runs":
         return textResult(context.service.listChainRuns(stringArg(input, "systemId")));
+      case "bc_list_specs":
+        return textResult(context.service.listTestSpecs(stringArg(input, "systemId")));
+      case "bc_list_tests":
+        return textResult(context.service.listTestFiles(stringArg(input, "systemId")));
       case "bc_list_cases":
         return textResult(context.service.listTestCases(stringArg(input, "systemId")));
       case "bc_list_gaps":
