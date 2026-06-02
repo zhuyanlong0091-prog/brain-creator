@@ -820,6 +820,67 @@ describe("BrainCreatorService", () => {
     expect(service.listChainRuns("system-1")).toEqual([chainRun]);
   });
 
+  it("lists generated spec and test file artifacts per system", () => {
+    const service = createService();
+    service.recordAgentRun({
+      id: "agent_1",
+      systemId: "system-1",
+      agent: "planner",
+      status: "succeeded",
+      inputSummary: "Plan robot checkout",
+      outputPaths: ["specs/robot-plan.md"],
+      duration: 100,
+      logs: [],
+      createdAt: "2026-05-29T00:00:00.000Z"
+    });
+    service.recordAgentRun({
+      id: "agent_2",
+      systemId: "system-2",
+      agent: "generator",
+      status: "succeeded",
+      inputSummary: "Generate billing test",
+      outputPaths: ["tests/generated/billing.spec.ts"],
+      duration: 100,
+      logs: [],
+      createdAt: "2026-05-29T00:00:00.000Z"
+    });
+    service.recordChainRun({
+      id: "chain_1",
+      systemId: "system-1",
+      testCaseId: "case_1",
+      status: "succeeded",
+      specPath: "specs/robot-chain.md",
+      testPath: "tests/generated/robot.spec.ts",
+      gaps: [],
+      createdAt: "2026-05-29T00:00:00.000Z",
+      completedAt: "2026-05-29T00:01:00.000Z"
+    });
+
+    expect(service.listTestSpecs("system-1")).toEqual([
+      expect.objectContaining({
+        type: "test-spec",
+        path: "specs/robot-plan.md",
+        sourceType: "agent-run",
+        sourceId: "agent_1"
+      }),
+      expect.objectContaining({
+        type: "test-spec",
+        path: "specs/robot-chain.md",
+        sourceType: "chain-run",
+        sourceId: "chain_1",
+        testCaseId: "case_1"
+      })
+    ]);
+    expect(service.listTestFiles("system-1")).toEqual([
+      expect.objectContaining({
+        type: "test-file",
+        path: "tests/generated/robot.spec.ts",
+        sourceType: "chain-run",
+        sourceId: "chain_1"
+      })
+    ]);
+  });
+
   it("lists and resolves gaps per system without crossing system boundaries", () => {
     const service = createService();
     const session = service.createTrainingSession({

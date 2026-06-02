@@ -415,9 +415,25 @@ describe("handleBrainCreatorTool", () => {
         systemId: system.id
       })
     );
+    const specs = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_specs", {
+        systemId: system.id
+      })
+    );
+    const tests = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_tests", {
+        systemId: system.id
+      })
+    );
 
     expect(result.chainRun.status).toBe("succeeded");
     expect(chainRuns).toEqual([expect.objectContaining({ id: result.chainRun.id })]);
+    expect(specs).toEqual([
+      expect.objectContaining({ type: "test-spec", path: result.chainRun.specPath })
+    ]);
+    expect(tests).toEqual([
+      expect.objectContaining({ type: "test-file", path: result.chainRun.testPath })
+    ]);
     expect(context.service.listChainRuns(system.id)).toEqual([
       expect.objectContaining({ id: result.chainRun.id })
     ]);

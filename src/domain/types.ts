@@ -242,6 +242,18 @@ export type ChainRun = {
   completedAt?: string;
 };
 
+export type TestArtifact = {
+  id: string;
+  systemId: string;
+  type: "test-spec" | "test-file";
+  path: string;
+  sourceType: "agent-run" | "chain-run";
+  sourceId: string;
+  status: string;
+  createdAt: string;
+  testCaseId?: string;
+};
+
 export type AssetSearchResult = {
   id: string;
   type: AssetType;
