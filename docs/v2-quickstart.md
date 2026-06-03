@@ -27,6 +27,7 @@ Claude Code integration is declared in:
 
 - `.claude/settings.json` for the Brain Creator MCP server.
 - `.mcp.json` for Brain Creator and Playwright Test MCP servers.
+- `.claude/skills/brain-creator/SKILL.md` for the Claude Code project-level one-sentence Brain Creator entrypoint.
 - `skills/bc-*` for tool-oriented Brain Creator workflows.
 
 Playwright agent prompts and agent definitions are generated under `.claude/agents` and `.claude/prompts`.
@@ -42,7 +43,7 @@ For local MCP usage, configure a Claude subprocess bridge:
 
 ```bash
 BRAIN_CREATOR_AGENT_COMMAND=claude
-BRAIN_CREATOR_AGENT_ARGS='["--print"]'
+BRAIN_CREATOR_AGENT_ARGS='["--print","--permission-mode","acceptEdits"]'
 BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
 
@@ -214,6 +215,30 @@ Run it with:
 npm test -- src/mcp/localFlow.test.ts
 ```
 
+To verify a live Claude subprocess bridge can dispatch all three Brain Creator agents, run:
+
+```bash
+npm run verify:live-claude-chain
+```
+
+This smoke command calls planner -> generator -> healer through the same Claude subprocess bridge used by `bc_run_agent`, without creating generated test files. On Windows npm installs, the bridge resolves `claude.cmd` from PATH and runs it through a shell so stdin is preserved.
+
+To verify live Claude agent outputs can become runnable Brain Creator artifacts, run:
+
+```bash
+npm run verify:live-agent-artifacts
+```
+
+This artifact smoke writes a Planner spec artifact, writes and runs a Generator Playwright test, then repairs a controlled failing test through Healer and reruns it. Set `BRAIN_CREATOR_KEEP_LIVE_ARTIFACTS=1` to keep the temporary evidence directory for manual inspection.
+
+To verify a one-sentence Agent-native request can drive the Brain Creator MCP flow, run:
+
+```bash
+npm run verify:live-mcp-workflow
+```
+
+This smoke creates a live demo system from one-sentence intent, then calls `bc_generate_plan`, `bc_approve_plan`, and `bc_run_chain` with the real Claude bridge. It verifies recorded spec/test artifacts through Brain Creator asset tools.
+
 ## Generated Files
 
 Playwright initialization creates:
@@ -229,7 +254,7 @@ Brain Creator runtime files are written under `.brain-creator/` by default. Plan
 ## Known Limits
 
 - The current MVP is local-first and uses JSON persistence.
-- `bc_generate_plan` and `bc_run_chain` are tested with mockable and subprocess AgentBridge implementations; full Claude Code subagent validation in a live Claude Code session is still a follow-up.
+- `bc_generate_plan` and `bc_run_chain` are tested with mockable and subprocess AgentBridge implementations; `npm run verify:live-claude-chain` is the local live Claude bridge gate for planner -> generator -> healer dispatch.
 - The current Playwright CLI does not expose `playwright agent`; `npx playwright init-agents` generates Claude agent definitions and prompts, so Planner/Generator/Healer execution should use the Claude subprocess bridge rather than a Playwright CLI placeholder.
 - The Healer loop is bounded and creates a Gap when it cannot fix a failing generated test.
 - No Web UI is included in v2.

@@ -38,7 +38,51 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("npx tsc --noEmit");
     expect(content).toContain("Known Limits");
     expect(content).toContain("AgentBridge");
+    expect(content).toContain(".claude/skills/brain-creator/SKILL.md");
     expect(content).toContain("current Playwright CLI does not expose `playwright agent`");
     expect(content).toContain("Claude subagent bridge required");
+  });
+
+  it("documents the live Claude planner/generator/healer chain smoke command", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.scripts["verify:live-claude-chain"]).toContain(
+      "scripts/liveClaudeChainSmoke.ts"
+    );
+    expect(content).toContain("npm run verify:live-claude-chain");
+    expect(content).toContain("planner -> generator -> healer");
+    expect(content).not.toContain(
+      "full Claude Code subagent validation in a live Claude Code session is still a follow-up"
+    );
+  });
+
+  it("documents the live Claude artifact smoke command", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.scripts["verify:live-agent-artifacts"]).toContain(
+      "scripts/liveAgentArtifactSmoke.ts"
+    );
+    expect(content).toContain("npm run verify:live-agent-artifacts");
+    expect(content).toContain("writes a Planner spec artifact");
+    expect(content).toContain("writes and runs a Generator Playwright test");
+    expect(content).toContain("repairs a controlled failing test through Healer");
+  });
+
+  it("documents the live MCP workflow smoke command for one-sentence agent usage", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.scripts["verify:live-mcp-workflow"]).toContain(
+      "scripts/liveMcpWorkflowSmoke.ts"
+    );
+    expect(content).toContain("npm run verify:live-mcp-workflow");
+    expect(content).toContain("one-sentence");
+    expect(content).toContain("bc_generate_plan");
+    expect(content).toContain("bc_approve_plan");
+    expect(content).toContain("bc_run_chain");
+    expect(content).toContain("--permission-mode");
+    expect(content).toContain("acceptEdits");
   });
 });
