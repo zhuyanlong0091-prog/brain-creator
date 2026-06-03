@@ -1,10 +1,11 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { createClaudeSubagentBridge } from "../src/agent/claudeBridge.js";
+import { extractMarkdown, extractTypeScript } from "../src/agent/liveSmokeOutput.js";
 import { spawnCommand } from "../src/agent/orchestrator.js";
 import type { AgentBridgeInput } from "../src/agent/orchestrator.js";
 
-const timeoutMs = Number(process.env.BRAIN_CREATOR_AGENT_TIMEOUT_MS ?? 180000);
+const timeoutMs = Number(process.env.BRAIN_CREATOR_AGENT_TIMEOUT_MS ?? 300000);
 const keepArtifacts = process.env.BRAIN_CREATOR_KEEP_LIVE_ARTIFACTS === "1";
 const generatedRoot = join(process.cwd(), "tests", "generated");
 await mkdir(generatedRoot, { recursive: true });
@@ -16,7 +17,11 @@ await mkdir(testsDir, { recursive: true });
 
 const bridge = createClaudeSubagentBridge({
   command: process.env.BRAIN_CREATOR_AGENT_COMMAND,
-  baseArgs: parseArgs(process.env.BRAIN_CREATOR_AGENT_ARGS),
+  baseArgs: parseArgs(process.env.BRAIN_CREATOR_AGENT_ARGS) ?? [
+    "--print",
+    "--permission-mode",
+    "acceptEdits"
+  ],
   timeoutMs
 });
 
@@ -28,12 +33,12 @@ try {
     inputSummary:
       "Live artifact smoke. Return the Markdown content in stdout only. Do not ask permission. Do not create or edit files. Include the exact text 'Brain Creator Live Planner Artifact' and one scenario that validates 'Order total: 42'."
   });
-  await writeFile(specPath, asMarkdown(plannerOutput), "utf8");
+  await writeFile(specPath, extractMarkdown(plannerOutput), "utf8");
   const specContent = await readFile(specPath, "utf8");
   assertIncludes(specContent, "Brain Creator Live Planner Artifact", "planner spec marker");
 
   const generatedTestPath = join(testsDir, "live-generator.spec.ts");
-  const generatorOutput = await runLiveAgent({
+  const generatorOutput = await runCodeAgent({
     agent: "generator",
     inputSummary: [
       "Live artifact smoke. Return only a complete TypeScript Playwright test file.",
@@ -48,7 +53,7 @@ try {
       specContent
     ].join("\n")
   });
-  await writeFile(generatedTestPath, extractTypeScript(generatorOutput), "utf8");
+  await writeFile(generatedTestPath, generatorOutput, "utf8");
   await runPlaywright(generatedTestPath, "generator Playwright test");
 
   const brokenTestPath = join(testsDir, "live-healer.spec.ts");
@@ -65,7 +70,7 @@ try {
     ].join("\n"),
     "utf8"
   );
-  const healerOutput = await runLiveAgent({
+  const healerOutput = await runCodeAgent({
     agent: "healer",
     inputSummary: [
       "Live artifact smoke. Return only a complete repaired TypeScript Playwright test file.",
@@ -79,7 +84,7 @@ try {
       await readFile(brokenTestPath, "utf8")
     ].join("\n")
   });
-  await writeFile(brokenTestPath, extractTypeScript(healerOutput), "utf8");
+  await writeFile(brokenTestPath, healerOutput, "utf8");
   await runPlaywright(brokenTestPath, "healer repaired Playwright test");
 
   console.log("Live Agent artifact smoke passed.");
@@ -110,6 +115,30 @@ async function runLiveAgent(input: Pick<AgentBridgeInput, "agent" | "inputSummar
   return output;
 }
 
+async function runCodeAgent(input: Pick<AgentBridgeInput, "agent" | "inputSummary">) {
+  let output = await runLiveAgent(input);
+  try {
+    return extractTypeScript(output);
+  } catch (firstError) {
+    output = await runLiveAgent({
+      agent: input.agent,
+      inputSummary: [
+        "Your previous response was not a raw TypeScript Playwright test file.",
+        "Return only code. The first line must be:",
+        "import { test, expect } from '@playwright/test';",
+        "The test must assert 'Order total: 42'.",
+        "",
+        "Original task:",
+        input.inputSummary,
+        "",
+        "Previous invalid response:",
+        firstError instanceof Error ? firstError.message : String(firstError)
+      ].join("\n")
+    });
+    return extractTypeScript(output);
+  }
+}
+
 async function runPlaywright(testPath: string, label: string) {
   const testRunPath = relative(process.cwd(), testPath).replace(/\\/g, "/");
   const result = await spawnCommand("npx", ["playwright", "test", testRunPath], {
@@ -120,19 +149,6 @@ async function runPlaywright(testPath: string, label: string) {
     throw new Error(`${label} failed\n${result.stdout}\n${result.stderr}`);
   }
   console.log(`[playwright] ${label} passed`);
-}
-
-function extractTypeScript(output: string) {
-  const fenced = output.match(/```(?:ts|typescript)?\s*([\s\S]*?)```/i)?.[1];
-  const source = (fenced ?? output).trim();
-  assertIncludes(source, "@playwright/test", "Playwright import");
-  assertIncludes(source, "Order total: 42", "order total assertion");
-  return `${source}\n`;
-}
-
-function asMarkdown(output: string) {
-  const fenced = output.match(/```(?:md|markdown)?\s*([\s\S]*?)```/i)?.[1];
-  return `${(fenced ?? output).trim()}\n`;
 }
 
 function assertIncludes(content: string, expected: string, label: string) {

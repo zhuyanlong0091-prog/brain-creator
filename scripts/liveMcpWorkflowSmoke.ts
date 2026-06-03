@@ -5,7 +5,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createClaudeSubagentBridge } from "../src/agent/claudeBridge.js";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "../src/mcp/handlers.js";
 
-const timeoutMs = Number(process.env.BRAIN_CREATOR_AGENT_TIMEOUT_MS ?? 180000);
+const timeoutMs = Number(process.env.BRAIN_CREATOR_AGENT_TIMEOUT_MS ?? 300000);
 const keepArtifacts = process.env.BRAIN_CREATOR_KEEP_LIVE_ARTIFACTS === "1";
 const rootDir = process.cwd();
 const dataDir = await mkdtemp(join(rootDir, ".brain-creator-test", "live-mcp-workflow-"));
