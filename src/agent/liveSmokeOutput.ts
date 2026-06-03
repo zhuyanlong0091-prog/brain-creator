@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 export function extractTypeScript(output: string) {
   const fenced = output.match(/```(?:ts|typescript)?\s*([\s\S]*?)```/i)?.[1];
   const candidate = fenced ?? fromFirstImport(output);
@@ -8,6 +10,14 @@ export function extractTypeScript(output: string) {
   assertIncludes(source, "@playwright/test", "Playwright import");
   assertIncludes(source, "Order total: 42", "order total assertion");
   return `${source}\n`;
+}
+
+export async function extractTypeScriptArtifact(output: string, outputPath: string) {
+  try {
+    return extractTypeScript(await readFile(outputPath, "utf8"));
+  } catch {
+    return extractTypeScript(output);
+  }
 }
 
 export function extractMarkdown(output: string) {

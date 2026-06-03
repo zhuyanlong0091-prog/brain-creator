@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { createClaudeSubagentBridge } from "../src/agent/claudeBridge.js";
-import { extractMarkdown, extractTypeScript } from "../src/agent/liveSmokeOutput.js";
+import { extractMarkdown, extractTypeScriptArtifact } from "../src/agent/liveSmokeOutput.js";
 import { spawnCommand } from "../src/agent/orchestrator.js";
 import type { AgentBridgeInput } from "../src/agent/orchestrator.js";
 
@@ -40,11 +40,11 @@ try {
   const generatedTestPath = join(testsDir, "live-generator.spec.ts");
   const generatorOutput = await runCodeAgent({
     agent: "generator",
+    outputPath: generatedTestPath,
     inputSummary: [
-      "Live artifact smoke. Return only a complete TypeScript Playwright test file.",
-      "Return the TypeScript content in stdout only. Do not ask permission. Do not create or edit files.",
-      "Do not return an outline, explanation, checklist, or markdown prose.",
-      "The first non-empty line must be: import { test, expect } from '@playwright/test';",
+      "Live artifact smoke. Write a complete TypeScript Playwright test file to the expected output path.",
+      "Do not ask permission. Do not return an outline, explanation, checklist, or markdown prose instead of writing the file.",
+      "The first line of the file must be: import { test, expect } from '@playwright/test';",
       "The test must import { test, expect } from '@playwright/test'.",
       "The test must navigate to data:text/html,<h1>Brain Creator Live</h1><p>Order total: 42</p>.",
       "The test must assert that 'Brain Creator Live' and 'Order total: 42' are visible.",
@@ -72,11 +72,11 @@ try {
   );
   const healerOutput = await runCodeAgent({
     agent: "healer",
+    outputPath: brokenTestPath,
     inputSummary: [
-      "Live artifact smoke. Return only a complete repaired TypeScript Playwright test file.",
-      "Return the repaired TypeScript content in stdout only. Do not ask permission. Do not create or edit files.",
-      "Do not return an outline, explanation, checklist, or markdown prose.",
-      "The first non-empty line must be: import { test, expect } from '@playwright/test';",
+      "Live artifact smoke. Rewrite the failing test at the expected output path with a complete repaired TypeScript Playwright test file.",
+      "Do not ask permission. Do not return an outline, explanation, checklist, or markdown prose instead of writing the file.",
+      "The first line of the file must be: import { test, expect } from '@playwright/test';",
       "The original test fails because it asserts 'Missing Total'.",
       "Repair the assertion to validate the visible text 'Order total: 42'.",
       "",
@@ -97,13 +97,13 @@ try {
   }
 }
 
-async function runLiveAgent(input: Pick<AgentBridgeInput, "agent" | "inputSummary">) {
+async function runLiveAgent(input: Pick<AgentBridgeInput, "agent" | "inputSummary"> & Partial<Pick<AgentBridgeInput, "args" | "outputPaths">>) {
   const result = await bridge({
     systemId: "live-agent-artifact-smoke",
     agent: input.agent,
     inputSummary: input.inputSummary,
-    args: [],
-    outputPaths: [],
+    args: input.args ?? [],
+    outputPaths: input.outputPaths ?? [],
     cwd: process.cwd(),
     timeoutMs
   });
@@ -115,16 +115,22 @@ async function runLiveAgent(input: Pick<AgentBridgeInput, "agent" | "inputSummar
   return output;
 }
 
-async function runCodeAgent(input: Pick<AgentBridgeInput, "agent" | "inputSummary">) {
-  let output = await runLiveAgent(input);
+async function runCodeAgent(input: Pick<AgentBridgeInput, "agent" | "inputSummary"> & { outputPath: string }) {
+  let output = await runLiveAgent({
+    ...input,
+    args: ["--output", input.outputPath],
+    outputPaths: [input.outputPath]
+  });
   try {
-    return extractTypeScript(output);
+    return await extractTypeScriptArtifact(output, input.outputPath);
   } catch (firstError) {
     output = await runLiveAgent({
       agent: input.agent,
+      args: ["--output", input.outputPath],
+      outputPaths: [input.outputPath],
       inputSummary: [
-        "Your previous response was not a raw TypeScript Playwright test file.",
-        "Return only code. The first line must be:",
+        "Your previous response did not produce a readable TypeScript Playwright test at the expected output path.",
+        "Write the complete file to the expected output path now. The first line must be:",
         "import { test, expect } from '@playwright/test';",
         "The test must assert 'Order total: 42'.",
         "",
@@ -135,7 +141,7 @@ async function runCodeAgent(input: Pick<AgentBridgeInput, "agent" | "inputSummar
         firstError instanceof Error ? firstError.message : String(firstError)
       ].join("\n")
     });
-    return extractTypeScript(output);
+    return await extractTypeScriptArtifact(output, input.outputPath);
   }
 }
 
