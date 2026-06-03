@@ -214,6 +214,14 @@ Run it with:
 npm test -- src/mcp/localFlow.test.ts
 ```
 
+To verify a live Claude subprocess bridge can dispatch all three Brain Creator agents, run:
+
+```bash
+npm run verify:live-claude-chain
+```
+
+This smoke command calls planner -> generator -> healer through the same Claude subprocess bridge used by `bc_run_agent`, without creating generated test files. On Windows npm installs, the bridge resolves `claude.cmd` from PATH and runs it through a shell so stdin is preserved.
+
 ## Generated Files
 
 Playwright initialization creates:
@@ -229,7 +237,7 @@ Brain Creator runtime files are written under `.brain-creator/` by default. Plan
 ## Known Limits
 
 - The current MVP is local-first and uses JSON persistence.
-- `bc_generate_plan` and `bc_run_chain` are tested with mockable and subprocess AgentBridge implementations; full Claude Code subagent validation in a live Claude Code session is still a follow-up.
+- `bc_generate_plan` and `bc_run_chain` are tested with mockable and subprocess AgentBridge implementations; `npm run verify:live-claude-chain` is the local live Claude bridge gate for planner -> generator -> healer dispatch.
 - The current Playwright CLI does not expose `playwright agent`; `npx playwright init-agents` generates Claude agent definitions and prompts, so Planner/Generator/Healer execution should use the Claude subprocess bridge rather than a Playwright CLI placeholder.
 - The Healer loop is bounded and creates a Gap when it cannot fix a failing generated test.
 - No Web UI is included in v2.

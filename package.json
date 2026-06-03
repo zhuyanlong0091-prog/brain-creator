@@ -6,7 +6,8 @@
   "scripts": {
     "test": "vitest run",
     "mcp": "node --loader ts-node/esm src/mcp/server.ts",
-    "init-agents": "npx playwright init-agents --loop=claude"
+    "init-agents": "npx playwright init-agents --loop=claude",
+    "verify:live-claude-chain": "node --loader ts-node/esm scripts/liveClaudeChainSmoke.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

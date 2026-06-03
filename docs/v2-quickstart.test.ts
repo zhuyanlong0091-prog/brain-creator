@@ -41,4 +41,18 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("current Playwright CLI does not expose `playwright agent`");
     expect(content).toContain("Claude subagent bridge required");
   });
+
+  it("documents the live Claude planner/generator/healer chain smoke command", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.scripts["verify:live-claude-chain"]).toContain(
+      "scripts/liveClaudeChainSmoke.ts"
+    );
+    expect(content).toContain("npm run verify:live-claude-chain");
+    expect(content).toContain("planner -> generator -> healer");
+    expect(content).not.toContain(
+      "full Claude Code subagent validation in a live Claude Code session is still a follow-up"
+    );
+  });
 });

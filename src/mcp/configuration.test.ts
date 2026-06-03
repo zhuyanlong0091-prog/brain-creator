@@ -1,7 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
-const skillNames = ["bc-system", "bc-auth", "bc-rules", "bc-plan", "bc-run", "bc-assets"];
+const skillNames = [
+  "brain-creator",
+  "bc-system",
+  "bc-auth",
+  "bc-rules",
+  "bc-plan",
+  "bc-run",
+  "bc-assets"
+];
 
 describe("Brain Creator local integration files", () => {
   it("defines Claude Code MCP server settings for Brain Creator", async () => {
@@ -29,6 +37,20 @@ describe("Brain Creator local integration files", () => {
       expect(content).toContain("MCP");
       expect(content).toMatch(/bc_[a-z_]+/);
     }
+  });
+
+  it("defines a one-sentence Brain Creator workflow entrypoint for agent clients", async () => {
+    const content = await readFile("skills/brain-creator/SKILL.md", "utf8");
+
+    expect(content).toContain("one-sentence");
+    expect(content).toContain("bc_list_systems");
+    expect(content).toContain("bc_create_system");
+    expect(content).toContain("bc_generate_plan");
+    expect(content).toContain("bc_approve_plan");
+    expect(content).toContain("bc_run_chain");
+    expect(content).toContain("bc_artifact_overview");
+    expect(content).toContain("bc_list_gaps");
+    expect(content).toContain("Do not create or prioritize a Web UI");
   });
 
   it("keeps Playwright agent definitions and default seed file available", async () => {

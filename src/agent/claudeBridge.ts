@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { delimiter, extname, join } from "node:path";
 import type { AgentBridge, AgentBridgeInput, CommandResult } from "./orchestrator.js";
 
 type ClaudeSubagentBridgeOptions = {
@@ -49,8 +51,10 @@ function runClaudeSubagent(input: {
   timeoutMs?: number;
 }): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(input.command, input.args, {
-      cwd: input.cwd
+    const command = resolveCommand(input.command);
+    const child = spawn(command.path, input.args, {
+      cwd: input.cwd,
+      shell: command.shell
     });
     let stdout = "";
     let stderr = "";
@@ -77,4 +81,41 @@ function runClaudeSubagent(input: {
     });
     child.stdin.end(input.stdin);
   });
+}
+
+function resolveCommand(command: string) {
+  if (process.platform !== "win32") {
+    return { path: command, shell: false };
+  }
+  const resolved = hasPathSegment(command) ? command : resolveFromPath(command);
+  return {
+    path: resolved,
+    shell: isWindowsShellCommand(resolved)
+  };
+}
+
+function resolveFromPath(command: string) {
+  const extensions = command.includes(".") ? [""] : windowsPathExtensions();
+  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    for (const extension of extensions) {
+      const candidate = join(dir, `${command}${extension}`);
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return command;
+}
+
+function windowsPathExtensions() {
+  const raw = process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD;.PS1";
+  return raw.split(";").filter(Boolean).map((extension) => extension.toLowerCase());
+}
+
+function hasPathSegment(command: string) {
+  return command.includes("/") || command.includes("\\");
+}
+
+function isWindowsShellCommand(command: string) {
+  return [".cmd", ".bat", ".ps1"].includes(extname(command).toLowerCase());
 }
