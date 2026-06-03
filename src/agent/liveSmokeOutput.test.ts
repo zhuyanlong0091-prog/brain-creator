@@ -1,0 +1,48 @@
+import { describe, expect, it } from "vitest";
+import { extractMarkdown, extractTypeScript } from "./liveSmokeOutput.js";
+
+describe("live smoke output parsing", () => {
+  it("extracts TypeScript from fenced code", () => {
+    const output = [
+      "Here is the file:",
+      "```ts",
+      "import { test, expect } from '@playwright/test';",
+      "test('order total', async ({ page }) => {",
+      "  await expect(page.getByText('Order total: 42')).toBeVisible();",
+      "});",
+      "```"
+    ].join("\n");
+
+    expect(extractTypeScript(output)).toContain("import { test, expect } from '@playwright/test';");
+  });
+
+  it("extracts TypeScript from the first import line and discards surrounding prose", () => {
+    const output = [
+      "The generator created a test.",
+      "import { test, expect } from '@playwright/test';",
+      "test('order total', async ({ page }) => {",
+      "  await expect(page.getByText('Order total: 42')).toBeVisible();",
+      "});",
+      "Done."
+    ].join("\n");
+
+    const source = extractTypeScript(output);
+
+    expect(source.startsWith("import { test, expect } from '@playwright/test';")).toBe(true);
+    expect(source).not.toContain("The generator created a test.");
+  });
+
+  it("rejects prose that merely mentions Playwright without returning a test file", () => {
+    const output = [
+      "The playwright-test-generator successfully created the complete TypeScript Playwright test file.",
+      "- Imports `test` and `expect` from `@playwright/test`",
+      "- Asserts `Order total: 42`"
+    ].join("\n");
+
+    expect(() => extractTypeScript(output)).toThrow("No TypeScript Playwright source found");
+  });
+
+  it("extracts Markdown from fenced markdown", () => {
+    expect(extractMarkdown("```markdown\n# Brain Creator\n```")).toBe("# Brain Creator\n");
+  });
+});

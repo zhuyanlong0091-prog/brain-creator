@@ -54,6 +54,7 @@ describe("createClaudeSubagentBridge", () => {
     expect(transcript).toContain(`--output ${specPath}`);
     expect(transcript).toContain("non-interactive");
     expect(transcript).toContain("## Scenario:");
+    expect(transcript).toContain("skip browser exploration");
     expect(await readFile(specPath, "utf8")).toContain("Robot checkout");
   });
 

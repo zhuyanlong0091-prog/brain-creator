@@ -54,6 +54,7 @@ function agentInstructions(agent: AgentBridgeInput["agent"]) {
   if (agent === "planner") {
     return [
       "- Planner output must be Markdown in Brain Creator's parser format.",
+      "- If the task provides exact Brain Creator parser format or enough deterministic evidence, skip browser exploration and write the parser spec directly.",
       "- Use one or more headings exactly like `## Scenario: Scenario title`.",
       "- Include `Priority: critical|high|medium|low` after each scenario heading.",
       "- Write steps as `- navigate: ...`, `- fill: target = value`, `- click: ...`, or `- assert: target => expected`."
