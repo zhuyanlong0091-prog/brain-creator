@@ -85,4 +85,17 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("--permission-mode");
     expect(content).toContain("acceptEdits");
   });
+
+  it("documents the live Claude Code skill workflow command", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.scripts["verify:live-claude-skill-workflow"]).toContain(
+      "scripts/liveClaudeSkillWorkflowSmoke.ts"
+    );
+    expect(content).toContain("npm run verify:live-claude-skill-workflow");
+    expect(content).toContain("Claude Code session");
+    expect(content).toContain("Skill(\"brain-creator\")");
+    expect(content).toContain("bc_run_chain");
+  });
 });
