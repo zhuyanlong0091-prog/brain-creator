@@ -239,6 +239,14 @@ npm run verify:live-mcp-workflow
 
 This smoke creates a live demo system from one-sentence intent, then calls `bc_generate_plan`, `bc_approve_plan`, and `bc_run_chain` with the real Claude bridge. It verifies recorded spec/test artifacts through Brain Creator asset tools.
 
+To verify a real Claude Code session can load `Skill("brain-creator")` and select Brain Creator MCP tools from one sentence, run:
+
+```bash
+npm run verify:live-claude-skill-workflow
+```
+
+This starts a local fixture page, launches Claude Code in print mode, invokes the project skill, and asserts that the session calls `bc_create_system`, `bc_generate_plan`, `bc_approve_plan`, `bc_run_chain`, and artifact overview tools.
+
 ## Generated Files
 
 Playwright initialization creates:

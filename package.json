@@ -9,7 +9,8 @@
     "init-agents": "npx playwright init-agents --loop=claude",
     "verify:live-claude-chain": "node --loader ts-node/esm scripts/liveClaudeChainSmoke.ts",
     "verify:live-agent-artifacts": "node --loader ts-node/esm scripts/liveAgentArtifactSmoke.ts",
-    "verify:live-mcp-workflow": "node --loader ts-node/esm scripts/liveMcpWorkflowSmoke.ts"
+    "verify:live-mcp-workflow": "node --loader ts-node/esm scripts/liveMcpWorkflowSmoke.ts",
+    "verify:live-claude-skill-workflow": "node --loader ts-node/esm scripts/liveClaudeSkillWorkflowSmoke.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
