@@ -55,4 +55,17 @@ describe("v2 quickstart documentation", () => {
       "full Claude Code subagent validation in a live Claude Code session is still a follow-up"
     );
   });
+
+  it("documents the live Claude artifact smoke command", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.scripts["verify:live-agent-artifacts"]).toContain(
+      "scripts/liveAgentArtifactSmoke.ts"
+    );
+    expect(content).toContain("npm run verify:live-agent-artifacts");
+    expect(content).toContain("writes a Planner spec artifact");
+    expect(content).toContain("writes and runs a Generator Playwright test");
+    expect(content).toContain("repairs a controlled failing test through Healer");
+  });
 });

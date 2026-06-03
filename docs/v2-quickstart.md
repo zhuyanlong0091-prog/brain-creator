@@ -222,6 +222,14 @@ npm run verify:live-claude-chain
 
 This smoke command calls planner -> generator -> healer through the same Claude subprocess bridge used by `bc_run_agent`, without creating generated test files. On Windows npm installs, the bridge resolves `claude.cmd` from PATH and runs it through a shell so stdin is preserved.
 
+To verify live Claude agent outputs can become runnable Brain Creator artifacts, run:
+
+```bash
+npm run verify:live-agent-artifacts
+```
+
+This artifact smoke writes a Planner spec artifact, writes and runs a Generator Playwright test, then repairs a controlled failing test through Healer and reruns it. Set `BRAIN_CREATOR_KEEP_LIVE_ARTIFACTS=1` to keep the temporary evidence directory for manual inspection.
+
 ## Generated Files
 
 Playwright initialization creates:
