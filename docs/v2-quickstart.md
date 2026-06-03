@@ -27,6 +27,7 @@ Claude Code integration is declared in:
 
 - `.claude/settings.json` for the Brain Creator MCP server.
 - `.mcp.json` for Brain Creator and Playwright Test MCP servers.
+- `.claude/skills/brain-creator/SKILL.md` for the Claude Code project-level one-sentence Brain Creator entrypoint.
 - `skills/bc-*` for tool-oriented Brain Creator workflows.
 
 Playwright agent prompts and agent definitions are generated under `.claude/agents` and `.claude/prompts`.

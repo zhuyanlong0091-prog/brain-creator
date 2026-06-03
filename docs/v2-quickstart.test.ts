@@ -38,6 +38,7 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("npx tsc --noEmit");
     expect(content).toContain("Known Limits");
     expect(content).toContain("AgentBridge");
+    expect(content).toContain(".claude/skills/brain-creator/SKILL.md");
     expect(content).toContain("current Playwright CLI does not expose `playwright agent`");
     expect(content).toContain("Claude subagent bridge required");
   });

@@ -53,6 +53,15 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("Do not create or prioritize a Web UI");
   });
 
+  it("registers the Brain Creator entrypoint as a Claude Code project skill", async () => {
+    const canonical = await readFile("skills/brain-creator/SKILL.md", "utf8");
+    const claudeSkill = await readFile(".claude/skills/brain-creator/SKILL.md", "utf8");
+
+    expect(claudeSkill).toBe(canonical);
+    expect(claudeSkill).toContain("one-sentence");
+    expect(claudeSkill).toContain("bc_run_chain");
+  });
+
   it("keeps Playwright agent definitions and default seed file available", async () => {
     const planner = await readFile(".claude/agents/playwright-test-planner.md", "utf8");
     const generator = await readFile(".claude/agents/playwright-test-generator.md", "utf8");
