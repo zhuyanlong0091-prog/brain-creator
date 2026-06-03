@@ -32,6 +32,13 @@ function buildSubagentPrompt(input: AgentBridgeInput) {
   return [
     `Call #${agentNames[input.agent]} subagent.`,
     "",
+    "Execution contract:",
+    "- This is a non-interactive Brain Creator run.",
+    "- Do not ask the user for permission or clarification.",
+    "- If an expected output path is listed, create or overwrite that file directly.",
+    "- Keep secrets out of stdout and summaries.",
+    ...agentInstructions(input.agent),
+    "",
     `System id: ${input.systemId}`,
     `Task: ${input.inputSummary}`,
     "",
@@ -41,6 +48,32 @@ function buildSubagentPrompt(input: AgentBridgeInput) {
     "Expected output paths:",
     input.outputPaths.length > 0 ? input.outputPaths.join("\n") : "(none)"
   ].join("\n");
+}
+
+function agentInstructions(agent: AgentBridgeInput["agent"]) {
+  if (agent === "planner") {
+    return [
+      "- Planner output must be Markdown in Brain Creator's parser format.",
+      "- Use one or more headings exactly like `## Scenario: Scenario title`.",
+      "- Include `Priority: critical|high|medium|low` after each scenario heading.",
+      "- Write steps as `- navigate: ...`, `- fill: target = value`, `- click: ...`, or `- assert: target => expected`."
+    ];
+  }
+  if (agent === "generator") {
+    return [
+      "- Generator output must be a complete TypeScript Playwright test file.",
+      "- Import from `@playwright/test`.",
+      "- Read the `--spec` and `--seed` argument files when present.",
+      "- Write the file to the `--output` path.",
+      "- The generated test must be runnable by `npx playwright test`."
+    ];
+  }
+  return [
+    "- Healer output must repair the failing Playwright test in place.",
+    "- Read the `--test` argument file and the `--error` details.",
+    "- Edit or rewrite the test file so `npx playwright test` can pass.",
+    "- If the application behavior truly contradicts the test intent, make the smallest safe test fix and explain it in stdout."
+  ];
 }
 
 function runClaudeSubagent(input: {

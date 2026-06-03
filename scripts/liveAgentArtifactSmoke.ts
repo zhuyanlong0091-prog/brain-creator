@@ -4,7 +4,7 @@ import { createClaudeSubagentBridge } from "../src/agent/claudeBridge.js";
 import { spawnCommand } from "../src/agent/orchestrator.js";
 import type { AgentBridgeInput } from "../src/agent/orchestrator.js";
 
-const timeoutMs = Number(process.env.BRAIN_CREATOR_AGENT_TIMEOUT_MS ?? 120000);
+const timeoutMs = Number(process.env.BRAIN_CREATOR_AGENT_TIMEOUT_MS ?? 180000);
 const keepArtifacts = process.env.BRAIN_CREATOR_KEEP_LIVE_ARTIFACTS === "1";
 const generatedRoot = join(process.cwd(), "tests", "generated");
 await mkdir(generatedRoot, { recursive: true });

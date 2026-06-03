@@ -42,7 +42,7 @@ For local MCP usage, configure a Claude subprocess bridge:
 
 ```bash
 BRAIN_CREATOR_AGENT_COMMAND=claude
-BRAIN_CREATOR_AGENT_ARGS='["--print"]'
+BRAIN_CREATOR_AGENT_ARGS='["--print","--permission-mode","acceptEdits"]'
 BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
 
@@ -229,6 +229,14 @@ npm run verify:live-agent-artifacts
 ```
 
 This artifact smoke writes a Planner spec artifact, writes and runs a Generator Playwright test, then repairs a controlled failing test through Healer and reruns it. Set `BRAIN_CREATOR_KEEP_LIVE_ARTIFACTS=1` to keep the temporary evidence directory for manual inspection.
+
+To verify a one-sentence Agent-native request can drive the Brain Creator MCP flow, run:
+
+```bash
+npm run verify:live-mcp-workflow
+```
+
+This smoke creates a live demo system from one-sentence intent, then calls `bc_generate_plan`, `bc_approve_plan`, and `bc_run_chain` with the real Claude bridge. It verifies recorded spec/test artifacts through Brain Creator asset tools.
 
 ## Generated Files
 

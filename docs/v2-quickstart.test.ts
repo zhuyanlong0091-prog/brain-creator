@@ -68,4 +68,20 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("writes and runs a Generator Playwright test");
     expect(content).toContain("repairs a controlled failing test through Healer");
   });
+
+  it("documents the live MCP workflow smoke command for one-sentence agent usage", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.scripts["verify:live-mcp-workflow"]).toContain(
+      "scripts/liveMcpWorkflowSmoke.ts"
+    );
+    expect(content).toContain("npm run verify:live-mcp-workflow");
+    expect(content).toContain("one-sentence");
+    expect(content).toContain("bc_generate_plan");
+    expect(content).toContain("bc_approve_plan");
+    expect(content).toContain("bc_run_chain");
+    expect(content).toContain("--permission-mode");
+    expect(content).toContain("acceptEdits");
+  });
 });

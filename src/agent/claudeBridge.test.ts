@@ -52,6 +52,8 @@ describe("createClaudeSubagentBridge", () => {
     expect(transcript).toContain("#playwright-test-planner");
     expect(transcript).toContain("Plan robot checkout");
     expect(transcript).toContain(`--output ${specPath}`);
+    expect(transcript).toContain("non-interactive");
+    expect(transcript).toContain("## Scenario:");
     expect(await readFile(specPath, "utf8")).toContain("Robot checkout");
   });
 
@@ -154,6 +156,44 @@ describe("createClaudeSubagentBridge", () => {
     } finally {
       process.env.PATH = previousPath;
     }
+  });
+
+  it("adds generator-specific instructions for writing runnable Playwright files", async () => {
+    const workDir = await tempDir();
+    const scriptPath = join(workDir, "generator-prompt-fixture.mjs");
+    const transcriptPath = join(workDir, "generator-transcript.txt");
+    await writeFile(
+      scriptPath,
+      [
+        "import { writeFile } from 'node:fs/promises';",
+        "let stdin = '';",
+        "for await (const chunk of process.stdin) stdin += chunk.toString();",
+        `await writeFile(${JSON.stringify(transcriptPath)}, stdin, 'utf8');`,
+        "console.log('ok');"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const bridge = createClaudeSubagentBridge({
+      command: process.execPath,
+      baseArgs: [scriptPath],
+      timeoutMs: 5000
+    });
+
+    await bridge({
+      systemId: "system_1",
+      agent: "generator",
+      inputSummary: "Generate checkout test",
+      args: ["--spec", "specs/case.md", "--seed", "tests/seed.spec.ts", "--output", "tests/generated/case.spec.ts"],
+      outputPaths: ["tests/generated/case.spec.ts"],
+      cwd: workDir
+    });
+
+    const transcript = await readFile(transcriptPath, "utf8");
+    expect(transcript).toContain("complete TypeScript Playwright test file");
+    expect(transcript).toContain("@playwright/test");
+    expect(transcript).toContain("Write the file");
+    expect(transcript).toContain("tests/generated/case.spec.ts");
   });
 });
 
