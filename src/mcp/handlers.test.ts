@@ -443,6 +443,11 @@ describe("handleBrainCreatorTool", () => {
         path: result.chainRun.testPath
       })
     );
+    const overview = dataOf(
+      await handleBrainCreatorTool(context, "bc_artifact_overview", {
+        systemId: system.id
+      })
+    );
 
     expect(result.chainRun.status).toBe("succeeded");
     expect(chainRuns).toEqual([expect.objectContaining({ id: result.chainRun.id })]);
@@ -464,6 +469,14 @@ describe("handleBrainCreatorTool", () => {
         type: "test-file",
         path: result.chainRun.testPath,
         content: expect.stringContaining("@playwright/test")
+      })
+    );
+    expect(overview).toEqual(
+      expect.objectContaining({
+        systemId: system.id,
+        counts: { specs: 1, tests: 1 },
+        latestSpec: expect.objectContaining({ snippet: expect.stringContaining("## Scenario") }),
+        latestTest: expect.objectContaining({ snippet: expect.stringContaining("@playwright/test") })
       })
     );
     expect(context.service.listChainRuns(system.id)).toEqual([
@@ -590,6 +603,59 @@ describe("handleBrainCreatorTool", () => {
     ]);
   });
 
+  it("uses a configured Claude subprocess bridge from environment variables", async () => {
+    const workDir = await tempDir();
+    const scriptPath = join(workDir, "claude-fixture.mjs");
+    const transcriptPath = join(workDir, "claude-transcript.txt");
+    await writeFile(
+      scriptPath,
+      [
+        "import { writeFile } from 'node:fs/promises';",
+        "let stdin = '';",
+        "for await (const chunk of process.stdin) stdin += chunk.toString();",
+        `await writeFile(${JSON.stringify(transcriptPath)}, stdin, 'utf8');`,
+        "console.log('claude bridge ok');"
+      ].join("\n"),
+      "utf8"
+    );
+    const previousCommand = process.env.BRAIN_CREATOR_AGENT_COMMAND;
+    const previousArgs = process.env.BRAIN_CREATOR_AGENT_ARGS;
+    process.env.BRAIN_CREATOR_AGENT_COMMAND = process.execPath;
+    process.env.BRAIN_CREATOR_AGENT_ARGS = JSON.stringify([scriptPath]);
+    try {
+      const context = createBrainCreatorMcpContext({
+        dataFilePath: join(workDir, "assets.json"),
+        workDir
+      });
+      const system = dataOf(
+        await handleBrainCreatorTool(context, "bc_create_system", {
+          name: "Orders Console",
+          environment: "staging",
+          baseUrl: "https://shop.example.test",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["https://shop.example.test"]
+        })
+      );
+
+      const run = dataOf(
+        await handleBrainCreatorTool(context, "bc_run_agent", {
+          systemId: system.id,
+          agent: "planner",
+          inputSummary: "Plan robot checkout",
+          args: ["--output", "specs/robot.md"],
+          outputPaths: ["specs/robot.md"]
+        })
+      );
+
+      expect(run.status).toBe("succeeded");
+      expect(run.logs).toEqual(["claude bridge ok"]);
+      expect(await readFile(transcriptPath, "utf8")).toContain("#playwright-test-planner");
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_COMMAND", previousCommand);
+      restoreEnv("BRAIN_CREATOR_AGENT_ARGS", previousArgs);
+    }
+  });
+
   it("lists test cases, lists gaps, and resolves a gap through MCP", async () => {
     const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
     const system = dataOf(
@@ -652,6 +718,14 @@ function errorOf(result: CallToolResult) {
     throw new Error("Expected text result");
   }
   return JSON.parse(firstContent.text).errors.join("\n");
+}
+
+function restoreEnv(key: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
 }
 
 async function tempDir() {

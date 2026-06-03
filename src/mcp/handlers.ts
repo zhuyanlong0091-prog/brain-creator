@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
 import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
 import { generateSeedFile } from "../agent/seedGenerator.js";
+import { createClaudeSubagentBridge } from "../agent/claudeBridge.js";
 import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   commandRunnerAgentBridge,
@@ -49,9 +50,42 @@ export function createBrainCreatorMcpContext(
     service: new BrainCreatorService(repository),
     workDir,
     agentBridge:
-      input.agentBridge ?? (input.runner ? commandRunnerAgentBridge(input.runner) : undefined),
+      input.agentBridge ??
+      (input.runner ? commandRunnerAgentBridge(input.runner) : configuredClaudeBridge()),
     runner: input.runner
   };
+}
+
+function configuredClaudeBridge(): AgentBridge | undefined {
+  const command = process.env.BRAIN_CREATOR_AGENT_COMMAND;
+  if (!command) {
+    return undefined;
+  }
+  return createClaudeSubagentBridge({
+    command,
+    baseArgs: parseAgentArgs(process.env.BRAIN_CREATOR_AGENT_ARGS),
+    timeoutMs: parseAgentTimeout(process.env.BRAIN_CREATOR_AGENT_TIMEOUT_MS)
+  });
+}
+
+function parseAgentArgs(value: string | undefined): string[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : undefined;
+  } catch {
+    return value.split(" ").map((item) => item.trim()).filter(Boolean);
+  }
+}
+
+function parseAgentTimeout(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 export async function handleBrainCreatorTool(
@@ -181,6 +215,8 @@ export async function handleBrainCreatorTool(
         return textResult(await readArtifact(context, input, "test-spec"));
       case "bc_read_test":
         return textResult(await readArtifact(context, input, "test-file"));
+      case "bc_artifact_overview":
+        return textResult(await artifactOverview(context, input));
       case "bc_list_cases":
         return textResult(context.service.listTestCases(stringArg(input, "systemId")));
       case "bc_list_gaps":
@@ -329,6 +365,33 @@ async function readArtifact(
   return {
     ...artifact,
     content,
+    bytes: Buffer.byteLength(content, "utf8")
+  };
+}
+
+async function artifactOverview(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const specs = context.service.listTestSpecs(systemId);
+  const tests = context.service.listTestFiles(systemId);
+  const latestSpec = specs.at(-1);
+  const latestTest = tests.at(-1);
+  return {
+    systemId,
+    counts: {
+      specs: specs.length,
+      tests: tests.length
+    },
+    latestSpec: latestSpec ? await artifactSummary(context, latestSpec) : undefined,
+    latestTest: latestTest ? await artifactSummary(context, latestTest) : undefined
+  };
+}
+
+async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestArtifact) {
+  const resolvedPath = resolveWorkspacePath(context.workDir, artifact.path);
+  const content = await readFile(resolvedPath, "utf8");
+  return {
+    ...artifact,
+    snippet: content.slice(0, 500),
     bytes: Buffer.byteLength(content, "utf8")
   };
 }

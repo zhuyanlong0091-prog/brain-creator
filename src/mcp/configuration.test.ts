@@ -42,4 +42,11 @@ describe("Brain Creator local integration files", () => {
     expect(healer).toContain("playwright-test-healer");
     expect(seed).toContain("generate code here");
   });
+
+  it("keeps Playwright browser config portable across local and CI environments", async () => {
+    const config = await readFile("playwright.config.ts", "utf8");
+
+    expect(config).toContain("PLAYWRIGHT_CHROMIUM_EXECUTABLE");
+    expect(config).not.toContain("C:\\Users\\");
+  });
 });

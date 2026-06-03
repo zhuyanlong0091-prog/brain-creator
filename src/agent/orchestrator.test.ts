@@ -174,7 +174,7 @@ describe("runChain", () => {
 
     expect(commands).toEqual([
       expect.arrayContaining(["playwright", "agent", "generator"]),
-      ["playwright", "test", result.testPath]
+      ["playwright", "test", `tests/generated/${testCase.id}.spec.ts`]
     ]);
     expect(result.chainRun).toEqual(
       expect.objectContaining({
@@ -209,6 +209,25 @@ describe("runChain", () => {
     expect(result.generateRun.status).toBe("succeeded");
   });
 
+  it("records Playwright stdout as the failure reason when stderr is empty", async () => {
+    const workDir = await tempDir();
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      testCase: approvedTestCase(),
+      maxHealAttempts: 0,
+      agentBridge: async () => ({ exitCode: 0, stdout: "agent ok", stderr: "" }),
+      runner: async () => ({
+        exitCode: 1,
+        stdout: "No tests found",
+        stderr: ""
+      })
+    });
+
+    expect(result.chainRun.gaps[0].reason).toContain("No tests found");
+  });
+
   it("runs healer and retries the generated test until it succeeds", async () => {
     const workDir = await tempDir();
     const commands: string[][] = [];
@@ -237,9 +256,9 @@ describe("runChain", () => {
 
     expect(commands).toEqual([
       expect.arrayContaining(["playwright", "agent", "generator"]),
-      ["playwright", "test", result.testPath],
+      ["playwright", "test", "tests/generated/case_1.spec.ts"],
       expect.arrayContaining(["playwright", "agent", "healer"]),
-      ["playwright", "test", result.testPath]
+      ["playwright", "test", "tests/generated/case_1.spec.ts"]
     ]);
     expect(result.chainRun.status).toBe("succeeded");
     expect(result.chainRun.healRunId).toEqual(expect.stringMatching(/^agent_/));

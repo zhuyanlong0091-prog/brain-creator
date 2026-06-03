@@ -7,6 +7,7 @@ describe("GitHub CI workflow", () => {
 
     expect(content).toContain("pull_request");
     expect(content).toContain("npm ci");
+    expect(content).toContain("npx playwright install --with-deps chromium");
     expect(content).toContain("npm test");
     expect(content).toContain("npx tsc --noEmit");
   });
