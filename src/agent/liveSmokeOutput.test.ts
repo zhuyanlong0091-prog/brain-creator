@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { extractMarkdown, extractTypeScript } from "./liveSmokeOutput.js";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { extractMarkdown, extractTypeScript, extractTypeScriptArtifact } from "./liveSmokeOutput.js";
 
 describe("live smoke output parsing", () => {
   it("extracts TypeScript from fenced code", () => {
@@ -40,6 +43,29 @@ describe("live smoke output parsing", () => {
     ].join("\n");
 
     expect(() => extractTypeScript(output)).toThrow("No TypeScript Playwright source found");
+  });
+
+  it("reads TypeScript from the expected artifact when stdout is prose-only", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "brain-creator-live-output-"));
+    const outputPath = join(directory, "generated.spec.ts");
+    await writeFile(
+      outputPath,
+      [
+        "import { test, expect } from '@playwright/test';",
+        "test('order total', async ({ page }) => {",
+        "  await expect(page.getByText('Order total: 42')).toBeVisible();",
+        "});",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const source = await extractTypeScriptArtifact(
+      "The playwright-test-generator successfully generated the test file.",
+      outputPath
+    );
+
+    expect(source).toContain("import { test, expect } from '@playwright/test';");
   });
 
   it("extracts Markdown from fenced markdown", () => {
