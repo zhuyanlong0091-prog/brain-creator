@@ -1,10 +1,106 @@
 # Brain Creator
 
-Brain Creator is an agent-native testing brain for **Claude Code / Codex**. It is a local business-logic library plus MCP toolset that helps an agent connect a business system, understand business language, generate reviewed test plans, run Playwright test generation, heal failures, and track reusable testing assets.
+Brain Creator 是面向 **Claude Code / Codex** 的 Agent 原生测试业务脑：它不是 Web UI，而是一套本地业务逻辑库 + MCP 工具集，让智能体能接入业务系统、理解业务语言、生成可审核的测试计划、调用 Playwright 测试生成与修复链路，并沉淀可复用测试资产。
 
-**No Web UI:** the product entrypoint is the agent conversation. In Claude Code, start with `Skill("brain-creator")`; in Codex, ask for the Brain Creator workflow and let the agent use the configured MCP tools.
+Brain Creator is an agent-native testing brain for **Claude Code / Codex**. It is not a Web UI; it is a local business-logic library plus MCP toolset that helps an agent connect business systems, understand business language, generate reviewed test plans, run Playwright test generation and healing, and track reusable testing assets.
 
-## What You Can Do
+## 中文版
+
+### 核心定位
+
+**无 Web UI：** Brain Creator v2 的产品入口是 Claude Code / Codex 里的智能体对话。Claude Code 中请从 `Skill("brain-creator")` 开始；Codex 中请直接要求执行 Brain Creator 工作流，让智能体使用已配置的 MCP 工具。
+
+### 你可以做什么
+
+- 接入多个业务系统，并隔离每个系统的鉴权、术语、规则、用例、产物和 Gap。
+- 配置 token、cookie、password 或 script 鉴权，并避免后续回复重复暴露密钥。
+- 添加业务术语和业务规则，让生成的测试贴合系统语义。
+- 先生成草稿测试计划，用自然语言审核后，再批准进入代码生成。
+- 执行 planner -> generator -> healer 链路，并查看生成的 Markdown spec 与 Playwright 测试文件。
+- 当证据缺失或生成链路无法安全修复时，查看并处理 Gap，而不是让智能体伪造成功。
+
+### 快速开始
+
+安装依赖并验证本地基线：
+
+```bash
+npm install
+npm test
+npx tsc --noEmit
+```
+
+启动 Brain Creator MCP server：
+
+```bash
+npm run mcp
+```
+
+本地运行真实 Planner / Generator / Healer 时，需要配置 Claude 子进程桥接：
+
+```bash
+BRAIN_CREATOR_AGENT_COMMAND=claude
+BRAIN_CREATOR_AGENT_ARGS='["--print","--permission-mode","acceptEdits"]'
+BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
+```
+
+Windows PowerShell 中请使用 `$env:` 设置同样的环境变量后再启动 MCP 客户端。
+
+### 智能体入口
+
+在 Claude Code 或 Codex 中使用一句话请求：
+
+```text
+Use Skill("brain-creator"). Connect the local order system, add a rule that order total must be visible, generate a test plan, wait for my approval, then run the chain.
+```
+
+预期行为：智能体先加载 Brain Creator skill，选择匹配的 MCP 工具，创建或复用业务系统，按需配置鉴权，生成草稿计划，等待你批准，然后执行 `bc_run_chain`，最后总结产物和 Gap。
+
+完整用户手册见 [docs/agent-usage.md](docs/agent-usage.md)。
+
+### 验证命令
+
+基础验证：
+
+```bash
+npm test
+npx tsc --noEmit
+```
+
+真实 Agent 验证：
+
+```bash
+npm run verify:live-claude-chain
+npm run verify:live-agent-artifacts
+npm run verify:live-mcp-workflow
+npm run verify:live-claude-skill-workflow
+```
+
+其中 `npm run verify:live-claude-skill-workflow` 是最接近真实用户体验的验收：它会验证真实 Claude Code 会话加载 `Skill("brain-creator")`、选择 Brain Creator MCP 工具、跑到 `bc_run_chain` 成功，并汇总生成产物。
+
+### 关键路径
+
+- `.claude/skills/brain-creator/SKILL.md` - Claude Code 项目级 skill 入口。
+- `skills/brain-creator/SKILL.md` - 可复用的 Brain Creator skill 定义。
+- `src/mcp/` - MCP server、工具 schema 和 handlers。
+- `src/agent/` - prompt 构建、seed 生成、用例格式化、编排、质量检查和 live smoke 解析。
+- `src/domain/` - 业务系统、鉴权、术语、规则、用例、运行记录、Gap 和仓库存储。
+- `docs/v2-quickstart.md` - 工具级设置与 API 风格流程。
+- `docs/agent-usage.md` - 面向最终用户的智能体使用流程。
+
+### 当前限制
+
+- Brain Creator v2 当前是 local-first，使用 JSON 持久化。
+- 常规界面是 Claude Code / Codex，不是浏览器页面。
+- 当前 Playwright CLI 提供 Claude agent 定义；Brain Creator 通过 Claude 子进程桥接调用这些 agent。
+- PostgreSQL、CI 中执行 live smoke、LLM QualityGate 和并行 Agent 是后续增强。
+
+## English Version
+
+### Positioning
+
+**No Web UI:** the Brain Creator v2 product entrypoint is the agent conversation in Claude Code / Codex. In Claude Code, start with `Skill("brain-creator")`; in Codex, ask for the Brain Creator workflow and let the agent use the configured MCP tools.
+
+### What You Can Do
 
 - Connect multiple business systems with isolated auth, glossary, rules, cases, artifacts, and gaps.
 - Configure token, cookie, password, or script auth without echoing secrets back into later responses.
@@ -13,7 +109,7 @@ Brain Creator is an agent-native testing brain for **Claude Code / Codex**. It i
 - Run the planner -> generator -> healer chain and inspect generated Markdown specs and Playwright tests.
 - Review gaps when evidence is missing or a generated chain cannot be repaired safely.
 
-## Fast Start
+### Fast Start
 
 Install dependencies and verify the local baseline:
 
@@ -39,7 +135,7 @@ BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 
 On Windows PowerShell, set the same values with `$env:` before launching the MCP client.
 
-## Agent Entry
+### Agent Entry
 
 Use a one-sentence request in Claude Code or Codex:
 
@@ -51,7 +147,7 @@ The agent should load the Brain Creator skill, select the matching MCP tools, cr
 
 For a full user-facing guide, see [docs/agent-usage.md](docs/agent-usage.md).
 
-## Verification
+### Verification
 
 Core checks:
 
@@ -71,7 +167,7 @@ npm run verify:live-claude-skill-workflow
 
 `npm run verify:live-claude-skill-workflow` verifies the real Claude Code session entrypoint: `Skill("brain-creator")` is loaded, Brain Creator MCP tools are selected, `bc_run_chain` succeeds, and artifacts are summarized.
 
-## Important Paths
+### Important Paths
 
 - `.claude/skills/brain-creator/SKILL.md` - Claude Code project skill entrypoint.
 - `skills/brain-creator/SKILL.md` - portable Brain Creator skill definition.
@@ -81,7 +177,7 @@ npm run verify:live-claude-skill-workflow
 - `docs/v2-quickstart.md` - tool-level setup and API-style workflow.
 - `docs/agent-usage.md` - end-user agent workflow.
 
-## Current Limits
+### Current Limits
 
 - Brain Creator v2 is local-first and uses JSON persistence.
 - The normal interface is Claude Code / Codex, not a browser UI.
