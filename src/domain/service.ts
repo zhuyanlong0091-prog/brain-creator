@@ -7,6 +7,7 @@ import type {
   ApiFlow,
   ApiRequest,
   AssetSearchResult,
+  AuthCheckpoint,
   AuthProfile,
   BusinessRule,
   ChainRun,
@@ -59,6 +60,23 @@ type CreateAuthProfileInput = {
   role: string;
   loginMethod: AuthProfile["loginMethod"];
   secrets: Record<string, string>;
+};
+
+type CreateAuthCheckpointInput = {
+  systemId: string;
+  authProfileId: string;
+  testCaseId?: string;
+  reason: string;
+  resumeInstruction: string;
+};
+
+type ReportGapInput = {
+  projectId: string;
+  sourceType: string;
+  sourceId: string;
+  reason: string;
+  severity: Gap["severity"];
+  owner: string;
 };
 
 type DiscoverPageInput = {
@@ -186,6 +204,17 @@ export class BrainCreatorService {
     return [...this.repository.systemProfiles];
   }
 
+  archiveSystemProfile(systemId: string): SystemProfile {
+    const system = this.repository.systemProfiles.find((item) => item.id === systemId);
+    if (!system) {
+      throw new Error("Business system not found");
+    }
+    system.status = "cancelled";
+    system.updatedAt = timestamp();
+    this.repository.persist();
+    return system;
+  }
+
   getSystemOverview(systemId: string) {
     const system = this.repository.systemProfiles.find((item) => item.id === systemId);
     if (!system) {
@@ -217,6 +246,8 @@ export class BrainCreatorService {
       },
       assetCounts: {
         authProfiles: authProfiles.length,
+        authCheckpoints: this.repository.authCheckpoints.filter((item) => item.systemId === systemId)
+          .length,
         pageModels: pageModelIds.length,
         locatorPoints: this.repository.locatorPoints.filter((item) =>
           pageModelIds.includes(item.pageModelId)
@@ -274,10 +305,71 @@ export class BrainCreatorService {
     return publicAuthProfile(profile);
   }
 
+  archiveAuthProfile(idValue: string): AuthProfile {
+    const profile = this.repository.authProfiles.find((item) => item.id === idValue);
+    if (!profile) {
+      throw new Error("Auth profile not found");
+    }
+    profile.status = "cancelled";
+    profile.failureReason = "Archived by user";
+    profile.updatedAt = timestamp();
+    this.repository.persist();
+    return publicAuthProfile(profile);
+  }
+
   listAuthProfiles(systemId: string): AuthProfile[] {
     return this.repository.authProfiles
       .filter((profile) => profile.projectId === systemId)
       .map((profile) => publicAuthProfile(profile));
+  }
+
+  createAuthCheckpoint(input: CreateAuthCheckpointInput): AuthCheckpoint {
+    const system = this.repository.systemProfiles.find((item) => item.id === input.systemId);
+    if (!system) {
+      throw new Error("Business system not found");
+    }
+    const authProfile = this.repository.authProfiles.find((item) => item.id === input.authProfileId);
+    if (!authProfile) {
+      throw new Error("Auth profile not found");
+    }
+    if (authProfile.projectId !== input.systemId) {
+      throw new Error("Auth profile belongs to another business system");
+    }
+    if (input.testCaseId) {
+      const testCase = this.getTestCase(input.testCaseId);
+      if (testCase.systemId !== input.systemId) {
+        throw new Error("Test case belongs to another business system");
+      }
+    }
+    const now = timestamp();
+    const checkpoint: AuthCheckpoint = {
+      id: id("checkpoint"),
+      systemId: input.systemId,
+      authProfileId: input.authProfileId,
+      testCaseId: input.testCaseId,
+      reason: input.reason.trim(),
+      resumeInstruction: input.resumeInstruction.trim(),
+      status: "awaiting-user",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.authCheckpoints.push(checkpoint);
+    this.repository.persist();
+    return checkpoint;
+  }
+
+  listAuthCheckpoints(systemId: string, status?: AuthCheckpoint["status"]): AuthCheckpoint[] {
+    return this.repository.authCheckpoints.filter(
+      (item) => item.systemId === systemId && (status === undefined || item.status === status)
+    );
+  }
+
+  completeAuthCheckpoint(checkpointId: string): AuthCheckpoint {
+    return this.setAuthCheckpointStatus(checkpointId, "completed");
+  }
+
+  cancelAuthCheckpoint(checkpointId: string): AuthCheckpoint {
+    return this.setAuthCheckpointStatus(checkpointId, "cancelled");
   }
 
   getCaptureAuth(idValue?: string): PageCaptureAuth | undefined {
@@ -674,10 +766,65 @@ export class BrainCreatorService {
 
   approveTestCase(caseId: string): TestCase {
     const testCase = this.getTestCase(caseId);
+    if (testCase.status !== "draft") {
+      throw new Error("Only draft test cases can be approved");
+    }
     testCase.status = "approved";
     testCase.updatedAt = timestamp();
     this.repository.persist();
     return testCase;
+  }
+
+  cancelTestCase(caseId: string, reason: string): { testCase: TestCase; gap: Gap } {
+    const testCase = this.getTestCase(caseId);
+    if (!["draft", "approved"].includes(testCase.status)) {
+      throw new Error("Only draft or approved test cases can be cancelled");
+    }
+    const now = timestamp();
+    testCase.status = "cancelled";
+    testCase.cancellationReason = reason.trim();
+    testCase.cancelledAt = now;
+    testCase.updatedAt = now;
+    const gap = this.reportGap({
+      projectId: testCase.systemId,
+      sourceType: "user-interruption",
+      sourceId: testCase.id,
+      reason: testCase.cancellationReason,
+      severity: "medium",
+      owner: "user"
+    });
+    this.repository.persist();
+    return { testCase, gap };
+  }
+
+  resumeTestCase(caseId: string): { testCase: TestCase; resolvedGaps: Gap[] } {
+    const testCase = this.getTestCase(caseId);
+    if (testCase.status !== "cancelled") {
+      throw new Error("Only cancelled test cases can be resumed");
+    }
+    const awaitingCheckpoints = this.repository.authCheckpoints.filter(
+      (item) => item.testCaseId === caseId && item.status === "awaiting-user"
+    );
+    if (awaitingCheckpoints.length > 0) {
+      throw new Error("Manual auth checkpoints must be completed or cancelled before resuming");
+    }
+    testCase.status = "draft";
+    testCase.cancellationReason = undefined;
+    testCase.cancelledAt = undefined;
+    testCase.updatedAt = timestamp();
+    const resolvedGaps = this.repository.gaps.filter(
+      (gap) =>
+        gap.projectId === testCase.systemId &&
+        gap.sourceType === "user-interruption" &&
+        gap.sourceId === caseId &&
+        gap.status === "open"
+    );
+    for (const gap of resolvedGaps) {
+      gap.status = "resolved";
+      gap.updatedAt = testCase.updatedAt;
+    }
+    this.repository.persist();
+    return { testCase, resolvedGaps };
   }
 
   updateTestCaseScenarios(caseId: string, scenarios: TestCaseScenario[]): TestCase {
@@ -759,6 +906,20 @@ export class BrainCreatorService {
         status: item.status
       }))
       .filter((item) => item.projectId === input.projectId || input.projectId === "all");
+
+    const authCheckpoints = this.repository.authCheckpoints
+      .filter(
+        (item) =>
+          inProject(item.systemId) &&
+          includes(`${item.reason} ${item.resumeInstruction} ${item.status}`)
+      )
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "auth-checkpoint",
+        label: item.reason,
+        projectId: item.systemId,
+        status: item.status
+      }));
 
     const pageModels = this.repository.pageModels
       .filter((item) => inProject(item.projectId) && includes(`${item.name} ${item.route}`))
@@ -911,6 +1072,7 @@ export class BrainCreatorService {
 
     return [
       ...systems,
+      ...authCheckpoints,
       ...pageModels,
       ...locators,
       ...sessions,
@@ -981,6 +1143,24 @@ export class BrainCreatorService {
     );
   }
 
+  reportGap(input: ReportGapInput): Gap {
+    const system = this.repository.systemProfiles.find((item) => item.id === input.projectId);
+    if (!system) {
+      throw new Error("Business system not found");
+    }
+    const gap = this.createGap(
+      input.projectId,
+      input.sourceType,
+      input.sourceId,
+      input.reason,
+      input.severity,
+      input.owner
+    );
+    this.repository.gaps.push(gap);
+    this.repository.persist();
+    return gap;
+  }
+
   resolveGap(input: ResolveGapInput): Gap {
     const gap = this.repository.gaps.find((item) => item.id === input.gapId);
     if (!gap) {
@@ -996,7 +1176,14 @@ export class BrainCreatorService {
     return gap;
   }
 
-  private createGap(projectId: string, sourceType: string, sourceId: string, reason: string): Gap {
+  private createGap(
+    projectId: string,
+    sourceType: string,
+    sourceId: string,
+    reason: string,
+    severity: Gap["severity"] = "high",
+    owner = "qa"
+  ): Gap {
     const now = timestamp();
     return {
       id: id("gap"),
@@ -1004,12 +1191,31 @@ export class BrainCreatorService {
       sourceType,
       sourceId,
       reason,
-      severity: "high",
-      owner: "qa",
+      severity,
+      owner,
       status: "open",
       createdAt: now,
       updatedAt: now
     };
+  }
+
+  private setAuthCheckpointStatus(
+    checkpointId: string,
+    status: Extract<AuthCheckpoint["status"], "completed" | "cancelled">
+  ): AuthCheckpoint {
+    const checkpoint = this.repository.authCheckpoints.find((item) => item.id === checkpointId);
+    if (!checkpoint) {
+      throw new Error("Auth checkpoint not found");
+    }
+    if (checkpoint.status !== "awaiting-user") {
+      throw new Error("Only awaiting-user auth checkpoints can be updated");
+    }
+    const now = timestamp();
+    checkpoint.status = status;
+    checkpoint.updatedAt = now;
+    checkpoint.completedAt = now;
+    this.repository.persist();
+    return checkpoint;
   }
 
   private assertAuthProfileMatchesProject(authProfileId: string | undefined, projectId: string) {
@@ -1039,6 +1245,9 @@ export class BrainCreatorService {
     const candidates: Record<string, unknown[]> = {
       "system-profile": this.repository.systemProfiles.filter((item) => item.id === input.projectId),
       "auth-profile": this.repository.authProfiles.filter((item) => item.projectId === input.projectId),
+      "auth-checkpoint": this.repository.authCheckpoints.filter(
+        (item) => item.systemId === input.projectId
+      ),
       "locator-point": this.repository.locatorPoints.filter((item) =>
         pageIds.includes(item.pageModelId)
       ),

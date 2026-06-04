@@ -32,5 +32,9 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("review artifacts and gaps");
     expect(content).toContain("Skill(\"brain-creator\")");
     expect(content).toContain("bc_run_chain");
+    expect(content).toContain("bc_create_auth_checkpoint");
+    expect(content).toContain("bc_cancel_plan");
+    expect(content).toContain("bc_resume_plan");
+    expect(content).toContain("bc_report_gap");
   });
 });

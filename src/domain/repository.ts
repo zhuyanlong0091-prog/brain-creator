@@ -4,6 +4,7 @@ import type {
   ActionStep,
   AgentRun,
   ApiFlow,
+  AuthCheckpoint,
   AuthProfile,
   BusinessRule,
   ChainRun,
@@ -21,6 +22,7 @@ import type {
 export class InMemoryBrainCreatorRepository {
   systemProfiles: SystemProfile[] = [];
   authProfiles: AuthProfile[] = [];
+  authCheckpoints: AuthCheckpoint[] = [];
   pageModels: PageModel[] = [];
   locatorPoints: LocatorPoint[] = [];
   probeResults: ProbeResult[] = [];
@@ -42,6 +44,7 @@ export class InMemoryBrainCreatorRepository {
   reset() {
     this.systemProfiles = [];
     this.authProfiles = [];
+    this.authCheckpoints = [];
     this.pageModels = [];
     this.locatorPoints = [];
     this.probeResults = [];
@@ -63,6 +66,7 @@ type RepositorySnapshot = Pick<
   InMemoryBrainCreatorRepository,
   | "systemProfiles"
   | "authProfiles"
+  | "authCheckpoints"
   | "pageModels"
   | "locatorPoints"
   | "probeResults"
@@ -96,6 +100,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     const snapshot = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<RepositorySnapshot>;
     this.systemProfiles = snapshot.systemProfiles ?? [];
     this.authProfiles = snapshot.authProfiles ?? [];
+    this.authCheckpoints = snapshot.authCheckpoints ?? [];
     this.pageModels = snapshot.pageModels ?? [];
     this.locatorPoints = snapshot.locatorPoints ?? [];
     this.probeResults = snapshot.probeResults ?? [];
@@ -115,6 +120,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     return {
       systemProfiles: this.systemProfiles,
       authProfiles: this.authProfiles,
+      authCheckpoints: this.authCheckpoints,
       pageModels: this.pageModels,
       locatorPoints: this.locatorPoints,
       probeResults: this.probeResults,

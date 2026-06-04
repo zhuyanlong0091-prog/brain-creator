@@ -15,12 +15,15 @@ When the user gives a one-sentence request such as "connect this CRM and generat
 
 1. Call `bc_list_systems` and reuse the matching system, or call `bc_create_system` if the user supplied enough system details.
 2. If auth is needed, call `bc_create_auth`, then `bc_verify_auth`, then `bc_generate_seed`; never echo secrets back to chat.
+   - For password, recovery, CAPTCHA, or 2FA that must be completed by the user, call `bc_create_auth_checkpoint` instead of storing those values.
 3. Capture known business language with `bc_add_term` and required checks with `bc_add_rule` when the user provides them.
 4. Call `bc_generate_plan` with the selected `systemId` and the user's natural language requirement.
 5. Present scenarios, new term candidates, and rule check results; call `bc_update_plan` only when the user asks for changes.
 6. Call `bc_approve_plan` only after the user confirms the test intent.
 7. Call `bc_run_chain` for the approved case, then report generated spec/test paths, ChainRun status, healer attempts, and gaps.
 8. Call `bc_artifact_overview`, `bc_list_specs`, `bc_list_tests`, `bc_list_cases`, and `bc_list_gaps` when summarizing outcomes or continuing later.
+9. If the user closes or stops a protected login flow, call `bc_cancel_plan` with the reason. Use `bc_resume_plan` only after awaiting auth checkpoints are completed or cancelled.
+10. Call `bc_report_gap` for external preflight failures such as blocked network access or missing evidence.
 
 ## Guardrails
 
@@ -29,3 +32,4 @@ When the user gives a one-sentence request such as "connect this CRM and generat
 - Never mix assets across systems. All planning, execution, search, and gap handling must use the selected system id.
 - Use `bc_run_agent` only for diagnostics; the normal user workflow is `bc_generate_plan` to `bc_approve_plan` to `bc_run_chain`.
 - Treat generated artifacts as local workspace assets. Use `bc_read_spec` and `bc_read_test` only for paths returned by Brain Creator list tools.
+- Never store passwords, recovery codes, CAPTCHA answers, or 2FA values in auth checkpoints, gaps, plans, or artifacts.

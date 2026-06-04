@@ -134,6 +134,37 @@ describe("JsonFileBrainCreatorRepository", () => {
       expect.objectContaining({ id: "chain_1" })
     ]);
   });
+
+  it("restores manual auth checkpoints after recreation", async () => {
+    const filePath = join(await tempDir(), "assets.json");
+    const firstService = new BrainCreatorService(new JsonFileBrainCreatorRepository(filePath));
+    const system = firstService.createSystemProfile({
+      name: "Google Gmail Login",
+      environment: "external-first-run",
+      baseUrl: "https://workspace.google.com/intl/zh-CN/gmail/",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://accounts.google.com/"]
+    });
+    const auth = firstService.createAuthProfile({
+      projectId: system.id,
+      env: "external-first-run",
+      role: "manual-user",
+      loginMethod: "script",
+      secrets: { mode: "manual-browser-login-required" }
+    });
+    const checkpoint = firstService.createAuthCheckpoint({
+      systemId: system.id,
+      authProfileId: auth.id,
+      reason: "Manual Google authentication required",
+      resumeInstruction: "Resume after Inbox is visible"
+    });
+
+    const secondService = new BrainCreatorService(new JsonFileBrainCreatorRepository(filePath));
+
+    expect(secondService.listAuthCheckpoints(system.id)).toEqual([
+      expect.objectContaining({ id: checkpoint.id, status: "awaiting-user" })
+    ]);
+  });
 });
 
 async function tempDir() {

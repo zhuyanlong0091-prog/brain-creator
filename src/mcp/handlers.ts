@@ -16,6 +16,7 @@ import {
 } from "../agent/orchestrator.js";
 import type {
   AgentRun,
+  AuthCheckpoint,
   AuthProfile,
   TestArtifact,
   TestCaseScenario,
@@ -109,6 +110,8 @@ export async function handleBrainCreatorTool(
         return textResult(context.service.listSystemProfiles());
       case "bc_system_overview":
         return textResult(context.service.getSystemOverview(stringArg(input, "systemId")));
+      case "bc_archive_system":
+        return textResult(context.service.archiveSystemProfile(stringArg(input, "systemId")));
       case "bc_create_auth":
         return textResult(
           context.service.createAuthProfile({
@@ -123,8 +126,31 @@ export async function handleBrainCreatorTool(
         return textResult(context.service.listAuthProfiles(stringArg(input, "systemId")));
       case "bc_verify_auth":
         return textResult(context.service.verifyAuthProfile(stringArg(input, "id")));
+      case "bc_archive_auth":
+        return textResult(context.service.archiveAuthProfile(stringArg(input, "id")));
       case "bc_generate_seed":
         return textResult(await generateSeed(context, input));
+      case "bc_create_auth_checkpoint":
+        return textResult(
+          context.service.createAuthCheckpoint({
+            systemId: stringArg(input, "systemId"),
+            authProfileId: stringArg(input, "authProfileId"),
+            testCaseId: optionalStringArg(input, "testCaseId"),
+            reason: stringArg(input, "reason"),
+            resumeInstruction: stringArg(input, "resumeInstruction")
+          })
+        );
+      case "bc_list_auth_checkpoints":
+        return textResult(
+          context.service.listAuthCheckpoints(
+            stringArg(input, "systemId"),
+            authCheckpointStatusArg(input, "status")
+          )
+        );
+      case "bc_complete_auth_checkpoint":
+        return textResult(context.service.completeAuthCheckpoint(stringArg(input, "checkpointId")));
+      case "bc_cancel_auth_checkpoint":
+        return textResult(context.service.cancelAuthCheckpoint(stringArg(input, "checkpointId")));
       case "bc_add_term":
         return textResult(
           context.service.createGlossaryTerm({
@@ -199,6 +225,12 @@ export async function handleBrainCreatorTool(
         );
       case "bc_approve_plan":
         return textResult(context.service.approveTestCase(stringArg(input, "caseId")));
+      case "bc_cancel_plan":
+        return textResult(
+          context.service.cancelTestCase(stringArg(input, "caseId"), stringArg(input, "reason"))
+        );
+      case "bc_resume_plan":
+        return textResult(context.service.resumeTestCase(stringArg(input, "caseId")));
       case "bc_run_agent":
         return textResult(await runSingleAgent(context, input));
       case "bc_list_agent_runs":
@@ -224,6 +256,17 @@ export async function handleBrainCreatorTool(
           context.service.listGaps({
             projectId: stringArg(input, "projectId"),
             status: gapStatusArg(input, "status")
+          })
+        );
+      case "bc_report_gap":
+        return textResult(
+          context.service.reportGap({
+            projectId: stringArg(input, "projectId"),
+            sourceType: stringArg(input, "sourceType"),
+            sourceId: stringArg(input, "sourceId"),
+            reason: stringArg(input, "reason"),
+            severity: gapSeverityArg(input, "severity"),
+            owner: stringArg(input, "owner")
           })
         );
       case "bc_resolve_gap":
@@ -397,7 +440,9 @@ async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestAr
 }
 
 function findAuthProfile(context: BrainCreatorMcpContext, systemId: string): AuthProfile {
-  const profile = context.repository.authProfiles.find((item) => item.projectId === systemId);
+  const profile = context.repository.authProfiles.find(
+    (item) => item.projectId === systemId && item.status !== "cancelled"
+  );
   if (!profile) {
     throw new Error("Auth profile not found");
   }
@@ -415,6 +460,9 @@ function findAuthProfileById(
   }
   if (profile.projectId !== systemId) {
     throw new Error("Auth profile belongs to another business system");
+  }
+  if (profile.status === "cancelled") {
+    throw new Error("Auth profile is archived");
   }
   return profile;
 }
@@ -500,6 +548,28 @@ function gapStatusArg(input: Record<string, unknown>, key: string) {
     throw new Error(`${key} is invalid`);
   }
   return value;
+}
+
+function gapSeverityArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (!["low", "medium", "high"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as "low" | "medium" | "high";
+}
+
+function authCheckpointStatusArg(
+  input: Record<string, unknown>,
+  key: string
+): AuthCheckpoint["status"] | undefined {
+  const value = optionalStringArg(input, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!["awaiting-user", "completed", "cancelled"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as AuthCheckpoint["status"];
 }
 
 function agentArg(input: Record<string, unknown>, key: string): AgentRun["agent"] {
