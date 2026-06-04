@@ -6,10 +6,14 @@ describe("Agent-native usage documentation", () => {
     const content = await readFile("README.md", "utf8");
 
     expect(content).toContain("Brain Creator");
+    expect(content).toContain("## 中文版");
+    expect(content).toContain("## English Version");
     expect(content).toContain("Claude Code / Codex");
     expect(content).toContain("Skill(\"brain-creator\")");
     expect(content).toContain("MCP");
     expect(content).toContain("No Web UI");
+    expect(content).toContain("无 Web UI");
+    expect(content).toContain("智能体入口");
     expect(content).toContain("docs/agent-usage.md");
     expect(content).toContain("npm run verify:live-claude-skill-workflow");
   });
