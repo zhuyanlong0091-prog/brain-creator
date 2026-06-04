@@ -159,6 +159,20 @@ Expected agent behavior:
 
 Behind the scenes, this uses `bc_artifact_overview`, `bc_list_specs`, `bc_list_tests`, `bc_read_spec`, `bc_read_test`, `bc_list_chain_runs`, and `bc_list_gaps`.
 
+### 9. Stop And Resume A Protected Login
+
+If a login requires password, recovery, CAPTCHA, or 2FA, the agent should call `bc_create_auth_checkpoint` and wait while you complete the protected step manually. The checkpoint stores only the reason and resume instruction, never the secret value.
+
+If you close the login page or stop the attempt, the agent should call `bc_cancel_plan`. Brain Creator records the test case as cancelled and creates a `user-interruption` Gap.
+
+To continue later:
+
+1. Complete or cancel the pending auth checkpoint.
+2. Call `bc_resume_plan` to return the cancelled case to draft.
+3. Review and approve the plan again before running the chain.
+
+Use `bc_report_gap` for external preflight failures such as blocked network access, unreachable target pages, or missing evidence outside a chain run.
+
 ## Recommended One-Sentence Prompts
 
 Use these when you want the agent to drive the flow without tool-level instructions:

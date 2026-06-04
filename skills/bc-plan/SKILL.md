@@ -15,6 +15,8 @@ Use Brain Creator MCP planning to generate structured scenarios before code gene
 4. Present the draft scenarios, new term candidates, and rule check results to the user.
 5. Call `bc_update_plan` if the user wants to edit scenarios before approval.
 6. Call `bc_approve_plan` only after the user confirms the test intent.
+7. Call `bc_cancel_plan` when the user stops or closes a protected flow.
+8. Call `bc_resume_plan` only after awaiting manual auth checkpoints are completed or cancelled.
 
 Planning must not generate test code directly. The user should confirm the structured plan first.
 Approved plans are execution contracts and should not be changed silently.

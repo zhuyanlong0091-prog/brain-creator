@@ -10,6 +10,7 @@ export type GapStatus = "open" | "resolved";
 export type AssetType =
   | "system-profile"
   | "auth-profile"
+  | "auth-checkpoint"
   | "page-model"
   | "locator-point"
   | "training-session"
@@ -48,6 +49,21 @@ export type AuthProfile = {
   failureReason?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AuthCheckpointStatus = "awaiting-user" | "completed" | "cancelled";
+
+export type AuthCheckpoint = {
+  id: string;
+  systemId: string;
+  authProfileId: string;
+  testCaseId?: string;
+  reason: string;
+  resumeInstruction: string;
+  status: AuthCheckpointStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
 };
 
 export type PageModel = {
@@ -172,7 +188,13 @@ export type BusinessRule = {
   createdAt: string;
 };
 
-export type TestCaseStatus = "draft" | "approved" | "generating" | "passed" | "failed";
+export type TestCaseStatus =
+  | "draft"
+  | "approved"
+  | "generating"
+  | "passed"
+  | "failed"
+  | "cancelled";
 
 export type TestCase = {
   id: string;
@@ -185,6 +207,8 @@ export type TestCase = {
   specId?: string;
   testFileId?: string;
   chainRunId?: string;
+  cancellationReason?: string;
+  cancelledAt?: string;
   createdAt: string;
   updatedAt: string;
 };

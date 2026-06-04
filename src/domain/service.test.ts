@@ -785,6 +785,106 @@ describe("BrainCreatorService", () => {
     ).toThrow("Only draft test cases can be updated");
   });
 
+  it("cancels and resumes a test case around a manual auth checkpoint", () => {
+    const service = createService();
+    const system = service.createSystemProfile({
+      name: "Google Gmail Login",
+      environment: "external-first-run",
+      baseUrl: "https://workspace.google.com/intl/zh-CN/gmail/",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://accounts.google.com/", "https://mail.google.com/"]
+    });
+    const auth = service.createAuthProfile({
+      projectId: system.id,
+      env: "external-first-run",
+      role: "manual-user",
+      loginMethod: "script",
+      secrets: { mode: "manual-browser-login-required" }
+    });
+    const testCase = service.createTestCase({
+      systemId: system.id,
+      requirement: "首次 Gmail 登录验证",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    const checkpoint = service.createAuthCheckpoint({
+      systemId: system.id,
+      authProfileId: auth.id,
+      testCaseId: testCase.id,
+      reason: "User must complete Google password and 2FA manually",
+      resumeInstruction: "Resume after Inbox is visible"
+    });
+
+    const cancelled = service.cancelTestCase(testCase.id, "User closed the login page");
+
+    expect(cancelled.testCase.status).toBe("cancelled");
+    expect(cancelled.gap).toEqual(
+      expect.objectContaining({
+        projectId: system.id,
+        sourceType: "user-interruption",
+        sourceId: testCase.id,
+        status: "open"
+      })
+    );
+    expect(() => service.resumeTestCase(testCase.id)).toThrow(
+      "Manual auth checkpoints must be completed or cancelled before resuming"
+    );
+    expect(() => service.approveTestCase(testCase.id)).toThrow("Only draft test cases can be approved");
+
+    expect(service.completeAuthCheckpoint(checkpoint.id).status).toBe("completed");
+    expect(() => service.cancelAuthCheckpoint(checkpoint.id)).toThrow(
+      "Only awaiting-user auth checkpoints can be updated"
+    );
+    const resumed = service.resumeTestCase(testCase.id);
+
+    expect(resumed.testCase.status).toBe("draft");
+    expect(resumed.resolvedGaps).toEqual([
+      expect.objectContaining({ sourceType: "user-interruption", status: "resolved" })
+    ]);
+  });
+
+  it("reports external preflight gaps and archives systems and auth without deleting them", () => {
+    const service = createService();
+    const system = service.createSystemProfile({
+      name: "Google Gmail Login",
+      environment: "external-first-run",
+      baseUrl: "https://workspace.google.com/intl/zh-CN/gmail/",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://accounts.google.com/"]
+    });
+    const auth = service.createAuthProfile({
+      projectId: system.id,
+      env: "external-first-run",
+      role: "manual-user",
+      loginMethod: "script",
+      secrets: { mode: "manual-browser-login-required" }
+    });
+
+    const gap = service.reportGap({
+      projectId: system.id,
+      sourceType: "external-preflight",
+      sourceId: system.id,
+      reason: "net::ERR_CONNECTION_CLOSED",
+      severity: "high",
+      owner: "qa"
+    });
+
+    expect(gap).toEqual(
+      expect.objectContaining({
+        projectId: system.id,
+        sourceType: "external-preflight",
+        reason: "net::ERR_CONNECTION_CLOSED"
+      })
+    );
+    expect(service.archiveAuthProfile(auth.id).status).toBe("cancelled");
+    expect(service.archiveSystemProfile(system.id).status).toBe("cancelled");
+    expect(service.listAuthProfiles(system.id)).toHaveLength(1);
+    expect(service.listSystemProfiles()).toContainEqual(
+      expect.objectContaining({ id: system.id, status: "cancelled" })
+    );
+  });
+
   it("records agent and chain runs per system", () => {
     const service = createService();
     const agentRun = {

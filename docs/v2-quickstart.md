@@ -82,6 +82,8 @@ Use `bc_verify_auth` after creating a profile.
 
 Use `bc_generate_seed` with `systemId` and optional `authProfileId` to write the local Playwright seed fixture. The tool returns only metadata such as `seedPath`, `loginMethod`, and `secretKeys`. Local generated seed files may contain secrets and should not be copied into chat or committed if they contain real credentials.
 
+For protected steps that require the user to enter a password, recovery answer, CAPTCHA, or 2FA value, use `bc_create_auth_checkpoint`. Complete or cancel the checkpoint without storing the secret value. Use `bc_archive_auth` when a profile should remain in history but no longer be active.
+
 ### 3. Add Glossary Terms
 
 Use `bc_add_term` to seed important business language before planning.
@@ -132,6 +134,8 @@ Use `bc_update_plan` with `caseId` and replacement `scenarios` when the user wan
 
 Only draft test cases can be updated. After approval, the test case becomes the execution contract for Generator and Healer.
 
+If the user stops or closes a protected flow, use `bc_cancel_plan` with the reason. Use `bc_resume_plan` only after all awaiting manual auth checkpoints for that case are completed or cancelled.
+
 ### 7. Approve The Plan
 
 Use `bc_approve_plan` only after the user confirms the test intent.
@@ -167,6 +171,8 @@ Use `bc_list_cases` with the selected `systemId` to review draft, approved, pass
 Use `bc_list_gaps` with `projectId` and optional `status` to review open or resolved gaps.
 
 Use `bc_resolve_gap` with `projectId` and `gapId` after the user confirms the missing evidence or issue has been handled.
+
+Use `bc_report_gap` to record external preflight failures or manual workflow blockers that occur outside an Agent chain.
 
 ### 11. Search Assets
 

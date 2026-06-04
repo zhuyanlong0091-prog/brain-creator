@@ -5,10 +5,16 @@ export type BrainCreatorToolName =
   | "bc_create_system"
   | "bc_list_systems"
   | "bc_system_overview"
+  | "bc_archive_system"
   | "bc_create_auth"
   | "bc_list_auth"
   | "bc_verify_auth"
+  | "bc_archive_auth"
   | "bc_generate_seed"
+  | "bc_create_auth_checkpoint"
+  | "bc_list_auth_checkpoints"
+  | "bc_complete_auth_checkpoint"
+  | "bc_cancel_auth_checkpoint"
   | "bc_add_term"
   | "bc_list_terms"
   | "bc_update_term"
@@ -20,6 +26,8 @@ export type BrainCreatorToolName =
   | "bc_generate_plan"
   | "bc_update_plan"
   | "bc_approve_plan"
+  | "bc_cancel_plan"
+  | "bc_resume_plan"
   | "bc_run_agent"
   | "bc_list_agent_runs"
   | "bc_run_chain"
@@ -31,6 +39,7 @@ export type BrainCreatorToolName =
   | "bc_artifact_overview"
   | "bc_list_cases"
   | "bc_list_gaps"
+  | "bc_report_gap"
   | "bc_resolve_gap"
   | "bc_search_assets";
 
@@ -79,6 +88,12 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({ systemId: z.string() })
   },
   {
+    name: "bc_archive_system",
+    title: "Archive business system",
+    description: "Non-destructively archive a business system by marking it cancelled.",
+    inputSchema: z.object({ systemId: z.string() })
+  },
+  {
     name: "bc_create_auth",
     title: "Create auth profile",
     description: "Create an encrypted auth profile for a business system.",
@@ -103,6 +118,12 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({ id: z.string() })
   },
   {
+    name: "bc_archive_auth",
+    title: "Archive auth profile",
+    description: "Non-destructively archive an auth profile by marking it cancelled.",
+    inputSchema: z.object({ id: z.string() })
+  },
+  {
     name: "bc_generate_seed",
     title: "Generate seed file",
     description: "Generate a local Playwright seed fixture from a business system auth profile.",
@@ -111,6 +132,39 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       authProfileId: z.string().optional(),
       outputDir: z.string().optional()
     })
+  },
+  {
+    name: "bc_create_auth_checkpoint",
+    title: "Create manual auth checkpoint",
+    description: "Record that a user must complete protected authentication outside Brain Creator.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      authProfileId: z.string(),
+      testCaseId: z.string().optional(),
+      reason: z.string(),
+      resumeInstruction: z.string()
+    })
+  },
+  {
+    name: "bc_list_auth_checkpoints",
+    title: "List manual auth checkpoints",
+    description: "List manual authentication checkpoints for a business system.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      status: z.enum(["awaiting-user", "completed", "cancelled"]).optional()
+    })
+  },
+  {
+    name: "bc_complete_auth_checkpoint",
+    title: "Complete manual auth checkpoint",
+    description: "Mark a manual authentication checkpoint completed without storing credentials.",
+    inputSchema: z.object({ checkpointId: z.string() })
+  },
+  {
+    name: "bc_cancel_auth_checkpoint",
+    title: "Cancel manual auth checkpoint",
+    description: "Mark a manual authentication checkpoint cancelled.",
+    inputSchema: z.object({ checkpointId: z.string() })
   },
   {
     name: "bc_add_term",
@@ -234,6 +288,21 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({ caseId: z.string() })
   },
   {
+    name: "bc_cancel_plan",
+    title: "Cancel test plan",
+    description: "Record a user-interrupted draft or approved plan and create a gap.",
+    inputSchema: z.object({
+      caseId: z.string(),
+      reason: z.string()
+    })
+  },
+  {
+    name: "bc_resume_plan",
+    title: "Resume cancelled test plan",
+    description: "Resume a cancelled plan after manual auth checkpoints are handled.",
+    inputSchema: z.object({ caseId: z.string() })
+  },
+  {
     name: "bc_run_agent",
     title: "Run agent",
     description: "Run a single Planner, Generator, or Healer agent and record the AgentRun.",
@@ -316,6 +385,19 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({
       projectId: z.string(),
       status: z.enum(["open", "resolved"]).optional()
+    })
+  },
+  {
+    name: "bc_report_gap",
+    title: "Report gap",
+    description: "Record an external preflight, manual workflow, or evidence gap.",
+    inputSchema: z.object({
+      projectId: z.string(),
+      sourceType: z.string(),
+      sourceId: z.string(),
+      reason: z.string(),
+      severity: z.enum(["low", "medium", "high"]),
+      owner: z.string()
     })
   },
   {

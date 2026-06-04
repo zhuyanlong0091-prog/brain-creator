@@ -702,6 +702,78 @@ describe("handleBrainCreatorTool", () => {
     expect(gaps).toEqual([expect.objectContaining({ id: failed.gap.id, status: "open" })]);
     expect(resolved.status).toBe("resolved");
   });
+
+  it("records and resumes a user-interrupted manual auth flow through MCP", async () => {
+    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Google Gmail Login",
+        environment: "external-first-run",
+        baseUrl: "https://workspace.google.com/intl/zh-CN/gmail/",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://accounts.google.com/", "https://mail.google.com/"]
+      })
+    );
+    const auth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "external-first-run",
+        role: "manual-user",
+        loginMethod: "script",
+        secrets: { mode: "manual-browser-login-required" }
+      })
+    );
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "首次 Gmail 登录验证",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    const checkpoint = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth_checkpoint", {
+        systemId: system.id,
+        authProfileId: auth.id,
+        testCaseId: testCase.id,
+        reason: "Manual Google authentication required",
+        resumeInstruction: "Resume after Inbox is visible"
+      })
+    );
+    const preflightGap = dataOf(
+      await handleBrainCreatorTool(context, "bc_report_gap", {
+        projectId: system.id,
+        sourceType: "external-preflight",
+        sourceId: system.id,
+        reason: "net::ERR_CONNECTION_CLOSED",
+        severity: "high",
+        owner: "qa"
+      })
+    );
+    const cancelled = dataOf(
+      await handleBrainCreatorTool(context, "bc_cancel_plan", {
+        caseId: testCase.id,
+        reason: "User closed the login page"
+      })
+    );
+    const blockedResume = errorOf(
+      await handleBrainCreatorTool(context, "bc_resume_plan", {
+        caseId: testCase.id
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_complete_auth_checkpoint", {
+      checkpointId: checkpoint.id
+    });
+    const resumed = dataOf(
+      await handleBrainCreatorTool(context, "bc_resume_plan", {
+        caseId: testCase.id
+      })
+    );
+
+    expect(preflightGap.sourceType).toBe("external-preflight");
+    expect(cancelled.testCase.status).toBe("cancelled");
+    expect(blockedResume).toContain("Manual auth checkpoints");
+    expect(resumed.testCase.status).toBe("draft");
+  });
 });
 
 function dataOf(result: CallToolResult) {
