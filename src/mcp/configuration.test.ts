@@ -43,7 +43,8 @@ describe("Brain Creator local integration files", () => {
     expect(packageJson.bin).toEqual({
       "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
       "brain-creator-doctor": "dist/cli/doctor.js",
-      "brain-creator-install-assets": "dist/cli/installAssets.js"
+      "brain-creator-install-assets": "dist/cli/installAssets.js",
+      "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
     });
     expect(packageJson.files).toEqual(
       expect.arrayContaining([
