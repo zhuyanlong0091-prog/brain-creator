@@ -26,7 +26,7 @@ Use source checkout mode when you are developing Brain Creator itself. In this m
 
 Use MCP CLI connection mode when you want to use Brain Creator from a business project. In this mode, run `brain-creator-install-assets` and `brain-creator-write-mcp-config` once in the business project, connect the MCP server with `brain-creator-mcp`, set `BRAIN_CREATOR_WORKSPACE` to the business project, and run `brain-creator-doctor` before the first workflow.
 
-Use future plugin installation mode after the Brain Creator plugin package exists. That mode should register the Skill, MCP server, bridge environment, and doctor command automatically. Until then, use MCP CLI connection mode.
+Use repo-local plugin installation mode when you want Brain Creator to appear through Codex `/plugin`. The repository provides `plugins/brain-creator/.codex-plugin/plugin.json`, `plugins/brain-creator/.mcp.json`, bundled Brain Creator skills, and `.agents/plugins/marketplace.json` for local marketplace discovery. This mode registers the Skill and MCP server metadata, while the executable commands still need to be available through a local package install or a future npm publish.
 
 Full setup details are in `docs/mcp-installation.md`.
 

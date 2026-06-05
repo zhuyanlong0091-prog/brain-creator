@@ -31,8 +31,24 @@ npm run verify:package-install
 - Run `npm run verify:package-install`.
 - Run the full project verification suite.
 
+## `/plugin` Publishing
+
+The repo-local Codex plugin is now covered by:
+
+- `plugins/brain-creator/.codex-plugin/plugin.json`
+- `plugins/brain-creator/.mcp.json`
+- `plugins/brain-creator/skills/`
+- `.agents/plugins/marketplace.json`
+
+Validate it before sharing:
+
+```bash
+py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
+```
+
+This is a repo-local plugin publish path. A broader public marketplace submission would still need the target marketplace process and permissions.
+
 ## Not Yet Covered
 
-- Marketplace `/plugin` publishing.
 - Automated npm publish from CI.
 - GitHub release notes automation.

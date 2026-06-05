@@ -1,0 +1,35 @@
+{
+  "name": "brain-creator",
+  "version": "2.0.0",
+  "description": "Agent-native testing brain for Claude Code and Codex.",
+  "author": {
+    "name": "Brain Creator"
+  },
+  "homepage": "https://github.com/zhuyanlong0091-prog/brain-creator-mvp",
+  "repository": "https://github.com/zhuyanlong0091-prog/brain-creator-mvp",
+  "license": "UNLICENSED",
+  "keywords": [
+    "testing",
+    "mcp",
+    "playwright",
+    "agent"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Brain Creator",
+    "shortDescription": "Use Brain Creator as an agent-native testing brain.",
+    "longDescription": "Brain Creator registers the Brain Creator Skill and MCP server so Claude Code or Codex can connect business systems, manage auth and rules, generate reviewed test plans, run agent chains, and track gaps without starting from a Web UI.",
+    "developerName": "Brain Creator",
+    "category": "Productivity",
+    "capabilities": [
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Skill(\"brain-creator\"). Connect this system.",
+      "Use Skill(\"brain-creator\"). Generate a reviewed test plan.",
+      "Run brain-creator-doctor, then start Brain Creator."
+    ],
+    "brandColor": "#0F766E"
+  },
+  "mcpServers": "./.mcp.json"
+}

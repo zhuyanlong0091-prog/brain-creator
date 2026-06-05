@@ -13,7 +13,7 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("MCP");
     expect(content).toContain("source checkout mode");
     expect(content).toContain("MCP CLI connection mode");
-    expect(content).toContain("future plugin installation mode");
+    expect(content).toContain("repo-local plugin installation mode");
     expect(content).toContain("brain-creator-doctor");
     expect(content).toContain("brain-creator-install-assets");
     expect(content).toContain("brain-creator-write-mcp-config");
@@ -48,7 +48,7 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("Skill(\"brain-creator\")");
     expect(content).toContain("source checkout mode");
     expect(content).toContain("MCP CLI connection mode");
-    expect(content).toContain("future plugin installation mode");
+    expect(content).toContain("repo-local plugin installation mode");
     expect(content).toContain("brain-creator-doctor");
     expect(content).toContain("brain-creator-install-assets");
     expect(content).toContain("bc_run_chain");
