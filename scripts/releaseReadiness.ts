@@ -161,7 +161,7 @@ function npmAuthCheck(status: ReleaseReadinessInput["npmAuth"]): ReleaseCheck {
   return {
     name: "npm authentication",
     status: "pass",
-    message: "npm is authenticated."
+    message: "npm is authenticated; publish may still require --otp when 2FA is enabled."
   };
 }
 

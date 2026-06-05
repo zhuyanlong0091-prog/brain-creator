@@ -1,12 +1,13 @@
 # Brain Creator Release Checklist
 
-Brain Creator is not ready for public npm publish until every blocker below is resolved.
+Brain Creator can be published to npm only after the release readiness report is ready and the package smoke checks pass.
 
-## Current Publish Blockers
+## Current Publish Gates
 
-- `private:true` is still set in `package.json`.
-- `license` is not set in `package.json`.
-- npm authentication is not configured on this machine.
+- `package.json` must not contain `private:true`.
+- `package.json` must declare the confirmed license.
+- `LICENSE` must be included in the package.
+- npm authentication must be configured on the publishing machine.
 
 Run the release readiness report:
 
@@ -23,13 +24,20 @@ npm run verify:package-install
 
 ## Required Before npm publish
 
-- Confirm final package name: `brain-creator` or a scoped package.
-- Confirm and document license.
+- Confirm final package name: `brain-creator`.
+- Confirm and document license: `MIT`.
 - Log in with the npm publishing account.
 - Run `npm run release:check` and confirm it reports ready.
 - Run `npm run verify:package-contents`.
 - Run `npm run verify:package-install`.
 - Run the full project verification suite.
+- If npm requires two-factor authentication, publish with a current OTP:
+
+```bash
+npm publish --access public --otp=<current-2fa-code>
+```
+
+Alternatively, publish with a granular npm access token that is allowed to bypass 2FA for automation.
 
 ## `/plugin` Publishing
 

@@ -83,7 +83,13 @@ npm run verify:package-contents
 npm run verify:package-install
 ```
 
-当前 `brain-creator` 包名在 npm registry 查询结果为未占用，但本机尚未登录 npm。当前已知发布阻塞项包括：`private:true` 仍保留、`license` 尚未确定、npm 登录账号尚未配置。真正发布前还需要确认包名、license、npm 登录账号和发布权限。
+当前 `brain-creator` 包名、MIT license、npm 登录账号和发布权限已进入发布前检查范围。真正发布前必须确认 `npm run release:check`、`npm run verify:package-contents` 和 `npm run verify:package-install` 全部通过。
+
+如果 npm 账号开启了双因素认证，真实发布时还需要当前 OTP：
+
+```bash
+npm publish --access public --otp=<当前 2FA 验证码>
+```
 
 发布清单见 [docs/release-checklist.md](docs/release-checklist.md)。
 
@@ -102,7 +108,7 @@ npm run verify:package-install
 py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
 ```
 
-插件安装后仍要求 `brain-creator-mcp`、`brain-creator-doctor`、`brain-creator-install-assets` 和 `brain-creator-write-mcp-config` 这些命令可用。npm 正式发布前，可通过本地包或 `npm pack` 产物安装这些命令。
+插件安装后仍要求 `brain-creator-mcp`、`brain-creator-doctor`、`brain-creator-install-assets` 和 `brain-creator-write-mcp-config` 这些命令可用。npm 正式发布前后，都可以通过 npm 包或 `npm pack` 产物安装这些命令。
 
 ### 智能体入口
 
@@ -212,7 +218,13 @@ npm run verify:package-contents
 npm run verify:package-install
 ```
 
-The `brain-creator` package name currently returns not found from the npm registry, but this machine is not logged in to npm. Known publish blockers remain: `private:true` is still set, `license` is not decided, and npm authentication is not configured. Before a real publish, confirm the package name, license, npm account, and publish permissions.
+The `brain-creator` package name, MIT license, npm account, and publish permissions are covered by the release readiness gates. Before a real publish, confirm `npm run release:check`, `npm run verify:package-contents`, and `npm run verify:package-install` all pass.
+
+If the npm account has two-factor authentication enabled, the real publish command also needs the current OTP:
+
+```bash
+npm publish --access public --otp=<current-2fa-code>
+```
 
 See [docs/release-checklist.md](docs/release-checklist.md).
 
@@ -231,7 +243,7 @@ Validate the plugin:
 py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
 ```
 
-After plugin installation, the commands `brain-creator-mcp`, `brain-creator-doctor`, `brain-creator-install-assets`, and `brain-creator-write-mcp-config` still need to be available on PATH. Before public npm publish, install them from a local package build or `npm pack` output.
+After plugin installation, the commands `brain-creator-mcp`, `brain-creator-doctor`, `brain-creator-install-assets`, and `brain-creator-write-mcp-config` still need to be available on PATH. They can be installed from the npm package or from a local `npm pack` output.
 
 ### Business Project Setup
 
