@@ -42,13 +42,28 @@ describe("Brain Creator local integration files", () => {
 
     expect(packageJson.bin).toEqual({
       "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
-      "brain-creator-doctor": "dist/cli/doctor.js"
+      "brain-creator-doctor": "dist/cli/doctor.js",
+      "brain-creator-install-assets": "dist/cli/installAssets.js"
     });
+    expect(packageJson.files).toEqual(
+      expect.arrayContaining([
+        "dist/",
+        "skills/",
+        ".claude/agents/",
+        "plugin/",
+        "docs/mcp-installation.md",
+        "README.md"
+      ])
+    );
     expect(packageJson.scripts.build).toContain("tsc");
+    expect(packageJson.scripts.prepack).toBe("npm run build");
     expect(packageJson.scripts.mcp).toContain("dist/cli/brainCreatorMcp.js");
     expect(packageJson.scripts["dev:mcp"]).toContain("src/mcp/server.ts");
     expect(packageJson.scripts["verify:installed-mcp"]).toContain(
       "scripts/verifyInstalledMcpSmoke.ts"
+    );
+    expect(packageJson.scripts["verify:package-install"]).toContain(
+      "scripts/verifyPackageInstallSmoke.ts"
     );
   });
 
