@@ -24,7 +24,7 @@ The first action in Claude Code should be `Skill("brain-creator")`. After that, 
 
 Use source checkout mode when you are developing Brain Creator itself. In this mode, clone the repository, run `npm install`, then use `npm run dev:mcp`.
 
-Use MCP CLI connection mode when you want to use Brain Creator from a business project. In this mode, connect the MCP server with `brain-creator-mcp`, set `BRAIN_CREATOR_WORKSPACE` to the business project, and run `brain-creator-doctor` before the first workflow.
+Use MCP CLI connection mode when you want to use Brain Creator from a business project. In this mode, run `brain-creator-install-assets` once in the business project, connect the MCP server with `brain-creator-mcp`, set `BRAIN_CREATOR_WORKSPACE` to the business project, and run `brain-creator-doctor` before the first workflow.
 
 Use future plugin installation mode after the Brain Creator plugin package exists. That mode should register the Skill, MCP server, bridge environment, and doctor command automatically. Until then, use MCP CLI connection mode.
 

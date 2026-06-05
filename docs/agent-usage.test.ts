@@ -15,6 +15,8 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("MCP CLI connection mode");
     expect(content).toContain("future plugin installation mode");
     expect(content).toContain("brain-creator-doctor");
+    expect(content).toContain("brain-creator-install-assets");
+    expect(content).toContain("npm run verify:package-install");
     expect(content).toContain("No Web UI");
     expect(content).toContain("无 Web UI");
     expect(content).toContain("智能体入口");
@@ -39,6 +41,7 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("MCP CLI connection mode");
     expect(content).toContain("future plugin installation mode");
     expect(content).toContain("brain-creator-doctor");
+    expect(content).toContain("brain-creator-install-assets");
     expect(content).toContain("bc_run_chain");
     expect(content).toContain("bc_create_auth_checkpoint");
     expect(content).toContain("bc_cancel_plan");

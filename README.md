@@ -130,10 +130,17 @@ Brain Creator supports three installation paths:
 Before a real agent workflow, run:
 
 ```bash
+brain-creator-install-assets
 brain-creator-doctor
 ```
 
 See [docs/mcp-installation.md](docs/mcp-installation.md) for the copyable Claude Code / Codex MCP configuration.
+
+Package installation smoke:
+
+```bash
+npm run verify:package-install
+```
 
 Start the Brain Creator MCP server:
 
