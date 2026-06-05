@@ -69,6 +69,7 @@ brain-creator-doctor
 Validate local package installation from this repository:
 
 ```bash
+npm run verify:package-contents
 npm run verify:package-install
 ```
 
