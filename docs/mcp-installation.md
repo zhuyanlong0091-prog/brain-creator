@@ -25,6 +25,13 @@ Build or install Brain Creator so these commands are available:
 ```bash
 brain-creator-mcp
 brain-creator-doctor
+brain-creator-install-assets
+```
+
+Install the Brain Creator Skill and Playwright agent definitions into the business project:
+
+```bash
+brain-creator-install-assets
 ```
 
 Then configure Claude Code or Codex MCP in the business project:
@@ -49,6 +56,12 @@ Run the preflight before the first Brain Creator workflow:
 
 ```bash
 brain-creator-doctor
+```
+
+Validate local package installation from this repository:
+
+```bash
+npm run verify:package-install
 ```
 
 After MCP is connected, start in Claude Code or Codex with:
