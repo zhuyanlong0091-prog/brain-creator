@@ -49,6 +49,28 @@ describe("Brain Creator local integration files", () => {
     expect(packageJson.scripts["dev:mcp"]).toContain("src/mcp/server.ts");
   });
 
+  it("defines a plugin installation manifest draft", async () => {
+    const manifest = JSON.parse(await readFile("plugin/manifest.json", "utf8"));
+
+    expect(manifest.name).toBe("brain-creator");
+    expect(manifest.mcpServers["brain-creator"]).toEqual({
+      command: "brain-creator-mcp",
+      env: {
+        BRAIN_CREATOR_WORKSPACE: ".",
+        BRAIN_CREATOR_AGENT_COMMAND: "claude",
+        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      }
+    });
+    expect(manifest.skills).toEqual([
+      expect.objectContaining({
+        name: "brain-creator",
+        path: "skills/brain-creator/SKILL.md"
+      })
+    ]);
+    expect(manifest.doctor.command).toBe("brain-creator-doctor");
+  });
+
   it("defines all Brain Creator skills with tool-oriented usage guidance", async () => {
     for (const skillName of skillNames) {
       const content = await readFile(`skills/${skillName}/SKILL.md`, "utf8");
