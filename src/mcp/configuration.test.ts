@@ -38,6 +38,17 @@ describe("Brain Creator local integration files", () => {
     expect(mcpConfig.mcpServers["playwright-test"]).toBeDefined();
   });
 
+  it("packages Brain Creator MCP as an installable CLI entrypoint", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.bin).toEqual({
+      "brain-creator-mcp": "dist/cli/brainCreatorMcp.js"
+    });
+    expect(packageJson.scripts.build).toContain("tsc");
+    expect(packageJson.scripts.mcp).toContain("dist/cli/brainCreatorMcp.js");
+    expect(packageJson.scripts["dev:mcp"]).toContain("src/mcp/server.ts");
+  });
+
   it("defines all Brain Creator skills with tool-oriented usage guidance", async () => {
     for (const skillName of skillNames) {
       const content = await readFile(`skills/${skillName}/SKILL.md`, "utf8");
