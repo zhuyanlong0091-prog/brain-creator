@@ -45,6 +45,45 @@ BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 
 Windows PowerShell 中请使用 `$env:` 设置同样的环境变量后再启动 MCP 客户端。
 
+### 业务项目安装步骤
+
+在 Brain Creator 已通过本地包或后续插件安装到环境后，进入你的业务项目目录，执行：
+
+```bash
+brain-creator-install-assets
+brain-creator-write-mcp-config
+brain-creator-doctor
+```
+
+这三步分别完成：
+
+- `brain-creator-install-assets`：把 Brain Creator Skill 和 Playwright Planner / Generator / Healer agent 定义安装到当前业务项目。
+- `brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，并保留已有 MCP server。
+- `brain-creator-doctor`：在真正使用前检查 workspace、Claude bridge 和 agent 定义。
+
+之后重启或重载 Claude Code / Codex 的 MCP 连接，在业务项目中输入：
+
+```text
+Use Skill("brain-creator"). 接入这个业务系统，生成测试计划，先等我审批，再执行链路。
+```
+
+本地包安装验证：
+
+```bash
+npm run verify:package-install
+```
+
+### 发布前检查
+
+正式发布 npm 包前，先确认包内容只包含运行所需文件，不包含本地资产、缓存、测试结果或源码工作目录：
+
+```bash
+npm run verify:package-contents
+npm run verify:package-install
+```
+
+当前 `brain-creator` 包名在 npm registry 查询结果为未占用，但本机尚未登录 npm。真正发布前还需要确认包名、license、npm 登录账号和发布权限。
+
 ### 智能体入口
 
 在 Claude Code 或 Codex 中使用一句话请求：
@@ -131,6 +170,7 @@ Before a real agent workflow, run:
 
 ```bash
 brain-creator-install-assets
+brain-creator-write-mcp-config
 brain-creator-doctor
 ```
 
@@ -140,6 +180,39 @@ Package installation smoke:
 
 ```bash
 npm run verify:package-install
+```
+
+### Release Readiness
+
+Before publishing an npm package, verify that the package contains only runtime files and excludes local assets, caches, test results, and source workspace data:
+
+```bash
+npm run verify:package-contents
+npm run verify:package-install
+```
+
+The `brain-creator` package name currently returns not found from the npm registry, but this machine is not logged in to npm. Before a real publish, confirm the package name, license, npm account, and publish permissions.
+
+### Business Project Setup
+
+After Brain Creator is available through a local package install or a future plugin install, go to the business project directory and run:
+
+```bash
+brain-creator-install-assets
+brain-creator-write-mcp-config
+brain-creator-doctor
+```
+
+These commands:
+
+- `brain-creator-install-assets`: installs the Brain Creator Skill and Playwright Planner / Generator / Healer agent definitions into the current business project.
+- `brain-creator-write-mcp-config`: creates or updates the business project's `.mcp.json` while preserving existing MCP servers.
+- `brain-creator-doctor`: checks workspace, Claude bridge, and agent definitions before the first workflow.
+
+Then restart or reload the Claude Code / Codex MCP connection and say:
+
+```text
+Use Skill("brain-creator"). Connect this business system, generate a test plan, wait for my approval, then run the chain.
 ```
 
 Start the Brain Creator MCP server:

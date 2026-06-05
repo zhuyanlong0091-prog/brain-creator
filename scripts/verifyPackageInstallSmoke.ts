@@ -23,12 +23,18 @@ try {
 
   const binDir = join(businessDir, "node_modules", ".bin");
   await run(join(binDir, "brain-creator-install-assets.cmd"), [], businessDir);
+  await run(join(binDir, "brain-creator-write-mcp-config.cmd"), [], businessDir);
 
   const skill = await readFile(
     join(businessDir, ".claude", "skills", "brain-creator", "SKILL.md"),
     "utf8"
   );
   assert(skill.includes("bc_run_chain"), "installed Brain Creator skill is missing workflow guidance");
+  const mcpConfig = JSON.parse(await readFile(join(businessDir, ".mcp.json"), "utf8"));
+  assert(
+    mcpConfig.mcpServers?.["brain-creator"]?.command === "brain-creator-mcp",
+    "installed business project MCP config is missing Brain Creator"
+  );
 
   await run(join(binDir, "brain-creator-doctor.cmd"), [], businessDir, {
     BRAIN_CREATOR_WORKSPACE: businessDir,

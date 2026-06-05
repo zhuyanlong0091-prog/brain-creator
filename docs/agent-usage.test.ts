@@ -16,7 +16,13 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("future plugin installation mode");
     expect(content).toContain("brain-creator-doctor");
     expect(content).toContain("brain-creator-install-assets");
+    expect(content).toContain("brain-creator-write-mcp-config");
+    expect(content).toContain("业务项目安装步骤");
+    expect(content).toContain("Business Project Setup");
     expect(content).toContain("npm run verify:package-install");
+    expect(content).toContain("发布前检查");
+    expect(content).toContain("Release Readiness");
+    expect(content).toContain("npm run verify:package-contents");
     expect(content).toContain("No Web UI");
     expect(content).toContain("无 Web UI");
     expect(content).toContain("智能体入口");

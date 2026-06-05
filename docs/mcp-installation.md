@@ -34,6 +34,14 @@ Install the Brain Creator Skill and Playwright agent definitions into the busine
 brain-creator-install-assets
 ```
 
+Create or update the business project's MCP config:
+
+```bash
+brain-creator-write-mcp-config
+```
+
+The command preserves existing MCP servers in `.mcp.json` and adds the `brain-creator` server.
+
 Then configure Claude Code or Codex MCP in the business project:
 
 ```json
@@ -61,6 +69,7 @@ brain-creator-doctor
 Validate local package installation from this repository:
 
 ```bash
+npm run verify:package-contents
 npm run verify:package-install
 ```
 
