@@ -51,7 +51,7 @@ The repo-local Codex plugin is now covered by:
 Validate it before sharing:
 
 ```bash
-py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
+py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
 This is a repo-local plugin publish path. A broader public marketplace submission would still need the target marketplace process and permissions.

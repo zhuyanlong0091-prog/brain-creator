@@ -6,5 +6,7 @@ playwright-report/
 *.tgz
 .brain-creator/
 .gstack/
+.obsidian/
+.playwright-mcp/
 /specs/
 /tests/seed-*.spec.ts

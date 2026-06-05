@@ -105,7 +105,7 @@ npm publish --access public --otp=<当前 2FA 验证码>
 验证插件：
 
 ```bash
-py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
+py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
 插件安装后仍要求 `brain-creator-mcp`、`brain-creator-doctor`、`brain-creator-install-assets` 和 `brain-creator-write-mcp-config` 这些命令可用。npm 正式发布前后，都可以通过 npm 包或 `npm pack` 产物安装这些命令。
@@ -240,7 +240,7 @@ The repository now includes a repo-local Codex plugin:
 Validate the plugin:
 
 ```bash
-py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
+py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
 After plugin installation, the commands `brain-creator-mcp`, `brain-creator-doctor`, `brain-creator-install-assets`, and `brain-creator-write-mcp-config` still need to be available on PATH. They can be installed from the npm package or from a local `npm pack` output.
