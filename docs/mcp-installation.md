@@ -93,7 +93,7 @@ It provides:
 To validate the local plugin:
 
 ```bash
-py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
+py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
 When installed from the repo-local marketplace, Brain Creator still expects the npm CLI commands to be available on PATH:
