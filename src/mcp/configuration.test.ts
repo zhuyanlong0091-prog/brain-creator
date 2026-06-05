@@ -47,6 +47,9 @@ describe("Brain Creator local integration files", () => {
     expect(packageJson.scripts.build).toContain("tsc");
     expect(packageJson.scripts.mcp).toContain("dist/cli/brainCreatorMcp.js");
     expect(packageJson.scripts["dev:mcp"]).toContain("src/mcp/server.ts");
+    expect(packageJson.scripts["verify:installed-mcp"]).toContain(
+      "scripts/verifyInstalledMcpSmoke.ts"
+    );
   });
 
   it("defines a plugin installation manifest draft", async () => {
