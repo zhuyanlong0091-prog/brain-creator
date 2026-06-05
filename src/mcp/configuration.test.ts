@@ -96,6 +96,55 @@ describe("Brain Creator local integration files", () => {
     expect(manifest.doctor.command).toBe("brain-creator-doctor");
   });
 
+  it("publishes a repo-local Codex plugin with MCP defaults and marketplace metadata", async () => {
+    const pluginManifest = JSON.parse(
+      await readFile("plugins/brain-creator/.codex-plugin/plugin.json", "utf8")
+    );
+    const pluginMcp = JSON.parse(await readFile("plugins/brain-creator/.mcp.json", "utf8"));
+    const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
+
+    expect(pluginManifest.name).toBe("brain-creator");
+    expect(pluginManifest.version).toBe("2.0.0");
+    expect(pluginManifest.description).toContain("Agent-native testing brain");
+    expect(pluginManifest.skills).toBe("./skills/");
+    expect(pluginManifest.mcpServers).toBe("./.mcp.json");
+    expect(pluginManifest.interface.displayName).toBe("Brain Creator");
+    expect(pluginManifest.interface.category).toBe("Productivity");
+    expect(pluginManifest.interface.defaultPrompt).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Use Skill("brain-creator")'),
+        expect.stringContaining("brain-creator-doctor")
+      ])
+    );
+
+    expect(pluginMcp.mcpServers["brain-creator"]).toEqual({
+      command: "brain-creator-mcp",
+      env: {
+        BRAIN_CREATOR_WORKSPACE: ".",
+        BRAIN_CREATOR_AGENT_COMMAND: "claude",
+        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      }
+    });
+
+    expect(marketplace.plugins).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "brain-creator",
+          source: {
+            source: "local",
+            path: "./plugins/brain-creator"
+          },
+          policy: {
+            installation: "AVAILABLE",
+            authentication: "ON_INSTALL"
+          },
+          category: "Productivity"
+        })
+      ])
+    );
+  });
+
   it("defines all Brain Creator skills with tool-oriented usage guidance", async () => {
     for (const skillName of skillNames) {
       const content = await readFile(`skills/${skillName}/SKILL.md`, "utf8");

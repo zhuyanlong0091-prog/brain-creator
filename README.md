@@ -87,6 +87,23 @@ npm run verify:package-install
 
 发布清单见 [docs/release-checklist.md](docs/release-checklist.md)。
 
+### Codex `/plugin` 本地发布
+
+仓库已提供 repo-local Codex 插件：
+
+- `plugins/brain-creator/.codex-plugin/plugin.json`：插件展示、starter prompt 和能力描述。
+- `plugins/brain-creator/.mcp.json`：注册 `brain-creator-mcp` MCP server。
+- `plugins/brain-creator/skills/`：随插件提供 Brain Creator skill。
+- `.agents/plugins/marketplace.json`：将 `brain-creator` 作为本地 marketplace 插件暴露给 Codex。
+
+验证插件：
+
+```bash
+py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
+```
+
+插件安装后仍要求 `brain-creator-mcp`、`brain-creator-doctor`、`brain-creator-install-assets` 和 `brain-creator-write-mcp-config` 这些命令可用。npm 正式发布前，可通过本地包或 `npm pack` 产物安装这些命令。
+
 ### 智能体入口
 
 在 Claude Code 或 Codex 中使用一句话请求：
@@ -167,7 +184,7 @@ Brain Creator supports three installation paths:
 
 - source checkout mode: use this repository directly when developing Brain Creator.
 - MCP CLI connection mode: connect any business project to the installed `brain-creator-mcp` command.
-- future plugin installation mode: a `/plugin` style package will register the Skill, MCP server, bridge env, and doctor command automatically.
+- repo-local plugin installation mode: use `plugins/brain-creator` plus `.agents/plugins/marketplace.json` to expose Brain Creator through Codex `/plugin`.
 
 Before a real agent workflow, run:
 
@@ -198,6 +215,23 @@ npm run verify:package-install
 The `brain-creator` package name currently returns not found from the npm registry, but this machine is not logged in to npm. Known publish blockers remain: `private:true` is still set, `license` is not decided, and npm authentication is not configured. Before a real publish, confirm the package name, license, npm account, and publish permissions.
 
 See [docs/release-checklist.md](docs/release-checklist.md).
+
+### Codex `/plugin` Local Publish
+
+The repository now includes a repo-local Codex plugin:
+
+- `plugins/brain-creator/.codex-plugin/plugin.json`: plugin metadata, starter prompts, and capability text.
+- `plugins/brain-creator/.mcp.json`: registers the `brain-creator-mcp` MCP server.
+- `plugins/brain-creator/skills/`: ships the Brain Creator skill with the plugin.
+- `.agents/plugins/marketplace.json`: exposes `brain-creator` as a local marketplace plugin for Codex.
+
+Validate the plugin:
+
+```bash
+py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
+```
+
+After plugin installation, the commands `brain-creator-mcp`, `brain-creator-doctor`, `brain-creator-install-assets`, and `brain-creator-write-mcp-config` still need to be available on PATH. Before public npm publish, install them from a local package build or `npm pack` output.
 
 ### Business Project Setup
 
