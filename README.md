@@ -119,6 +119,22 @@ npm test
 npx tsc --noEmit
 ```
 
+### Installation Modes
+
+Brain Creator supports three installation paths:
+
+- source checkout mode: use this repository directly when developing Brain Creator.
+- MCP CLI connection mode: connect any business project to the installed `brain-creator-mcp` command.
+- future plugin installation mode: a `/plugin` style package will register the Skill, MCP server, bridge env, and doctor command automatically.
+
+Before a real agent workflow, run:
+
+```bash
+brain-creator-doctor
+```
+
+See [docs/mcp-installation.md](docs/mcp-installation.md) for the copyable Claude Code / Codex MCP configuration.
+
 Start the Brain Creator MCP server:
 
 ```bash
