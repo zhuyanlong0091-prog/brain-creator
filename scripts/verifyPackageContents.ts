@@ -10,6 +10,7 @@ const requiredPaths = [
   ".claude/agents/playwright-test-generator.md",
   ".claude/agents/playwright-test-healer.md",
   "docs/mcp-installation.md",
+  "LICENSE",
   "plugin/manifest.json",
   "README.md",
   "package.json"

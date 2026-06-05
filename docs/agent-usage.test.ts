@@ -24,7 +24,7 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("Release Readiness");
     expect(content).toContain("npm run verify:package-contents");
     expect(content).toContain("npm run release:check");
-    expect(content).toContain("private:true");
+    expect(content).toContain("MIT license");
     expect(content).toContain("docs/release-checklist.md");
     expect(content).toContain("No Web UI");
     expect(content).toContain("无 Web UI");
