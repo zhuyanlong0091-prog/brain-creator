@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -34,8 +34,10 @@ describe("brain-creator-mcp CLI", () => {
     child.stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
     await wait(300);
     const stillRunning = child.exitCode === null;
+    const closed = waitForClose(child);
     child.kill();
     child.stdin.end();
+    await closed;
 
     expect(processCwd).not.toBe(businessWorkspace);
     expect(stillRunning).toBe(true);
@@ -51,4 +53,13 @@ async function tempDir() {
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForClose(child: ChildProcess) {
+  if (child.exitCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    child.once("close", () => resolve());
+  });
 }
