@@ -20,6 +20,16 @@ Brain Creator is the testing brain for an agent. Claude Code / Codex is the conv
 
 The first action in Claude Code should be `Skill("brain-creator")`. After that, the agent should choose Brain Creator MCP tools for you.
 
+## Installation Modes
+
+Use source checkout mode when you are developing Brain Creator itself. In this mode, clone the repository, run `npm install`, then use `npm run dev:mcp`.
+
+Use MCP CLI connection mode when you want to use Brain Creator from a business project. In this mode, connect the MCP server with `brain-creator-mcp`, set `BRAIN_CREATOR_WORKSPACE` to the business project, and run `brain-creator-doctor` before the first workflow.
+
+Use future plugin installation mode after the Brain Creator plugin package exists. That mode should register the Skill, MCP server, bridge environment, and doctor command automatically. Until then, use MCP CLI connection mode.
+
+Full setup details are in `docs/mcp-installation.md`.
+
 ## Flow Checklist
 
 The normal flow is: connect a business system, configure auth, add business language, add business rules, generate a draft plan, approve the plan, run the chain, then review artifacts and gaps.

@@ -17,25 +17,61 @@ describe("Brain Creator local integration files", () => {
     const mcpConfig = JSON.parse(await readFile(".mcp.json", "utf8"));
 
     expect(settings.mcpServers["brain-creator"]).toEqual({
-      command: "npm",
-      args: ["run", "mcp"],
-      cwd: ".",
+      command: "brain-creator-mcp",
       env: {
+        BRAIN_CREATOR_WORKSPACE: ".",
         BRAIN_CREATOR_AGENT_COMMAND: "claude",
         BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });
     expect(mcpConfig.mcpServers["brain-creator"]).toEqual({
-      command: "npm",
-      args: ["run", "mcp"],
+      command: "brain-creator-mcp",
       env: {
+        BRAIN_CREATOR_WORKSPACE: ".",
         BRAIN_CREATOR_AGENT_COMMAND: "claude",
         BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });
     expect(mcpConfig.mcpServers["playwright-test"]).toBeDefined();
+  });
+
+  it("packages Brain Creator MCP as an installable CLI entrypoint", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.bin).toEqual({
+      "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
+      "brain-creator-doctor": "dist/cli/doctor.js"
+    });
+    expect(packageJson.scripts.build).toContain("tsc");
+    expect(packageJson.scripts.mcp).toContain("dist/cli/brainCreatorMcp.js");
+    expect(packageJson.scripts["dev:mcp"]).toContain("src/mcp/server.ts");
+    expect(packageJson.scripts["verify:installed-mcp"]).toContain(
+      "scripts/verifyInstalledMcpSmoke.ts"
+    );
+  });
+
+  it("defines a plugin installation manifest draft", async () => {
+    const manifest = JSON.parse(await readFile("plugin/manifest.json", "utf8"));
+
+    expect(manifest.name).toBe("brain-creator");
+    expect(manifest.mcpServers["brain-creator"]).toEqual({
+      command: "brain-creator-mcp",
+      env: {
+        BRAIN_CREATOR_WORKSPACE: ".",
+        BRAIN_CREATOR_AGENT_COMMAND: "claude",
+        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      }
+    });
+    expect(manifest.skills).toEqual([
+      expect.objectContaining({
+        name: "brain-creator",
+        path: "skills/brain-creator/SKILL.md"
+      })
+    ]);
+    expect(manifest.doctor.command).toBe("brain-creator-doctor");
   });
 
   it("defines all Brain Creator skills with tool-oriented usage guidance", async () => {
