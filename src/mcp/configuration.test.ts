@@ -17,19 +17,18 @@ describe("Brain Creator local integration files", () => {
     const mcpConfig = JSON.parse(await readFile(".mcp.json", "utf8"));
 
     expect(settings.mcpServers["brain-creator"]).toEqual({
-      command: "npm",
-      args: ["run", "mcp"],
-      cwd: ".",
+      command: "brain-creator-mcp",
       env: {
+        BRAIN_CREATOR_WORKSPACE: ".",
         BRAIN_CREATOR_AGENT_COMMAND: "claude",
         BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });
     expect(mcpConfig.mcpServers["brain-creator"]).toEqual({
-      command: "npm",
-      args: ["run", "mcp"],
+      command: "brain-creator-mcp",
       env: {
+        BRAIN_CREATOR_WORKSPACE: ".",
         BRAIN_CREATOR_AGENT_COMMAND: "claude",
         BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
