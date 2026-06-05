@@ -3,7 +3,12 @@
     "brain-creator": {
       "command": "npm",
       "args": ["run", "mcp"],
-      "cwd": "."
+      "cwd": ".",
+      "env": {
+        "BRAIN_CREATOR_AGENT_COMMAND": "claude",
+        "BRAIN_CREATOR_AGENT_ARGS": "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        "BRAIN_CREATOR_AGENT_TIMEOUT_MS": "120000"
+      }
     }
   }
 }

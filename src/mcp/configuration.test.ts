@@ -19,11 +19,21 @@ describe("Brain Creator local integration files", () => {
     expect(settings.mcpServers["brain-creator"]).toEqual({
       command: "npm",
       args: ["run", "mcp"],
-      cwd: "."
+      cwd: ".",
+      env: {
+        BRAIN_CREATOR_AGENT_COMMAND: "claude",
+        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      }
     });
     expect(mcpConfig.mcpServers["brain-creator"]).toEqual({
       command: "npm",
-      args: ["run", "mcp"]
+      args: ["run", "mcp"],
+      env: {
+        BRAIN_CREATOR_AGENT_COMMAND: "claude",
+        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      }
     });
     expect(mcpConfig.mcpServers["playwright-test"]).toBeDefined();
   });

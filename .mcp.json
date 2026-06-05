@@ -5,7 +5,12 @@
       "args": [
         "run",
         "mcp"
-      ]
+      ],
+      "env": {
+        "BRAIN_CREATOR_AGENT_COMMAND": "claude",
+        "BRAIN_CREATOR_AGENT_ARGS": "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        "BRAIN_CREATOR_AGENT_TIMEOUT_MS": "120000"
+      }
     },
     "playwright-test": {
       "command": "cmd",
