@@ -12,6 +12,47 @@ afterEach(async () => {
 });
 
 describe("handleBrainCreatorTool", () => {
+  it("uses the configured Brain Creator workspace when creating MCP context", async () => {
+    const previousWorkspace = process.env.BRAIN_CREATOR_WORKSPACE;
+    const workDir = await tempDir();
+    process.env.BRAIN_CREATOR_WORKSPACE = workDir;
+    try {
+      const context = createBrainCreatorMcpContext();
+
+      expect(context.workDir).toBe(workDir);
+    } finally {
+      restoreEnv("BRAIN_CREATOR_WORKSPACE", previousWorkspace);
+    }
+  });
+
+  it("stores MCP assets under the configured Brain Creator workspace by default", async () => {
+    const previousWorkspace = process.env.BRAIN_CREATOR_WORKSPACE;
+    const previousDataFile = process.env.BRAIN_CREATOR_DATA_FILE;
+    const workDir = await tempDir();
+    process.env.BRAIN_CREATOR_WORKSPACE = workDir;
+    delete process.env.BRAIN_CREATOR_DATA_FILE;
+    try {
+      const context = createBrainCreatorMcpContext();
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      });
+
+      const persisted = JSON.parse(
+        await readFile(join(workDir, ".brain-creator", "local-assets.json"), "utf8")
+      );
+      expect(persisted.systemProfiles).toEqual([
+        expect.objectContaining({ name: "Orders Console" })
+      ]);
+    } finally {
+      restoreEnv("BRAIN_CREATOR_WORKSPACE", previousWorkspace);
+      restoreEnv("BRAIN_CREATOR_DATA_FILE", previousDataFile);
+    }
+  });
+
   it("creates systems, auth, rules, and searchable assets through MCP results", async () => {
     const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
     const system = dataOf(

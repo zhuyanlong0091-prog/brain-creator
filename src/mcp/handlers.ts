@@ -7,6 +7,10 @@ import { generateSeedFile } from "../agent/seedGenerator.js";
 import { createClaudeSubagentBridge } from "../agent/claudeBridge.js";
 import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
+  resolveBrainCreatorDataFile,
+  resolveBrainCreatorWorkspace
+} from "../shared/workspace.js";
+import {
   commandRunnerAgentBridge,
   generatePlanDraft,
   runAgent,
@@ -42,9 +46,9 @@ type CreateContextInput = {
 export function createBrainCreatorMcpContext(
   input: CreateContextInput = {}
 ): BrainCreatorMcpContext {
-  const workDir = input.workDir ?? process.cwd();
+  const workDir = input.workDir ?? resolveBrainCreatorWorkspace();
   const repository = new JsonFileBrainCreatorRepository(
-    input.dataFilePath ?? join(workDir, ".brain-creator", "local-assets.json")
+    input.dataFilePath ?? resolveBrainCreatorDataFile(workDir)
   );
   return {
     repository,
