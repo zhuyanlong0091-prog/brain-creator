@@ -4,13 +4,15 @@
   "private": true,
   "type": "module",
   "bin": {
-    "brain-creator-mcp": "dist/cli/brainCreatorMcp.js"
+    "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
+    "brain-creator-doctor": "dist/cli/doctor.js"
   },
   "scripts": {
     "test": "vitest run",
     "build": "tsc -p tsconfig.build.json",
     "mcp": "npm run build && node dist/cli/brainCreatorMcp.js",
     "dev:mcp": "node --loader ts-node/esm src/mcp/server.ts",
+    "doctor": "npm run build && node dist/cli/doctor.js",
     "init-agents": "npx playwright init-agents --loop=claude",
     "verify:live-claude-chain": "node --loader ts-node/esm scripts/liveClaudeChainSmoke.ts",
     "verify:live-agent-artifacts": "node --loader ts-node/esm scripts/liveAgentArtifactSmoke.ts",
