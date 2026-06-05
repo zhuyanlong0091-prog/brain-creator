@@ -78,11 +78,14 @@ npm run verify:package-install
 正式发布 npm 包前，先确认包内容只包含运行所需文件，不包含本地资产、缓存、测试结果或源码工作目录：
 
 ```bash
+npm run release:check
 npm run verify:package-contents
 npm run verify:package-install
 ```
 
-当前 `brain-creator` 包名在 npm registry 查询结果为未占用，但本机尚未登录 npm。真正发布前还需要确认包名、license、npm 登录账号和发布权限。
+当前 `brain-creator` 包名在 npm registry 查询结果为未占用，但本机尚未登录 npm。当前已知发布阻塞项包括：`private:true` 仍保留、`license` 尚未确定、npm 登录账号尚未配置。真正发布前还需要确认包名、license、npm 登录账号和发布权限。
+
+发布清单见 [docs/release-checklist.md](docs/release-checklist.md)。
 
 ### 智能体入口
 
@@ -187,11 +190,14 @@ npm run verify:package-install
 Before publishing an npm package, verify that the package contains only runtime files and excludes local assets, caches, test results, and source workspace data:
 
 ```bash
+npm run release:check
 npm run verify:package-contents
 npm run verify:package-install
 ```
 
-The `brain-creator` package name currently returns not found from the npm registry, but this machine is not logged in to npm. Before a real publish, confirm the package name, license, npm account, and publish permissions.
+The `brain-creator` package name currently returns not found from the npm registry, but this machine is not logged in to npm. Known publish blockers remain: `private:true` is still set, `license` is not decided, and npm authentication is not configured. Before a real publish, confirm the package name, license, npm account, and publish permissions.
+
+See [docs/release-checklist.md](docs/release-checklist.md).
 
 ### Business Project Setup
 

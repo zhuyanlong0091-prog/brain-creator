@@ -69,6 +69,9 @@ describe("Brain Creator local integration files", () => {
     expect(packageJson.scripts["verify:package-contents"]).toContain(
       "scripts/verifyPackageContents.ts"
     );
+    expect(packageJson.scripts["release:check"]).toContain(
+      "scripts/releaseReadiness.ts"
+    );
   });
 
   it("defines a plugin installation manifest draft", async () => {

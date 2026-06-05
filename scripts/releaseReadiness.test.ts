@@ -1,0 +1,76 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildReleaseReadinessReport,
+  formatReleaseReadinessReport
+} from "./releaseReadiness.js";
+
+describe("release readiness report", () => {
+  it("reports blockers for the current safe non-publishable package state", () => {
+    const report = buildReleaseReadinessReport({
+      packageJson: {
+        name: "brain-creator",
+        version: "2.0.0",
+        private: true,
+        bin: {
+          "brain-creator-mcp": "dist/cli/brainCreatorMcp.js"
+        },
+        files: ["dist/", "skills/", ".claude/agents/", "plugin/", "README.md"],
+        scripts: {
+          "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
+          "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts"
+        }
+      },
+      npmAuth: "missing",
+      packageNameStatus: "available"
+    });
+
+    expect(report.ready).toBe(false);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "private flag",
+          status: "blocker",
+          message: expect.stringContaining("private")
+        }),
+        expect.objectContaining({
+          name: "license",
+          status: "blocker",
+          message: expect.stringContaining("license")
+        }),
+        expect.objectContaining({
+          name: "npm authentication",
+          status: "blocker"
+        })
+      ])
+    );
+    expect(formatReleaseReadinessReport(report)).toContain("Release readiness: blocked");
+  });
+
+  it("passes when package metadata and npm state are publishable", () => {
+    const report = buildReleaseReadinessReport({
+      packageJson: {
+        name: "brain-creator",
+        version: "2.0.0",
+        private: false,
+        license: "MIT",
+        bin: {
+          "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
+          "brain-creator-doctor": "dist/cli/doctor.js",
+          "brain-creator-install-assets": "dist/cli/installAssets.js",
+          "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
+        },
+        files: ["dist/", "skills/", ".claude/agents/", "plugin/", "README.md"],
+        scripts: {
+          "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
+          "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts"
+        }
+      },
+      npmAuth: "authenticated",
+      packageNameStatus: "available"
+    });
+
+    expect(report.ready).toBe(true);
+    expect(report.checks.every((check) => check.status === "pass")).toBe(true);
+    expect(formatReleaseReadinessReport(report)).toContain("Release readiness: ready");
+  });
+});
