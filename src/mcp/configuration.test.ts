@@ -74,6 +74,17 @@ describe("Brain Creator local integration files", () => {
     );
   });
 
+  it("defines explicit npm publish exclusions instead of relying on gitignore", async () => {
+    const npmIgnore = await readFile(".npmignore", "utf8");
+
+    expect(npmIgnore).toContain("src/");
+    expect(npmIgnore).toContain("scripts/");
+    expect(npmIgnore).toContain("tests/");
+    expect(npmIgnore).toContain(".obsidian/");
+    expect(npmIgnore).toContain(".playwright-mcp/");
+    expect(npmIgnore).toContain("*.tgz");
+  });
+
   it("defines a plugin installation manifest draft", async () => {
     const manifest = JSON.parse(await readFile("plugin/manifest.json", "utf8"));
 

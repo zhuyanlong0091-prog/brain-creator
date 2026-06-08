@@ -1,0 +1,28 @@
+# Explicit npm publish exclusions.
+# Runtime package contents are primarily controlled by package.json "files".
+
+# Source, tests, and development scripts are not published.
+src/
+scripts/
+tests/
+*.test.ts
+
+# Local build, cache, and tool output.
+node_modules/
+.next/
+test-results/
+playwright-report/
+.brain-creator/
+.brain-creator-test/
+.gstack/
+.obsidian/
+.playwright-mcp/
+specs/
+
+# Local archives and transient package outputs.
+*.tgz
+swc-*.tgz
+
+# Repository and CI metadata not needed at runtime.
+.git/
+.github/
