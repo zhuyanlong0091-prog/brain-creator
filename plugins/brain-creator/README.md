@@ -11,7 +11,7 @@ It registers:
 Validate before sharing:
 
 ```bash
-py C:\Users\28917\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py plugins\brain-creator
+py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
 The plugin expects these commands to be available on PATH:
