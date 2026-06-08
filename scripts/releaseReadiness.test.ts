@@ -9,7 +9,7 @@ describe("release readiness report", () => {
     const report = buildReleaseReadinessReport({
       packageJson: {
         name: "brain-creator",
-        version: "2.0.0",
+        version: "2.0.1",
         private: true,
         bin: {
           "brain-creator-mcp": "dist/cli/brainCreatorMcp.js"
@@ -50,7 +50,7 @@ describe("release readiness report", () => {
     const report = buildReleaseReadinessReport({
       packageJson: {
         name: "brain-creator",
-        version: "2.0.0",
+        version: "2.0.1",
         private: false,
         license: "MIT",
         bin: {
@@ -72,5 +72,32 @@ describe("release readiness report", () => {
     expect(report.ready).toBe(true);
     expect(report.checks.every((check) => check.status === "pass")).toBe(true);
     expect(formatReleaseReadinessReport(report)).toContain("Release readiness: ready");
+  });
+
+  it("passes for an existing npm package when publishing a new version", () => {
+    const report = buildReleaseReadinessReport({
+      packageJson: {
+        name: "brain-creator",
+        version: "2.0.1",
+        private: false,
+        license: "MIT",
+        bin: {
+          "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
+          "brain-creator-doctor": "dist/cli/doctor.js",
+          "brain-creator-install-assets": "dist/cli/installAssets.js",
+          "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
+        },
+        files: ["dist/", "skills/", ".claude/agents/", "plugin/", "README.md"],
+        scripts: {
+          "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
+          "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts"
+        }
+      },
+      npmAuth: "authenticated",
+      packageNameStatus: "published"
+    });
+
+    expect(report.ready).toBe(true);
+    expect(formatReleaseReadinessReport(report)).toContain("package already exists on npm");
   });
 });

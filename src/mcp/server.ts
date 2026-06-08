@@ -8,7 +8,7 @@ export function createBrainCreatorServer() {
   const context = createBrainCreatorMcpContext();
   const server = new McpServer({
     name: "brain-creator",
-    version: "2.0.0"
+    version: "2.0.1"
   });
 
   registerBrainCreatorTools(server, (name, input) =>

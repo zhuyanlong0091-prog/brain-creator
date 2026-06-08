@@ -1,10 +1,11 @@
 {
   "name": "brain-creator",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Agent-native testing brain for Claude Code and Codex.",
   "mcpServers": {
     "brain-creator": {
-      "command": "brain-creator-mcp",
+      "command": "npx",
+      "args": ["brain-creator-mcp"],
       "env": {
         "BRAIN_CREATOR_WORKSPACE": ".",
         "BRAIN_CREATOR_AGENT_COMMAND": "claude",
@@ -21,6 +22,7 @@
     }
   ],
   "doctor": {
-    "command": "brain-creator-doctor"
+    "command": "npx",
+    "args": ["brain-creator-doctor"]
   }
 }

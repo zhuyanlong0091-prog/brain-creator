@@ -1,6 +1,6 @@
 {
   "name": "brain-creator",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Agent-native testing brain for Claude Code and Codex.",
   "author": {
     "name": "Brain Creator"
@@ -27,7 +27,7 @@
     "defaultPrompt": [
       "Use Skill(\"brain-creator\"). Connect this system.",
       "Use Skill(\"brain-creator\"). Generate a reviewed test plan.",
-      "Run brain-creator-doctor, then start Brain Creator."
+      "Run npx brain-creator-doctor, then start Brain Creator."
     ],
     "brandColor": "#0F766E"
   },

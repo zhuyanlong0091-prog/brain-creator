@@ -26,7 +26,7 @@ export type ReleaseReadinessReport = {
 export type ReleaseReadinessInput = {
   packageJson: PackageJsonLike;
   npmAuth: "authenticated" | "missing" | "unknown";
-  packageNameStatus: "available" | "taken" | "unknown";
+  packageNameStatus: "available" | "published" | "unknown";
 };
 
 const requiredBins = [
@@ -126,20 +126,19 @@ function licenseCheck(packageJson: PackageJsonLike): ReleaseCheck {
 }
 
 function packageNameCheck(status: ReleaseReadinessInput["packageNameStatus"]): ReleaseCheck {
-  if (status === "taken") {
-    return {
-      name: "package name",
-      status: "blocker",
-      message: "configured package name is already taken on npm.",
-      remediation: "Choose a new package name or a scoped package name."
-    };
-  }
   if (status === "unknown") {
     return {
       name: "package name",
       status: "blocker",
-      message: "package name availability could not be confirmed.",
+      message: "package name status could not be confirmed.",
       remediation: "Run npm view <package-name> before publishing."
+    };
+  }
+  if (status === "published") {
+    return {
+      name: "package name",
+      status: "pass",
+      message: "package already exists on npm; publishing a new version will rely on npm account permissions."
     };
   }
   return {
@@ -228,7 +227,7 @@ async function detectPackageNameStatus(
   }
   const result = await run("npm", ["view", packageName, "name", "--json"]);
   if (result.exitCode === 0) {
-    return "taken";
+    return "published";
   }
   if (result.stderr.includes("E404") || result.stdout.includes("E404")) {
     return "available";

@@ -32,8 +32,13 @@ try {
   assert(skill.includes("bc_run_chain"), "installed Brain Creator skill is missing workflow guidance");
   const mcpConfig = JSON.parse(await readFile(join(businessDir, ".mcp.json"), "utf8"));
   assert(
-    mcpConfig.mcpServers?.["brain-creator"]?.command === "brain-creator-mcp",
+    mcpConfig.mcpServers?.["brain-creator"]?.command === "npx",
     "installed business project MCP config is missing Brain Creator"
+  );
+  assert(
+    JSON.stringify(mcpConfig.mcpServers?.["brain-creator"]?.args) ===
+      JSON.stringify(["brain-creator-mcp"]),
+    "installed business project MCP config should use local npx Brain Creator"
   );
 
   await run(join(binDir, "brain-creator-doctor.cmd"), [], businessDir, {

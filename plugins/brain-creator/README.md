@@ -14,11 +14,13 @@ Validate before sharing:
 py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
-The plugin expects these commands to be available on PATH:
+For project-local npm installs, run these commands with `npx`:
 
 ```bash
-brain-creator-mcp
-brain-creator-doctor
-brain-creator-install-assets
-brain-creator-write-mcp-config
+npx brain-creator-mcp
+npx brain-creator-doctor
+npx brain-creator-install-assets
+npx brain-creator-write-mcp-config
 ```
+
+For global npm installs, the same commands can be run without `npx`.

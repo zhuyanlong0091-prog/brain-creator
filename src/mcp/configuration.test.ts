@@ -90,7 +90,8 @@ describe("Brain Creator local integration files", () => {
 
     expect(manifest.name).toBe("brain-creator");
     expect(manifest.mcpServers["brain-creator"]).toEqual({
-      command: "brain-creator-mcp",
+      command: "npx",
+      args: ["brain-creator-mcp"],
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
         BRAIN_CREATOR_AGENT_COMMAND: "claude",
@@ -104,7 +105,10 @@ describe("Brain Creator local integration files", () => {
         path: "skills/brain-creator/SKILL.md"
       })
     ]);
-    expect(manifest.doctor.command).toBe("brain-creator-doctor");
+    expect(manifest.doctor).toEqual({
+      command: "npx",
+      args: ["brain-creator-doctor"]
+    });
   });
 
   it("publishes a repo-local Codex plugin with MCP defaults and marketplace metadata", async () => {
@@ -115,7 +119,7 @@ describe("Brain Creator local integration files", () => {
     const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
 
     expect(pluginManifest.name).toBe("brain-creator");
-    expect(pluginManifest.version).toBe("2.0.0");
+    expect(pluginManifest.version).toBe("2.0.1");
     expect(pluginManifest.description).toContain("Agent-native testing brain");
     expect(pluginManifest.skills).toBe("./skills/");
     expect(pluginManifest.mcpServers).toBe("./.mcp.json");
@@ -129,7 +133,8 @@ describe("Brain Creator local integration files", () => {
     );
 
     expect(pluginMcp.mcpServers["brain-creator"]).toEqual({
-      command: "brain-creator-mcp",
+      command: "npx",
+      args: ["brain-creator-mcp"],
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
         BRAIN_CREATOR_AGENT_COMMAND: "claude",
