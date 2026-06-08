@@ -47,19 +47,30 @@ Windows PowerShell 中请使用 `$env:` 设置同样的环境变量后再启动 
 
 ### 业务项目安装步骤
 
-在 Brain Creator 已通过本地包或后续插件安装到环境后，进入你的业务项目目录，执行：
+推荐在每个业务项目里做本地安装，这样 Brain Creator 跟随项目版本走：
 
 ```bash
-brain-creator-install-assets
-brain-creator-write-mcp-config
-brain-creator-doctor
+npm install --save-dev brain-creator
+npx brain-creator-install-assets
+npx brain-creator-write-mcp-config
+npx brain-creator-doctor
 ```
 
-这三步分别完成：
+这几步分别完成：
 
-- `brain-creator-install-assets`：把 Brain Creator Skill 和 Playwright Planner / Generator / Healer agent 定义安装到当前业务项目。
-- `brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，并保留已有 MCP server。
-- `brain-creator-doctor`：在真正使用前检查 workspace、Claude bridge 和 agent 定义。
+- `npm install --save-dev brain-creator`：把 Brain Creator 安装到当前业务项目。
+- `npx brain-creator-install-assets`：把 Brain Creator Skill 和 Playwright Planner / Generator / Healer agent 定义安装到当前业务项目。
+- `npx brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，默认写入 `npx brain-creator-mcp`，因此适配本地安装。
+- `npx brain-creator-doctor`：在真正使用前检查 workspace、Claude bridge 和 agent 定义。
+
+如果你偏好全局安装，也可以执行：
+
+```bash
+npm install -g brain-creator
+brain-creator-install-assets
+brain-creator-write-mcp-config --global
+brain-creator-doctor
+```
 
 之后重启或重载 Claude Code / Codex 的 MCP 连接，在业务项目中输入：
 
@@ -98,7 +109,7 @@ npm publish --access public --otp=<当前 2FA 验证码>
 仓库已提供 repo-local Codex 插件：
 
 - `plugins/brain-creator/.codex-plugin/plugin.json`：插件展示、starter prompt 和能力描述。
-- `plugins/brain-creator/.mcp.json`：注册 `brain-creator-mcp` MCP server。
+- `plugins/brain-creator/.mcp.json`：通过 `npx brain-creator-mcp` 注册 MCP server。
 - `plugins/brain-creator/skills/`：随插件提供 Brain Creator skill。
 - `.agents/plugins/marketplace.json`：将 `brain-creator` 作为本地 marketplace 插件暴露给 Codex。
 
@@ -108,7 +119,7 @@ npm publish --access public --otp=<当前 2FA 验证码>
 py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
-插件安装后仍要求 `brain-creator-mcp`、`brain-creator-doctor`、`brain-creator-install-assets` 和 `brain-creator-write-mcp-config` 这些命令可用。npm 正式发布前后，都可以通过 npm 包或 `npm pack` 产物安装这些命令。
+插件安装后仍要求业务项目安装 npm 包。项目本地安装时使用 `npx brain-creator-*` 命令；全局安装时可以直接使用 `brain-creator-*` 命令。
 
 ### 智能体入口
 
@@ -189,15 +200,16 @@ npx tsc --noEmit
 Brain Creator supports three installation paths:
 
 - source checkout mode: use this repository directly when developing Brain Creator.
-- MCP CLI connection mode: connect any business project to the installed `brain-creator-mcp` command.
+- MCP CLI connection mode: install `brain-creator` in a business project and connect MCP through `npx brain-creator-mcp`.
 - repo-local plugin installation mode: use `plugins/brain-creator` plus `.agents/plugins/marketplace.json` to expose Brain Creator through Codex `/plugin`.
 
 Before a real agent workflow, run:
 
 ```bash
-brain-creator-install-assets
-brain-creator-write-mcp-config
-brain-creator-doctor
+npm install --save-dev brain-creator
+npx brain-creator-install-assets
+npx brain-creator-write-mcp-config
+npx brain-creator-doctor
 ```
 
 See [docs/mcp-installation.md](docs/mcp-installation.md) for the copyable Claude Code / Codex MCP configuration.
@@ -233,7 +245,7 @@ See [docs/release-checklist.md](docs/release-checklist.md).
 The repository now includes a repo-local Codex plugin:
 
 - `plugins/brain-creator/.codex-plugin/plugin.json`: plugin metadata, starter prompts, and capability text.
-- `plugins/brain-creator/.mcp.json`: registers the `brain-creator-mcp` MCP server.
+- `plugins/brain-creator/.mcp.json`: registers the MCP server through `npx brain-creator-mcp`.
 - `plugins/brain-creator/skills/`: ships the Brain Creator skill with the plugin.
 - `.agents/plugins/marketplace.json`: exposes `brain-creator` as a local marketplace plugin for Codex.
 
@@ -243,23 +255,34 @@ Validate the plugin:
 py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
-After plugin installation, the commands `brain-creator-mcp`, `brain-creator-doctor`, `brain-creator-install-assets`, and `brain-creator-write-mcp-config` still need to be available on PATH. They can be installed from the npm package or from a local `npm pack` output.
+After plugin installation, the business project still needs the npm package installed. Use `npx brain-creator-*` commands for project-local installs, or direct `brain-creator-*` commands for global installs.
 
 ### Business Project Setup
 
-After Brain Creator is available through a local package install or a future plugin install, go to the business project directory and run:
+After Brain Creator is available from npm, go to the business project directory and run the local-install flow:
 
 ```bash
-brain-creator-install-assets
-brain-creator-write-mcp-config
-brain-creator-doctor
+npm install --save-dev brain-creator
+npx brain-creator-install-assets
+npx brain-creator-write-mcp-config
+npx brain-creator-doctor
 ```
 
 These commands:
 
-- `brain-creator-install-assets`: installs the Brain Creator Skill and Playwright Planner / Generator / Healer agent definitions into the current business project.
-- `brain-creator-write-mcp-config`: creates or updates the business project's `.mcp.json` while preserving existing MCP servers.
-- `brain-creator-doctor`: checks workspace, Claude bridge, and agent definitions before the first workflow.
+- `npm install --save-dev brain-creator`: installs Brain Creator into the current business project.
+- `npx brain-creator-install-assets`: installs the Brain Creator Skill and Playwright Planner / Generator / Healer agent definitions into the current business project.
+- `npx brain-creator-write-mcp-config`: creates or updates the business project's `.mcp.json`, preserving existing MCP servers and using `npx brain-creator-mcp` for local installs.
+- `npx brain-creator-doctor`: checks workspace, Claude bridge, and agent definitions before the first workflow.
+
+For a global install instead:
+
+```bash
+npm install -g brain-creator
+brain-creator-install-assets
+brain-creator-write-mcp-config --global
+brain-creator-doctor
+```
 
 Then restart or reload the Claude Code / Codex MCP connection and say:
 

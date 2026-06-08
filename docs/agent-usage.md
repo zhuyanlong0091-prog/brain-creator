@@ -24,7 +24,7 @@ The first action in Claude Code should be `Skill("brain-creator")`. After that, 
 
 Use source checkout mode when you are developing Brain Creator itself. In this mode, clone the repository, run `npm install`, then use `npm run dev:mcp`.
 
-Use MCP CLI connection mode when you want to use Brain Creator from a business project. In this mode, run `brain-creator-install-assets` and `brain-creator-write-mcp-config` once in the business project, connect the MCP server with `brain-creator-mcp`, set `BRAIN_CREATOR_WORKSPACE` to the business project, and run `brain-creator-doctor` before the first workflow.
+Use MCP CLI connection mode when you want to use Brain Creator from a business project. The recommended setup is project-local: run `npm install --save-dev brain-creator`, then `npx brain-creator-install-assets`, `npx brain-creator-write-mcp-config`, and `npx brain-creator-doctor` once in the business project. The generated MCP config connects the server with `npx brain-creator-mcp`, so the local package is used.
 
 Use repo-local plugin installation mode when you want Brain Creator to appear through Codex `/plugin`. The repository provides `plugins/brain-creator/.codex-plugin/plugin.json`, `plugins/brain-creator/.mcp.json`, bundled Brain Creator skills, and `.agents/plugins/marketplace.json` for local marketplace discovery. This mode registers the Skill and MCP server metadata, while the executable commands still need to be available through a local package install or a future npm publish.
 

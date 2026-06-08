@@ -18,29 +18,27 @@ This mode still depends on the source checkout and is mainly for contributors.
 
 ## MCP CLI connection mode
 
-Use this mode when connecting Brain Creator to a business project.
+Use this mode when connecting Brain Creator to a business project. The recommended setup is a project-local install, so each business project controls its own Brain Creator version.
 
-Build or install Brain Creator so these commands are available:
+Install Brain Creator into the business project:
 
 ```bash
-brain-creator-mcp
-brain-creator-doctor
-brain-creator-install-assets
+npm install --save-dev brain-creator
 ```
 
 Install the Brain Creator Skill and Playwright agent definitions into the business project:
 
 ```bash
-brain-creator-install-assets
+npx brain-creator-install-assets
 ```
 
 Create or update the business project's MCP config:
 
 ```bash
-brain-creator-write-mcp-config
+npx brain-creator-write-mcp-config
 ```
 
-The command preserves existing MCP servers in `.mcp.json` and adds the `brain-creator` server.
+The command preserves existing MCP servers in `.mcp.json` and adds the `brain-creator` server. By default, it writes an MCP command that uses the project-local package through `npx`.
 
 Then configure Claude Code or Codex MCP in the business project:
 
@@ -48,7 +46,8 @@ Then configure Claude Code or Codex MCP in the business project:
 {
   "mcpServers": {
     "brain-creator": {
-      "command": "brain-creator-mcp",
+      "command": "npx",
+      "args": ["brain-creator-mcp"],
       "env": {
         "BRAIN_CREATOR_WORKSPACE": ".",
         "BRAIN_CREATOR_AGENT_COMMAND": "claude",
@@ -63,8 +62,19 @@ Then configure Claude Code or Codex MCP in the business project:
 Run the preflight before the first Brain Creator workflow:
 
 ```bash
+npx brain-creator-doctor
+```
+
+If you prefer a global install, use:
+
+```bash
+npm install -g brain-creator
+brain-creator-install-assets
+brain-creator-write-mcp-config --global
 brain-creator-doctor
 ```
+
+In global mode, `.mcp.json` uses `"command": "brain-creator-mcp"` instead of `npx`.
 
 Validate local package installation from this repository:
 
@@ -86,7 +96,7 @@ The repo-local Codex plugin is available under `plugins/brain-creator` and is re
 It provides:
 
 - `.codex-plugin/plugin.json` for Codex `/plugin` discovery.
-- `.mcp.json` that registers the `brain-creator` MCP server with `brain-creator-mcp`.
+- `.mcp.json` that registers the `brain-creator` MCP server with `npx brain-creator-mcp`.
 - `skills/` containing the Brain Creator workflow entrypoint and supporting skill guidance.
 - Starter prompts for connecting a business system, generating a reviewed plan, and running doctor.
 
@@ -96,13 +106,13 @@ To validate the local plugin:
 py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
-When installed from the repo-local marketplace, Brain Creator still expects the npm CLI commands to be available on PATH:
+When installed from the repo-local marketplace, Brain Creator still expects the npm package to be installed in the business project:
 
 ```bash
-brain-creator-mcp
-brain-creator-doctor
-brain-creator-install-assets
-brain-creator-write-mcp-config
+npx brain-creator-mcp
+npx brain-creator-doctor
+npx brain-creator-install-assets
+npx brain-creator-write-mcp-config
 ```
 
 If those commands are not available yet, use MCP CLI connection mode first, or install the package tarball produced by `npm pack`.

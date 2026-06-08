@@ -20,7 +20,8 @@ describe("writeBrainCreatorMcpConfig", () => {
     expect(result.status).toBe("created");
     const config = JSON.parse(await readFile(result.path, "utf8"));
     expect(config.mcpServers["brain-creator"]).toEqual({
-      command: "brain-creator-mcp",
+      command: "npx",
+      args: ["brain-creator-mcp"],
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
         BRAIN_CREATOR_AGENT_COMMAND: "claude",
@@ -58,7 +59,25 @@ describe("writeBrainCreatorMcpConfig", () => {
       command: "cmd",
       args: ["/c", "npx", "playwright", "run-test-mcp-server"]
     });
-    expect(config.mcpServers["brain-creator"].command).toBe("brain-creator-mcp");
+    expect(config.mcpServers["brain-creator"].command).toBe("npx");
+    expect(config.mcpServers["brain-creator"].args).toEqual(["brain-creator-mcp"]);
+  });
+
+  it("can write a global-install MCP config when requested", async () => {
+    const targetDir = await tempDir();
+
+    const result = await writeBrainCreatorMcpConfig({ targetDir, commandMode: "global" });
+
+    const config = JSON.parse(await readFile(result.path, "utf8"));
+    expect(config.mcpServers["brain-creator"]).toEqual({
+      command: "brain-creator-mcp",
+      env: {
+        BRAIN_CREATOR_WORKSPACE: ".",
+        BRAIN_CREATOR_AGENT_COMMAND: "claude",
+        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      }
+    });
   });
 });
 
