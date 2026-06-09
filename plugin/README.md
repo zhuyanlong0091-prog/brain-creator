@@ -7,7 +7,7 @@ Current status:
 - The supported install path is MCP connection with the npm package, using `npx brain-creator-mcp` for project-local installs.
 - The repo-local Codex `/plugin` implementation now lives in `plugins/brain-creator`.
 - `.agents/plugins/marketplace.json` registers that local plugin for Codex marketplace discovery.
-- After installation, run `npx brain-creator-doctor` before using `Use Skill("brain-creator")`.
+- After installation, run `npx brain-creator-doctor` before asking a natural request such as `Use Brain Creator to connect this system`.
 
 The plugin must provide:
 

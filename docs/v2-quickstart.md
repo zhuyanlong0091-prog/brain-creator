@@ -28,7 +28,7 @@ Claude Code integration is declared in:
 - `.claude/settings.json` for the Brain Creator MCP server.
 - `.mcp.json` for Brain Creator and Playwright Test MCP servers.
 - `.claude/skills/brain-creator/SKILL.md` for the Claude Code project-level one-sentence Brain Creator entrypoint.
-- `skills/bc-*` for tool-oriented Brain Creator workflows.
+- `skills/brain-creator/SKILL.md` as the single tool-oriented Brain Creator workflow, covering system, auth, glossary, rules, planning, running, assets, and gaps.
 
 Playwright agent prompts and agent definitions are generated under `.claude/agents` and `.claude/prompts`.
 
@@ -245,13 +245,13 @@ npm run verify:live-mcp-workflow
 
 This smoke creates a live demo system from one-sentence intent, then calls `bc_generate_plan`, `bc_approve_plan`, and `bc_run_chain` with the real Claude bridge. It verifies recorded spec/test artifacts through Brain Creator asset tools.
 
-To verify a real Claude Code session can load `Skill("brain-creator")` and select Brain Creator MCP tools from one sentence, run:
+To verify a real Claude Code session can handle a natural Brain Creator request and select Brain Creator MCP tools from one sentence, run:
 
 ```bash
 npm run verify:live-claude-skill-workflow
 ```
 
-This starts a local fixture page, launches Claude Code in print mode, invokes the project skill, and asserts that the session calls `bc_create_system`, `bc_generate_plan`, `bc_approve_plan`, `bc_run_chain`, and artifact overview tools.
+This starts a local fixture page, launches Claude Code in print mode, sends a natural Brain Creator request, and asserts that the session calls `bc_create_system`, `bc_generate_plan`, `bc_approve_plan`, `bc_run_chain`, and artifact overview tools.
 
 ## Generated Files
 

@@ -95,7 +95,7 @@ describe("v2 quickstart documentation", () => {
     );
     expect(content).toContain("npm run verify:live-claude-skill-workflow");
     expect(content).toContain("Claude Code session");
-    expect(content).toContain("Skill(\"brain-creator\")");
+    expect(content).toContain("natural Brain Creator request");
     expect(content).toContain("bc_run_chain");
   });
 });

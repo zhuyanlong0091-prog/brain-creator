@@ -86,7 +86,7 @@ npm run verify:package-install
 After MCP is connected, start in Claude Code or Codex with:
 
 ```text
-Use Skill("brain-creator"). Connect this business system, generate a test plan, wait for my approval, then run the chain.
+Use Brain Creator to connect this business system, generate a test plan, wait for my approval, then run the chain.
 ```
 
 ## repo-local plugin installation mode
