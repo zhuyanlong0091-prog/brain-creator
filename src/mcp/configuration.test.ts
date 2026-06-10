@@ -1,16 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
-const skillNames = [
-  "brain-creator",
-  "bc-system",
-  "bc-auth",
-  "bc-rules",
-  "bc-plan",
-  "bc-run",
-  "bc-assets"
-];
-
 describe("Brain Creator local integration files", () => {
   it("defines Claude Code MCP server settings for Brain Creator", async () => {
     const settings = JSON.parse(await readFile(".claude/settings.json", "utf8"));
@@ -127,7 +117,7 @@ describe("Brain Creator local integration files", () => {
     expect(pluginManifest.interface.category).toBe("Productivity");
     expect(pluginManifest.interface.defaultPrompt).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('Use Skill("brain-creator")'),
+        expect.stringContaining("Use Brain Creator"),
         expect.stringContaining("brain-creator-doctor")
       ])
     );
@@ -161,23 +151,39 @@ describe("Brain Creator local integration files", () => {
     );
   });
 
-  it("defines all Brain Creator skills with tool-oriented usage guidance", async () => {
-    for (const skillName of skillNames) {
-      const content = await readFile(`skills/${skillName}/SKILL.md`, "utf8");
+  it("defines a single Brain Creator skill with all tool-oriented workflow guidance", async () => {
+    const content = await readFile("skills/brain-creator/SKILL.md", "utf8");
 
-      expect(content).toContain("---");
-      expect(content).toContain("Brain Creator");
-      expect(content).toContain("MCP");
-      expect(content).toMatch(/bc_[a-z_]+/);
-    }
+    expect(content).toContain("---");
+    expect(content).toContain("Brain Creator");
+    expect(content).toContain("MCP");
+    expect(content).toContain('Skill("brain-creator")` only as an explicit fallback');
+    expect(content).toContain("## System");
+    expect(content).toContain("## Auth");
+    expect(content).toContain("## Glossary");
+    expect(content).toContain("## Rules");
+    expect(content).toContain("## Plan");
+    expect(content).toContain("## Run");
+    expect(content).toContain("## Assets And Gaps");
+    expect(content).toContain("bc_create_system");
+    expect(content).toContain("bc_create_auth");
+    expect(content).toContain("bc_add_term");
+    expect(content).toContain("bc_add_rule");
+    expect(content).toContain("bc_generate_plan");
+    expect(content).toContain("bc_run_chain");
+    expect(content).toContain("bc_search_assets");
   });
 
   it("defines a one-sentence Brain Creator workflow entrypoint for agent clients", async () => {
     const content = await readFile("skills/brain-creator/SKILL.md", "utf8");
 
-    expect(content).toContain("one-sentence");
+    expect(content).toContain("One-Sentence");
+    expect(content).toContain("Use Brain Creator to connect this system");
     expect(content).toContain("bc_list_systems");
     expect(content).toContain("bc_create_system");
+    expect(content).toContain("bc_create_auth_checkpoint");
+    expect(content).toContain("bc_batch_confirm_terms");
+    expect(content).toContain("bc_delete_rule");
     expect(content).toContain("bc_generate_plan");
     expect(content).toContain("bc_approve_plan");
     expect(content).toContain("bc_run_chain");
@@ -191,7 +197,7 @@ describe("Brain Creator local integration files", () => {
     const claudeSkill = await readFile(".claude/skills/brain-creator/SKILL.md", "utf8");
 
     expect(claudeSkill).toBe(canonical);
-    expect(claudeSkill).toContain("one-sentence");
+    expect(claudeSkill).toContain("One-Sentence");
     expect(claudeSkill).toContain("bc_run_chain");
   });
 

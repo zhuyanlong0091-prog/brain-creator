@@ -18,7 +18,7 @@ Brain Creator is the testing brain for an agent. Claude Code / Codex is the conv
 - generated specs and Playwright test files
 - agent run history, chain run history, and gaps
 
-The first action in Claude Code should be `Skill("brain-creator")`. After that, the agent should choose Brain Creator MCP tools for you.
+Start with a natural request such as `Use Brain Creator to connect this system`. The agent should load the Brain Creator skill internally and choose MCP tools for you; use `Skill("brain-creator")` only as an explicit troubleshooting fallback when automatic matching fails.
 
 ## Installation Modes
 
@@ -41,7 +41,7 @@ The normal flow is: connect a business system, configure auth, add business lang
 Say something like:
 
 ```text
-Use Skill("brain-creator"). Connect the order admin system at https://orders.example.test for local QA. The default language is zh-CN and only that base URL is allowed.
+Use Brain Creator to connect the order admin system at https://orders.example.test for local QA. The default language is zh-CN and only that base URL is allowed.
 ```
 
 Expected agent behavior:
@@ -188,19 +188,19 @@ Use `bc_report_gap` for external preflight failures such as blocked network acce
 Use these when you want the agent to drive the flow without tool-level instructions:
 
 ```text
-Use Skill("brain-creator"). Connect this CRM as a reusable business system, configure token auth, and prepare it for generating Playwright tests.
+Use Brain Creator to connect this CRM as a reusable business system, configure token auth, and prepare it for generating Playwright tests.
 ```
 
 ```text
-Use Skill("brain-creator"). For the selected order system, add a blocking business rule that every checkout test must assert Order total, then generate a draft plan for order submission and wait for my approval.
+Use Brain Creator for the selected order system, add a blocking business rule that every checkout test must assert Order total, then generate a draft plan for order submission and wait for my approval.
 ```
 
 ```text
-Use Skill("brain-creator"). Continue the approved case for the selected system, run the chain, and summarize generated artifacts and open gaps.
+Use Brain Creator to continue the approved case for the selected system, run the chain, and summarize generated artifacts and open gaps.
 ```
 
 ```text
-Use Skill("brain-creator"). Show the current system overview, latest generated specs/tests, chain history, and unresolved gaps.
+Use Brain Creator to show the current system overview, latest generated specs/tests, chain history, and unresolved gaps.
 ```
 
 ## What The Agent Should Not Do
@@ -242,7 +242,7 @@ npm run verify:live-mcp-workflow
 npm run verify:live-claude-skill-workflow
 ```
 
-The strongest user-experience check is `npm run verify:live-claude-skill-workflow`: it launches a real Claude Code session, requires `Skill("brain-creator")`, calls Brain Creator MCP tools, reaches `bc_run_chain`, and reviews artifacts.
+The strongest user-experience check is `npm run verify:live-claude-skill-workflow`: it launches a real Claude Code session, uses a natural Brain Creator request, calls Brain Creator MCP tools, reaches `bc_run_chain`, and reviews artifacts.
 
 ## Troubleshooting
 
@@ -259,5 +259,5 @@ If the chain fails, ask the agent to show open gaps and latest chain runs. A fai
 If the agent starts discussing UI screens, redirect it:
 
 ```text
-Brain Creator v2 is agent-native. Use Skill("brain-creator") and the MCP tools; do not design a Web UI.
+Brain Creator v2 is agent-native. Use Brain Creator and the MCP tools; do not design a Web UI.
 ```

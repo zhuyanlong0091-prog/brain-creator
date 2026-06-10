@@ -25,8 +25,8 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Use Skill(\"brain-creator\"). Connect this system.",
-      "Use Skill(\"brain-creator\"). Generate a reviewed test plan.",
+      "Use Brain Creator to connect this system.",
+      "Use Brain Creator to generate a reviewed test plan.",
       "Run npx brain-creator-doctor, then start Brain Creator."
     ],
     "brandColor": "#0F766E"

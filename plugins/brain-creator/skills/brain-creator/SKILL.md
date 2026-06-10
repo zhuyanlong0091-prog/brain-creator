@@ -1,17 +1,19 @@
 ---
 name: brain-creator
-description: Use when a user gives a one-sentence Brain Creator request in Claude Code or Codex and expects an agent-native testing workflow.
+description: Use when the user asks to use Brain Creator, connect a business system, configure auth, manage glossary or business rules, generate reviewed test plans, run agent-native tests, inspect artifacts, or handle gaps.
 ---
 
 # Brain Creator
 
 Use Brain Creator as an agent-native testing business brain through MCP tools. Claude Code or Codex is the user interface; Brain Creator supplies system context, auth handling, business language, planning, generated artifacts, chain execution, and gap tracking.
 
-Do not create or prioritize a Web UI. If the user asks for an entrypoint, treat the entrypoint as this skill plus Brain Creator MCP tools.
+Users should not need to say `Skill("brain-creator")`. Treat natural-language requests such as "Use Brain Creator to connect this system", "用 Brain Creator 接入这个系统", "generate a reviewed test plan", "run the approved chain", or "show open gaps" as Brain Creator entrypoints. Keep `Skill("brain-creator")` only as an explicit fallback when automatic skill matching fails.
 
-## One-sentence Workflow
+Do not create or prioritize a Web UI. If the user asks for an entrypoint, treat the entrypoint as natural conversation plus this skill and the Brain Creator MCP tools.
 
-When the user gives a one-sentence request such as "connect this CRM and generate tests for order approval":
+## One-Sentence Workflow
+
+When the user gives a request such as "Use Brain Creator to connect this CRM and generate tests for order approval":
 
 1. Call `bc_list_systems` and reuse the matching system, or call `bc_create_system` if the user supplied enough system details.
 2. If auth is needed, call `bc_create_auth`, then `bc_verify_auth`, then `bc_generate_seed`; never echo secrets back to chat.
@@ -25,10 +27,107 @@ When the user gives a one-sentence request such as "connect this CRM and generat
 9. If the user closes or stops a protected login flow, call `bc_cancel_plan` with the reason. Use `bc_resume_plan` only after awaiting auth checkpoints are completed or cancelled.
 10. Call `bc_report_gap` for external preflight failures such as blocked network access or missing evidence.
 
+## System
+
+Use the Brain Creator system tools to create and inspect reusable business system contexts.
+
+1. Call `bc_list_systems` before assuming a system already exists.
+2. Call `bc_create_system` when a user wants to connect a Web system and provides a system name, environment, base URL, default locale, and URL allowlist.
+3. Call `bc_system_overview` to summarize onboarding completeness and asset counts.
+4. Call `bc_archive_system` only when the user confirms a system should be retained for history but no longer used.
+
+Never mix assets across systems. Every later Brain Creator action must use the selected system id.
+
+## Auth
+
+Use the auth tools to store credentials without exposing secrets in later conversation.
+
+1. Call `bc_create_auth` with the selected system id as `projectId`.
+2. Call `bc_verify_auth` after creating the profile.
+3. Call `bc_list_auth` when you need to inspect configured profiles for the selected system.
+4. Call `bc_generate_seed` only when a local Playwright seed fixture is needed for Planner or Generator execution.
+5. Do not repeat raw token, cookie, or password values after the tool call.
+6. Call `bc_create_auth_checkpoint` when the user must manually complete password, recovery, CAPTCHA, or 2FA.
+7. Call `bc_complete_auth_checkpoint` after the user confirms the protected step is complete, or `bc_cancel_auth_checkpoint` when they stop.
+8. Call `bc_archive_auth` when an auth profile should be retained for history but no longer used.
+
+Supported `loginMethod` values are `password`, `cookie`, `token`, and `script`. Returned auth profiles redact all secrets. Auth checkpoints contain reasons and resume instructions only; never put credentials or verification codes in them.
+
+## Glossary
+
+Use glossary tools to keep business language reusable across planning and generation.
+
+1. Call `bc_add_term` for known domain terms before planning.
+2. Include aliases and `pageScope` when a term only applies to part of the system.
+3. After `bc_generate_plan`, review `testCase.newTerms` with the user.
+4. Call `bc_batch_confirm_terms` with confirmed candidate ids and ignored candidate ids.
+5. Call `bc_update_term` when the user corrects wording, aliases, or page scope.
+6. Call `bc_delete_term` when the user says a term should not be reusable system knowledge.
+7. Call `bc_list_terms` to show the updated glossary.
+
+Do not silently add every candidate term. Do not delete terms without explicit user confirmation.
+
+## Rules
+
+Use rules to capture business quality gates before planning tests.
+
+1. Call `bc_add_rule` for requirements that must be checked in generated scenarios.
+2. Use `severity: "block"` for required coverage.
+3. Use `severity: "warn"` for advisory checks.
+4. Call `bc_list_rules` before generating a plan.
+5. Call `bc_delete_rule` only after the user confirms the rule no longer applies to the selected system.
+
+Quality gate checks are deterministic in v2 MVP, so rules should use clear domain terms such as order amount or payment status.
+
+## Plan
+
+Use planning tools to generate structured scenarios before code generation.
+
+1. Confirm the target system id.
+2. Ensure auth and business rules exist.
+3. Call `bc_generate_plan` with `systemId` and the user's requirement.
+4. Present the draft scenarios, new term candidates, and rule check results to the user.
+5. Call `bc_update_plan` if the user wants to edit scenarios before approval.
+6. Call `bc_approve_plan` only after the user confirms the test intent.
+7. Call `bc_cancel_plan` when the user stops or closes a protected flow.
+8. Call `bc_resume_plan` only after awaiting manual auth checkpoints are completed or cancelled.
+
+Planning must not generate test code directly. The user should confirm the structured plan first. Approved plans are execution contracts and should not be changed silently.
+
+## Run
+
+Use run tools only after a test case is approved.
+
+1. Confirm the test case has `status: "approved"`.
+2. Call `bc_run_chain` with the approved `caseId`.
+3. Call `bc_list_chain_runs` when you need execution history for the selected system.
+4. Report ChainRun status, generated spec path, generated test path, healer attempts, and any gaps.
+
+Use `bc_run_agent` only when debugging a single Planner, Generator, or Healer run. It records an AgentRun but does not replace the approved-case execution flow. If the chain fails after healing attempts, treat returned gaps as work items rather than claiming the test is complete.
+
+## Assets And Gaps
+
+Use asset tools to inspect what has already been created for a business system.
+
+1. Call `bc_list_cases` with `systemId` when the user asks for test history.
+2. Call `bc_list_agent_runs` with `systemId` when the user asks for Planner, Generator, or Healer run history.
+3. Call `bc_list_chain_runs` with `systemId` when the user asks for generator/test/healer chain history.
+4. Call `bc_list_specs` and `bc_list_tests` with `systemId` when the user asks for generated spec or test file paths.
+5. Call `bc_read_spec` or `bc_read_test` only for paths returned by the list tools.
+6. Call `bc_artifact_overview` when the user needs a concise generated-artifact summary without inspecting raw paths first.
+7. Call `bc_list_gaps` with `projectId` and optional `status` when the user asks what is blocked.
+8. Call `bc_resolve_gap` only after the user confirms a gap has been handled.
+9. Call `bc_report_gap` when an external preflight or manual workflow issue cannot be inferred from an existing chain.
+10. Call `bc_list_auth_checkpoints` when the user asks what manual authentication work is still waiting.
+11. Call `bc_search_assets` with `projectId` and a short query for broad asset lookup.
+12. Keep results scoped to the current system.
+
+Asset search is for review and traceability. It is not a substitute for user approval of a generated plan.
+
 ## Guardrails
 
 - Never skip plan approval before code generation.
-- Never fabricate missing evidence; create or report gaps through `bc_list_gaps` and `bc_resolve_gap`.
+- Never fabricate missing evidence; create or report gaps through `bc_report_gap`, `bc_list_gaps`, and `bc_resolve_gap`.
 - Never mix assets across systems. All planning, execution, search, and gap handling must use the selected system id.
 - Use `bc_run_agent` only for diagnostics; the normal user workflow is `bc_generate_plan` to `bc_approve_plan` to `bc_run_chain`.
 - Treat generated artifacts as local workspace assets. Use `bc_read_spec` and `bc_read_test` only for paths returned by Brain Creator list tools.

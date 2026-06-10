@@ -9,7 +9,7 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("## 中文版");
     expect(content).toContain("## English Version");
     expect(content).toContain("Claude Code / Codex");
-    expect(content).toContain("Skill(\"brain-creator\")");
+    expect(content).toContain("Use Brain Creator to connect this system");
     expect(content).toContain("MCP");
     expect(content).toContain("source checkout mode");
     expect(content).toContain("MCP CLI connection mode");
@@ -45,7 +45,7 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("approve the plan");
     expect(content).toContain("run the chain");
     expect(content).toContain("review artifacts and gaps");
-    expect(content).toContain("Skill(\"brain-creator\")");
+    expect(content).toContain("Use Brain Creator to connect the order admin system");
     expect(content).toContain("source checkout mode");
     expect(content).toContain("MCP CLI connection mode");
     expect(content).toContain("repo-local plugin installation mode");

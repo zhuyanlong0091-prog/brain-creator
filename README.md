@@ -75,7 +75,7 @@ brain-creator-doctor
 之后重启或重载 Claude Code / Codex 的 MCP 连接，在业务项目中输入：
 
 ```text
-Use Skill("brain-creator"). 接入这个业务系统，生成测试计划，先等我审批，再执行链路。
+用 Brain Creator 接入这个业务系统，生成测试计划，先等我审批，再执行链路。
 ```
 
 本地包安装验证：
@@ -126,7 +126,7 @@ py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 在 Claude Code 或 Codex 中使用一句话请求：
 
 ```text
-Use Skill("brain-creator"). Connect the local order system, add a rule that order total must be visible, generate a test plan, wait for my approval, then run the chain.
+Use Brain Creator to connect the local order system, add a rule that order total must be visible, generate a test plan, wait for my approval, then run the chain.
 ```
 
 预期行为：智能体先加载 Brain Creator skill，选择匹配的 MCP 工具，创建或复用业务系统，按需配置鉴权，生成草稿计划，等待你批准，然后执行 `bc_run_chain`，最后总结产物和 Gap。
@@ -174,7 +174,7 @@ npm run verify:live-claude-skill-workflow
 
 ### Positioning
 
-**No Web UI:** the Brain Creator v2 product entrypoint is the agent conversation in Claude Code / Codex. In Claude Code, start with `Skill("brain-creator")`; in Codex, ask for the Brain Creator workflow and let the agent use the configured MCP tools.
+**No Web UI:** the Brain Creator v2 product entrypoint is the agent conversation in Claude Code / Codex. Users should ask naturally, such as `Use Brain Creator to connect this system`; `Skill("brain-creator")` is only an explicit troubleshooting fallback when automatic skill matching fails.
 
 ### What You Can Do
 
@@ -287,7 +287,7 @@ brain-creator-doctor
 Then restart or reload the Claude Code / Codex MCP connection and say:
 
 ```text
-Use Skill("brain-creator"). Connect this business system, generate a test plan, wait for my approval, then run the chain.
+Use Brain Creator to connect this business system, generate a test plan, wait for my approval, then run the chain.
 ```
 
 Start the Brain Creator MCP server:
@@ -311,7 +311,7 @@ On Windows PowerShell, set the same values with `$env:` before launching the MCP
 Use a one-sentence request in Claude Code or Codex:
 
 ```text
-Use Skill("brain-creator"). Connect the local order system, add a rule that order total must be visible, generate a test plan, wait for my approval, then run the chain.
+Use Brain Creator to connect the local order system, add a rule that order total must be visible, generate a test plan, wait for my approval, then run the chain.
 ```
 
 The agent should load the Brain Creator skill, select the matching MCP tools, create or reuse a business system, configure auth if needed, generate a draft plan, ask for approval, run `bc_run_chain`, and summarize artifacts and gaps.
@@ -336,7 +336,7 @@ npm run verify:live-mcp-workflow
 npm run verify:live-claude-skill-workflow
 ```
 
-`npm run verify:live-claude-skill-workflow` verifies the real Claude Code session entrypoint: `Skill("brain-creator")` is loaded, Brain Creator MCP tools are selected, `bc_run_chain` succeeds, and artifacts are summarized.
+`npm run verify:live-claude-skill-workflow` verifies the real Claude Code session entrypoint: a natural Brain Creator request is handled, Brain Creator MCP tools are selected, `bc_run_chain` succeeds, and artifacts are summarized.
 
 ### Important Paths
 
