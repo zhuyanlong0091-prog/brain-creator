@@ -133,8 +133,6 @@ npm run verify:live-mcp-workflow            # 完整 MCP 工具工作流
 npm run verify:live-claude-skill-workflow   # 端到端：Skill → MCP → 链路 → 产物
 ```
 
-## 远景架构（v3 参考，非当前任务）
+## 当前路线
 
-v3 目标：Brain Creator 作为独立 Agent（用 LangGraph 编排，多模型策略路由），MCP 收缩为单一 `bc_delegate` 入口。详见 `docs/v3-architecture.md`。
-
-**当前路线决策：先打磨 v2 Skill + MCP 到极限，再启动 v3。**
+**聚焦 v2：打磨 Skill + MCP 到极限。** v3 Agent 架构方向待具体信号触发后再启动（详见 memory）。
