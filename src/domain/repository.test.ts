@@ -165,6 +165,43 @@ describe("JsonFileBrainCreatorRepository", () => {
       expect.objectContaining({ id: checkpoint.id, status: "awaiting-user" })
     ]);
   });
+
+  it("restores agent sessions and ledger entries after recreation", async () => {
+    const filePath = join(await tempDir(), "assets.json");
+    const firstRepository = new JsonFileBrainCreatorRepository(filePath);
+    firstRepository.agentSessions.push({
+      id: "session_1",
+      state: "completed",
+      currentSystemId: "system-1",
+      lastIntent: "connect_system",
+      lastUserRequest: "Use Brain Creator to connect https://example.test",
+      createdAt: "2026-06-12T00:00:00.000Z",
+      updatedAt: "2026-06-12T00:00:00.000Z"
+    });
+    firstRepository.runLedgerEntries.push({
+      id: "ledger_1",
+      sessionId: "session_1",
+      systemId: "system-1",
+      intent: "connect_system",
+      action: "connect_system",
+      fromState: "idle",
+      toState: "completed",
+      inputSummary: "Use Brain Creator to connect https://example.test",
+      contextReferences: [],
+      outputSummary: "Created system",
+      createdAt: "2026-06-12T00:00:00.000Z"
+    });
+    firstRepository.persist();
+
+    const secondRepository = new JsonFileBrainCreatorRepository(filePath);
+
+    expect(secondRepository.agentSessions).toEqual([
+      expect.objectContaining({ id: "session_1", currentSystemId: "system-1" })
+    ]);
+    expect(secondRepository.runLedgerEntries).toEqual([
+      expect.objectContaining({ id: "ledger_1", sessionId: "session_1" })
+    ]);
+  });
 });
 
 async function tempDir() {

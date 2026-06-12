@@ -53,6 +53,38 @@ describe("handleBrainCreatorTool", () => {
     }
   });
 
+  it("runs a natural-language Brain Creator agent turn and exposes ledger entries", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+
+    const agentResult = dataOf(
+      await handleBrainCreatorTool(context, "bc_agent_run", {
+        request: "Use Brain Creator to connect https://shop.example.test"
+      })
+    );
+    const ledger = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_ledger", {
+        sessionId: agentResult.session.id
+      })
+    );
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_agent_status", {
+        sessionId: agentResult.session.id
+      })
+    );
+
+    expect(agentResult.intent.intent).toBe("connect_system");
+    expect(agentResult.session.currentSystemId).toBeDefined();
+    expect(ledger).toEqual([
+      expect.objectContaining({
+        action: "connect_system",
+        toState: "completed"
+      })
+    ]);
+    expect(status.session.id).toBe(agentResult.session.id);
+  });
+
   it("creates systems, auth, rules, and searchable assets through MCP results", async () => {
     const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
     const system = dataOf(

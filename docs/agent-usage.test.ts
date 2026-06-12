@@ -17,6 +17,7 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("brain-creator-doctor");
     expect(content).toContain("brain-creator-install-assets");
     expect(content).toContain("brain-creator-write-mcp-config");
+    expect(content).toContain("brain-creator-agent");
     expect(content).toContain("业务项目安装步骤");
     expect(content).toContain("Business Project Setup");
     expect(content).toContain("npm run verify:package-install");
@@ -51,6 +52,7 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("repo-local plugin installation mode");
     expect(content).toContain("brain-creator-doctor");
     expect(content).toContain("brain-creator-install-assets");
+    expect(content).toContain("bc_agent_run");
     expect(content).toContain("bc_run_chain");
     expect(content).toContain("bc_create_auth_checkpoint");
     expect(content).toContain("bc_cancel_plan");

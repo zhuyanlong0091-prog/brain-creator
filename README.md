@@ -54,6 +54,7 @@ npm install --save-dev brain-creator
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config
 npx brain-creator-doctor
+npx brain-creator-agent "用 Brain Creator 接入 https://example.test 系统"
 ```
 
 这几步分别完成：
@@ -62,6 +63,7 @@ npx brain-creator-doctor
 - `npx brain-creator-install-assets`：把 Brain Creator Skill 和 Playwright Planner / Generator / Healer agent 定义安装到当前业务项目。
 - `npx brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，默认写入 `npx brain-creator-mcp`，因此适配本地安装。
 - `npx brain-creator-doctor`：在真正使用前检查 workspace、Claude bridge 和 agent 定义。
+- `npx brain-creator-agent "<自然语言请求>"`：运行受控 Brain Creator Agent 单轮循环，写入 session、ledger 和本地资产。
 
 如果你偏好全局安装，也可以执行：
 
@@ -210,6 +212,7 @@ npm install --save-dev brain-creator
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config
 npx brain-creator-doctor
+npx brain-creator-agent "Use Brain Creator to connect https://example.test"
 ```
 
 See [docs/mcp-installation.md](docs/mcp-installation.md) for the copyable Claude Code / Codex MCP configuration.
@@ -274,6 +277,7 @@ These commands:
 - `npx brain-creator-install-assets`: installs the Brain Creator Skill and Playwright Planner / Generator / Healer agent definitions into the current business project.
 - `npx brain-creator-write-mcp-config`: creates or updates the business project's `.mcp.json`, preserving existing MCP servers and using `npx brain-creator-mcp` for local installs.
 - `npx brain-creator-doctor`: checks workspace, Claude bridge, and agent definitions before the first workflow.
+- `npx brain-creator-agent "<natural language request>"`: runs one controlled Brain Creator Agent loop turn and records session, ledger, and local assets.
 
 For a global install instead:
 

@@ -24,6 +24,11 @@ try {
   const binDir = join(businessDir, "node_modules", ".bin");
   await run(join(binDir, "brain-creator-install-assets.cmd"), [], businessDir);
   await run(join(binDir, "brain-creator-write-mcp-config.cmd"), [], businessDir);
+  await run(
+    join(binDir, "brain-creator-agent.cmd"),
+    ["Use Brain Creator to connect https://shop.example.test"],
+    businessDir
+  );
 
   const skill = await readFile(
     join(businessDir, ".claude", "skills", "brain-creator", "SKILL.md"),

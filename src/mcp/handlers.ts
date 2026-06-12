@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { buildContextPack } from "../agentRuntime/context.js";
+import { getAgentStatus, listLedger, runBrainCreatorAgent } from "../agentRuntime/runtime.js";
 import { BrainCreatorService } from "../domain/service.js";
 import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
 import { generateSeedFile } from "../agent/seedGenerator.js";
@@ -19,6 +21,7 @@ import {
   type CommandRunner
 } from "../agent/orchestrator.js";
 import type {
+  AgentIntent,
   AgentRun,
   AuthCheckpoint,
   AuthProfile,
@@ -100,6 +103,36 @@ export async function handleBrainCreatorTool(
 ): Promise<CallToolResult> {
   try {
     switch (name) {
+      case "bc_agent_run":
+        return textResult(
+          await runBrainCreatorAgent({
+            request: stringArg(input, "request"),
+            sessionId: optionalStringArg(input, "sessionId"),
+            repository: context.repository,
+            service: context.service,
+            workDir: context.workDir
+          })
+        );
+      case "bc_agent_status":
+        return textResult(getAgentStatus(context.repository, optionalStringArg(input, "sessionId")));
+      case "bc_list_ledger":
+        return textResult(
+          listLedger({
+            repository: context.repository,
+            sessionId: optionalStringArg(input, "sessionId"),
+            systemId: optionalStringArg(input, "systemId")
+          })
+        );
+      case "bc_retrieve_context":
+        return textResult(
+          buildContextPack({
+            repository: context.repository,
+            systemId: stringArg(input, "systemId"),
+            intent: agentIntentArg(input, "intent"),
+            query: stringArg(input, "query"),
+            maxEstimatedChars: optionalNumberArg(input, "maxEstimatedChars")
+          })
+        );
       case "bc_create_system":
         return textResult(
           context.service.createSystemProfile({
@@ -582,6 +615,25 @@ function agentArg(input: Record<string, unknown>, key: string): AgentRun["agent"
     throw new Error(`${key} is invalid`);
   }
   return value as AgentRun["agent"];
+}
+
+function agentIntentArg(input: Record<string, unknown>, key: string): AgentIntent {
+  const value = stringArg(input, key);
+  if (
+    ![
+      "connect_system",
+      "configure_auth",
+      "generate_plan",
+      "approve_plan",
+      "run_chain",
+      "show_assets",
+      "show_gaps",
+      "unknown"
+    ].includes(value)
+  ) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as AgentIntent;
 }
 
 function scenarioArrayArg(input: Record<string, unknown>, key: string): TestCaseScenario[] {

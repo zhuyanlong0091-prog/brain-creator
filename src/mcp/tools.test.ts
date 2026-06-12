@@ -4,6 +4,10 @@ import { BRAIN_CREATOR_TOOLS, registerBrainCreatorTools } from "./tools.js";
 describe("BRAIN_CREATOR_TOOLS", () => {
   it("defines the core Brain Creator v2 MCP tools", () => {
     expect(BRAIN_CREATOR_TOOLS.map((tool) => tool.name)).toEqual([
+      "bc_agent_run",
+      "bc_agent_status",
+      "bc_list_ledger",
+      "bc_retrieve_context",
       "bc_create_system",
       "bc_list_systems",
       "bc_system_overview",

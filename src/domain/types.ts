@@ -23,7 +23,35 @@ export type AssetType =
   | "test-spec"
   | "test-file"
   | "agent-run"
-  | "chain-run";
+  | "chain-run"
+  | "agent-session"
+  | "run-ledger-entry"
+  | "rag-document";
+
+export type AgentIntent =
+  | "connect_system"
+  | "configure_auth"
+  | "generate_plan"
+  | "approve_plan"
+  | "run_chain"
+  | "show_assets"
+  | "show_gaps"
+  | "unknown";
+
+export type AgentLoopState =
+  | "idle"
+  | "intent_detected"
+  | "context_building"
+  | "planning"
+  | "waiting_for_approval"
+  | "waiting_for_auth"
+  | "approved"
+  | "generating"
+  | "testing"
+  | "healing"
+  | "blocked"
+  | "completed"
+  | "cancelled";
 
 export type SystemProfile = {
   id: string;
@@ -264,6 +292,93 @@ export type ChainRun = {
   gaps: Gap[];
   createdAt: string;
   completedAt?: string;
+};
+
+export type AgentSession = {
+  id: string;
+  state: AgentLoopState;
+  currentSystemId?: string;
+  currentCaseId?: string;
+  pendingCheckpointId?: string;
+  lastChainRunId?: string;
+  lastIntent?: AgentIntent;
+  lastUserRequest?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EvalVerdict = "pass" | "needs_user" | "retry" | "blocked";
+
+export type GapDraft = {
+  reason: string;
+  severity: Gap["severity"];
+  sourceType: string;
+  sourceId: string;
+  owner: string;
+};
+
+export type EvalResult = {
+  verdict: EvalVerdict;
+  score: number;
+  reasons: string[];
+  requiredActions: string[];
+  gaps: GapDraft[];
+};
+
+export type ContextReference = {
+  assetType: string;
+  assetId: string;
+  title: string;
+  summary: string;
+  relevance: number;
+  reason: string;
+};
+
+export type RunLedgerEntry = {
+  id: string;
+  sessionId: string;
+  systemId?: string;
+  intent: AgentIntent;
+  action: string;
+  fromState: AgentLoopState;
+  toState: AgentLoopState;
+  inputSummary: string;
+  contextReferences: ContextReference[];
+  outputSummary: string;
+  evalResult?: EvalResult;
+  error?: string;
+  createdAt: string;
+};
+
+export type RagAssetType =
+  | "system"
+  | "glossary"
+  | "rule"
+  | "test-case"
+  | "scenario"
+  | "gap"
+  | "evidence"
+  | "spec-summary"
+  | "test-summary"
+  | "run-summary";
+
+export type RagDocument = {
+  id: string;
+  systemId: string;
+  assetType: RagAssetType;
+  assetId: string;
+  title: string;
+  summary: string;
+  content: string;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  visibility: "active" | "archived";
+  contentHash: string;
+  updatedAt: string;
+};
+
+export type EmbeddingProvider = {
+  embed(text: string): Promise<number[]>;
 };
 
 export type TestArtifact = {

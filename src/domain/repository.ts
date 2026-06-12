@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type {
   ActionStep,
   AgentRun,
+  AgentSession,
   ApiFlow,
   AuthCheckpoint,
   AuthProfile,
@@ -14,6 +15,7 @@ import type {
   LocatorPoint,
   PageModel,
   ProbeResult,
+  RunLedgerEntry,
   SystemProfile,
   TestCase,
   TrainingSession
@@ -36,6 +38,8 @@ export class InMemoryBrainCreatorRepository {
   testCases: TestCase[] = [];
   agentRuns: AgentRun[] = [];
   chainRuns: ChainRun[] = [];
+  agentSessions: AgentSession[] = [];
+  runLedgerEntries: RunLedgerEntry[] = [];
 
   persist() {
     return;
@@ -58,6 +62,8 @@ export class InMemoryBrainCreatorRepository {
     this.testCases = [];
     this.agentRuns = [];
     this.chainRuns = [];
+    this.agentSessions = [];
+    this.runLedgerEntries = [];
     this.persist();
   }
 }
@@ -80,6 +86,8 @@ type RepositorySnapshot = Pick<
   | "testCases"
   | "agentRuns"
   | "chainRuns"
+  | "agentSessions"
+  | "runLedgerEntries"
 >;
 
 export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorRepository {
@@ -114,6 +122,8 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     this.testCases = snapshot.testCases ?? [];
     this.agentRuns = snapshot.agentRuns ?? [];
     this.chainRuns = snapshot.chainRuns ?? [];
+    this.agentSessions = snapshot.agentSessions ?? [];
+    this.runLedgerEntries = snapshot.runLedgerEntries ?? [];
   }
 
   private snapshot(): RepositorySnapshot {
@@ -133,7 +143,9 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       businessRules: this.businessRules,
       testCases: this.testCases,
       agentRuns: this.agentRuns,
-      chainRuns: this.chainRuns
+      chainRuns: this.chainRuns,
+      agentSessions: this.agentSessions,
+      runLedgerEntries: this.runLedgerEntries
     };
   }
 }

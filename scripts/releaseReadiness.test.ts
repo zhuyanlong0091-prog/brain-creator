@@ -54,6 +54,7 @@ describe("release readiness report", () => {
         private: false,
         license: "MIT",
         bin: {
+          "brain-creator-agent": "dist/cli/brainCreatorAgent.js",
           "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
           "brain-creator-doctor": "dist/cli/doctor.js",
           "brain-creator-install-assets": "dist/cli/installAssets.js",
@@ -82,6 +83,7 @@ describe("release readiness report", () => {
         private: false,
         license: "MIT",
         bin: {
+          "brain-creator-agent": "dist/cli/brainCreatorAgent.js",
           "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
           "brain-creator-doctor": "dist/cli/doctor.js",
           "brain-creator-install-assets": "dist/cli/installAssets.js",

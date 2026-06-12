@@ -30,6 +30,14 @@ Use repo-local plugin installation mode when you want Brain Creator to appear th
 
 Full setup details are in `docs/mcp-installation.md`.
 
+For a direct local Agent Runtime smoke, run one natural-language turn from the business project:
+
+```bash
+npx brain-creator-agent "Use Brain Creator to connect https://example.test"
+```
+
+This records an AgentSession and RunLedgerEntry in `.brain-creator/local-assets.json`. In MCP clients, the equivalent tools are `bc_agent_run`, `bc_agent_status`, `bc_list_ledger`, and `bc_retrieve_context`.
+
 ## Flow Checklist
 
 The normal flow is: connect a business system, configure auth, add business language, add business rules, generate a draft plan, approve the plan, run the chain, then review artifacts and gaps.
@@ -51,6 +59,7 @@ Expected agent behavior:
 - summarize the system id, environment, base URL, and onboarding status
 
 Behind the scenes, this uses tools such as `bc_create_system`, `bc_list_systems`, and `bc_system_overview`.
+When using the controlled Agent Runtime, the first turn goes through `bc_agent_run`, then records the selected system in the current session and writes a ledger entry.
 
 ### 2. Configure Auth
 

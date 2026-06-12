@@ -31,6 +31,7 @@ describe("Brain Creator local integration files", () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 
     expect(packageJson.bin).toEqual({
+      "brain-creator-agent": "dist/cli/brainCreatorAgent.js",
       "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
       "brain-creator-doctor": "dist/cli/doctor.js",
       "brain-creator-install-assets": "dist/cli/installAssets.js",

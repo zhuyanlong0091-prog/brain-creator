@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 export type BrainCreatorToolName =
+  | "bc_agent_run"
+  | "bc_agent_status"
+  | "bc_list_ledger"
+  | "bc_retrieve_context"
   | "bc_create_system"
   | "bc_list_systems"
   | "bc_system_overview"
@@ -63,6 +67,52 @@ type RegisterableMcpServer = {
 };
 
 export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
+  {
+    name: "bc_agent_run",
+    title: "Run Brain Creator agent",
+    description: "Run one controlled Brain Creator agent loop turn from a natural-language request.",
+    inputSchema: z.object({
+      request: z.string(),
+      sessionId: z.string().optional()
+    })
+  },
+  {
+    name: "bc_agent_status",
+    title: "Brain Creator agent status",
+    description: "Show current Brain Creator agent session state and open blockers.",
+    inputSchema: z.object({
+      sessionId: z.string().optional()
+    })
+  },
+  {
+    name: "bc_list_ledger",
+    title: "List Brain Creator ledger",
+    description: "List Brain Creator agent ledger entries by session or business system.",
+    inputSchema: z.object({
+      sessionId: z.string().optional(),
+      systemId: z.string().optional()
+    })
+  },
+  {
+    name: "bc_retrieve_context",
+    title: "Retrieve Brain Creator context",
+    description: "Build a debug context pack for an intent inside a business system.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      intent: z.enum([
+        "connect_system",
+        "configure_auth",
+        "generate_plan",
+        "approve_plan",
+        "run_chain",
+        "show_assets",
+        "show_gaps",
+        "unknown"
+      ]),
+      query: z.string(),
+      maxEstimatedChars: z.number().int().positive().optional()
+    })
+  },
   {
     name: "bc_create_system",
     title: "Create business system",
