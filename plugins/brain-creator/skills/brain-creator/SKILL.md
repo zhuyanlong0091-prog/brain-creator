@@ -1,15 +1,41 @@
 ---
 name: brain-creator
-description: Use when the user asks to use Brain Creator, connect a business system, configure auth, manage glossary or business rules, generate reviewed test plans, run agent-native tests, inspect artifacts, or handle gaps.
+description: 当用户要求使用 Brain Creator 时触发：接入业务系统、配置鉴权、管理术语/业务规则、生成测试计划、运行智能体原生测试、查看产物或处理 Gap。When the user asks to use Brain Creator, connect a business system, configure auth, manage glossary or business rules, generate reviewed test plans, run agent-native tests, inspect artifacts, or handle gaps.
 ---
 
 # Brain Creator
 
 Use Brain Creator as an agent-native testing business brain through MCP tools. Claude Code or Codex is the user interface; Brain Creator supplies system context, auth handling, business language, planning, generated artifacts, chain execution, and gap tracking.
 
-Users should not need to say `Skill("brain-creator")`. Treat natural-language requests such as "Use Brain Creator to connect this system", "用 Brain Creator 接入这个系统", "generate a reviewed test plan", "run the approved chain", or "show open gaps" as Brain Creator entrypoints. Keep `Skill("brain-creator")` only as an explicit fallback when automatic skill matching fails.
+## 入口路由（Entry Routing）
 
-Do not create or prioritize a Web UI. If the user asks for an entrypoint, treat the entrypoint as natural conversation plus this skill and the Brain Creator MCP tools.
+用户通过两种方式使用 Brain Creator。每次用户消息到达时自动判断入口模式。
+
+| | 🗣 自然语言（Natural Language） | ⚡ 快速维护（Quick Maintenance） |
+|---|---|---|
+| **触发方式** | 自由描述测试需求 | 描述已有用例的操作意图，如"查看状态""跑高优先级用例""修复失败" |
+| **适用场景** | 新系统接入、新需求探索、首次生成测试 | 已有用例的维护、执行、状态查询、Gap 处理 |
+| **用户心智** | "我不知道有什么，你帮我弄" | "我知道我要什么，快速操作" |
+
+### 自动路由规则
+
+```
+用户消息到达
+  ├─ 意图清晰指向已有用例维护？
+  │   （如"跑一下"、"状态怎么样"、"有哪些Gap"、"修复失败"）
+  │   └─ 是 → ⚡ 快速维护路由：直接查询状态 + 给出执行建议
+  │
+  ├─ 意图清晰指向新系统/新需求？
+  │   （如"接入"、"connect"、"新系统"、"生成测试"、"帮我测"）
+  │   └─ 是 → 🗣 自然语言路由：按 One-Sentence Workflow 执行
+  │
+  └─ 意图模糊，无法判断？
+      → 主动提示用户当前系统状态，并给出下一步建议
+```
+
+> **注意：** 结构化命令（如 `/bc status`、`/bc run`）是未来迭代方向，当前版本尚未实现独立的命令解析器。现在通过自然语言描述意图即可触发同样的快速维护行为——说"查看状态"和未来输入 `/bc status` 等效。
+
+---
 
 ## One-Sentence Workflow
 
@@ -26,6 +52,10 @@ When the user gives a request such as "Use Brain Creator to connect this CRM and
 8. Call `bc_artifact_overview`, `bc_list_specs`, `bc_list_tests`, `bc_list_cases`, and `bc_list_gaps` when summarizing outcomes or continuing later.
 9. If the user closes or stops a protected login flow, call `bc_cancel_plan` with the reason. Use `bc_resume_plan` only after awaiting auth checkpoints are completed or cancelled.
 10. Call `bc_report_gap` for external preflight failures such as blocked network access or missing evidence.
+
+Users should not need to say `Skill("brain-creator")`. Treat natural-language requests such as "Use Brain Creator to connect this system", "用 Brain Creator 接入这个系统", "generate a reviewed test plan", "run the approved chain", or "show open gaps" as Brain Creator entrypoints. Keep `Skill("brain-creator")` only as an explicit fallback when automatic skill matching fails.
+
+Do not create or prioritize a Web UI. If the user asks for an entrypoint, treat the entrypoint as natural conversation plus this skill and the Brain Creator MCP tools.
 
 ## System
 
@@ -132,3 +162,4 @@ Asset search is for review and traceability. It is not a substitute for user app
 - Use `bc_run_agent` only for diagnostics; the normal user workflow is `bc_generate_plan` to `bc_approve_plan` to `bc_run_chain`.
 - Treat generated artifacts as local workspace assets. Use `bc_read_spec` and `bc_read_test` only for paths returned by Brain Creator list tools.
 - Never store passwords, recovery codes, CAPTCHA answers, or 2FA values in auth checkpoints, gaps, plans, or artifacts.
+- **工具透明度（Tool Transparency）：** 默认不主动列出工具名，用自然语言描述行为。但当用户追问操作细节、调试失败、做 Eval 或审计时，必须说明调用了哪些 MCP 工具、产出了哪些资产和 Gap。Brain Creator 应当可控、可审计、可复盘。
