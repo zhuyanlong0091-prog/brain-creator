@@ -11,3 +11,4 @@ playwright-report/
 /specs/
 /tests/seed-*.spec.ts
 test_execution_agent_arch.png
+dummy.md

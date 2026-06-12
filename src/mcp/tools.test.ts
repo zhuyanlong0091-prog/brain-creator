@@ -6,6 +6,7 @@ describe("BRAIN_CREATOR_TOOLS", () => {
     expect(BRAIN_CREATOR_TOOLS.map((tool) => tool.name)).toEqual([
       "bc_create_system",
       "bc_list_systems",
+      "bc_session_resume",
       "bc_system_overview",
       "bc_archive_system",
       "bc_create_auth",

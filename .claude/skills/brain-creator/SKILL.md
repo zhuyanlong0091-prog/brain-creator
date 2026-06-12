@@ -41,7 +41,7 @@ Use Brain Creator as an agent-native testing business brain through MCP tools. C
 
 When the user gives a request such as "Use Brain Creator to connect this CRM and generate tests for order approval":
 
-1. Call `bc_list_systems` and reuse the matching system, or call `bc_create_system` if the user supplied enough system details.
+1. Call `bc_session_resume` with the selected `systemId` to get a full system snapshot (auth, rules, terms, cases, gaps, bridge status, and recommended next action). If no system matches, call `bc_list_systems` to discover existing systems, or call `bc_create_system` if the user supplied enough system details.
 2. If auth is needed, call `bc_create_auth`, then `bc_verify_auth`, then `bc_generate_seed`; never echo secrets back to chat.
    - For password, recovery, CAPTCHA, or 2FA that must be completed by the user, call `bc_create_auth_checkpoint` instead of storing those values.
 3. Capture known business language with `bc_add_term` and required checks with `bc_add_rule` when the user provides them.

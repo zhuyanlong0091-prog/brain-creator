@@ -13,6 +13,7 @@ import {
 import {
   commandRunnerAgentBridge,
   generatePlanDraft,
+  preflightAgentBridge,
   runAgent,
   runChain,
   type AgentBridge,
@@ -112,6 +113,8 @@ export async function handleBrainCreatorTool(
         );
       case "bc_list_systems":
         return textResult(context.service.listSystemProfiles());
+      case "bc_session_resume":
+        return textResult(await sessionResume(context, input));
       case "bc_system_overview":
         return textResult(context.service.getSystemOverview(stringArg(input, "systemId")));
       case "bc_archive_system":
@@ -296,6 +299,10 @@ export async function handleBrainCreatorTool(
 }
 
 async function generatePlan(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const bridgeCheck = await preflightAgentBridge(context.agentBridge);
+  if (!bridgeCheck.ok) {
+    throw new Error(`Agent bridge unavailable: ${bridgeCheck.error}`);
+  }
   const systemId = stringArg(input, "systemId");
   const requirement = stringArg(input, "requirement");
   const system = context.repository.systemProfiles.find((item) => item.id === systemId);
@@ -327,6 +334,10 @@ async function generatePlan(context: BrainCreatorMcpContext, input: Record<strin
 }
 
 async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const bridgeCheck = await preflightAgentBridge(context.agentBridge);
+  if (!bridgeCheck.ok) {
+    throw new Error(`Agent bridge unavailable: ${bridgeCheck.error}`);
+  }
   const testCase = context.service.getTestCase(stringArg(input, "caseId"));
   const system = context.repository.systemProfiles.find((item) => item.id === testCase.systemId);
   if (!system) {
@@ -348,6 +359,86 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   }
   context.service.recordChainRun(result.chainRun);
   return result;
+}
+
+/**
+ * bc_session_resume — 一次调用返回系统完整快照，替代新会话时的 6-7 次独立查询。
+ * 只读，不做任何写入操作。
+ */
+async function sessionResume(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+  if (!system) {
+    throw new Error("Business system not found");
+  }
+
+  const authProfiles = context.service.listAuthProfiles(systemId);
+  const authCheckpoints = context.service.listAuthCheckpoints(systemId);
+  const rules = context.service.listBusinessRules(systemId);
+  const terms = context.service.listGlossaryTerms({ projectId: systemId, query: "" });
+  const cases = context.service.listTestCases(systemId);
+  const agentRuns = context.service.listAgentRuns(systemId);
+  const chainRuns = context.service.listChainRuns(systemId);
+  const openGaps = context.service.listGaps({ projectId: systemId, status: "open" });
+  const specs = context.service.listTestSpecs(systemId);
+  const tests = context.service.listTestFiles(systemId);
+  const bridgeStatus = await preflightAgentBridge(context.agentBridge);
+
+  const caseCounts = { draft: 0, approved: 0, generating: 0, passed: 0, failed: 0, cancelled: 0 };
+  for (const item of cases) {
+    caseCounts[item.status] += 1;
+  }
+
+  const nextAction = computeNextAction({
+    hasAuth: authProfiles.length > 0,
+    hasRules: rules.length > 0,
+    hasApprovedCases: caseCounts.approved > 0,
+    hasFailedCases: caseCounts.failed > 0,
+    hasOpenGaps: openGaps.length > 0,
+    bridgeOk: bridgeStatus.ok
+  });
+
+  return {
+    system,
+    auth: { profiles: authProfiles, checkpoints: authCheckpoints },
+    rules,
+    terms,
+    cases: { total: cases.length, byStatus: caseCounts },
+    recentRuns: {
+      agentRuns: agentRuns.slice(-5),
+      chainRuns: chainRuns.slice(-5)
+    },
+    artifacts: { specs: specs.length, tests: tests.length },
+    openGaps,
+    bridge: bridgeStatus,
+    nextAction
+  };
+}
+
+function computeNextAction(state: {
+  hasAuth: boolean;
+  hasRules: boolean;
+  hasApprovedCases: boolean;
+  hasFailedCases: boolean;
+  hasOpenGaps: boolean;
+  bridgeOk: boolean;
+}): string {
+  if (!state.hasAuth) {
+    return "complete_onboarding: 配置鉴权 (bc_create_auth)";
+  }
+  if (!state.bridgeOk) {
+    return "configure_bridge: 设置 BRAIN_CREATOR_AGENT_COMMAND 环境变量以启用 Planner/Generator/Healer";
+  }
+  if (state.hasOpenGaps) {
+    return "resolve_gaps: 存在待处理的 Gap，建议优先处理 (bc_list_gaps → bc_resolve_gap)";
+  }
+  if (state.hasFailedCases) {
+    return "review_failures: 存在失败用例，建议复盘或 healer 修复 (bc_review / bc_run_agent healer)";
+  }
+  if (state.hasApprovedCases) {
+    return "run_chain: 已批准用例等待执行 (bc_run_chain)";
+  }
+  return "generate_plan: 系统就绪，可以生成新测试计划 (bc_generate_plan)";
 }
 
 async function generateSeed(context: BrainCreatorMcpContext, input: Record<string, unknown>) {

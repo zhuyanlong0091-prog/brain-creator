@@ -2,7 +2,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { commandRunnerAgentBridge, generatePlanDraft, runAgent, runChain } from "./orchestrator.js";
+import {
+  commandRunnerAgentBridge,
+  generatePlanDraft,
+  preflightAgentBridge,
+  runAgent,
+  runChain
+} from "./orchestrator.js";
 import { encryptSecrets } from "../shared/crypto.js";
 import type {
   AuthProfile,
@@ -293,6 +299,51 @@ describe("runChain", () => {
         status: "open"
       })
     ]);
+  });
+});
+
+describe("preflightAgentBridge", () => {
+  it("returns ok:false when no bridge is configured", async () => {
+    const result = await preflightAgentBridge(undefined);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("BRAIN_CREATOR_AGENT_COMMAND");
+    expect(result.checkedAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}/));
+  });
+
+  it("returns ok:true when bridge responds (even with errors)", async () => {
+    const bridge = commandRunnerAgentBridge(async () => ({
+      exitCode: 2,
+      stdout: "",
+      stderr: "no such subagent"
+    }));
+    const result = await preflightAgentBridge(bridge);
+    expect(result.ok).toBe(true);
+  });
+
+  it("returns ok:false on bridge timeout within the deadline", async () => {
+    const bridge = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    const start = Date.now();
+    const result = await preflightAgentBridge(bridge, 500);
+    const elapsed = Date.now() - start;
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("unreachable");
+    expect(result.error).toContain("500ms");
+    // 必须在 deadline 附近返回，不能等到 2000ms
+    expect(elapsed).toBeLessThan(1500);
+  });
+
+  it("returns ok:true for a healthy bridge", async () => {
+    const bridge = commandRunnerAgentBridge(async () => ({
+      exitCode: 0,
+      stdout: "planner ready",
+      stderr: ""
+    }));
+    const result = await preflightAgentBridge(bridge);
+    expect(result.ok).toBe(true);
+    expect(result.checkedAt).toBeDefined();
   });
 });
 

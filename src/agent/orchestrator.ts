@@ -42,6 +42,61 @@ export type AgentBridgeInput = {
 
 export type AgentBridge = (input: AgentBridgeInput) => Promise<CommandResult>;
 
+export type BridgePreflight = {
+  ok: boolean;
+  error?: string;
+  checkedAt: string;
+};
+
+/**
+ * Agent Bridge 可用性预检（preflight）。
+ * 在 planner/generator/healer 执行前调用，5 秒内确认桥接器是否可达。
+ * bridge 未配置或不可达时返回结构化错误，避免进入 120s 超时。
+ */
+export async function preflightAgentBridge(
+  bridge: AgentBridge | undefined,
+  timeoutMs = 5000
+): Promise<BridgePreflight> {
+  if (!bridge) {
+    return {
+      ok: false,
+      error:
+        "Agent bridge not configured. Set BRAIN_CREATOR_AGENT_COMMAND to enable Planner/Generator/Healer.",
+      checkedAt: new Date().toISOString()
+    };
+  }
+  try {
+    const result = await withTimeout(
+      bridge({
+        systemId: "_preflight",
+        agent: "planner",
+        inputSummary: "preflight-ping",
+        args: [],
+        outputPaths: []
+      }),
+      timeoutMs
+    );
+    // bridge 有响应（即使是参数错误）说明桥接器存活
+    return { ok: true, checkedAt: new Date().toISOString() };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      error: `Agent bridge unreachable (${timeoutMs}ms timeout): ${message}`,
+      checkedAt: new Date().toISOString()
+    };
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms)
+    )
+  ]);
+}
+
 type RunAgentInput = {
   systemId: string;
   agent: AgentRun["agent"];

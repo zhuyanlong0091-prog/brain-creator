@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 export type BrainCreatorToolName =
   | "bc_create_system"
   | "bc_list_systems"
+  | "bc_session_resume"
   | "bc_system_overview"
   | "bc_archive_system"
   | "bc_create_auth"
@@ -80,6 +81,13 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     title: "List business systems",
     description: "List all connected business systems.",
     inputSchema: z.object({})
+  },
+  {
+    name: "bc_session_resume",
+    title: "Resume session",
+    description:
+      "只读返回系统完整快照：系统配置、鉴权、规则、术语、用例状态、最近执行记录、Open Gap、Agent Bridge 状态和推荐下一步。替代新会话时的多次独立查询。",
+    inputSchema: z.object({ systemId: z.string() })
   },
   {
     name: "bc_system_overview",

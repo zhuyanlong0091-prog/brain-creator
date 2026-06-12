@@ -815,6 +815,128 @@ describe("handleBrainCreatorTool", () => {
     expect(blockedResume).toContain("Manual auth checkpoints");
     expect(resumed.testCase.status).toBe("draft");
   });
+
+  it("resumes a session with aggregated system state and bridge preflight", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      agentBridge: async ({ agent, inputSummary }) => {
+        // bridge 存活（即使返回 planner 错误，preflight 也只看是否响应）
+        return { exitCode: 2, stdout: "", stderr: `unknown subagent ${agent}: ${inputSummary}` };
+      }
+    });
+
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Resume Test Shop",
+        environment: "staging",
+        baseUrl: "https://resume-shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://resume-shop.example.test"]
+      })
+    );
+
+    await handleBrainCreatorTool(context, "bc_add_rule", {
+      systemId: system.id,
+      name: "订单金额必须可见",
+      condition: "订单金额必须显示在页面上",
+      severity: "block"
+    });
+    await handleBrainCreatorTool(context, "bc_add_term", {
+      projectId: system.id,
+      key: "order.amount",
+      zhCN: "订单金额",
+      enUS: "Order Amount",
+      aliases: ["金额"],
+      pageScope: "/"
+    });
+
+    const resume = dataOf(
+      await handleBrainCreatorTool(context, "bc_session_resume", {
+        systemId: system.id
+      })
+    );
+
+    // system
+    expect(resume.system.id).toBe(system.id);
+    expect(resume.system.name).toBe("Resume Test Shop");
+
+    // auth
+    expect(resume.auth.profiles).toEqual([]);
+
+    // rules
+    expect(resume.rules).toEqual([
+      expect.objectContaining({ name: "订单金额必须可见" })
+    ]);
+
+    // terms
+    expect(resume.terms).toEqual([
+      expect.objectContaining({ zhCN: "订单金额" })
+    ]);
+
+    // cases
+    expect(resume.cases).toEqual({ total: 0, byStatus: { draft: 0, approved: 0, generating: 0, passed: 0, failed: 0, cancelled: 0 } });
+
+    // bridge
+    expect(resume.bridge.ok).toBe(true);
+    expect(resume.bridge.checkedAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}/));
+
+    // next action — 无鉴权优先
+    expect(resume.nextAction).toContain("complete_onboarding");
+
+    // 无 bridge 时的 next action
+    const noBridgeContext = createBrainCreatorMcpContext({ workDir });
+    const resumeNoBridge = dataOf(
+      await handleBrainCreatorTool(noBridgeContext, "bc_session_resume", {
+        systemId: system.id
+      })
+    );
+    expect(resumeNoBridge.bridge.ok).toBe(false);
+    expect(resumeNoBridge.bridge.error).toContain("BRAIN_CREATOR_AGENT_COMMAND");
+  });
+
+  it("isolates bc_session_resume per system", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({ workDir });
+
+    const systemA = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "System A",
+        environment: "qa",
+        baseUrl: "https://a.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: []
+      })
+    );
+    const systemB = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "System B",
+        environment: "qa",
+        baseUrl: "https://b.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: []
+      })
+    );
+
+    await handleBrainCreatorTool(context, "bc_add_rule", {
+      systemId: systemA.id,
+      name: "Rule A Only",
+      condition: "Only in A",
+      severity: "block"
+    });
+
+    const resumeA = dataOf(
+      await handleBrainCreatorTool(context, "bc_session_resume", { systemId: systemA.id })
+    );
+    const resumeB = dataOf(
+      await handleBrainCreatorTool(context, "bc_session_resume", { systemId: systemB.id })
+    );
+
+    expect(resumeA.rules).toHaveLength(1);
+    expect(resumeA.rules[0].name).toBe("Rule A Only");
+    expect(resumeB.rules).toHaveLength(0);
+    expect(resumeA.system.id).not.toBe(resumeB.system.id);
+  });
 });
 
 function dataOf(result: CallToolResult) {

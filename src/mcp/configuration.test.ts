@@ -165,6 +165,7 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("## Plan");
     expect(content).toContain("## Run");
     expect(content).toContain("## Assets And Gaps");
+    expect(content).toContain("bc_session_resume");
     expect(content).toContain("bc_create_system");
     expect(content).toContain("bc_create_auth");
     expect(content).toContain("bc_add_term");
@@ -179,6 +180,7 @@ describe("Brain Creator local integration files", () => {
 
     expect(content).toContain("One-Sentence");
     expect(content).toContain("Use Brain Creator to connect this system");
+    expect(content).toContain("bc_session_resume");
     expect(content).toContain("bc_list_systems");
     expect(content).toContain("bc_create_system");
     expect(content).toContain("bc_create_auth_checkpoint");
@@ -198,7 +200,38 @@ describe("Brain Creator local integration files", () => {
 
     expect(claudeSkill).toBe(canonical);
     expect(claudeSkill).toContain("One-Sentence");
+    expect(claudeSkill).toContain("bc_session_resume");
     expect(claudeSkill).toContain("bc_run_chain");
+  });
+
+  it("includes bc_session_resume in the MCP tool registry", async () => {
+    const toolsModule = await readFile("src/mcp/tools.ts", "utf8");
+
+    expect(toolsModule).toContain("bc_session_resume");
+    expect(toolsModule).toContain("Resume session");
+  });
+
+  it("requires agent bridge preflight before plan and chain execution", async () => {
+    const handlersModule = await readFile("src/mcp/handlers.ts", "utf8");
+
+    expect(handlersModule).toContain("preflightAgentBridge");
+    // generatePlan 和 runApprovedChain 都应该在开头检查 bridge
+    const planIndex = handlersModule.indexOf("async function generatePlan");
+    const bridgeCheckInPlan = handlersModule.indexOf("preflightAgentBridge", planIndex);
+    expect(bridgeCheckInPlan).toBeGreaterThan(planIndex);
+
+    const chainIndex = handlersModule.indexOf("async function runApprovedChain");
+    const bridgeCheckInChain = handlersModule.indexOf("preflightAgentBridge", chainIndex);
+    expect(bridgeCheckInChain).toBeGreaterThan(chainIndex);
+  });
+
+  it("exports preflightAgentBridge from the orchestrator", async () => {
+    const orchestratorModule = await readFile("src/agent/orchestrator.ts", "utf8");
+
+    expect(orchestratorModule).toContain("export async function preflightAgentBridge");
+    expect(orchestratorModule).toContain("BridgePreflight");
+    expect(orchestratorModule).toContain("_preflight");
+    expect(orchestratorModule).toContain("preflight-ping");
   });
 
   it("keeps Playwright agent definitions and default seed file available", async () => {
