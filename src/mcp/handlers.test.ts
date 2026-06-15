@@ -937,6 +937,124 @@ describe("handleBrainCreatorTool", () => {
     expect(resumeB.rules).toHaveLength(0);
     expect(resumeA.system.id).not.toBe(resumeB.system.id);
   });
+
+  it("runs bc_full_workflow: approve + chain in a single call", async () => {
+    const workDir = await tempDir();
+    const bridgeCalls: string[][] = [];
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        bridgeCalls.push([agent, ...args]);
+        const outputIdx = args.indexOf("--output");
+        const outputPath = outputIdx >= 0 ? args[outputIdx + 1] : "";
+        if (agent === "planner" && outputPath) {
+          await writeFile(
+            outputPath,
+            [
+              "## Scenario: 一键工作流测试",
+              "Priority: critical",
+              "- navigate: 首页",
+              "- assert: 标题 => 订单管理"
+            ].join("\n"),
+            "utf8"
+          );
+        }
+        if (agent === "generator" && outputPath) {
+          await writeFile(outputPath, "// generated test", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async (_command, args) => {
+        bridgeCalls.push(args);
+        return { exitCode: 0, stdout: "test passed", stderr: "" };
+      }
+    });
+
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Full Workflow Shop",
+        environment: "staging",
+        baseUrl: "https://fullworkflow.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://fullworkflow.example.test"]
+      })
+    );
+
+    // 创建鉴权（bc_generate_plan 依赖）
+    const authProfile = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "staging",
+        role: "qa",
+        loginMethod: "token",
+        secrets: { token: "test-token" }
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_verify_auth", {
+      id: authProfile.id
+    });
+
+    // 生成计划
+    const plan = dataOf(
+      await handleBrainCreatorTool(context, "bc_generate_plan", {
+        systemId: system.id,
+        requirement: "测试一键工作流"
+      })
+    );
+
+    // draft 状态
+    expect(plan.testCase.status).toBe("draft");
+
+    // bc_full_workflow：审批 + 执行一次完成
+    const workflow = dataOf(
+      await handleBrainCreatorTool(context, "bc_full_workflow", {
+        caseId: plan.testCase.id
+      })
+    );
+
+    expect(workflow.chainRun.status).toBe("succeeded");
+    expect(workflow.chainRun.testCaseId).toBe(plan.testCase.id);
+
+    // 确认用例状态已变为 passed
+    const cases = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_cases", { systemId: system.id })
+    );
+    expect(cases[0].status).toBe("passed");
+  });
+
+  it("rejects bc_full_workflow for non-draft cases", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({ workDir });
+
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Reject Workflow Shop",
+        environment: "staging",
+        baseUrl: "https://reject.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://reject.example.test"]
+      })
+    );
+
+    // 创建一个已审批的用例（模拟）
+    const ctx = context.service;
+    const testCase = ctx.createTestCase({
+      systemId: system.id,
+      requirement: "already approved",
+      scenarios: [{ id: "s1", title: "X", priority: "medium", steps: [] }],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    ctx.approveTestCase(testCase.id);
+
+    // 已审批的用例不能再走 bc_full_workflow
+    const error = errorOf(
+      await handleBrainCreatorTool(context, "bc_full_workflow", {
+        caseId: testCase.id
+      })
+    );
+    expect(error).toContain("Only draft test cases can be approved");
+  });
 });
 
 function dataOf(result: CallToolResult) {

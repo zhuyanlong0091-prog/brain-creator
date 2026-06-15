@@ -34,6 +34,7 @@ describe("BRAIN_CREATOR_TOOLS", () => {
       "bc_run_agent",
       "bc_list_agent_runs",
       "bc_run_chain",
+      "bc_full_workflow",
       "bc_list_chain_runs",
       "bc_list_specs",
       "bc_list_tests",

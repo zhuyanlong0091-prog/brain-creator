@@ -47,8 +47,8 @@ When the user gives a request such as "Use Brain Creator to connect this CRM and
 3. Capture known business language with `bc_add_term` and required checks with `bc_add_rule` when the user provides them.
 4. Call `bc_generate_plan` with the selected `systemId` and the user's natural language requirement.
 5. Present scenarios, new term candidates, and rule check results; call `bc_update_plan` only when the user asks for changes.
-6. Call `bc_approve_plan` only after the user confirms the test intent.
-7. Call `bc_run_chain` for the approved case, then report generated spec/test paths, ChainRun status, healer attempts, and gaps.
+6. Call `bc_approve_plan` only after the user confirms the test intent. When the user says "approve and run" or "确认并执行", use `bc_full_workflow` to approve and execute in one call.
+7. Call `bc_run_chain` (or `bc_full_workflow`) for the approved case, then report generated spec/test paths, ChainRun status, healer attempts, and gaps.
 8. Call `bc_artifact_overview`, `bc_list_specs`, `bc_list_tests`, `bc_list_cases`, and `bc_list_gaps` when summarizing outcomes or continuing later.
 9. If the user closes or stops a protected login flow, call `bc_cancel_plan` with the reason. Use `bc_resume_plan` only after awaiting auth checkpoints are completed or cancelled.
 10. Call `bc_report_gap` for external preflight failures such as blocked network access or missing evidence.
