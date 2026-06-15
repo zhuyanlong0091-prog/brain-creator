@@ -183,6 +183,23 @@ To continue later:
 
 Use `bc_report_gap` for external preflight failures such as blocked network access, unreachable target pages, or missing evidence outside a chain run.
 
+## Session Resume: The New-Session Entry Point
+
+When the agent opens a new session for an existing Brain Creator system, the first call should be `bc_session_resume`. It returns a full snapshot in one call:
+
+- System profile, auth profiles, checkpoints
+- Business rules, glossary terms
+- Test case counts by status
+- Recent agent runs and chain runs (last 5 each)
+- Generated artifact counts
+- Open gaps
+- **Bridge preflight status** (`{ ok, checkedAt }`) — tells the agent whether Planner/Generator/Healer are reachable
+- **Recommended next action** — computed from the snapshot state
+
+This replaces 6–7 independent queries and gives the agent everything it needs to present a status summary and take the next step.
+
+For the full E2E flow documentation, see `docs/e2e-session-resume-workflow.md`.
+
 ## Recommended One-Sentence Prompts
 
 Use these when you want the agent to drive the flow without tool-level instructions:
@@ -201,6 +218,16 @@ Use Brain Creator to continue the approved case for the selected system, run the
 
 ```text
 Use Brain Creator to show the current system overview, latest generated specs/tests, chain history, and unresolved gaps.
+```
+
+### New session prompts (session resume path)
+
+```text
+Use Brain Creator to check the order-admin system status and tell me what to do next.
+```
+
+```text
+Use Brain Creator to resume where I left off with the order-admin system. If the bridge isn't working, tell me how to fix it.
 ```
 
 ## What The Agent Should Not Do
@@ -240,6 +267,7 @@ npm run verify:live-claude-chain
 npm run verify:live-agent-artifacts
 npm run verify:live-mcp-workflow
 npm run verify:live-claude-skill-workflow
+npm run verify:live-session-resume-workflow
 ```
 
 The strongest user-experience check is `npm run verify:live-claude-skill-workflow`: it launches a real Claude Code session, uses a natural Brain Creator request, calls Brain Creator MCP tools, reaches `bc_run_chain`, and reviews artifacts.
