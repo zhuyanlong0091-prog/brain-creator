@@ -32,6 +32,7 @@ export type BrainCreatorToolName =
   | "bc_run_agent"
   | "bc_list_agent_runs"
   | "bc_run_chain"
+  | "bc_full_workflow"
   | "bc_list_chain_runs"
   | "bc_list_specs"
   | "bc_list_tests"
@@ -333,6 +334,16 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_run_chain",
     title: "Run test chain",
     description: "Run generator/test/healer chain for an approved test case.",
+    inputSchema: z.object({
+      caseId: z.string(),
+      maxHealAttempts: z.number().int().min(0).max(10).optional()
+    })
+  },
+  {
+    name: "bc_full_workflow",
+    title: "Full workflow: approve + run",
+    description:
+      "一键审批并执行：对草稿用例先调用 bc_approve_plan，审批通过后自动执行 bc_run_chain。用于用户已审核计划、确认可执行的场景，减少两次独立工具调用。",
     inputSchema: z.object({
       caseId: z.string(),
       maxHealAttempts: z.number().int().min(0).max(10).optional()

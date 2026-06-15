@@ -57,4 +57,26 @@ describe("Agent-native usage documentation", () => {
     expect(content).toContain("bc_resume_plan");
     expect(content).toContain("bc_report_gap");
   });
+
+  it("documents the session resume new-session entry point", async () => {
+    const content = await readFile("docs/agent-usage.md", "utf8");
+
+    expect(content).toContain("Session Resume: The New-Session Entry Point");
+    expect(content).toContain("bc_session_resume");
+    expect(content).toContain("6–7 independent queries");
+    expect(content).toContain("Bridge preflight status");
+    expect(content).toContain("docs/e2e-session-resume-workflow.md");
+    expect(content).toContain("check the order-admin system status");
+    expect(content).toContain("resume where I left off");
+  });
+
+  it("lists the session resume smoke command in verification commands", async () => {
+    const content = await readFile("docs/agent-usage.md", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(content).toContain("npm run verify:live-session-resume-workflow");
+    expect(packageJson.scripts["verify:live-session-resume-workflow"]).toContain(
+      "scripts/liveSessionResumeWorkflowSmoke.ts"
+    );
+  });
 });

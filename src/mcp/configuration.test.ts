@@ -172,6 +172,7 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("bc_add_rule");
     expect(content).toContain("bc_generate_plan");
     expect(content).toContain("bc_run_chain");
+    expect(content).toContain("bc_full_workflow");
     expect(content).toContain("bc_search_assets");
   });
 

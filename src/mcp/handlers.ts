@@ -244,6 +244,8 @@ export async function handleBrainCreatorTool(
         return textResult(context.service.listAgentRuns(stringArg(input, "systemId")));
       case "bc_run_chain":
         return textResult(await runApprovedChain(context, input));
+      case "bc_full_workflow":
+        return textResult(await fullWorkflow(context, input));
       case "bc_list_chain_runs":
         return textResult(context.service.listChainRuns(stringArg(input, "systemId")));
       case "bc_list_specs":
@@ -359,6 +361,18 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   }
   context.service.recordChainRun(result.chainRun);
   return result;
+}
+
+/**
+ * bc_full_workflow — 一键审批 + 执行。
+ * 封装 bc_approve_plan → bc_run_chain，用于用户已审核计划、确认可执行的场景。
+ * 不减损审批门禁：只对 draft 状态用例执行审批，等效于用户手动确认。
+ */
+async function fullWorkflow(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const caseId = stringArg(input, "caseId");
+  const approved = context.service.approveTestCase(caseId);
+  const chainInput = { ...input, caseId: approved.id };
+  return runApprovedChain(context, chainInput);
 }
 
 /**
