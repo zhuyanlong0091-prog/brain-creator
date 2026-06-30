@@ -28,7 +28,7 @@ Brain Creator v2 现在采用三层入口：
 - **Agent Facade 入口：** Agent 默认使用 `bc_status`、`bc_configure`、`bc_run`、`bc_review`。
 - **内部工具入口：** 现有细粒度 `bc_*` 工具继续保留，用于兼容、调试、审计和 Facade 内部编排。
 
-执行测试用例文档时，Agent 应先调用 `bc_run mode=case-source-suite confirm=false` 返回预览；只有用户明确确认后，才调用 `confirm=true` 执行全量 suite run。
+执行测试用例文档时，Agent 应先调用 `bc_run mode=case-source-suite confirm=false` 返回预览；只有用户明确确认后，才调用 `confirm=true` 执行 suite run。默认是全量执行；如果用户说“只跑 TC-001/TC-002”“只跑招聘需求模块”或“只跑 P0”，Agent 应映射为 `caseNos`、`modules`、`priorities` 筛选条件。多个筛选条件同时出现时取交集。
 
 当前文档来源支持：
 
@@ -213,7 +213,7 @@ Brain Creator v2 uses three layers:
 - **Agent facade entry:** agents should default to `bc_status`, `bc_configure`, `bc_run`, and `bc_review`.
 - **Internal tool entry:** existing fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and facade orchestration.
 
-For a test case document, the agent should call `bc_run mode=case-source-suite confirm=false` first. Only after explicit user confirmation should it call the same mode with `confirm=true` to execute the full suite run.
+For a test case document, the agent should call `bc_run mode=case-source-suite confirm=false` first. Only after explicit user confirmation should it call the same mode with `confirm=true` to execute the suite run. The default is the full document; if the user says "only run TC-001/TC-002", "only run the recruiting module", or "only run P0", map that request to `caseNos`, `modules`, and `priorities`. Multiple filters are intersected.
 
 Supported document sources:
 

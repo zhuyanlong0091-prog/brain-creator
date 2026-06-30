@@ -19,7 +19,7 @@ import {
   type AgentBridge,
   type CommandRunner
 } from "../agent/orchestrator.js";
-import { parseCaseSource, type ParsedCaseSource } from "../caseSource/parser.js";
+import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
 import type {
   AgentRun,
   AuthCheckpoint,
@@ -379,6 +379,8 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     throw new Error("source is required unless resume is true and an unfinished suite exists");
   }
   const parsed = await parseCaseSource(source);
+  const filters = caseSourceFilters(input);
+  const selectedCases = filterDocumentCases(parsed.cases, filters);
   const caseSource = context.service.upsertCaseSource({
     systemId,
     source: parsed.source,
@@ -395,19 +397,23 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       mode: "case-source-suite",
       status: "preview",
       source: caseSource,
-      summary: previewSummary(parsed),
+      summary: previewSummary(parsed, selectedCases),
+      selection: selectionSummary(parsed.cases, selectedCases, filters),
       bridge,
       requiresConfirmation: true,
       nextAction: "Ask the user to confirm before running the full suite."
     };
   }
 
-  if (parsed.cases.length === 0) {
+  if (selectedCases.length === 0) {
     const gap = context.service.reportGap({
       projectId: systemId,
       sourceType: "case-source",
       sourceId: caseSource.id,
-      reason: "Case source has no executable document cases.",
+      reason:
+        parsed.cases.length === 0
+          ? "Case source has no executable document cases."
+          : "Case source filters selected no executable document cases.",
       severity: "high",
       owner: "qa"
     });
@@ -444,8 +450,8 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     : context.service.createCaseSuite({
         systemId,
         sourceId: caseSource.id,
-        totalCases: parsed.cases.length,
-        selectedCaseNos: parsed.cases.map((documentCase) => documentCase.caseNo),
+        totalCases: selectedCases.length,
+        selectedCaseNos: selectedCases.map((documentCase) => documentCase.caseNo),
         status: "approved"
       });
   const alreadyPassed = passedCaseNosForSuite(context, systemId, suite.id);
@@ -509,6 +515,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     source: caseSource,
     suite,
     suiteRun,
+    progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, caseResults),
     bugs: context.service.listBugReports({ systemId }).filter((bug) =>
       bugReportIds.includes(bug.id)
     )
@@ -1022,19 +1029,85 @@ async function artifactOverview(context: BrainCreatorMcpContext, input: Record<s
   };
 }
 
-function previewSummary(parsed: ParsedCaseSource) {
+function previewSummary(parsed: ParsedCaseSource, selectedCases: DocumentCase[] = parsed.cases) {
+  const selectedStats = summarizeDocumentCases(selectedCases);
   return {
-    total: parsed.cases.length,
-    moduleStats: parsed.moduleStats,
-    priorityStats: parsed.priorityStats,
+    total: selectedCases.length,
+    moduleStats: selectedStats.moduleStats,
+    priorityStats: selectedStats.priorityStats,
     warnings: parsed.warnings,
-    sampleCases: parsed.sampleCases.map((item) => ({
+    sampleCases: selectedCases.slice(0, 3).map((item) => ({
       caseNo: item.caseNo,
       title: item.title,
       module: item.module,
       priority: item.priority,
       sourceRow: item.sourceRow
     }))
+  };
+}
+
+function caseSourceFilters(input: Record<string, unknown>) {
+  return {
+    caseNos: new Set(stringArrayArg(input, "caseNos").map((item) => item.trim()).filter(Boolean)),
+    modules: new Set(stringArrayArg(input, "modules").map((item) => item.trim()).filter(Boolean)),
+    priorities: new Set(stringArrayArg(input, "priorities").map((item) => item.trim()).filter(Boolean))
+  };
+}
+
+function filterDocumentCases(
+  cases: DocumentCase[],
+  filters: ReturnType<typeof caseSourceFilters>
+) {
+  return cases.filter((documentCase) => {
+    if (filters.caseNos.size > 0 && !filters.caseNos.has(documentCase.caseNo)) {
+      return false;
+    }
+    if (filters.modules.size > 0 && !filters.modules.has(documentCase.module)) {
+      return false;
+    }
+    if (filters.priorities.size > 0 && !filters.priorities.has(documentCase.priority)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function selectionSummary(
+  allCases: DocumentCase[],
+  selectedCases: DocumentCase[],
+  filters: ReturnType<typeof caseSourceFilters>
+) {
+  return {
+    totalAvailable: allCases.length,
+    selected: selectedCases.length,
+    selectedCaseNos: selectedCases.map((documentCase) => documentCase.caseNo),
+    filters: {
+      caseNos: [...filters.caseNos],
+      modules: [...filters.modules],
+      priorities: [...filters.priorities]
+    }
+  };
+}
+
+function caseSuiteProgress(
+  selectedCaseNos: string[],
+  alreadyPassed: Set<string>,
+  caseResults: CaseSuiteCaseResult[]
+) {
+  const passedNow = caseResults.filter((result) => result.status === "passed").map((result) => result.caseNo);
+  const passed = new Set([...alreadyPassed, ...passedNow]);
+  const failed = caseResults.filter((result) => result.status === "failed").length;
+  const blocked = caseResults.filter((result) => result.status === "blocked").length;
+  const remainingCaseNos = selectedCaseNos.filter((caseNo) => !passed.has(caseNo));
+  return {
+    selected: selectedCaseNos.length,
+    alreadyPassed: alreadyPassed.size,
+    attempted: caseResults.length,
+    passed: passed.size,
+    failed,
+    blocked,
+    remaining: remainingCaseNos.length,
+    remainingCaseNos
   };
 }
 
