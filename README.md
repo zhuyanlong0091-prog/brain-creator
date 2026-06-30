@@ -36,7 +36,7 @@ Brain Creator v2 现在采用三层入口：
 - 包含标准测试用例表头的 `.md` 文件。
 - `obsidian:<path>`、`claudian:<path>` 和 `[[path]]` 引用形式；Brain Creator 会读取引用文件，但资产中保留原始 source 引用。
 
-如果 suite run 中途失败，后续可使用同一个 source 和已创建的 `suiteId` 继续执行，Brain Creator 只会重跑该 suite 中尚未通过的用例。Bug 复盘请使用 `bc_review target=bug`，结果会包含状态摘要和 Bug 列表。
+如果 suite run 中途失败，后续可直接说“继续上次未完成套件”。Agent 应先调用 `bc_status` 查看 `suites.unfinished`，再调用 `bc_run mode=case-source-suite resume=true confirm=true`；Brain Creator 会复用最近未完成 suite 的 source 和 `suiteId`，只重跑尚未通过的用例。Bug 复盘请使用 `bc_review target=bug`，结果会包含状态摘要、Bug 列表和可直接贴到报告里的 `reportMarkdown`。
 
 ### 快速开始
 
@@ -221,7 +221,7 @@ Supported document sources:
 - `.md` files that contain the standard executable test case table headers.
 - `obsidian:<path>`, `claudian:<path>`, and `[[path]]` references. Brain Creator reads the referenced file while keeping the original source reference in its assets.
 
-If a suite run fails midway, pass the same source plus the created `suiteId` to continue; Brain Creator reruns only cases that have not passed in that suite. Use `bc_review target=bug` to get both a bug status summary and the BugReport list.
+If a suite run fails midway, the user can simply say "continue the unfinished suite." The agent should call `bc_status` to inspect `suites.unfinished`, then call `bc_run mode=case-source-suite resume=true confirm=true`; Brain Creator reuses the latest unfinished suite source and `suiteId` and reruns only cases that have not passed in that suite. Use `bc_review target=bug` to get a bug status summary, the BugReport list, and `reportMarkdown` that can be pasted into a test report.
 
 ### Fast Start
 
