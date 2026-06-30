@@ -15,6 +15,12 @@ export type ParsedCaseSource = {
   sampleCases: DocumentCase[];
 };
 
+type SourceReference = {
+  source: string;
+  filePath: string;
+  sourceTypeOverride?: CaseSource["sourceType"];
+};
+
 const requiredHeaders = [
   "用例编号",
   "用例标题",
@@ -26,14 +32,15 @@ const requiredHeaders = [
 ];
 
 export async function parseCaseSource(source: string): Promise<ParsedCaseSource> {
-  const buffer = await readFile(source);
-  const sourceType = inferSourceType(source);
+  const reference = resolveSourceReference(source);
+  const buffer = await readFile(reference.filePath);
+  const sourceType = inferSourceType(reference.filePath, reference.sourceTypeOverride);
   const contentHash = createHash("sha256").update(buffer).digest("hex");
-  if (sourceType === "xlsx") {
-    return parseXlsxCaseSource(source, buffer, contentHash);
+  if (sourceType === "xlsx" || extname(reference.filePath).toLowerCase() === ".xlsx") {
+    return parseXlsxCaseSource(reference.source, buffer, contentHash, sourceType);
   }
-  if (sourceType === "markdown" || sourceType === "obsidian") {
-    return parseMarkdownCaseSource(source, buffer.toString("utf8"), contentHash, sourceType);
+  if (sourceType === "markdown" || sourceType === "obsidian" || sourceType === "claudian") {
+    return parseMarkdownCaseSource(reference.source, buffer.toString("utf8"), contentHash, sourceType);
   }
   throw new Error("Unsupported case source type. Use .xlsx or .md.");
 }
@@ -49,7 +56,8 @@ export function summarizeDocumentCases(cases: DocumentCase[]) {
 function parseXlsxCaseSource(
   source: string,
   buffer: Buffer,
-  contentHash: string
+  contentHash: string,
+  sourceType: CaseSource["sourceType"] = "xlsx"
 ): ParsedCaseSource {
   const zip = new AdmZip(buffer);
   const sharedStrings = readSharedStrings(zip);
@@ -79,7 +87,7 @@ function parseXlsxCaseSource(
   const stats = summarizeDocumentCases(cases);
   return {
     source,
-    sourceType: "xlsx",
+    sourceType,
     contentHash,
     cases,
     moduleStats: stats.moduleStats,
@@ -95,15 +103,28 @@ function parseMarkdownCaseSource(
   contentHash: string,
   sourceType: CaseSource["sourceType"]
 ): ParsedCaseSource {
-  const rows = content
+  const tableRows = content
     .split(/\r?\n/)
-    .filter((line) => line.trim().startsWith("|") && line.includes("用例编号"))
-    .map(parseMarkdownTableRow);
+    .map((line, index) => ({ line, sourceRow: index + 1 }))
+    .filter((item) => item.line.trim().startsWith("|"))
+    .map((item) => ({ ...item, row: parseMarkdownTableRow(item.line) }));
   const warnings: string[] = [];
-  if (rows.length === 0) {
+  const headerIndex = tableRows.findIndex((item) =>
+    requiredHeaders.every((header) => item.row.includes(header))
+  );
+  if (headerIndex < 0) {
     warnings.push("Markdown source does not include an executable case table.");
   }
-  const cases: DocumentCase[] = [];
+  const header = headerIndex >= 0 ? tableRows[headerIndex].row : [];
+  const headerMap = new Map(header.map((name, index) => [name.trim(), index]));
+  const cases =
+    headerIndex >= 0
+      ? tableRows
+          .slice(headerIndex + 1)
+          .filter((item) => !isMarkdownSeparatorRow(item.row))
+          .map((item) => rowToDocumentCase(item.row, headerMap, item.sourceRow))
+          .filter((item): item is DocumentCase => item !== undefined)
+      : [];
   const stats = summarizeDocumentCases(cases);
   return {
     source,
@@ -113,16 +134,7 @@ function parseMarkdownCaseSource(
     moduleStats: stats.moduleStats,
     priorityStats: stats.priorityStats,
     warnings,
-    sampleCases: rows.map((row, index) => ({
-      caseNo: row[0] ?? `row-${index + 1}`,
-      title: row[1] ?? "",
-      module: row[2] ?? "",
-      precondition: "",
-      steps: [],
-      expectedResult: "",
-      priority: row[3] ?? "",
-      sourceRow: index + 1
-    }))
+    sampleCases: cases.slice(0, 5)
   };
 }
 
@@ -189,6 +201,7 @@ function rowToDocumentCase(
 
 function splitSteps(value: string) {
   return value
+    .replace(/<br\s*\/?>/gi, "\n")
     .split(/\r?\n/)
     .map((item) => item.replace(/^\s*\d+[.、)]\s*/, "").trim())
     .filter(Boolean);
@@ -201,7 +214,38 @@ function parseMarkdownTableRow(line: string) {
     .filter(Boolean);
 }
 
-function inferSourceType(source: string): CaseSource["sourceType"] {
+function isMarkdownSeparatorRow(row: string[]) {
+  return row.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function resolveSourceReference(source: string): SourceReference {
+  const trimmed = source.trim();
+  const prefixed = /^(obsidian|claudian):(.+)$/i.exec(trimmed);
+  if (prefixed) {
+    return {
+      source: trimmed,
+      filePath: prefixed[2]!.trim(),
+      sourceTypeOverride: prefixed[1]!.toLowerCase() as CaseSource["sourceType"]
+    };
+  }
+  const wiki = /^\[\[(.+)\]\]$/.exec(trimmed);
+  if (wiki) {
+    return {
+      source: trimmed,
+      filePath: wiki[1]!.trim(),
+      sourceTypeOverride: "obsidian"
+    };
+  }
+  return { source: trimmed, filePath: trimmed };
+}
+
+function inferSourceType(
+  source: string,
+  override?: CaseSource["sourceType"]
+): CaseSource["sourceType"] {
+  if (override) {
+    return override;
+  }
   const ext = extname(source).toLowerCase();
   if (ext === ".xlsx") {
     return "xlsx";

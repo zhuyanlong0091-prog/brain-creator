@@ -53,6 +53,12 @@ Default to the high-level facade tools. The fine-grained `bc_*` tools remain ava
 
 When the user provides a test case document path, first call `bc_run` with `mode: "case-source-suite"` and `confirm: false`. Present the preview summary, risks, bridge status, and sample cases. Only after explicit user confirmation call the same mode with `confirm: true`.
 
+Document source details:
+- Supported inputs are local `.xlsx`, executable `.md` tables, `obsidian:<path>`, `claudian:<path>`, and `[[path]]`.
+- For Obsidian/Claudian-style references, keep the original source reference in Brain Creator assets; do not paste the full document content into chat.
+- To continue an interrupted or failed suite, call `bc_run mode="case-source-suite"` with the same `source`, the existing `suiteId`, and `confirm: true`; rerun only cases that have not passed.
+- For bugs, call `bc_review target="bug"` to get a status summary and BugReport list before deciding whether to run `bc_run mode="bug-regression"`.
+
 ---
 
 ## One-Sentence Workflow

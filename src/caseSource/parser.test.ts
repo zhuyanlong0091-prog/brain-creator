@@ -89,6 +89,60 @@ describe("parseCaseSource", () => {
     expect(parsed.cases).toEqual([]);
     expect(parsed.warnings).toContain("Markdown source does not include an executable case table.");
   });
+
+  it("parses executable markdown case tables", async () => {
+    const dir = await tempDir();
+    const source = join(dir, "cases.md");
+    await writeFile(
+      source,
+      [
+        "| 用例编号 | 用例标题 | 所属模块 | 前置条件 | 操作步骤 | 预期结果 | 优先级 | 备注 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| TC-MD-001 | 审批招聘需求 | 招聘需求 | 用户已登录 | 1. 打开招聘需求<br>2. 点击审批 | 状态变为已审批 | P0 | Markdown 表格 |"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const parsed = await parseCaseSource(source);
+
+    expect(parsed.sourceType).toBe("markdown");
+    expect(parsed.cases).toEqual([
+      expect.objectContaining({
+        caseNo: "TC-MD-001",
+        title: "审批招聘需求",
+        module: "招聘需求",
+        steps: ["打开招聘需求", "点击审批"],
+        expectedResult: "状态变为已审批",
+        priority: "P0",
+        remark: "Markdown 表格"
+      })
+    ]);
+    expect(parsed.moduleStats).toEqual({ "招聘需求": 1 });
+  });
+
+  it("parses Obsidian and Claudian references without changing the stored source", async () => {
+    const dir = await tempDir();
+    const source = join(dir, "referenced-cases.md");
+    await writeFile(
+      source,
+      [
+        "| 用例编号 | 用例标题 | 所属模块 | 前置条件 | 操作步骤 | 预期结果 | 优先级 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| TC-REF-001 | 发起 offer | Offer | 候选人已通过面试 | 1. 点击发起 offer | Offer 审批流启动 | P1 |"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const obsidian = await parseCaseSource(`obsidian:${source}`);
+    const claudian = await parseCaseSource(`claudian:${source}`);
+
+    expect(obsidian.source).toBe(`obsidian:${source}`);
+    expect(obsidian.sourceType).toBe("obsidian");
+    expect(obsidian.cases[0].caseNo).toBe("TC-REF-001");
+    expect(claudian.source).toBe(`claudian:${source}`);
+    expect(claudian.sourceType).toBe("claudian");
+    expect(claudian.cases[0].title).toBe("发起 offer");
+  });
 });
 
 function createXlsx(rows: string[][]) {

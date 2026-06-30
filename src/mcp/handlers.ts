@@ -24,6 +24,7 @@ import type {
   AgentRun,
   AuthCheckpoint,
   AuthProfile,
+  CaseSuite,
   CaseSuiteCaseResult,
   ChainRun,
   DocumentCase,
@@ -428,20 +429,28 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     return { mode: "case-source-suite", status: "blocked", source: caseSource, gap, bridge };
   }
 
-  const suite = context.service.createCaseSuite({
-    systemId,
-    sourceId: caseSource.id,
-    totalCases: parsed.cases.length,
-    selectedCaseNos: parsed.cases.map((documentCase) => documentCase.caseNo),
-    status: "approved"
-  });
+  const requestedSuiteId = optionalStringArg(input, "suiteId");
+  const suite = requestedSuiteId
+    ? existingCaseSuite(context, requestedSuiteId, systemId, caseSource.id)
+    : context.service.createCaseSuite({
+        systemId,
+        sourceId: caseSource.id,
+        totalCases: parsed.cases.length,
+        selectedCaseNos: parsed.cases.map((documentCase) => documentCase.caseNo),
+        status: "approved"
+      });
+  const alreadyPassed = passedCaseNosForSuite(context, systemId, suite.id);
+  const casesToRun = parsed.cases.filter(
+    (documentCase) =>
+      suite.selectedCaseNos.includes(documentCase.caseNo) && !alreadyPassed.has(documentCase.caseNo)
+  );
   context.service.updateCaseSuiteStatus(suite.id, "running");
   const caseResults: CaseSuiteCaseResult[] = [];
   const artifactPaths: string[] = [];
   const bugReportIds: string[] = [];
   const gapIds: string[] = [];
 
-  for (const documentCase of parsed.cases) {
+  for (const documentCase of casesToRun) {
     const result = await executeDocumentCase(context, {
       systemId,
       sourceId: caseSource.id,
@@ -460,12 +469,17 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
   }
 
   const counts = countBy(caseResults, (result) => result.status);
+  const nowPassed = new Set(alreadyPassed);
+  for (const result of caseResults.filter((item) => item.status === "passed")) {
+    nowPassed.add(result.caseNo);
+  }
+  const allSuiteCasesPassed = suite.selectedCaseNos.every((caseNo) => nowPassed.has(caseNo));
   const suiteRun = context.service.recordCaseSuiteRun({
     systemId,
     suiteId: suite.id,
     sourceId: caseSource.id,
     status: (counts.blocked ?? 0) > 0 ? "blocked" : (counts.failed ?? 0) > 0 ? "failed" : "completed",
-    total: caseResults.length,
+    total: casesToRun.length,
     passed: counts.passed ?? 0,
     failed: counts.failed ?? 0,
     blocked: counts.blocked ?? 0,
@@ -477,7 +491,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
   });
   context.service.updateCaseSuiteStatus(
     suite.id,
-    suiteRun.status === "completed" ? "completed" : "failed"
+    allSuiteCasesPassed ? "completed" : "failed"
   );
 
   return {
@@ -686,10 +700,17 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
   const systemId = stringArg(input, "systemId");
   const target = reviewTargetArg(input, "target");
   if (target === "bug") {
-    return context.service.listBugReports({
+    const bugs = context.service.listBugReports({
       systemId,
       status: bugStatusArg(input, "status")
     });
+    return {
+      summary: bugReviewSummary(bugs),
+      bugs,
+      nextAction: bugs.some((bug) => bug.status === "open" || bug.status === "retest-failed")
+        ? "run_bug_regression"
+        : "no_open_bug"
+    };
   }
   if (target === "suite-run") {
     return context.service.listCaseSuiteRuns(systemId);
@@ -1007,6 +1028,34 @@ function previewSummary(parsed: ParsedCaseSource) {
   };
 }
 
+function existingCaseSuite(
+  context: BrainCreatorMcpContext,
+  suiteId: string,
+  systemId: string,
+  sourceId: string
+): CaseSuite {
+  const suite = context.service.getCaseSuite(suiteId);
+  if (suite.systemId !== systemId) {
+    throw new Error("Case suite belongs to another business system");
+  }
+  if (suite.sourceId !== sourceId) {
+    throw new Error("Case suite belongs to another case source");
+  }
+  return suite;
+}
+
+function passedCaseNosForSuite(context: BrainCreatorMcpContext, systemId: string, suiteId: string) {
+  const passed = new Set<string>();
+  for (const run of context.service.listCaseSuiteRuns(systemId).filter((item) => item.suiteId === suiteId)) {
+    for (const result of run.caseResults) {
+      if (result.status === "passed") {
+        passed.add(result.caseNo);
+      }
+    }
+  }
+  return passed;
+}
+
 function facadeNextAction(state: {
   bridgeOk: boolean;
   openBugs: number;
@@ -1052,6 +1101,18 @@ function countBy<T>(items: T[], getKey: (item: T) => string) {
     result[key] = (result[key] ?? 0) + 1;
     return result;
   }, {});
+}
+
+function bugReviewSummary(bugs: Array<{ status: string }>) {
+  const counts = countBy(bugs, (bug) => bug.status);
+  return {
+    total: bugs.length,
+    open: counts.open ?? 0,
+    retestRunning: counts["retest-running"] ?? 0,
+    retestPassed: counts["retest-passed"] ?? 0,
+    retestFailed: counts["retest-failed"] ?? 0,
+    closed: counts.closed ?? 0
+  };
 }
 
 async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestArtifact) {
