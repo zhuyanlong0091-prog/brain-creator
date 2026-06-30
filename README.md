@@ -30,6 +30,14 @@ Brain Creator v2 现在采用三层入口：
 
 执行测试用例文档时，Agent 应先调用 `bc_run mode=case-source-suite confirm=false` 返回预览；只有用户明确确认后，才调用 `confirm=true` 执行全量 suite run。
 
+当前文档来源支持：
+
+- 本地 `.xlsx` 文件。
+- 包含标准测试用例表头的 `.md` 文件。
+- `obsidian:<path>`、`claudian:<path>` 和 `[[path]]` 引用形式；Brain Creator 会读取引用文件，但资产中保留原始 source 引用。
+
+如果 suite run 中途失败，后续可使用同一个 source 和已创建的 `suiteId` 继续执行，Brain Creator 只会重跑该 suite 中尚未通过的用例。Bug 复盘请使用 `bc_review target=bug`，结果会包含状态摘要和 Bug 列表。
+
 ### 快速开始
 
 安装依赖并验证本地基线：
@@ -206,6 +214,14 @@ Brain Creator v2 uses three layers:
 - **Internal tool entry:** existing fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and facade orchestration.
 
 For a test case document, the agent should call `bc_run mode=case-source-suite confirm=false` first. Only after explicit user confirmation should it call the same mode with `confirm=true` to execute the full suite run.
+
+Supported document sources:
+
+- Local `.xlsx` files.
+- `.md` files that contain the standard executable test case table headers.
+- `obsidian:<path>`, `claudian:<path>`, and `[[path]]` references. Brain Creator reads the referenced file while keeping the original source reference in its assets.
+
+If a suite run fails midway, pass the same source plus the created `suiteId` to continue; Brain Creator reruns only cases that have not passed in that suite. Use `bc_review target=bug` to get both a bug status summary and the BugReport list.
 
 ### Fast Start
 

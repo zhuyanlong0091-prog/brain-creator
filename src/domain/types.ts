@@ -286,7 +286,7 @@ export type CaseSource = {
   id: string;
   systemId: string;
   source: string;
-  sourceType: "xlsx" | "markdown" | "obsidian" | "unknown";
+  sourceType: "xlsx" | "markdown" | "obsidian" | "claudian" | "unknown";
   contentHash: string;
   caseCount: number;
   moduleStats: Record<string, number>;
