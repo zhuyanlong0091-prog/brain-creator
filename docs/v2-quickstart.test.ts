@@ -98,4 +98,28 @@ describe("v2 quickstart documentation", () => {
     expect(content).toContain("natural Brain Creator request");
     expect(content).toContain("bc_run_chain");
   });
+
+  it("documents the session resume → bridge preflight → full workflow E2E path", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.scripts["verify:live-session-resume-workflow"]).toContain(
+      "scripts/liveSessionResumeWorkflowSmoke.ts"
+    );
+    expect(content).toContain("npm run verify:live-session-resume-workflow");
+    expect(content).toContain("bc_session_resume");
+    expect(content).toContain("bridge preflight");
+    expect(content).toContain("bc_full_workflow");
+    expect(content).toContain("session resume");
+    expect(content).toContain("5-second bridge preflight");
+    expect(content).toContain("docs/e2e-session-resume-workflow.md");
+  });
+
+  it("documents bc_session_resume and bc_full_workflow in the local verification flow", async () => {
+    const content = await readFile("docs/v2-quickstart.md", "utf8");
+
+    expect(content).toContain("bc_session_resume");
+    expect(content).toContain("bc_full_workflow");
+    expect(content).toContain("29. `bc_search_assets`");
+  });
 });

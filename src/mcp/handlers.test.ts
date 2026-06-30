@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import AdmZip from "adm-zip";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
@@ -937,6 +938,341 @@ describe("handleBrainCreatorTool", () => {
     expect(resumeB.rules).toHaveLength(0);
     expect(resumeA.system.id).not.toBe(resumeB.system.id);
   });
+
+  it("runs bc_full_workflow: approve + chain in a single call", async () => {
+    const workDir = await tempDir();
+    const bridgeCalls: string[][] = [];
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        bridgeCalls.push([agent, ...args]);
+        const outputIdx = args.indexOf("--output");
+        const outputPath = outputIdx >= 0 ? args[outputIdx + 1] : "";
+        if (agent === "planner" && outputPath) {
+          await writeFile(
+            outputPath,
+            [
+              "## Scenario: 一键工作流测试",
+              "Priority: critical",
+              "- navigate: 首页",
+              "- assert: 标题 => 订单管理"
+            ].join("\n"),
+            "utf8"
+          );
+        }
+        if (agent === "generator" && outputPath) {
+          await writeFile(outputPath, "// generated test", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async (_command, args) => {
+        bridgeCalls.push(args);
+        return { exitCode: 0, stdout: "test passed", stderr: "" };
+      }
+    });
+
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Full Workflow Shop",
+        environment: "staging",
+        baseUrl: "https://fullworkflow.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://fullworkflow.example.test"]
+      })
+    );
+
+    // 创建鉴权（bc_generate_plan 依赖）
+    const authProfile = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "staging",
+        role: "qa",
+        loginMethod: "token",
+        secrets: { token: "test-token" }
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_verify_auth", {
+      id: authProfile.id
+    });
+
+    // 生成计划
+    const plan = dataOf(
+      await handleBrainCreatorTool(context, "bc_generate_plan", {
+        systemId: system.id,
+        requirement: "测试一键工作流"
+      })
+    );
+
+    // draft 状态
+    expect(plan.testCase.status).toBe("draft");
+
+    // bc_full_workflow：审批 + 执行一次完成
+    const workflow = dataOf(
+      await handleBrainCreatorTool(context, "bc_full_workflow", {
+        caseId: plan.testCase.id
+      })
+    );
+
+    expect(workflow.chainRun.status).toBe("succeeded");
+    expect(workflow.chainRun.testCaseId).toBe(plan.testCase.id);
+
+    // 确认用例状态已变为 passed
+    const cases = dataOf(
+      await handleBrainCreatorTool(context, "bc_list_cases", { systemId: system.id })
+    );
+    expect(cases[0].status).toBe("passed");
+  });
+
+  it("exposes facade status and configure entries for agents", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json"),
+      agentBridge: async () => ({ exitCode: 1, stdout: "", stderr: "preflight response" })
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_configure", {
+        target: "system",
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_configure", {
+      target: "auth",
+      systemId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        systemId: system.id
+      })
+    );
+
+    expect(status.system.name).toBe("HRMS");
+    expect(status.auth.profiles).toHaveLength(1);
+    expect(status.bridge.ok).toBe(true);
+    expect(status.facadeNextAction).toBe("configure_or_generate_plan");
+    expect(JSON.stringify(status)).not.toContain("secret-token");
+  });
+
+  it("previews a case source suite without executing before confirmation", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+
+    const preview = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: false
+      })
+    );
+
+    expect(preview.status).toBe("preview");
+    expect(preview.summary.total).toBe(2);
+    expect(preview.summary.priorityStats).toEqual({ P0: 1, P1: 1 });
+    expect(preview.requiresConfirmation).toBe(true);
+    expect(context.service.listCaseSuiteRuns(system.id)).toEqual([]);
+  });
+
+  it("executes a confirmed case source suite and records suite run results", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => ({ exitCode: 0, stdout: "passed", stderr: "" })
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true
+      })
+    );
+    const suiteRuns = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "suite-run",
+        systemId: system.id
+      })
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.suiteRun).toEqual(
+      expect.objectContaining({ total: 2, passed: 2, failed: 0, blocked: 0 })
+    );
+    expect(suiteRuns).toEqual([expect.objectContaining({ id: result.suiteRun.id })]);
+  });
+
+  it("creates BugReport assets when a confirmed document case fails expectations", async () => {
+    const workDir = await tempDir();
+    let shouldFail = true;
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () =>
+        shouldFail
+          ? { exitCode: 1, stdout: "", stderr: "expected result was not visible" }
+          : { exitCode: 0, stdout: "fixed", stderr: "" }
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "", "", ""]]));
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true,
+        maxHealAttempts: 0
+      })
+    );
+    const bugs = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "bug",
+        systemId: system.id,
+        status: "open"
+      })
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.suiteRun.failed).toBe(1);
+    expect(bugs).toEqual([
+      expect.objectContaining({
+        caseNo: "TC-001",
+        caseTitle: "创建招聘需求",
+        actualResult: expect.stringContaining("expected result was not visible"),
+        status: "open"
+      })
+    ]);
+
+    shouldFail = false;
+    const regression = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "bug-regression",
+        systemId: system.id,
+        bugIds: [bugs[0].id],
+        maxHealAttempts: 0
+      })
+    );
+    const retestedBugs = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "bug",
+        systemId: system.id
+      })
+    );
+
+    expect(regression.status).toBe("completed");
+    expect(regression.passed).toBe(1);
+    expect(retestedBugs).toEqual([
+      expect.objectContaining({
+        id: bugs[0].id,
+        status: "retest-passed"
+      })
+    ]);
+  });
+
+  it("rejects bc_full_workflow for non-draft cases", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({ workDir });
+
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Reject Workflow Shop",
+        environment: "staging",
+        baseUrl: "https://reject.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://reject.example.test"]
+      })
+    );
+
+    // 创建一个已审批的用例（模拟）
+    const ctx = context.service;
+    const testCase = ctx.createTestCase({
+      systemId: system.id,
+      requirement: "already approved",
+      scenarios: [{ id: "s1", title: "X", priority: "medium", steps: [] }],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    ctx.approveTestCase(testCase.id);
+
+    // 已审批的用例不能再走 bc_full_workflow
+    const error = errorOf(
+      await handleBrainCreatorTool(context, "bc_full_workflow", {
+        caseId: testCase.id
+      })
+    );
+    expect(error).toContain("Only draft test cases can be approved");
+  });
 });
 
 function dataOf(result: CallToolResult) {
@@ -967,4 +1303,142 @@ async function tempDir() {
   const dir = await mkdtemp(join(tmpdir(), "brain-mcp-"));
   tempDirs.push(dir);
   return dir;
+}
+
+function createXlsxFixture(
+  caseRows: string[][] = [
+    [
+      "TC-001",
+      "创建招聘需求",
+      "招聘需求",
+      "用户已登录 HRMS",
+      "1. 打开招聘需求页面\n2. 点击新增",
+      "招聘需求创建成功",
+      "",
+      "P0",
+      "未执行",
+      "",
+      ""
+    ],
+    [
+      "TC-002",
+      "发起 offer",
+      "Offer",
+      "候选人已通过面试",
+      "1. 进入候选人详情\n2. 点击发起 offer",
+      "Offer 审批流启动",
+      "",
+      "P1",
+      "未执行",
+      "",
+      ""
+    ]
+  ]
+) {
+  const rows = [
+    [
+      "用例编号",
+      "用例标题",
+      "所属模块",
+      "前置条件",
+      "操作步骤",
+      "预期结果",
+      "实际结果",
+      "优先级",
+      "用例状态",
+      "BugID",
+      "备注"
+    ],
+    ...caseRows
+  ];
+  const zip = new AdmZip();
+  zip.addFile("[Content_Types].xml", Buffer.from(contentTypesXml(), "utf8"));
+  zip.addFile("_rels/.rels", Buffer.from(rootRelsXml(), "utf8"));
+  zip.addFile("xl/workbook.xml", Buffer.from(workbookXml(), "utf8"));
+  zip.addFile("xl/_rels/workbook.xml.rels", Buffer.from(workbookRelsXml(), "utf8"));
+  zip.addFile("xl/worksheets/sheet1.xml", Buffer.from(sheetXml(rows), "utf8"));
+  return zip.toBuffer();
+}
+
+function sheetXml(rows: string[][]) {
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    "<sheetData>",
+    ...rows.map((row, rowIndex) => {
+      const rowNumber = rowIndex + 1;
+      const cells = row
+        .map(
+          (value, columnIndex) =>
+            `<c r="${columnName(columnIndex)}${rowNumber}" t="inlineStr"><is><t>${escapeXml(
+              value
+            )}</t></is></c>`
+        )
+        .join("");
+      return `<row r="${rowNumber}">${cells}</row>`;
+    }),
+    "</sheetData>",
+    "</worksheet>"
+  ].join("");
+}
+
+function workbookXml() {
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+    ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+    '<sheets><sheet name="测试用例" sheetId="1" r:id="rId1"/></sheets>',
+    "</workbook>"
+  ].join("");
+}
+
+function workbookRelsXml() {
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"',
+    ' Target="worksheets/sheet1.xml"/>',
+    "</Relationships>"
+  ].join("");
+}
+
+function rootRelsXml() {
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"',
+    ' Target="xl/workbook.xml"/>',
+    "</Relationships>"
+  ].join("");
+}
+
+function contentTypesXml() {
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    '<Override PartName="/xl/workbook.xml"',
+    ' ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+    '<Override PartName="/xl/worksheets/sheet1.xml"',
+    ' ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+    "</Types>"
+  ].join("");
+}
+
+function columnName(index: number) {
+  let value = "";
+  for (let current = index + 1; current > 0; current = Math.floor((current - 1) / 26)) {
+    value = String.fromCharCode(((current - 1) % 26) + 65) + value;
+  }
+  return value;
+}
+
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }

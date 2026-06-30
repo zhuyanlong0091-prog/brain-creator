@@ -19,10 +19,14 @@ import {
   type AgentBridge,
   type CommandRunner
 } from "../agent/orchestrator.js";
+import { parseCaseSource, type ParsedCaseSource } from "../caseSource/parser.js";
 import type {
   AgentRun,
   AuthCheckpoint,
   AuthProfile,
+  CaseSuiteCaseResult,
+  ChainRun,
+  DocumentCase,
   TestArtifact,
   TestCaseScenario,
   TestCaseStep
@@ -101,6 +105,14 @@ export async function handleBrainCreatorTool(
 ): Promise<CallToolResult> {
   try {
     switch (name) {
+      case "bc_status":
+        return textResult(await statusFacade(context, input));
+      case "bc_run":
+        return textResult(await runFacade(context, input));
+      case "bc_review":
+        return textResult(await reviewFacade(context, input));
+      case "bc_configure":
+        return textResult(configureFacade(context, input));
       case "bc_create_system":
         return textResult(
           context.service.createSystemProfile({
@@ -244,6 +256,8 @@ export async function handleBrainCreatorTool(
         return textResult(context.service.listAgentRuns(stringArg(input, "systemId")));
       case "bc_run_chain":
         return textResult(await runApprovedChain(context, input));
+      case "bc_full_workflow":
+        return textResult(await fullWorkflow(context, input));
       case "bc_list_chain_runs":
         return textResult(context.service.listChainRuns(stringArg(input, "systemId")));
       case "bc_list_specs":
@@ -296,6 +310,447 @@ export async function handleBrainCreatorTool(
   } catch (error) {
     return envelopeResult(errorEnvelope(error), true);
   }
+}
+
+async function statusFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const snapshot = await sessionResume(context, { systemId });
+  const caseSources = context.service.listCaseSources(systemId);
+  const suites = context.service.listCaseSuites(systemId);
+  const suiteRuns = context.service.listCaseSuiteRuns(systemId);
+  const bugs = context.service.listBugReports({ systemId });
+  const openBugs = bugs.filter((bug) => bug.status === "open" || bug.status === "retest-failed");
+  return {
+    ...snapshot,
+    caseSources: {
+      total: caseSources.length,
+      recent: caseSources.slice(-5)
+    },
+    suites: {
+      total: suites.length,
+      byStatus: countBy(suites, (suite) => suite.status),
+      recent: suites.slice(-5)
+    },
+    suiteRuns: {
+      total: suiteRuns.length,
+      byStatus: countBy(suiteRuns, (run) => run.status),
+      recent: suiteRuns.slice(-5)
+    },
+    bugs: {
+      total: bugs.length,
+      open: openBugs.length,
+      recent: bugs.slice(-5)
+    },
+    facadeNextAction: facadeNextAction({
+      bridgeOk: snapshot.bridge.ok,
+      openBugs: openBugs.length,
+      openGaps: snapshot.openGaps.length,
+      approvedCases: snapshot.cases.byStatus.approved,
+      caseSources: caseSources.length
+    })
+  };
+}
+
+async function runFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const mode = runModeArg(input, "mode");
+  if (mode === "approved-case") {
+    return runApprovedChain(context, { ...input, caseId: stringArg(input, "caseId") });
+  }
+  if (mode === "full-workflow") {
+    return fullWorkflow(context, { ...input, caseId: stringArg(input, "caseId") });
+  }
+  if (mode === "case-source-suite") {
+    return runCaseSourceSuite(context, input);
+  }
+  return runBugRegression(context, input);
+}
+
+async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const source = stringArg(input, "source");
+  const parsed = await parseCaseSource(source);
+  const caseSource = context.service.upsertCaseSource({
+    systemId,
+    source: parsed.source,
+    sourceType: parsed.sourceType,
+    contentHash: parsed.contentHash,
+    caseCount: parsed.cases.length,
+    moduleStats: parsed.moduleStats,
+    priorityStats: parsed.priorityStats
+  });
+  const bridge = await preflightAgentBridge(context.agentBridge);
+
+  if (!optionalBooleanArg(input, "confirm")) {
+    return {
+      mode: "case-source-suite",
+      status: "preview",
+      source: caseSource,
+      summary: previewSummary(parsed),
+      bridge,
+      requiresConfirmation: true,
+      nextAction: "Ask the user to confirm before running the full suite."
+    };
+  }
+
+  if (parsed.cases.length === 0) {
+    const gap = context.service.reportGap({
+      projectId: systemId,
+      sourceType: "case-source",
+      sourceId: caseSource.id,
+      reason: "Case source has no executable document cases.",
+      severity: "high",
+      owner: "qa"
+    });
+    return { mode: "case-source-suite", status: "blocked", source: caseSource, gap, bridge };
+  }
+
+  if (!bridge.ok) {
+    const gap = context.service.reportGap({
+      projectId: systemId,
+      sourceType: "case-source-suite",
+      sourceId: caseSource.id,
+      reason: `Agent bridge unavailable: ${bridge.error}`,
+      severity: "high",
+      owner: "qa"
+    });
+    return { mode: "case-source-suite", status: "blocked", source: caseSource, gap, bridge };
+  }
+
+  if (context.service.listAuthProfiles(systemId).length === 0) {
+    const gap = context.service.reportGap({
+      projectId: systemId,
+      sourceType: "case-source-suite",
+      sourceId: caseSource.id,
+      reason: "Auth profile is required before executing a document case suite.",
+      severity: "high",
+      owner: "qa"
+    });
+    return { mode: "case-source-suite", status: "blocked", source: caseSource, gap, bridge };
+  }
+
+  const suite = context.service.createCaseSuite({
+    systemId,
+    sourceId: caseSource.id,
+    totalCases: parsed.cases.length,
+    selectedCaseNos: parsed.cases.map((documentCase) => documentCase.caseNo),
+    status: "approved"
+  });
+  context.service.updateCaseSuiteStatus(suite.id, "running");
+  const caseResults: CaseSuiteCaseResult[] = [];
+  const artifactPaths: string[] = [];
+  const bugReportIds: string[] = [];
+  const gapIds: string[] = [];
+
+  for (const documentCase of parsed.cases) {
+    const result = await executeDocumentCase(context, {
+      systemId,
+      sourceId: caseSource.id,
+      documentCase,
+      maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
+      createBugOnFailure: true
+    });
+    caseResults.push(result.caseResult);
+    if (result.artifactPaths) {
+      artifactPaths.push(...result.artifactPaths);
+    }
+    if (result.bugReportId) {
+      bugReportIds.push(result.bugReportId);
+    }
+    gapIds.push(...result.caseResult.gapIds);
+  }
+
+  const counts = countBy(caseResults, (result) => result.status);
+  const suiteRun = context.service.recordCaseSuiteRun({
+    systemId,
+    suiteId: suite.id,
+    sourceId: caseSource.id,
+    status: (counts.blocked ?? 0) > 0 ? "blocked" : (counts.failed ?? 0) > 0 ? "failed" : "completed",
+    total: caseResults.length,
+    passed: counts.passed ?? 0,
+    failed: counts.failed ?? 0,
+    blocked: counts.blocked ?? 0,
+    caseResults,
+    artifactPaths: [...new Set(artifactPaths)],
+    bugReportIds,
+    gapIds,
+    completedAt: new Date().toISOString()
+  });
+  context.service.updateCaseSuiteStatus(
+    suite.id,
+    suiteRun.status === "completed" ? "completed" : "failed"
+  );
+
+  return {
+    mode: "case-source-suite",
+    status: suiteRun.status,
+    source: caseSource,
+    suite,
+    suiteRun,
+    bugs: context.service.listBugReports({ systemId }).filter((bug) =>
+      bugReportIds.includes(bug.id)
+    )
+  };
+}
+
+async function executeDocumentCase(
+  context: BrainCreatorMcpContext,
+  input: {
+    systemId: string;
+    sourceId: string;
+    documentCase: DocumentCase;
+    maxHealAttempts?: number;
+    createBugOnFailure?: boolean;
+  }
+): Promise<{
+  caseResult: CaseSuiteCaseResult;
+  artifactPaths?: string[];
+  bugReportId?: string;
+}> {
+  const testCase = context.service.createTestCaseFromDocumentCase({
+    systemId: input.systemId,
+    documentCase: input.documentCase
+  });
+  context.service.approveTestCase(testCase.id);
+  try {
+    const result = await runApprovedChain(context, {
+      caseId: testCase.id,
+      maxHealAttempts: input.maxHealAttempts
+    });
+    const artifactPaths = [result.chainRun.specPath, result.chainRun.testPath].filter(
+      (item): item is string => typeof item === "string"
+    );
+    if (result.chainRun.status === "succeeded") {
+      return {
+        caseResult: {
+          caseNo: input.documentCase.caseNo,
+          title: input.documentCase.title,
+          status: "passed",
+          testCaseId: testCase.id,
+          chainRunId: result.chainRun.id,
+          gapIds: []
+        },
+        artifactPaths
+      };
+    }
+    if (input.createBugOnFailure === false) {
+      return {
+        caseResult: {
+          caseNo: input.documentCase.caseNo,
+          title: input.documentCase.title,
+          status: "failed",
+          testCaseId: testCase.id,
+          chainRunId: result.chainRun.id,
+          gapIds: result.chainRun.gaps.map((gap) => gap.id),
+          error: chainFailureReason(result.chainRun)
+        },
+        artifactPaths
+      };
+    }
+    const bug = context.service.createBugReport({
+      systemId: input.systemId,
+      sourceId: input.sourceId,
+      caseNo: input.documentCase.caseNo,
+      caseTitle: input.documentCase.title,
+      module: input.documentCase.module,
+      priority: input.documentCase.priority,
+      expectedResult: input.documentCase.expectedResult,
+      actualResult: chainFailureReason(result.chainRun),
+      reproductionSteps: reproductionSteps(input.documentCase),
+      evidencePaths: artifactPaths,
+      chainRunId: result.chainRun.id,
+      gapIds: result.chainRun.gaps.map((gap) => gap.id)
+    });
+    return {
+      caseResult: {
+        caseNo: input.documentCase.caseNo,
+        title: input.documentCase.title,
+        status: "failed",
+        testCaseId: testCase.id,
+        chainRunId: result.chainRun.id,
+        bugReportId: bug.id,
+        gapIds: result.chainRun.gaps.map((gap) => gap.id)
+      },
+      artifactPaths,
+      bugReportId: bug.id
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const gap = context.service.reportGap({
+      projectId: input.systemId,
+      sourceType: "case-source-suite",
+      sourceId: `${input.sourceId}:${input.documentCase.caseNo}`,
+      reason,
+      severity: "high",
+      owner: "qa"
+    });
+    return {
+      caseResult: {
+        caseNo: input.documentCase.caseNo,
+        title: input.documentCase.title,
+        status: "blocked",
+        testCaseId: testCase.id,
+        gapIds: [gap.id],
+        error: reason
+      }
+    };
+  }
+}
+
+async function runBugRegression(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const requestedBugIds = stringArrayArg(input, "bugIds");
+  const candidates = context.service
+    .listBugReports({ systemId })
+    .filter((bug) =>
+      requestedBugIds.length > 0
+        ? requestedBugIds.includes(bug.id)
+        : bug.status === "open" || bug.status === "retest-failed"
+    );
+  const bridge = await preflightAgentBridge(context.agentBridge);
+  if (!bridge.ok) {
+    const gap = context.service.reportGap({
+      projectId: systemId,
+      sourceType: "bug-regression",
+      sourceId: requestedBugIds.join(",") || "open-bugs",
+      reason: `Agent bridge unavailable: ${bridge.error}`,
+      severity: "high",
+      owner: "qa"
+    });
+    return { mode: "bug-regression", status: "blocked", bridge, gap };
+  }
+
+  const results: CaseSuiteCaseResult[] = [];
+  for (const bug of candidates) {
+    context.service.updateBugReportStatus(bug.id, "retest-running");
+    try {
+      const source = context.service
+        .listCaseSources(systemId)
+        .find((candidate) => candidate.id === bug.sourceId);
+      if (!source) {
+        throw new Error(`Original case source not found for bug ${bug.id}`);
+      }
+      const parsed = await parseCaseSource(source.source);
+      const documentCase = parsed.cases.find((item) => item.caseNo === bug.caseNo);
+      if (!documentCase) {
+        throw new Error(`Original document case ${bug.caseNo} not found`);
+      }
+      const result = await executeDocumentCase(context, {
+        systemId,
+        sourceId: source.id,
+        documentCase,
+        maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
+        createBugOnFailure: false
+      });
+      results.push(result.caseResult);
+      context.service.updateBugReportStatus(
+        bug.id,
+        result.caseResult.status === "passed" ? "retest-passed" : "retest-failed"
+      );
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const gap = context.service.reportGap({
+        projectId: systemId,
+        sourceType: "bug-regression",
+        sourceId: bug.id,
+        reason,
+        severity: "high",
+        owner: "qa"
+      });
+      results.push({
+        caseNo: bug.caseNo,
+        title: bug.caseTitle,
+        status: "blocked",
+        bugReportId: bug.id,
+        gapIds: [gap.id],
+        error: reason
+      });
+      context.service.updateBugReportStatus(bug.id, "retest-failed");
+    }
+  }
+  const counts = countBy(results, (result) => result.status);
+  return {
+    mode: "bug-regression",
+    status: (counts.blocked ?? 0) > 0 ? "blocked" : (counts.failed ?? 0) > 0 ? "failed" : "completed",
+    total: results.length,
+    passed: counts.passed ?? 0,
+    failed: counts.failed ?? 0,
+    blocked: counts.blocked ?? 0,
+    results,
+    bugs: context.service.listBugReports({ systemId }).filter((bug) =>
+      candidates.some((candidate) => candidate.id === bug.id)
+    )
+  };
+}
+
+async function reviewFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const target = reviewTargetArg(input, "target");
+  if (target === "bug") {
+    return context.service.listBugReports({
+      systemId,
+      status: bugStatusArg(input, "status")
+    });
+  }
+  if (target === "suite-run") {
+    return context.service.listCaseSuiteRuns(systemId);
+  }
+  if (target === "case") {
+    return context.service.listTestCases(systemId);
+  }
+  if (target === "gap") {
+    return context.service.listGaps({
+      projectId: systemId,
+      status: gapStatusArg(input, "status")
+    });
+  }
+  return artifactOverview(context, { systemId });
+}
+
+function configureFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const target = configureTargetArg(input, "target");
+  if (target === "system") {
+    return context.service.createSystemProfile({
+      name: stringArg(input, "name"),
+      environment: stringArg(input, "environment"),
+      baseUrl: stringArg(input, "baseUrl"),
+      defaultLocale: optionalStringArg(input, "defaultLocale") ?? "zh-CN",
+      urlAllowlist: stringArrayArg(input, "urlAllowlist")
+    });
+  }
+  if (target === "auth") {
+    return context.service.createAuthProfile({
+      projectId: stringArg(input, "systemId"),
+      env: stringArg(input, "env"),
+      role: stringArg(input, "role"),
+      loginMethod: loginMethodArg(input, "loginMethod"),
+      secrets: recordArg(input, "secrets")
+    });
+  }
+  if (target === "term") {
+    return context.service.createGlossaryTerm({
+      projectId: stringArg(input, "systemId"),
+      key: stringArg(input, "key"),
+      zhCN: stringArg(input, "zhCN"),
+      enUS: stringArg(input, "enUS"),
+      aliases: stringArrayArg(input, "aliases"),
+      pageScope: optionalStringArg(input, "pageScope") ?? "/"
+    });
+  }
+  if (target === "rule") {
+    return context.service.createBusinessRule({
+      systemId: stringArg(input, "systemId"),
+      name: stringArg(input, "name"),
+      condition: stringArg(input, "condition"),
+      severity: severityArg(input, "severity")
+    });
+  }
+  return context.service.createAuthCheckpoint({
+    systemId: stringArg(input, "systemId"),
+    authProfileId: stringArg(input, "authProfileId"),
+    testCaseId: optionalStringArg(input, "testCaseId"),
+    reason: stringArg(input, "reason"),
+    resumeInstruction: stringArg(input, "resumeInstruction")
+  });
 }
 
 async function generatePlan(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
@@ -359,6 +814,18 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   }
   context.service.recordChainRun(result.chainRun);
   return result;
+}
+
+/**
+ * bc_full_workflow — 一键审批 + 执行。
+ * 封装 bc_approve_plan → bc_run_chain，用于用户已审核计划、确认可执行的场景。
+ * 不减损审批门禁：只对 draft 状态用例执行审批，等效于用户手动确认。
+ */
+async function fullWorkflow(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const caseId = stringArg(input, "caseId");
+  const approved = context.service.approveTestCase(caseId);
+  const chainInput = { ...input, caseId: approved.id };
+  return runApprovedChain(context, chainInput);
 }
 
 /**
@@ -524,6 +991,69 @@ async function artifactOverview(context: BrainCreatorMcpContext, input: Record<s
   };
 }
 
+function previewSummary(parsed: ParsedCaseSource) {
+  return {
+    total: parsed.cases.length,
+    moduleStats: parsed.moduleStats,
+    priorityStats: parsed.priorityStats,
+    warnings: parsed.warnings,
+    sampleCases: parsed.sampleCases.map((item) => ({
+      caseNo: item.caseNo,
+      title: item.title,
+      module: item.module,
+      priority: item.priority,
+      sourceRow: item.sourceRow
+    }))
+  };
+}
+
+function facadeNextAction(state: {
+  bridgeOk: boolean;
+  openBugs: number;
+  openGaps: number;
+  approvedCases: number;
+  caseSources: number;
+}) {
+  if (!state.bridgeOk) {
+    return "configure_bridge";
+  }
+  if (state.openGaps > 0) {
+    return "review_gaps";
+  }
+  if (state.openBugs > 0) {
+    return "review_bugs";
+  }
+  if (state.approvedCases > 0) {
+    return "run_approved_case";
+  }
+  if (state.caseSources > 0) {
+    return "run_case_source_suite";
+  }
+  return "configure_or_generate_plan";
+}
+
+function chainFailureReason(chainRun: ChainRun) {
+  return (
+    chainRun.gaps.map((gap) => gap.reason).filter(Boolean).join("\n") ||
+    `Chain run ${chainRun.id} failed`
+  );
+}
+
+function reproductionSteps(documentCase: DocumentCase) {
+  return [
+    documentCase.precondition ? `Precondition: ${documentCase.precondition}` : "",
+    ...documentCase.steps
+  ].filter(Boolean);
+}
+
+function countBy<T>(items: T[], getKey: (item: T) => string) {
+  return items.reduce<Record<string, number>>((result, item) => {
+    const key = getKey(item);
+    result[key] = (result[key] ?? 0) + 1;
+    return result;
+  }, {});
+}
+
 async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestArtifact) {
   const resolvedPath = resolveWorkspacePath(context.workDir, artifact.path);
   const content = await readFile(resolvedPath, "utf8");
@@ -603,6 +1133,34 @@ function optionalNumberArg(input: Record<string, unknown>, key: string): number 
   return typeof value === "number" ? value : undefined;
 }
 
+function optionalBooleanArg(input: Record<string, unknown>, key: string): boolean {
+  return input[key] === true;
+}
+
+function runModeArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (!["approved-case", "full-workflow", "case-source-suite", "bug-regression"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as "approved-case" | "full-workflow" | "case-source-suite" | "bug-regression";
+}
+
+function reviewTargetArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (!["suite-run", "case", "bug", "gap", "artifact"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as "suite-run" | "case" | "bug" | "gap" | "artifact";
+}
+
+function configureTargetArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (!["system", "auth", "term", "rule", "checkpoint"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as "system" | "auth" | "term" | "rule" | "checkpoint";
+}
+
 function stringArrayArg(input: Record<string, unknown>, key: string): string[] {
   const value = input[key];
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -651,6 +1209,17 @@ function gapSeverityArg(input: Record<string, unknown>, key: string) {
     throw new Error(`${key} is invalid`);
   }
   return value as "low" | "medium" | "high";
+}
+
+function bugStatusArg(input: Record<string, unknown>, key: string) {
+  const value = optionalStringArg(input, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!["open", "retest-running", "retest-passed", "retest-failed", "closed"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as "open" | "retest-running" | "retest-passed" | "retest-failed" | "closed";
 }
 
 function authCheckpointStatusArg(

@@ -8,7 +8,7 @@ Brain Creator is an agent-native testing brain for **Claude Code / Codex**. It i
 
 ### 核心定位
 
-**无 Web UI：** Brain Creator v2 的产品入口是 Claude Code / Codex 里的智能体对话。Claude Code 中请从 `Skill("brain-creator")` 开始；Codex 中请直接要求执行 Brain Creator 工作流，让智能体使用已配置的 MCP 工具。
+**无 Web UI：** Brain Creator v2 的产品入口是 Claude Code / Codex 里的智能体对话。用户直接用自然语言说“用 Brain Creator ...”即可；`Skill("brain-creator")` 只作为自动匹配失败时的显式 fallback。
 
 ### 你可以做什么
 
@@ -18,6 +18,17 @@ Brain Creator is an agent-native testing brain for **Claude Code / Codex**. It i
 - 先生成草稿测试计划，用自然语言审核后，再批准进入代码生成。
 - 执行 planner -> generator -> healer 链路，并查看生成的 Markdown spec 与 Playwright 测试文件。
 - 当证据缺失或生成链路无法安全修复时，查看并处理 Gap，而不是让智能体伪造成功。
+- 引用或指定 `.xlsx` / `.md` 测试用例文档路径，先预览用例统计和风险，确认后按文档顺序执行套件，并沉淀 BugReport / Gap / 证据路径。
+
+### 分层入口
+
+Brain Creator v2 现在采用三层入口：
+
+- **用户入口：** 自然语言，例如“用 Brain Creator 执行这个测试用例文档：`F:\ZT_HR\06-招聘管理\用例\招聘需求及offer流程适配_V2.0_测试用例.xlsx`”。
+- **Agent Facade 入口：** Agent 默认使用 `bc_status`、`bc_configure`、`bc_run`、`bc_review`。
+- **内部工具入口：** 现有细粒度 `bc_*` 工具继续保留，用于兼容、调试、审计和 Facade 内部编排。
+
+执行测试用例文档时，Agent 应先调用 `bc_run mode=case-source-suite confirm=false` 返回预览；只有用户明确确认后，才调用 `confirm=true` 执行全量 suite run。
 
 ### 快速开始
 
@@ -184,6 +195,17 @@ npm run verify:live-claude-skill-workflow
 - Generate a draft test plan first, review it in natural language, then approve it before code generation.
 - Run the planner -> generator -> healer chain and inspect generated Markdown specs and Playwright tests.
 - Review gaps when evidence is missing or a generated chain cannot be repaired safely.
+- Reference or specify `.xlsx` / `.md` test case documents, preview case statistics and risks, then run the confirmed suite in document order while recording BugReport, Gap, and evidence paths.
+
+### Layered Entrypoints
+
+Brain Creator v2 uses three layers:
+
+- **User entry:** natural language, for example: `Use Brain Creator to execute this test case document: F:\ZT_HR\06-招聘管理\用例\招聘需求及offer流程适配_V2.0_测试用例.xlsx`.
+- **Agent facade entry:** agents should default to `bc_status`, `bc_configure`, `bc_run`, and `bc_review`.
+- **Internal tool entry:** existing fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and facade orchestration.
+
+For a test case document, the agent should call `bc_run mode=case-source-suite confirm=false` first. Only after explicit user confirmation should it call the same mode with `confirm=true` to execute the full suite run.
 
 ### Fast Start
 
@@ -314,7 +336,15 @@ Use a one-sentence request in Claude Code or Codex:
 Use Brain Creator to connect the local order system, add a rule that order total must be visible, generate a test plan, wait for my approval, then run the chain.
 ```
 
-The agent should load the Brain Creator skill, select the matching MCP tools, create or reuse a business system, configure auth if needed, generate a draft plan, ask for approval, run `bc_run_chain`, and summarize artifacts and gaps.
+The agent should load the Brain Creator skill, prefer the facade MCP tools, create or reuse a business system, configure auth if needed, generate or preview the requested work, ask for approval when required, run through `bc_run`, and summarize artifacts, bugs, and gaps.
+
+For test case documents, use a natural request such as:
+
+```text
+Use Brain Creator to execute this test case document: F:\ZT_HR\06-招聘管理\用例\招聘需求及offer流程适配_V2.0_测试用例.xlsx
+```
+
+The agent should preview the source first, show case count, module/priority stats, sample cases, bridge status, and risks, then wait for confirmation before running the full suite.
 
 For a full user-facing guide, see [docs/agent-usage.md](docs/agent-usage.md).
 

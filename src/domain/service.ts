@@ -9,8 +9,13 @@ import type {
   AssetSearchResult,
   AuthCheckpoint,
   AuthProfile,
+  BugReport,
   BusinessRule,
+  CaseSource,
+  CaseSuite,
+  CaseSuiteRun,
   ChainRun,
+  DocumentCase,
   Gap,
   GeneratedCase,
   GlossaryTerm,
@@ -22,6 +27,7 @@ import type {
   TestArtifact,
   TestCase,
   TestCaseScenario,
+  TestCaseStep,
   TrainingSession
 } from "./types.js";
 
@@ -172,6 +178,42 @@ type CreateTestCaseInput = {
   ruleCheckResult: RuleCheckResult;
 };
 
+type UpsertCaseSourceInput = {
+  systemId: string;
+  source: string;
+  sourceType: CaseSource["sourceType"];
+  contentHash: string;
+  caseCount: number;
+  moduleStats: Record<string, number>;
+  priorityStats: Record<string, number>;
+};
+
+type CreateCaseSuiteInput = {
+  systemId: string;
+  sourceId: string;
+  totalCases: number;
+  selectedCaseNos: string[];
+  status?: CaseSuite["status"];
+};
+
+type RecordCaseSuiteRunInput = Omit<CaseSuiteRun, "id" | "createdAt">;
+
+type CreateBugReportInput = {
+  systemId: string;
+  sourceId: string;
+  suiteRunId?: string;
+  caseNo: string;
+  caseTitle: string;
+  module: string;
+  priority: string;
+  expectedResult: string;
+  actualResult: string;
+  reproductionSteps: string[];
+  evidencePaths: string[];
+  chainRunId?: string;
+  gapIds: string[];
+};
+
 const actionTerms = ["Create Order", "Submit", "Search", "Create", "Save", "Delete"];
 
 export class BrainCreatorService {
@@ -202,6 +244,151 @@ export class BrainCreatorService {
 
   listSystemProfiles(): SystemProfile[] {
     return [...this.repository.systemProfiles];
+  }
+
+  upsertCaseSource(input: UpsertCaseSourceInput): CaseSource {
+    const now = timestamp();
+    const existing = this.repository.caseSources.find(
+      (item) => item.systemId === input.systemId && item.source === input.source
+    );
+    if (existing) {
+      existing.sourceType = input.sourceType;
+      existing.contentHash = input.contentHash;
+      existing.caseCount = input.caseCount;
+      existing.moduleStats = input.moduleStats;
+      existing.priorityStats = input.priorityStats;
+      existing.status = "active";
+      existing.parsedAt = now;
+      existing.updatedAt = now;
+      this.repository.persist();
+      return existing;
+    }
+    const source: CaseSource = {
+      id: id("source"),
+      systemId: input.systemId,
+      source: input.source,
+      sourceType: input.sourceType,
+      contentHash: input.contentHash,
+      caseCount: input.caseCount,
+      moduleStats: input.moduleStats,
+      priorityStats: input.priorityStats,
+      status: "active",
+      parsedAt: now,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.caseSources.push(source);
+    this.repository.persist();
+    return source;
+  }
+
+  listCaseSources(systemId: string): CaseSource[] {
+    return this.repository.caseSources.filter((item) => item.systemId === systemId);
+  }
+
+  createCaseSuite(input: CreateCaseSuiteInput): CaseSuite {
+    const now = timestamp();
+    const suite: CaseSuite = {
+      id: id("suite"),
+      systemId: input.systemId,
+      sourceId: input.sourceId,
+      status: input.status ?? "draft",
+      totalCases: input.totalCases,
+      selectedCaseNos: input.selectedCaseNos,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.caseSuites.push(suite);
+    this.repository.persist();
+    return suite;
+  }
+
+  updateCaseSuiteStatus(suiteId: string, status: CaseSuite["status"]): CaseSuite {
+    const suite = this.getCaseSuite(suiteId);
+    suite.status = status;
+    suite.updatedAt = timestamp();
+    this.repository.persist();
+    return suite;
+  }
+
+  getCaseSuite(suiteId: string): CaseSuite {
+    const suite = this.repository.caseSuites.find((item) => item.id === suiteId);
+    if (!suite) {
+      throw new Error("Case suite not found");
+    }
+    return suite;
+  }
+
+  listCaseSuites(systemId: string): CaseSuite[] {
+    return this.repository.caseSuites.filter((item) => item.systemId === systemId);
+  }
+
+  recordCaseSuiteRun(input: RecordCaseSuiteRunInput): CaseSuiteRun {
+    const run: CaseSuiteRun = {
+      ...input,
+      id: id("suiteRun"),
+      createdAt: timestamp()
+    };
+    this.repository.caseSuiteRuns.push(run);
+    this.repository.persist();
+    return run;
+  }
+
+  listCaseSuiteRuns(systemId: string): CaseSuiteRun[] {
+    return this.repository.caseSuiteRuns.filter((item) => item.systemId === systemId);
+  }
+
+  createBugReport(input: CreateBugReportInput): BugReport {
+    const now = timestamp();
+    const bug: BugReport = {
+      id: id("bug"),
+      systemId: input.systemId,
+      sourceId: input.sourceId,
+      suiteRunId: input.suiteRunId,
+      caseNo: input.caseNo,
+      caseTitle: input.caseTitle,
+      module: input.module,
+      priority: input.priority,
+      expectedResult: input.expectedResult,
+      actualResult: input.actualResult,
+      reproductionSteps: input.reproductionSteps,
+      evidencePaths: input.evidencePaths,
+      chainRunId: input.chainRunId,
+      gapIds: input.gapIds,
+      status: "open",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.bugReports.push(bug);
+    this.repository.persist();
+    return bug;
+  }
+
+  listBugReports(input: { systemId: string; status?: BugReport["status"] }): BugReport[] {
+    return this.repository.bugReports.filter(
+      (item) => item.systemId === input.systemId && (input.status === undefined || item.status === input.status)
+    );
+  }
+
+  updateBugReportStatus(id: string, status: BugReport["status"]): BugReport {
+    const bug = this.repository.bugReports.find((item) => item.id === id);
+    if (!bug) {
+      throw new Error("Bug report not found");
+    }
+    bug.status = status;
+    bug.updatedAt = timestamp();
+    this.repository.persist();
+    return bug;
+  }
+
+  createTestCaseFromDocumentCase(input: { systemId: string; documentCase: DocumentCase }): TestCase {
+    return this.createTestCase({
+      systemId: input.systemId,
+      requirement: `${input.documentCase.caseNo} ${input.documentCase.title}`,
+      scenarios: [documentCaseToScenario(input.documentCase)],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
   }
 
   archiveSystemProfile(systemId: string): SystemProfile {
@@ -1070,6 +1257,60 @@ export class BrainCreatorService {
         status: item.status
       }));
 
+    const caseSources = this.repository.caseSources
+      .filter(
+        (item) =>
+          inProject(item.systemId) &&
+          includes(
+            `${item.source} ${item.sourceType} ${JSON.stringify(item.moduleStats)} ${JSON.stringify(
+              item.priorityStats
+            )}`
+          )
+      )
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "case-source",
+        label: item.source,
+        projectId: item.systemId,
+        status: item.status
+      }));
+
+    const caseSuites = this.repository.caseSuites
+      .filter((item) => inProject(item.systemId) && includes(`${item.id} ${item.status}`))
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "case-suite",
+        label: `Case suite ${item.id}`,
+        projectId: item.systemId,
+        status: item.status
+      }));
+
+    const caseSuiteRuns = this.repository.caseSuiteRuns
+      .filter((item) => inProject(item.systemId) && includes(`${item.id} ${item.status}`))
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "case-suite-run",
+        label: `Case suite run ${item.id}`,
+        projectId: item.systemId,
+        status: item.status
+      }));
+
+    const bugReports = this.repository.bugReports
+      .filter(
+        (item) =>
+          inProject(item.systemId) &&
+          includes(
+            `${item.caseNo} ${item.caseTitle} ${item.module} ${item.expectedResult} ${item.actualResult}`
+          )
+      )
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "bug-report",
+        label: `${item.caseNo} ${item.caseTitle}`,
+        projectId: item.systemId,
+        status: item.status
+      }));
+
     return [
       ...systems,
       ...authCheckpoints,
@@ -1083,7 +1324,11 @@ export class BrainCreatorService {
       ...businessRules,
       ...testCases,
       ...agentRuns,
-      ...chainRuns
+      ...chainRuns,
+      ...caseSources,
+      ...caseSuites,
+      ...caseSuiteRuns,
+      ...bugReports
     ];
   }
 
@@ -1267,7 +1512,13 @@ export class BrainCreatorService {
       ),
       "test-case": this.repository.testCases.filter((item) => item.systemId === input.projectId),
       "agent-run": this.repository.agentRuns.filter((item) => item.systemId === input.projectId),
-      "chain-run": this.repository.chainRuns.filter((item) => item.systemId === input.projectId)
+      "chain-run": this.repository.chainRuns.filter((item) => item.systemId === input.projectId),
+      "case-source": this.repository.caseSources.filter((item) => item.systemId === input.projectId),
+      "case-suite": this.repository.caseSuites.filter((item) => item.systemId === input.projectId),
+      "case-suite-run": this.repository.caseSuiteRuns.filter(
+        (item) => item.systemId === input.projectId
+      ),
+      "bug-report": this.repository.bugReports.filter((item) => item.systemId === input.projectId)
     };
     const asset = candidates[input.type]?.find(
       (item) => (item as { id?: string }).id === input.id
@@ -1333,6 +1584,43 @@ function matchesArtifactType(path: string, type: TestArtifact["type"]) {
     return lowerPath.endsWith(".md") || lowerPath.endsWith(".markdown");
   }
   return lowerPath.endsWith(".spec.ts");
+}
+
+function documentCaseToScenario(documentCase: DocumentCase): TestCaseScenario {
+  const steps: TestCaseStep[] = [];
+  if (documentCase.precondition.trim()) {
+    steps.push({ action: "wait", target: documentCase.precondition.trim() });
+  }
+  for (const step of documentCase.steps) {
+    steps.push({ action: "click", target: step });
+  }
+  if (documentCase.expectedResult.trim()) {
+    steps.push({
+      action: "assert",
+      target: documentCase.title,
+      expected: documentCase.expectedResult.trim()
+    });
+  }
+  return {
+    id: id("scenario"),
+    title: `${documentCase.caseNo} ${documentCase.title}`.trim(),
+    priority: documentPriority(documentCase.priority),
+    steps
+  };
+}
+
+function documentPriority(priority: string): TestCaseScenario["priority"] {
+  const normalized = priority.trim().toUpperCase();
+  if (normalized === "P0") {
+    return "critical";
+  }
+  if (normalized === "P1") {
+    return "high";
+  }
+  if (normalized === "P3") {
+    return "low";
+  }
+  return "medium";
 }
 
 function assertHttpUrl(value: string, fieldName: string) {

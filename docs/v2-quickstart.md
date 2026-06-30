@@ -188,32 +188,34 @@ Search covers systems, auth profiles, business rules, test cases, agent runs, ch
 The automated local smoke flow is covered by `src/mcp/localFlow.test.ts`:
 
 1. `bc_create_system`
-2. `bc_create_auth`
-3. `bc_verify_auth`
-4. `bc_list_auth`
-5. `bc_generate_seed`
-6. `bc_add_term`
-7. `bc_add_rule`
-8. `bc_delete_rule`
-9. `bc_generate_plan`
-10. `bc_batch_confirm_terms`
-11. `bc_update_plan`
-12. `bc_approve_plan`
-13. `bc_run_agent`
-14. `bc_list_agent_runs`
-15. `bc_run_chain`
-16. `bc_list_chain_runs`
-17. `bc_list_specs`
-18. `bc_list_tests`
-19. `bc_read_spec`
-20. `bc_read_test`
-21. `bc_artifact_overview`
-22. `bc_list_terms`
-23. `bc_update_term`
-24. `bc_delete_term`
-25. `bc_list_cases`
-26. `bc_list_gaps`
-27. `bc_search_assets`
+2. `bc_session_resume`
+3. `bc_create_auth`
+4. `bc_verify_auth`
+5. `bc_list_auth`
+6. `bc_generate_seed`
+7. `bc_add_term`
+8. `bc_add_rule`
+9. `bc_delete_rule`
+10. `bc_generate_plan`
+11. `bc_batch_confirm_terms`
+12. `bc_update_plan`
+13. `bc_approve_plan`
+14. `bc_run_agent`
+15. `bc_list_agent_runs`
+16. `bc_run_chain`
+17. `bc_full_workflow`
+18. `bc_list_chain_runs`
+19. `bc_list_specs`
+20. `bc_list_tests`
+21. `bc_read_spec`
+22. `bc_read_test`
+23. `bc_artifact_overview`
+24. `bc_list_terms`
+25. `bc_update_term`
+26. `bc_delete_term`
+27. `bc_list_cases`
+28. `bc_list_gaps`
+29. `bc_search_assets`
 
 Run it with:
 
@@ -253,6 +255,14 @@ npm run verify:live-claude-skill-workflow
 
 This starts a local fixture page, launches Claude Code in print mode, sends a natural Brain Creator request, and asserts that the session calls `bc_create_system`, `bc_generate_plan`, `bc_approve_plan`, `bc_run_chain`, and artifact overview tools.
 
+To verify the session resume → bridge preflight → generate_plan → full_workflow E2E path, run:
+
+```bash
+npm run verify:live-session-resume-workflow
+```
+
+This smoke exercises the canonical new-session flow: it calls `bc_session_resume` to get a full system snapshot with bridge preflight, verifies the `nextAction` decision, calls `bc_generate_plan` (or confirms fast failure when the bridge is down), then calls `bc_full_workflow` to approve and execute in one step. It calls `bc_session_resume` again at the end to confirm the snapshot reflects the completed run. See `docs/e2e-session-resume-workflow.md` for the full user-facing workflow documentation.
+
 ## Generated Files
 
 Playwright initialization creates:
@@ -268,6 +278,8 @@ Brain Creator runtime files are written under `.brain-creator/` by default. Plan
 ## Known Limits
 
 - The current MVP is local-first and uses JSON persistence.
+- `bc_session_resume` replaces 6–7 independent queries with a single snapshot call that includes bridge preflight status and a recommended next action.
+- `bc_generate_plan` and `bc_run_chain` run a 5-second bridge preflight before invoking the Planner/Generator/Healer, avoiding the full agent timeout (120s) when the bridge is missing or unreachable.
 - `bc_generate_plan` and `bc_run_chain` are tested with mockable and subprocess AgentBridge implementations; `npm run verify:live-claude-chain` is the local live Claude bridge gate for planner -> generator -> healer dispatch.
 - The current Playwright CLI does not expose `playwright agent`; `npx playwright init-agents` generates Claude agent definitions and prompts, so Planner/Generator/Healer execution should use the Claude subprocess bridge rather than a Playwright CLI placeholder.
 - The Healer loop is bounded and creates a Gap when it cannot fix a failing generated test.
