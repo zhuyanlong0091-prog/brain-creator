@@ -1484,6 +1484,97 @@ describe("handleBrainCreatorTool", () => {
     ]);
   });
 
+  it("summarizes default bug regression candidates and results", async () => {
+    const workDir = await tempDir();
+    let regressionRun = false;
+    let retestCount = 0;
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => {
+        if (!regressionRun) {
+          return { exitCode: 1, stdout: "", stderr: "initial suite failed" };
+        }
+        retestCount += 1;
+        return retestCount === 2
+          ? { exitCode: 1, stdout: "", stderr: "offer still failed" }
+          : { exitCode: 0, stdout: "fixed", stderr: "" };
+      }
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    await handleBrainCreatorTool(context, "bc_run", {
+      mode: "case-source-suite",
+      systemId: system.id,
+      source,
+      confirm: true,
+      maxHealAttempts: 0
+    });
+
+    const beforeReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "bug",
+        systemId: system.id
+      })
+    );
+    regressionRun = true;
+    const regression = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "bug-regression",
+        systemId: system.id,
+        maxHealAttempts: 0
+      })
+    );
+
+    expect(beforeReview.regressionCandidates).toEqual(
+      expect.objectContaining({
+        total: 2,
+        bugIds: expect.arrayContaining(beforeReview.bugs.map((bug: { id: string }) => bug.id))
+      })
+    );
+    expect(regression.summary).toEqual(
+      expect.objectContaining({
+        candidates: 2,
+        retestPassed: 1,
+        retestFailed: 1
+      })
+    );
+    expect(regression.regressionMarkdown).toContain("## Bug Regression Summary");
+    expect(regression.regressionMarkdown).toContain("Retest passed: 1");
+    expect(regression.regressionMarkdown).toContain("Retest failed: 1");
+    expect(regression.regressionMarkdown).toContain("TC-001 创建招聘需求");
+    expect(regression.regressionMarkdown).toContain("TC-002 发起 offer");
+    expect(regression.bugs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ caseNo: "TC-001", status: "retest-passed" }),
+        expect.objectContaining({ caseNo: "TC-002", status: "retest-failed" })
+      ])
+    );
+  });
+
   it("rejects bc_full_workflow for non-draft cases", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({ workDir });

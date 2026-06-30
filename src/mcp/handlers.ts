@@ -24,6 +24,7 @@ import type {
   AgentRun,
   AuthCheckpoint,
   AuthProfile,
+  BugReport,
   CaseSuite,
   CaseSuiteCaseResult,
   ChainRun,
@@ -698,6 +699,10 @@ async function runBugRegression(context: BrainCreatorMcpContext, input: Record<s
     }
   }
   const counts = countBy(results, (result) => result.status);
+  const bugs = context.service.listBugReports({ systemId }).filter((bug) =>
+    candidates.some((candidate) => candidate.id === bug.id)
+  );
+  const summary = bugRegressionSummary(candidates, bugs, results);
   return {
     mode: "bug-regression",
     status: (counts.blocked ?? 0) > 0 ? "blocked" : (counts.failed ?? 0) > 0 ? "failed" : "completed",
@@ -705,10 +710,10 @@ async function runBugRegression(context: BrainCreatorMcpContext, input: Record<s
     passed: counts.passed ?? 0,
     failed: counts.failed ?? 0,
     blocked: counts.blocked ?? 0,
+    summary,
     results,
-    bugs: context.service.listBugReports({ systemId }).filter((bug) =>
-      candidates.some((candidate) => candidate.id === bug.id)
-    )
+    bugs,
+    regressionMarkdown: bugRegressionMarkdown(summary, bugs)
   };
 }
 
@@ -720,9 +725,11 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
       systemId,
       status: bugStatusArg(input, "status")
     });
+    const regressionCandidates = bugRegressionCandidates(bugs);
     return {
       summary: bugReviewSummary(bugs),
       bugs,
+      regressionCandidates: regressionCandidateSummary(regressionCandidates),
       reportMarkdown: bugReviewMarkdown(bugs),
       nextAction: bugs.some((bug) => bug.status === "open" || bug.status === "retest-failed")
         ? "run_bug_regression"
@@ -1233,6 +1240,67 @@ function bugReviewSummary(bugs: Array<{ status: string }>) {
     retestFailed: counts["retest-failed"] ?? 0,
     closed: counts.closed ?? 0
   };
+}
+
+function bugRegressionCandidates(bugs: BugReport[]) {
+  return bugs.filter((bug) => bug.status === "open" || bug.status === "retest-failed");
+}
+
+function regressionCandidateSummary(bugs: BugReport[]) {
+  return {
+    total: bugs.length,
+    bugIds: bugs.map((bug) => bug.id),
+    caseNos: bugs.map((bug) => bug.caseNo),
+    byModule: countBy(bugs, (bug) => bug.module || "未分组"),
+    byPriority: countBy(bugs, (bug) => bug.priority || "未标记")
+  };
+}
+
+function bugRegressionSummary(
+  candidates: BugReport[],
+  bugs: BugReport[],
+  results: CaseSuiteCaseResult[]
+) {
+  const counts = countBy(bugs, (bug) => bug.status);
+  return {
+    candidates: candidates.length,
+    attempted: results.length,
+    retestPassed: counts["retest-passed"] ?? 0,
+    retestFailed: counts["retest-failed"] ?? 0,
+    blocked: results.filter((result) => result.status === "blocked").length,
+    remainingOpen: counts.open ?? 0
+  };
+}
+
+function bugRegressionMarkdown(
+  summary: ReturnType<typeof bugRegressionSummary>,
+  bugs: BugReport[]
+) {
+  const lines = [
+    "## Bug Regression Summary",
+    "",
+    `Candidates: ${summary.candidates}`,
+    `Attempted: ${summary.attempted}`,
+    `Retest passed: ${summary.retestPassed}`,
+    `Retest failed: ${summary.retestFailed}`,
+    `Blocked: ${summary.blocked}`,
+    `Remaining open: ${summary.remainingOpen}`,
+    ""
+  ];
+  for (const bug of bugs) {
+    lines.push(
+      `### ${bug.caseNo} ${bug.caseTitle}`,
+      "",
+      `Status: ${bug.status}`,
+      `Priority: ${bug.priority}`,
+      `Module: ${bug.module}`,
+      `Expected: ${bug.expectedResult}`,
+      `Actual: ${bug.actualResult}`,
+      `Evidence: ${bug.evidencePaths.join(", ") || "N/A"}`,
+      ""
+    );
+  }
+  return lines.join("\n");
 }
 
 function bugReviewMarkdown(
