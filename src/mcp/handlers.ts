@@ -321,6 +321,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const suiteRuns = context.service.listCaseSuiteRuns(systemId);
   const bugs = context.service.listBugReports({ systemId });
   const openBugs = bugs.filter((bug) => bug.status === "open" || bug.status === "retest-failed");
+  const unfinishedSuites = unfinishedCaseSuites(context, systemId);
   return {
     ...snapshot,
     caseSources: {
@@ -330,6 +331,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     suites: {
       total: suites.length,
       byStatus: countBy(suites, (suite) => suite.status),
+      unfinished: unfinishedSuites,
       recent: suites.slice(-5)
     },
     suiteRuns: {
@@ -347,7 +349,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       openBugs: openBugs.length,
       openGaps: snapshot.openGaps.length,
       approvedCases: snapshot.cases.byStatus.approved,
-      caseSources: caseSources.length
+      caseSources: caseSources.length,
+      unfinishedSuites: unfinishedSuites.length
     })
   };
 }
@@ -368,7 +371,13 @@ async function runFacade(context: BrainCreatorMcpContext, input: Record<string, 
 
 async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const systemId = stringArg(input, "systemId");
-  const source = stringArg(input, "source");
+  const resumeTarget = optionalBooleanArg(input, "resume")
+    ? latestUnfinishedCaseSuite(context, systemId)
+    : undefined;
+  const source = optionalStringArg(input, "source") ?? resumeTarget?.source;
+  if (!source) {
+    throw new Error("source is required unless resume is true and an unfinished suite exists");
+  }
   const parsed = await parseCaseSource(source);
   const caseSource = context.service.upsertCaseSource({
     systemId,
@@ -429,7 +438,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     return { mode: "case-source-suite", status: "blocked", source: caseSource, gap, bridge };
   }
 
-  const requestedSuiteId = optionalStringArg(input, "suiteId");
+  const requestedSuiteId = optionalStringArg(input, "suiteId") ?? resumeTarget?.suiteId;
   const suite = requestedSuiteId
     ? existingCaseSuite(context, requestedSuiteId, systemId, caseSource.id)
     : context.service.createCaseSuite({
@@ -707,6 +716,7 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
     return {
       summary: bugReviewSummary(bugs),
       bugs,
+      reportMarkdown: bugReviewMarkdown(bugs),
       nextAction: bugs.some((bug) => bug.status === "open" || bug.status === "retest-failed")
         ? "run_bug_regression"
         : "no_open_bug"
@@ -1028,6 +1038,39 @@ function previewSummary(parsed: ParsedCaseSource) {
   };
 }
 
+function unfinishedCaseSuites(context: BrainCreatorMcpContext, systemId: string) {
+  const sourcesById = new Map(context.service.listCaseSources(systemId).map((source) => [source.id, source]));
+  return context.service
+    .listCaseSuites(systemId)
+    .filter((suite) => suite.status !== "completed" && suite.status !== "cancelled")
+    .map((suite) => {
+      const passed = passedCaseNosForSuite(context, systemId, suite.id);
+      const remainingCaseNos = suite.selectedCaseNos.filter((caseNo) => !passed.has(caseNo));
+      const lastRun = context.service
+        .listCaseSuiteRuns(systemId)
+        .filter((run) => run.suiteId === suite.id)
+        .at(-1);
+      return {
+        suiteId: suite.id,
+        sourceId: suite.sourceId,
+        source: sourcesById.get(suite.sourceId)?.source,
+        status: suite.status,
+        totalCases: suite.totalCases,
+        passedCaseNos: [...passed],
+        remainingCaseNos,
+        nextCaseNo: remainingCaseNos[0],
+        lastRunId: lastRun?.id
+      };
+    })
+    .filter((suite) => suite.remainingCaseNos.length > 0 && suite.source)
+    .sort((left, right) => (left.lastRunId ?? "").localeCompare(right.lastRunId ?? ""));
+}
+
+function latestUnfinishedCaseSuite(context: BrainCreatorMcpContext, systemId: string) {
+  const suites = unfinishedCaseSuites(context, systemId);
+  return suites.at(-1);
+}
+
 function existingCaseSuite(
   context: BrainCreatorMcpContext,
   suiteId: string,
@@ -1062,9 +1105,13 @@ function facadeNextAction(state: {
   openGaps: number;
   approvedCases: number;
   caseSources: number;
+  unfinishedSuites: number;
 }) {
   if (!state.bridgeOk) {
     return "configure_bridge";
+  }
+  if (state.unfinishedSuites > 0) {
+    return "continue_case_source_suite";
   }
   if (state.openGaps > 0) {
     return "review_gaps";
@@ -1113,6 +1160,46 @@ function bugReviewSummary(bugs: Array<{ status: string }>) {
     retestFailed: counts["retest-failed"] ?? 0,
     closed: counts.closed ?? 0
   };
+}
+
+function bugReviewMarkdown(
+  bugs: Array<{
+    caseNo: string;
+    caseTitle: string;
+    status: string;
+    priority: string;
+    module: string;
+    expectedResult: string;
+    actualResult: string;
+    reproductionSteps: string[];
+    evidencePaths: string[];
+  }>
+) {
+  const summary = bugReviewSummary(bugs);
+  const lines = [
+    "## BugReport Summary",
+    "",
+    `Total: ${summary.total}`,
+    `Open: ${summary.open}`,
+    `Retest passed: ${summary.retestPassed}`,
+    `Retest failed: ${summary.retestFailed}`,
+    ""
+  ];
+  for (const bug of bugs) {
+    lines.push(
+      `### ${bug.caseNo} ${bug.caseTitle}`,
+      "",
+      `Status: ${bug.status}`,
+      `Priority: ${bug.priority}`,
+      `Module: ${bug.module}`,
+      `Expected: ${bug.expectedResult}`,
+      `Actual: ${bug.actualResult}`,
+      `Steps: ${bug.reproductionSteps.join(" -> ") || "N/A"}`,
+      `Evidence: ${bug.evidencePaths.join(", ") || "N/A"}`,
+      ""
+    );
+  }
+  return lines.join("\n");
 }
 
 async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestArtifact) {

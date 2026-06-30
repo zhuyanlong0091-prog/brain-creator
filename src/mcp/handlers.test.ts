@@ -1219,6 +1219,85 @@ describe("handleBrainCreatorTool", () => {
     expect(runCount).toBe(3);
   });
 
+  it("continues the latest unfinished case source suite without repeating source details", async () => {
+    const workDir = await tempDir();
+    let runCount = 0;
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => {
+        runCount += 1;
+        return runCount === 2
+          ? { exitCode: 1, stdout: "", stderr: "TC-002 failed" }
+          : { exitCode: 0, stdout: "passed", stderr: "" };
+      }
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+
+    const firstRun = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true,
+        maxHealAttempts: 0
+      })
+    );
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        systemId: system.id
+      })
+    );
+    const continued = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        resume: true,
+        confirm: true,
+        maxHealAttempts: 0
+      })
+    );
+
+    expect(status.facadeNextAction).toBe("continue_case_source_suite");
+    expect(status.suites.unfinished).toEqual([
+      expect.objectContaining({
+        suiteId: firstRun.suite.id,
+        source,
+        remainingCaseNos: ["TC-002"],
+        nextCaseNo: "TC-002"
+      })
+    ]);
+    expect(continued.suite.id).toBe(firstRun.suite.id);
+    expect(continued.suiteRun.caseResults).toEqual([
+      expect.objectContaining({ caseNo: "TC-002", status: "passed" })
+    ]);
+    expect(runCount).toBe(3);
+  });
+
   it("creates BugReport assets when a confirmed document case fails expectations", async () => {
     const workDir = await tempDir();
     let shouldFail = true;
@@ -1279,6 +1358,10 @@ describe("handleBrainCreatorTool", () => {
     expect(bugReview.summary).toEqual(
       expect.objectContaining({ total: 1, open: 1, retestPassed: 0 })
     );
+    expect(bugReview.reportMarkdown).toContain("## BugReport Summary");
+    expect(bugReview.reportMarkdown).toContain("TC-001 创建招聘需求");
+    expect(bugReview.reportMarkdown).toContain("Expected: 创建成功");
+    expect(bugReview.reportMarkdown).toContain("Actual: expected result was not visible");
     expect(bugs).toEqual([
       expect.objectContaining({
         caseNo: "TC-001",

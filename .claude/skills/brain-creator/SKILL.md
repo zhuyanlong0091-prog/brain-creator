@@ -56,8 +56,8 @@ When the user provides a test case document path, first call `bc_run` with `mode
 Document source details:
 - Supported inputs are local `.xlsx`, executable `.md` tables, `obsidian:<path>`, `claudian:<path>`, and `[[path]]`.
 - For Obsidian/Claudian-style references, keep the original source reference in Brain Creator assets; do not paste the full document content into chat.
-- To continue an interrupted or failed suite, call `bc_run mode="case-source-suite"` with the same `source`, the existing `suiteId`, and `confirm: true`; rerun only cases that have not passed.
-- For bugs, call `bc_review target="bug"` to get a status summary and BugReport list before deciding whether to run `bc_run mode="bug-regression"`.
+- To continue an interrupted or failed suite, first call `bc_status` and inspect `suites.unfinished`. Prefer `bc_run mode="case-source-suite"` with `resume: true` and `confirm: true`; Brain Creator reuses the latest unfinished suite's `source` and `suiteId` and reruns only cases that have not passed. Use explicit `source` + `suiteId` only when the user selects a specific older suite.
+- For bugs, call `bc_review target="bug"` to get a status summary, BugReport list, and `reportMarkdown` before deciding whether to run `bc_run mode="bug-regression"`.
 
 ---
 
@@ -71,7 +71,7 @@ When the user gives a request such as "Use Brain Creator to connect this CRM and
 4. For a natural-language requirement, generate a draft plan through the existing planning flow, present it to the user, and wait for approval before code generation.
 5. When the user says "approve and run" or "确认并执行", prefer `bc_run mode=full-workflow`.
 6. When the user provides a test case document path, prefer `bc_run mode=case-source-suite confirm=false`; after explicit confirmation, call `bc_run mode=case-source-suite confirm=true`.
-7. Use `bc_review` to summarize suite runs, cases, bugs, gaps, and artifacts when reporting outcomes or continuing later.
+7. Use `bc_review` to summarize suite runs, cases, bugs, gaps, and artifacts when reporting outcomes or continuing later. For BugReport handoff, include the returned `reportMarkdown` when useful.
 8. If an external preflight, auth, bridge, or evidence issue blocks execution, create/report a Gap instead of claiming success.
 
 Users should not need to say `Skill("brain-creator")`. Treat natural-language requests such as "Use Brain Creator to connect this system", "用 Brain Creator 接入这个系统", "generate a reviewed test plan", "run the approved chain", or "show open gaps" as Brain Creator entrypoints. Keep `Skill("brain-creator")` only as an explicit fallback when automatic skill matching fails.

@@ -90,6 +90,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       caseId: z.string().optional(),
       source: z.string().optional(),
       suiteId: z.string().optional(),
+      resume: z.boolean().default(false),
       confirm: z.boolean().default(false),
       maxHealAttempts: z.number().int().min(0).max(10).optional(),
       bugIds: z.array(z.string()).default([])
