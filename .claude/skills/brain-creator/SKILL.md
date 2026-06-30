@@ -37,21 +37,36 @@ Use Brain Creator as an agent-native testing business brain through MCP tools. C
 
 ---
 
+## Facade-First Tool Policy
+
+Default to the high-level facade tools. The fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and fallback, but the user should not have to orchestrate them.
+
+1. Use `bc_status` as the first call in a new session when a `systemId` is known. It returns system, auth, bridge, cases, suites, bugs, gaps, artifacts, and the recommended next action.
+2. Use `bc_configure` for high-level setup of systems, auth, terms, rules, and auth checkpoints.
+3. Use `bc_run` for execution:
+   - `mode: "approved-case"` for an already approved case.
+   - `mode: "full-workflow"` when the user says "confirm and run" for a draft case.
+   - `mode: "case-source-suite"` when the user supplies an `.xlsx` or `.md` test case document path.
+   - `mode: "bug-regression"` when the user asks to retest open bugs.
+4. Use `bc_review` for suite runs, cases, bugs, gaps, and artifacts.
+5. Use internal tools such as `bc_generate_plan`, `bc_run_chain`, `bc_list_gaps`, or `bc_read_spec` only when a facade lacks the needed detail or the user is debugging/auditing.
+
+When the user provides a test case document path, first call `bc_run` with `mode: "case-source-suite"` and `confirm: false`. Present the preview summary, risks, bridge status, and sample cases. Only after explicit user confirmation call the same mode with `confirm: true`.
+
+---
+
 ## One-Sentence Workflow
 
 When the user gives a request such as "Use Brain Creator to connect this CRM and generate tests for order approval":
 
-1. Call `bc_session_resume` with the selected `systemId` to get a full system snapshot (auth, rules, terms, cases, gaps, bridge status, and recommended next action). If no system matches, call `bc_list_systems` to discover existing systems, or call `bc_create_system` if the user supplied enough system details.
-2. If auth is needed, call `bc_create_auth`, then `bc_verify_auth`, then `bc_generate_seed`; never echo secrets back to chat.
-   - For password, recovery, CAPTCHA, or 2FA that must be completed by the user, call `bc_create_auth_checkpoint` instead of storing those values.
-3. Capture known business language with `bc_add_term` and required checks with `bc_add_rule` when the user provides them.
-4. Call `bc_generate_plan` with the selected `systemId` and the user's natural language requirement.
-5. Present scenarios, new term candidates, and rule check results; call `bc_update_plan` only when the user asks for changes.
-6. Call `bc_approve_plan` only after the user confirms the test intent. When the user says "approve and run" or "确认并执行", use `bc_full_workflow` to approve and execute in one call.
-7. Call `bc_run_chain` (or `bc_full_workflow`) for the approved case, then report generated spec/test paths, ChainRun status, healer attempts, and gaps.
-8. Call `bc_artifact_overview`, `bc_list_specs`, `bc_list_tests`, `bc_list_cases`, and `bc_list_gaps` when summarizing outcomes or continuing later.
-9. If the user closes or stops a protected login flow, call `bc_cancel_plan` with the reason. Use `bc_resume_plan` only after awaiting auth checkpoints are completed or cancelled.
-10. Call `bc_report_gap` for external preflight failures such as blocked network access or missing evidence.
+1. Find or create the target business system. Prefer `bc_status` when `systemId` is known; otherwise use existing system discovery or `bc_configure target=system`.
+2. If auth is needed, use `bc_configure target=auth`; never echo secrets back to chat. For password, recovery, CAPTCHA, or 2FA that must be completed by the user, use `bc_configure target=checkpoint`.
+3. Capture known business language and quality gates with `bc_configure target=term` and `bc_configure target=rule`.
+4. For a natural-language requirement, generate a draft plan through the existing planning flow, present it to the user, and wait for approval before code generation.
+5. When the user says "approve and run" or "确认并执行", prefer `bc_run mode=full-workflow`.
+6. When the user provides a test case document path, prefer `bc_run mode=case-source-suite confirm=false`; after explicit confirmation, call `bc_run mode=case-source-suite confirm=true`.
+7. Use `bc_review` to summarize suite runs, cases, bugs, gaps, and artifacts when reporting outcomes or continuing later.
+8. If an external preflight, auth, bridge, or evidence issue blocks execution, create/report a Gap instead of claiming success.
 
 Users should not need to say `Skill("brain-creator")`. Treat natural-language requests such as "Use Brain Creator to connect this system", "用 Brain Creator 接入这个系统", "generate a reviewed test plan", "run the approved chain", or "show open gaps" as Brain Creator entrypoints. Keep `Skill("brain-creator")` only as an explicit fallback when automatic skill matching fails.
 

@@ -6,7 +6,11 @@ import type {
   ApiFlow,
   AuthCheckpoint,
   AuthProfile,
+  BugReport,
   BusinessRule,
+  CaseSource,
+  CaseSuite,
+  CaseSuiteRun,
   ChainRun,
   Gap,
   GeneratedCase,
@@ -36,6 +40,10 @@ export class InMemoryBrainCreatorRepository {
   testCases: TestCase[] = [];
   agentRuns: AgentRun[] = [];
   chainRuns: ChainRun[] = [];
+  caseSources: CaseSource[] = [];
+  caseSuites: CaseSuite[] = [];
+  caseSuiteRuns: CaseSuiteRun[] = [];
+  bugReports: BugReport[] = [];
 
   persist() {
     return;
@@ -58,6 +66,10 @@ export class InMemoryBrainCreatorRepository {
     this.testCases = [];
     this.agentRuns = [];
     this.chainRuns = [];
+    this.caseSources = [];
+    this.caseSuites = [];
+    this.caseSuiteRuns = [];
+    this.bugReports = [];
     this.persist();
   }
 }
@@ -80,6 +92,10 @@ type RepositorySnapshot = Pick<
   | "testCases"
   | "agentRuns"
   | "chainRuns"
+  | "caseSources"
+  | "caseSuites"
+  | "caseSuiteRuns"
+  | "bugReports"
 >;
 
 export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorRepository {
@@ -114,6 +130,10 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     this.testCases = snapshot.testCases ?? [];
     this.agentRuns = snapshot.agentRuns ?? [];
     this.chainRuns = snapshot.chainRuns ?? [];
+    this.caseSources = snapshot.caseSources ?? [];
+    this.caseSuites = snapshot.caseSuites ?? [];
+    this.caseSuiteRuns = snapshot.caseSuiteRuns ?? [];
+    this.bugReports = snapshot.bugReports ?? [];
   }
 
   private snapshot(): RepositorySnapshot {
@@ -133,7 +153,11 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       businessRules: this.businessRules,
       testCases: this.testCases,
       agentRuns: this.agentRuns,
-      chainRuns: this.chainRuns
+      chainRuns: this.chainRuns,
+      caseSources: this.caseSources,
+      caseSuites: this.caseSuites,
+      caseSuiteRuns: this.caseSuiteRuns,
+      bugReports: this.bugReports
     };
   }
 }

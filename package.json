@@ -37,10 +37,12 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "adm-zip": "^0.5.18",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^24.10.1",
     "ts-node": "^10.9.0",
     "typescript": "^5.9.3",

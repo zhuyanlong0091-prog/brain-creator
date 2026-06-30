@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 export type BrainCreatorToolName =
+  | "bc_status"
+  | "bc_run"
+  | "bc_review"
+  | "bc_configure"
   | "bc_create_system"
   | "bc_list_systems"
   | "bc_session_resume"
@@ -65,6 +69,71 @@ type RegisterableMcpServer = {
 };
 
 export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
+  {
+    name: "bc_status",
+    title: "Brain Creator status",
+    description:
+      "Facade status entry for agents. Returns system, auth, bridge, cases, suites, bugs, gaps, artifacts, and next action.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      include: z.array(z.string()).default([])
+    })
+  },
+  {
+    name: "bc_run",
+    title: "Brain Creator run",
+    description:
+      "Facade execution entry for approved cases, full workflow, document case suites, and bug regression.",
+    inputSchema: z.object({
+      mode: z.enum(["approved-case", "full-workflow", "case-source-suite", "bug-regression"]),
+      systemId: z.string().optional(),
+      caseId: z.string().optional(),
+      source: z.string().optional(),
+      confirm: z.boolean().default(false),
+      maxHealAttempts: z.number().int().min(0).max(10).optional(),
+      bugIds: z.array(z.string()).default([])
+    })
+  },
+  {
+    name: "bc_review",
+    title: "Brain Creator review",
+    description: "Facade review entry for suite runs, cases, bugs, gaps, and artifacts.",
+    inputSchema: z.object({
+      target: z.enum(["suite-run", "case", "bug", "gap", "artifact"]),
+      systemId: z.string(),
+      status: z.string().optional(),
+      id: z.string().optional()
+    })
+  },
+  {
+    name: "bc_configure",
+    title: "Brain Creator configure",
+    description: "Facade configuration entry for system, auth, term, rule, and auth checkpoint setup.",
+    inputSchema: z.object({
+      target: z.enum(["system", "auth", "term", "rule", "checkpoint"]),
+      systemId: z.string().optional(),
+      name: z.string().optional(),
+      environment: z.string().optional(),
+      baseUrl: z.string().optional(),
+      defaultLocale: z.string().default("zh-CN"),
+      urlAllowlist: z.array(z.string()).default([]),
+      env: z.string().optional(),
+      role: z.string().optional(),
+      loginMethod: z.enum(["password", "cookie", "token", "script"]).optional(),
+      secrets: z.record(z.string(), z.string()).default({}),
+      key: z.string().optional(),
+      zhCN: z.string().optional(),
+      enUS: z.string().optional(),
+      aliases: z.array(z.string()).default([]),
+      pageScope: z.string().default("/"),
+      condition: z.string().optional(),
+      severity: z.enum(["block", "warn"]).optional(),
+      authProfileId: z.string().optional(),
+      testCaseId: z.string().optional(),
+      reason: z.string().optional(),
+      resumeInstruction: z.string().optional()
+    })
+  },
   {
     name: "bc_create_system",
     title: "Create business system",

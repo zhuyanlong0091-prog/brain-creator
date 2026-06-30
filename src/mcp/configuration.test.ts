@@ -151,13 +151,14 @@ describe("Brain Creator local integration files", () => {
     );
   });
 
-  it("defines a single Brain Creator skill with all tool-oriented workflow guidance", async () => {
+  it("defines a single Brain Creator skill with facade-first workflow guidance", async () => {
     const content = await readFile("skills/brain-creator/SKILL.md", "utf8");
 
     expect(content).toContain("---");
     expect(content).toContain("Brain Creator");
     expect(content).toContain("MCP");
     expect(content).toContain('Skill("brain-creator")` only as an explicit fallback');
+    expect(content).toContain("## Facade-First Tool Policy");
     expect(content).toContain("## System");
     expect(content).toContain("## Auth");
     expect(content).toContain("## Glossary");
@@ -165,14 +166,20 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("## Plan");
     expect(content).toContain("## Run");
     expect(content).toContain("## Assets And Gaps");
-    expect(content).toContain("bc_session_resume");
+    expect(content).toContain("bc_status");
+    expect(content).toContain("bc_configure");
+    expect(content).toContain("bc_run");
+    expect(content).toContain("bc_review");
+    expect(content).toContain("case-source-suite");
+    expect(content).toContain("confirm: false");
+    expect(content).toContain("confirm: true");
     expect(content).toContain("bc_create_system");
     expect(content).toContain("bc_create_auth");
     expect(content).toContain("bc_add_term");
     expect(content).toContain("bc_add_rule");
     expect(content).toContain("bc_generate_plan");
     expect(content).toContain("bc_run_chain");
-    expect(content).toContain("bc_full_workflow");
+    expect(content).toContain("mode: \"full-workflow\"");
     expect(content).toContain("bc_search_assets");
   });
 
@@ -181,7 +188,12 @@ describe("Brain Creator local integration files", () => {
 
     expect(content).toContain("One-Sentence");
     expect(content).toContain("Use Brain Creator to connect this system");
-    expect(content).toContain("bc_session_resume");
+    expect(content).toContain("bc_status");
+    expect(content).toContain("bc_configure target=system");
+    expect(content).toContain("bc_configure target=auth");
+    expect(content).toContain("bc_run mode=case-source-suite confirm=false");
+    expect(content).toContain("bc_run mode=case-source-suite confirm=true");
+    expect(content).toContain("bc_review");
     expect(content).toContain("bc_list_systems");
     expect(content).toContain("bc_create_system");
     expect(content).toContain("bc_create_auth_checkpoint");
@@ -201,13 +213,17 @@ describe("Brain Creator local integration files", () => {
 
     expect(claudeSkill).toBe(canonical);
     expect(claudeSkill).toContain("One-Sentence");
-    expect(claudeSkill).toContain("bc_session_resume");
-    expect(claudeSkill).toContain("bc_run_chain");
+    expect(claudeSkill).toContain("bc_status");
+    expect(claudeSkill).toContain("bc_run");
   });
 
-  it("includes bc_session_resume in the MCP tool registry", async () => {
+  it("includes facade and session resume tools in the MCP tool registry", async () => {
     const toolsModule = await readFile("src/mcp/tools.ts", "utf8");
 
+    expect(toolsModule).toContain("bc_status");
+    expect(toolsModule).toContain("bc_run");
+    expect(toolsModule).toContain("bc_review");
+    expect(toolsModule).toContain("bc_configure");
     expect(toolsModule).toContain("bc_session_resume");
     expect(toolsModule).toContain("Resume session");
   });

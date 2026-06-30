@@ -11,6 +11,10 @@ export type AssetType =
   | "system-profile"
   | "auth-profile"
   | "auth-checkpoint"
+  | "case-source"
+  | "case-suite"
+  | "case-suite-run"
+  | "bug-report"
   | "page-model"
   | "locator-point"
   | "training-session"
@@ -276,6 +280,96 @@ export type TestArtifact = {
   status: string;
   createdAt: string;
   testCaseId?: string;
+};
+
+export type CaseSource = {
+  id: string;
+  systemId: string;
+  source: string;
+  sourceType: "xlsx" | "markdown" | "obsidian" | "unknown";
+  contentHash: string;
+  caseCount: number;
+  moduleStats: Record<string, number>;
+  priorityStats: Record<string, number>;
+  status: "active" | "stale" | "failed";
+  parsedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DocumentCase = {
+  caseNo: string;
+  title: string;
+  module: string;
+  precondition: string;
+  steps: string[];
+  expectedResult: string;
+  actualResult?: string;
+  priority: "P0" | "P1" | "P2" | "P3" | string;
+  status?: string;
+  bugId?: string;
+  remark?: string;
+  sourceRow: number;
+};
+
+export type CaseSuite = {
+  id: string;
+  systemId: string;
+  sourceId: string;
+  status: "draft" | "approved" | "running" | "completed" | "failed" | "cancelled";
+  totalCases: number;
+  selectedCaseNos: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CaseSuiteRun = {
+  id: string;
+  systemId: string;
+  suiteId: string;
+  sourceId: string;
+  status: "running" | "completed" | "failed" | "blocked";
+  total: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  caseResults: CaseSuiteCaseResult[];
+  artifactPaths: string[];
+  bugReportIds: string[];
+  gapIds: string[];
+  createdAt: string;
+  completedAt?: string;
+};
+
+export type CaseSuiteCaseResult = {
+  caseNo: string;
+  title: string;
+  status: "passed" | "failed" | "blocked";
+  testCaseId?: string;
+  chainRunId?: string;
+  bugReportId?: string;
+  gapIds: string[];
+  error?: string;
+};
+
+export type BugReport = {
+  id: string;
+  systemId: string;
+  sourceId: string;
+  suiteRunId?: string;
+  caseNo: string;
+  caseTitle: string;
+  module: string;
+  priority: string;
+  expectedResult: string;
+  actualResult: string;
+  reproductionSteps: string[];
+  evidencePaths: string[];
+  chainRunId?: string;
+  gapIds: string[];
+  status: "open" | "retest-running" | "retest-passed" | "retest-failed" | "closed";
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AssetSearchResult = {
