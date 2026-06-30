@@ -72,7 +72,7 @@ When the user gives a request such as "Use Brain Creator to connect this CRM and
 4. For a natural-language requirement, generate a draft plan through the existing planning flow, present it to the user, and wait for approval before code generation.
 5. When the user says "approve and run" or "确认并执行", prefer `bc_run mode=full-workflow`.
 6. When the user provides a test case document path, prefer `bc_run mode=case-source-suite confirm=false`; include `caseNos`, `modules`, or `priorities` when the user narrows the scope. After explicit confirmation, call `bc_run mode=case-source-suite confirm=true` with the same filters.
-7. Use `bc_review` to summarize suite runs, cases, bugs, gaps, and artifacts when reporting outcomes or continuing later. For BugReport handoff, include the returned `reportMarkdown`; after bug regression, include `regressionMarkdown` when useful.
+7. Use `bc_review` to summarize suite runs, cases, bugs, gaps, and artifacts when reporting outcomes or continuing later. For suite-run handoff, include the returned suite `reportMarkdown`; for BugReport handoff, include the returned bug `reportMarkdown`; after bug regression, include `regressionMarkdown` when useful.
 8. If an external preflight, auth, bridge, or evidence issue blocks execution, create/report a Gap instead of claiming success.
 
 Users should not need to say `Skill("brain-creator")`. Treat natural-language requests such as "Use Brain Creator to connect this system", "用 Brain Creator 接入这个系统", "generate a reviewed test plan", "run the approved chain", or "show open gaps" as Brain Creator entrypoints. Keep `Skill("brain-creator")` only as an explicit fallback when automatic skill matching fails.

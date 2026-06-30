@@ -1229,7 +1229,84 @@ describe("handleBrainCreatorTool", () => {
     expect(result.suiteRun).toEqual(
       expect.objectContaining({ total: 2, passed: 2, failed: 0, blocked: 0 })
     );
-    expect(suiteRuns).toEqual([expect.objectContaining({ id: result.suiteRun.id })]);
+    expect(suiteRuns.runs).toEqual([expect.objectContaining({ id: result.suiteRun.id })]);
+    expect(suiteRuns.summary).toEqual(
+      expect.objectContaining({ totalRuns: 1, totalCases: 2, passed: 2, failed: 0, blocked: 0 })
+    );
+  });
+
+  it("reviews suite runs with failed cases, bug links, and markdown report", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => ({ exitCode: 1, stdout: "", stderr: "suite assertion failed" })
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "", "", ""]]));
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const runResult = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true,
+        maxHealAttempts: 0
+      })
+    );
+
+    const review = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "suite-run",
+        systemId: system.id
+      })
+    );
+
+    expect(review.summary).toEqual(
+      expect.objectContaining({
+        totalRuns: 1,
+        totalCases: 1,
+        failed: 1,
+        bugReports: 1,
+        latestStatus: "failed"
+      })
+    );
+    expect(review.failedCases).toEqual([
+      expect.objectContaining({
+        suiteRunId: runResult.suiteRun.id,
+        caseNo: "TC-001",
+        bugReportId: expect.any(String)
+      })
+    ]);
+    expect(review.bugReports).toEqual([
+      expect.objectContaining({ caseNo: "TC-001", status: "open" })
+    ]);
+    expect(review.reportMarkdown).toContain("## Suite Run Summary");
+    expect(review.reportMarkdown).toContain("Failed: 1");
+    expect(review.reportMarkdown).toContain("TC-001 创建招聘需求");
+    expect(review.nextAction).toBe("review_bugs");
   });
 
   it("resumes an existing case source suite by rerunning only unfinished cases", async () => {
