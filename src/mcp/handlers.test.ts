@@ -1094,6 +1094,89 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.listCaseSuiteRuns(system.id)).toEqual([]);
   });
 
+  it("filters document case suites by case number, module, and priority", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => ({ exitCode: 0, stdout: "passed", stderr: "" })
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(
+      source,
+      createXlsxFixture([
+        ["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "", "", ""],
+        ["TC-002", "发起 offer", "Offer", "候选人已通过面试", "1. 发起 offer", "Offer 启动", "", "P1", "", "", ""],
+        ["TC-003", "审核招聘需求", "招聘需求", "主管待审批", "1. 点击通过", "审核通过", "", "P1", "", "", ""]
+      ])
+    );
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+
+    const preview = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        modules: ["招聘需求"],
+        priorities: ["P1"],
+        confirm: false
+      })
+    );
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        caseNos: ["TC-002", "TC-003"],
+        modules: ["招聘需求"],
+        confirm: true
+      })
+    );
+
+    expect(preview.summary.total).toBe(1);
+    expect(preview.selection).toEqual(
+      expect.objectContaining({
+        totalAvailable: 3,
+        selected: 1,
+        selectedCaseNos: ["TC-003"]
+      })
+    );
+    expect(result.suite.selectedCaseNos).toEqual(["TC-003"]);
+    expect(result.suiteRun.caseResults).toEqual([
+      expect.objectContaining({ caseNo: "TC-003", status: "passed" })
+    ]);
+    expect(result.progress).toEqual(
+      expect.objectContaining({
+        selected: 1,
+        attempted: 1,
+        passed: 1,
+        remaining: 0
+      })
+    );
+  });
+
   it("executes a confirmed case source suite and records suite run results", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
