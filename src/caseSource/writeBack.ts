@@ -1,5 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { extname } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join } from "node:path";
 import AdmZip from "adm-zip";
 import type { BugReport, CaseSuiteCaseResult, DocumentCase } from "../domain/types.js";
 
@@ -21,6 +21,7 @@ export async function writeXlsxCaseSourceResults(input: XlsxWriteBackInput) {
   }
 
   const buffer = await readFile(input.source);
+  const backupPath = await createWriteBackBackup(input.source, buffer);
   const zip = new AdmZip(buffer);
   const sharedStrings = readSharedStrings(zip);
   const sheetPath = worksheetPath(zip);
@@ -68,9 +69,24 @@ export async function writeXlsxCaseSourceResults(input: XlsxWriteBackInput) {
   return {
     status: "written",
     source: input.source,
+    backupPath,
     updatedRows,
     skippedCaseNos
   };
+}
+
+async function createWriteBackBackup(source: string, buffer: Buffer) {
+  const backupDir = join(dirname(source), ".brain-creator", "backups");
+  await mkdir(backupDir, { recursive: true });
+  const extension = extname(source);
+  const name = basename(source, extension);
+  const backupPath = join(backupDir, `${name}.${backupTimestamp()}.bak${extension}`);
+  await writeFile(backupPath, buffer);
+  return backupPath;
+}
+
+function backupTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
 function isLocalXlsx(source: string) {

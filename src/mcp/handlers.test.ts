@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import AdmZip from "adm-zip";
@@ -1406,8 +1406,20 @@ describe("handleBrainCreatorTool", () => {
       })
     );
     const reparsed = await parseCaseSource(source);
+    const backupPath = result.writeBack.backupPath;
+    const backup = await parseCaseSource(backupPath);
 
-    expect(result.writeBack).toEqual(expect.objectContaining({ status: "written", updatedRows: 1 }));
+    await expect(access(backupPath)).resolves.toBeUndefined();
+    expect(result.writeBack).toEqual(
+      expect.objectContaining({ status: "written", updatedRows: 1, backupPath: expect.any(String) })
+    );
+    expect(backup.cases[0]).toEqual(
+      expect.objectContaining({
+        actualResult: undefined,
+        status: "未执行",
+        bugId: undefined
+      })
+    );
     expect(reparsed.cases[0]).toEqual(
       expect.objectContaining({
         actualResult: expect.stringContaining("expected result was not visible"),
