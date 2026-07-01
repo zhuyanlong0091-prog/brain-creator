@@ -25,10 +25,12 @@ import type {
   AuthCheckpoint,
   AuthProfile,
   BugReport,
+  CaseSuiteRun,
   CaseSuite,
   CaseSuiteCaseResult,
   ChainRun,
   DocumentCase,
+  Gap,
   TestArtifact,
   TestCaseScenario,
   TestCaseStep
@@ -737,7 +739,7 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
     };
   }
   if (target === "suite-run") {
-    return context.service.listCaseSuiteRuns(systemId);
+    return suiteRunReview(context, systemId, optionalStringArg(input, "id"));
   }
   if (target === "case") {
     return context.service.listTestCases(systemId);
@@ -1036,6 +1038,129 @@ async function artifactOverview(context: BrainCreatorMcpContext, input: Record<s
   };
 }
 
+function suiteRunReview(context: BrainCreatorMcpContext, systemId: string, id?: string) {
+  const runs = context.service
+    .listCaseSuiteRuns(systemId)
+    .filter((run) => id === undefined || run.id === id || run.suiteId === id);
+  const bugIds = new Set(runs.flatMap((run) => run.bugReportIds));
+  const gapIds = new Set(
+    runs.flatMap((run) => [
+      ...run.gapIds,
+      ...run.caseResults.flatMap((caseResult) => caseResult.gapIds)
+    ])
+  );
+  const bugReports = context.service
+    .listBugReports({ systemId })
+    .filter((bug) => bugIds.has(bug.id));
+  const gaps = context.service
+    .listGaps({ projectId: systemId })
+    .filter((gap) => gapIds.has(gap.id));
+  const failedCases = runs.flatMap((run) =>
+    run.caseResults
+      .filter((caseResult) => caseResult.status !== "passed")
+      .map((caseResult) => ({
+        suiteRunId: run.id,
+        suiteId: run.suiteId,
+        sourceId: run.sourceId,
+        caseNo: caseResult.caseNo,
+        title: caseResult.title,
+        status: caseResult.status,
+        bugReportId: caseResult.bugReportId,
+        gapIds: caseResult.gapIds,
+        error: caseResult.error
+      }))
+  );
+  const summary = suiteRunSummary(runs, bugReports, gaps);
+  return {
+    summary,
+    runs,
+    failedCases,
+    bugReports,
+    gaps,
+    reportMarkdown: suiteRunMarkdown(summary, failedCases, bugReports, gaps),
+    nextAction: suiteRunNextAction(bugReports, gaps)
+  };
+}
+
+function suiteRunSummary(runs: CaseSuiteRun[], bugReports: BugReport[], gaps: Gap[]) {
+  const latest = runs.at(-1);
+  return {
+    totalRuns: runs.length,
+    totalCases: sumBy(runs, (run) => run.total),
+    passed: sumBy(runs, (run) => run.passed),
+    failed: sumBy(runs, (run) => run.failed),
+    blocked: sumBy(runs, (run) => run.blocked),
+    bugReports: bugReports.length,
+    gaps: gaps.length,
+    latestStatus: latest?.status,
+    byStatus: countBy(runs, (run) => run.status)
+  };
+}
+
+function suiteRunMarkdown(
+  summary: ReturnType<typeof suiteRunSummary>,
+  failedCases: Array<{
+    caseNo: string;
+    title: string;
+    status: string;
+    bugReportId?: string;
+    gapIds: string[];
+    error?: string;
+  }>,
+  bugReports: BugReport[],
+  gaps: Gap[]
+) {
+  const lines = [
+    "## Suite Run Summary",
+    "",
+    `Runs: ${summary.totalRuns}`,
+    `Cases: ${summary.totalCases}`,
+    `Passed: ${summary.passed}`,
+    `Failed: ${summary.failed}`,
+    `Blocked: ${summary.blocked}`,
+    `BugReports: ${summary.bugReports}`,
+    `Gaps: ${summary.gaps}`,
+    ""
+  ];
+  if (failedCases.length > 0) {
+    lines.push("### Failed / Blocked Cases", "");
+    for (const item of failedCases) {
+      lines.push(
+        `- ${item.caseNo} ${item.title} [${item.status}]` +
+          `${item.bugReportId ? ` bug=${item.bugReportId}` : ""}` +
+          `${item.gapIds.length > 0 ? ` gaps=${item.gapIds.join(",")}` : ""}` +
+          `${item.error ? ` error=${item.error}` : ""}`
+      );
+    }
+    lines.push("");
+  }
+  if (bugReports.length > 0) {
+    lines.push("### BugReports", "");
+    for (const bug of bugReports) {
+      lines.push(`- ${bug.caseNo} ${bug.caseTitle} [${bug.status}] ${bug.actualResult}`);
+    }
+    lines.push("");
+  }
+  if (gaps.length > 0) {
+    lines.push("### Gaps", "");
+    for (const gap of gaps) {
+      lines.push(`- ${gap.id} [${gap.status}] ${gap.reason}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+function suiteRunNextAction(bugReports: BugReport[], gaps: Gap[]) {
+  if (bugReports.some((bug) => bug.status === "open" || bug.status === "retest-failed")) {
+    return "review_bugs";
+  }
+  if (gaps.some((gap) => gap.status === "open")) {
+    return "review_gaps";
+  }
+  return "no_action";
+}
+
 function previewSummary(parsed: ParsedCaseSource, selectedCases: DocumentCase[] = parsed.cases) {
   const selectedStats = summarizeDocumentCases(selectedCases);
   return {
@@ -1228,6 +1353,10 @@ function countBy<T>(items: T[], getKey: (item: T) => string) {
     result[key] = (result[key] ?? 0) + 1;
     return result;
   }, {});
+}
+
+function sumBy<T>(items: T[], getValue: (item: T) => number) {
+  return items.reduce((total, item) => total + getValue(item), 0);
 }
 
 function bugReviewSummary(bugs: Array<{ status: string }>) {
