@@ -20,6 +20,7 @@ import {
   type CommandRunner
 } from "../agent/orchestrator.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
+import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import type {
   AgentRun,
   AuthCheckpoint,
@@ -511,6 +512,17 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     suite.id,
     allSuiteCasesPassed ? "completed" : "failed"
   );
+  const bugs = context.service.listBugReports({ systemId }).filter((bug) =>
+    bugReportIds.includes(bug.id)
+  );
+  const writeBack = await maybeWriteCaseSourceResults({
+    source: parsed.source,
+    cases: parsed.cases,
+    results: caseResults,
+    bugs,
+    requested: optionalBooleanArg(input, "writeBack"),
+    confirmed: optionalBooleanArg(input, "confirmWriteBack")
+  });
 
   return {
     mode: "case-source-suite",
@@ -519,9 +531,8 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     suite,
     suiteRun,
     progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, caseResults),
-    bugs: context.service.listBugReports({ systemId }).filter((bug) =>
-      bugReportIds.includes(bug.id)
-    )
+    bugs,
+    writeBack
   };
 }
 
@@ -1159,6 +1170,32 @@ function suiteRunNextAction(bugReports: BugReport[], gaps: Gap[]) {
     return "review_gaps";
   }
   return "no_action";
+}
+
+async function maybeWriteCaseSourceResults(input: {
+  source: string;
+  cases: DocumentCase[];
+  results: CaseSuiteCaseResult[];
+  bugs: BugReport[];
+  requested: boolean;
+  confirmed: boolean;
+}) {
+  if (!input.requested) {
+    return { status: "skipped", updatedRows: 0 };
+  }
+  if (!input.confirmed) {
+    return {
+      status: "requires_confirmation",
+      updatedRows: 0,
+      reason: "Set confirmWriteBack=true to modify the source .xlsx file."
+    };
+  }
+  return writeXlsxCaseSourceResults({
+    source: input.source,
+    cases: input.cases,
+    results: input.results,
+    bugs: input.bugs
+  });
 }
 
 function previewSummary(parsed: ParsedCaseSource, selectedCases: DocumentCase[] = parsed.cases) {
