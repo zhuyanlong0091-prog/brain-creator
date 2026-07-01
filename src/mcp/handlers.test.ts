@@ -4,6 +4,7 @@ import { join } from "node:path";
 import AdmZip from "adm-zip";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { parseCaseSource } from "../caseSource/parser.js";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
 
 const tempDirs: string[] = [];
@@ -1307,6 +1308,113 @@ describe("handleBrainCreatorTool", () => {
     expect(review.reportMarkdown).toContain("Failed: 1");
     expect(review.reportMarkdown).toContain("TC-001 创建招聘需求");
     expect(review.nextAction).toBe("review_bugs");
+  });
+
+  it("does not write document case results back without explicit write-back confirmation", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => ({ exitCode: 0, stdout: "passed", stderr: "" })
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        writeBack: true,
+        confirm: true
+      })
+    );
+    const reparsed = await parseCaseSource(source);
+
+    expect(result.writeBack).toEqual(
+      expect.objectContaining({ status: "requires_confirmation", updatedRows: 0 })
+    );
+    expect(reparsed.cases.map((item) => item.status)).toEqual(["未执行", "未执行"]);
+    expect(reparsed.cases.map((item) => item.actualResult)).toEqual([undefined, undefined]);
+  });
+
+  it("writes confirmed xlsx document case results back to actual result, status, and BugID columns", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => ({ exitCode: 1, stdout: "", stderr: "expected result was not visible" })
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "未执行", "", ""]]));
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        writeBack: true,
+        confirmWriteBack: true,
+        confirm: true,
+        maxHealAttempts: 0
+      })
+    );
+    const reparsed = await parseCaseSource(source);
+
+    expect(result.writeBack).toEqual(expect.objectContaining({ status: "written", updatedRows: 1 }));
+    expect(reparsed.cases[0]).toEqual(
+      expect.objectContaining({
+        actualResult: expect.stringContaining("expected result was not visible"),
+        status: "失败",
+        bugId: result.bugs[0].id
+      })
+    );
   });
 
   it("resumes an existing case source suite by rerunning only unfinished cases", async () => {
