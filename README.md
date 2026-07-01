@@ -28,6 +28,8 @@ Brain Creator v2 现在采用三层入口：
 - **Agent Facade 入口：** Agent 默认使用 `bc_status`、`bc_configure`、`bc_run`、`bc_review`。
 - **内部工具入口：** 现有细粒度 `bc_*` 工具继续保留，用于兼容、调试、审计和 Facade 内部编排。
 
+新会话中已知 `systemId` 时，Agent 应先调用 `bc_status`。返回值包含完整系统快照，也包含面向用户展示的 `userSummary` 和可直接建议的 `quickCommands`，用于减少后续手动组合多个底层查询工具。
+
 如果用户明确输入 `/bc ...`，Agent 可以调用 `bc_command` 作为最小命令解析入口。当前支持：
 
 - `/bc status`：查看当前系统状态。
@@ -226,6 +228,8 @@ Brain Creator v2 uses three layers:
 - **User entry:** natural language, for example: `Use Brain Creator to execute this test case document: F:\ZT_HR\06-招聘管理\用例\招聘需求及offer流程适配_V2.0_测试用例.xlsx`.
 - **Agent facade entry:** agents should default to `bc_status`, `bc_configure`, `bc_run`, and `bc_review`.
 - **Internal tool entry:** existing fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and facade orchestration.
+
+When a new session already knows `systemId`, the agent should call `bc_status` first. The response includes the full system snapshot plus user-facing `userSummary` and suggested `quickCommands`, reducing the need to compose several low-level list tools.
 
 When the user explicitly types `/bc ...`, the agent can call `bc_command` as the minimal command parser. Supported commands:
 

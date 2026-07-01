@@ -346,6 +346,14 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const bugs = context.service.listBugReports({ systemId });
   const openBugs = bugs.filter((bug) => bug.status === "open" || bug.status === "retest-failed");
   const unfinishedSuites = unfinishedCaseSuites(context, systemId);
+  const nextAction = facadeNextAction({
+    bridgeOk: snapshot.bridge.ok,
+    openBugs: openBugs.length,
+    openGaps: snapshot.openGaps.length,
+    approvedCases: snapshot.cases.byStatus.approved,
+    caseSources: caseSources.length,
+    unfinishedSuites: unfinishedSuites.length
+  });
   return {
     ...snapshot,
     caseSources: {
@@ -368,12 +376,19 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       open: openBugs.length,
       recent: bugs.slice(-5)
     },
-    facadeNextAction: facadeNextAction({
+    facadeNextAction: nextAction,
+    userSummary: statusUserSummary({
+      systemName: snapshot.system.name,
       bridgeOk: snapshot.bridge.ok,
+      authProfiles: snapshot.auth.profiles.length,
       openBugs: openBugs.length,
       openGaps: snapshot.openGaps.length,
-      approvedCases: snapshot.cases.byStatus.approved,
-      caseSources: caseSources.length,
+      unfinishedSuites: unfinishedSuites.length,
+      nextAction
+    }),
+    quickCommands: statusQuickCommands({
+      openBugs: openBugs.length,
+      openGaps: snapshot.openGaps.length,
       unfinishedSuites: unfinishedSuites.length
     })
   };
@@ -1388,6 +1403,92 @@ function facadeNextAction(state: {
     return "run_case_source_suite";
   }
   return "configure_or_generate_plan";
+}
+
+function statusUserSummary(state: {
+  systemName: string;
+  bridgeOk: boolean;
+  authProfiles: number;
+  openBugs: number;
+  openGaps: number;
+  unfinishedSuites: number;
+  nextAction: string;
+}) {
+  return {
+    systemName: state.systemName,
+    readiness: state.bridgeOk ? "ready" : "blocked",
+    nextAction: state.nextAction,
+    nextCommand: nextCommandForAction(state.nextAction),
+    nextStep: nextStepForAction(state.nextAction),
+    counts: {
+      authProfiles: state.authProfiles,
+      openBugs: state.openBugs,
+      openGaps: state.openGaps,
+      unfinishedSuites: state.unfinishedSuites
+    }
+  };
+}
+
+function statusQuickCommands(state: { openBugs: number; openGaps: number; unfinishedSuites: number }) {
+  const commands = [
+    { command: "/bc status", description: "Inspect the current Brain Creator system status." },
+    { command: `/bc run "<path>"`, description: "Preview a test case document suite before execution." }
+  ];
+  if (state.unfinishedSuites > 0) {
+    commands.push({ command: "/bc continue", description: "Resume the latest unfinished suite." });
+  }
+  if (state.openBugs > 0) {
+    commands.push({ command: "/bc bugs", description: "Review open BugReports." });
+    commands.push({ command: "/bc regress bugs", description: "Run regression for open BugReports." });
+  }
+  if (state.openGaps > 0) {
+    commands.push({ command: "/bc gaps", description: "Review open Gaps." });
+  }
+  return commands;
+}
+
+function nextCommandForAction(action: string) {
+  if (action === "configure_bridge") {
+    return "brain-creator-doctor";
+  }
+  if (action === "continue_case_source_suite") {
+    return "/bc continue";
+  }
+  if (action === "review_gaps") {
+    return "/bc gaps";
+  }
+  if (action === "review_bugs") {
+    return "/bc bugs";
+  }
+  if (action === "run_case_source_suite" || action === "configure_or_generate_plan") {
+    return `/bc run "<path>"`;
+  }
+  if (action === "run_approved_case") {
+    return "confirm and run";
+  }
+  return "/bc status";
+}
+
+function nextStepForAction(action: string) {
+  if (action === "configure_bridge") {
+    return "Configure the Brain Creator agent bridge before running generation or suites.";
+  }
+  if (action === "continue_case_source_suite") {
+    return "Continue the latest unfinished test case suite.";
+  }
+  if (action === "review_gaps") {
+    return "Review open gaps before claiming the system is ready.";
+  }
+  if (action === "review_bugs") {
+    return "Review open bugs or run bug regression.";
+  }
+  if (action === "run_approved_case") {
+    return "Run the approved test case chain.";
+  }
+  if (action === "run_case_source_suite") {
+    return "Run or preview an existing test case document suite.";
+  }
+  return "Add a requirement or preview a test case document suite.";
 }
 
 function chainFailureReason(chainRun: ChainRun) {
