@@ -1243,6 +1243,80 @@ describe("handleBrainCreatorTool", () => {
     expect(gaps.toolInput).toEqual(expect.objectContaining({ target: "gap", systemId: system.id }));
   });
 
+  it("resolves facade status and commands by system name when systemId is omitted", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+    await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "CRM Console",
+      environment: "staging",
+      baseUrl: "https://crm.example.test",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://crm.example.test"]
+    });
+    const hrms = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        systemName: "hrms"
+      })
+    );
+    const commandStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        command: "/bc status --system HRMS"
+      })
+    );
+
+    expect(status.system.id).toBe(hrms.id);
+    expect(status.systemResolution).toEqual(
+      expect.objectContaining({ systemId: hrms.id, matchedBy: "name" })
+    );
+    expect(commandStatus.toolInput).toEqual(expect.objectContaining({ systemId: hrms.id }));
+    expect(commandStatus.result.system.id).toBe(hrms.id);
+  });
+
+  it("does not guess when system name resolution is ambiguous", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+    await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "HRMS",
+      environment: "test",
+      baseUrl: "https://hrms-test.example.test",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://hrms-test.example.test"]
+    });
+    await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "HRMS",
+      environment: "staging",
+      baseUrl: "https://hrms-staging.example.test",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://hrms-staging.example.test"]
+    });
+
+    const ambiguous = await handleBrainCreatorTool(context, "bc_command", {
+      command: "/bc status --system HRMS"
+    });
+    const resolved = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        command: "/bc status --system HRMS --env staging"
+      })
+    );
+
+    expect(ambiguous.isError).toBe(true);
+    expect(errorOf(ambiguous)).toContain("Multiple Brain Creator systems match");
+    expect(errorOf(ambiguous)).toContain("staging");
+    expect(resolved.result.system.environment).toBe("staging");
+  });
+
   it("previews a case source suite without executing before confirmation", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
