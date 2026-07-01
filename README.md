@@ -28,6 +28,16 @@ Brain Creator v2 现在采用三层入口：
 - **Agent Facade 入口：** Agent 默认使用 `bc_status`、`bc_configure`、`bc_run`、`bc_review`。
 - **内部工具入口：** 现有细粒度 `bc_*` 工具继续保留，用于兼容、调试、审计和 Facade 内部编排。
 
+如果用户明确输入 `/bc ...`，Agent 可以调用 `bc_command` 作为最小命令解析入口。当前支持：
+
+- `/bc status`：查看当前系统状态。
+- `/bc run "<path>"`：预览测试用例文档套件，不会直接执行。
+- `/bc continue`：继续最近未完成的套件。
+- `/bc regress bugs`：回归当前系统的 open bug。
+- `/bc review suite`：复盘最近的 suite run。
+
+`/bc` 是快捷入口，不是必需入口；自然语言仍然是推荐的用户入口。
+
 执行测试用例文档时，Agent 应先调用 `bc_run mode=case-source-suite confirm=false` 返回预览；只有用户明确确认后，才调用 `confirm=true` 执行 suite run。默认是全量执行；如果用户说“只跑 TC-001/TC-002”“只跑招聘需求模块”或“只跑 P0”，Agent 应映射为 `caseNos`、`modules`、`priorities` 筛选条件。多个筛选条件同时出现时取交集。
 
 当前文档来源支持：
@@ -214,6 +224,16 @@ Brain Creator v2 uses three layers:
 - **User entry:** natural language, for example: `Use Brain Creator to execute this test case document: F:\ZT_HR\06-招聘管理\用例\招聘需求及offer流程适配_V2.0_测试用例.xlsx`.
 - **Agent facade entry:** agents should default to `bc_status`, `bc_configure`, `bc_run`, and `bc_review`.
 - **Internal tool entry:** existing fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and facade orchestration.
+
+When the user explicitly types `/bc ...`, the agent can call `bc_command` as the minimal command parser. Supported commands:
+
+- `/bc status`: inspect the current system status.
+- `/bc run "<path>"`: preview a test case document suite without executing it.
+- `/bc continue`: resume the latest unfinished suite.
+- `/bc regress bugs`: regress open bugs for the current system.
+- `/bc review suite`: review the latest suite run.
+
+`/bc` is a convenience entrypoint, not a required one. Natural language remains the recommended user entrypoint.
 
 For a test case document, the agent should call `bc_run mode=case-source-suite confirm=false` first. Only after explicit user confirmation should it call the same mode with `confirm=true` to execute the suite run. The default is the full document; if the user says "only run TC-001/TC-002", "only run the recruiting module", or "only run P0", map that request to `caseNos`, `modules`, and `priorities`. Multiple filters are intersected.
 

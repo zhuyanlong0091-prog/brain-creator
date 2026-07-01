@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 export type BrainCreatorToolName =
+  | "bc_command"
   | "bc_status"
   | "bc_run"
   | "bc_review"
@@ -69,6 +70,16 @@ type RegisterableMcpServer = {
 };
 
 export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
+  {
+    name: "bc_command",
+    title: "Brain Creator command",
+    description:
+      "Minimal slash-command facade. Parses /bc status, /bc run <path>, /bc continue, and /bc regress bugs into existing facade tools.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      command: z.string()
+    })
+  },
   {
     name: "bc_status",
     title: "Brain Creator status",
