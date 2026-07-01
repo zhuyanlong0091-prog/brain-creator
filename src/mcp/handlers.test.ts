@@ -1058,6 +1058,29 @@ describe("handleBrainCreatorTool", () => {
     expect(status.auth.profiles).toHaveLength(1);
     expect(status.bridge.ok).toBe(true);
     expect(status.facadeNextAction).toBe("configure_or_generate_plan");
+    expect(status.userSummary).toEqual(
+      expect.objectContaining({
+        systemName: "HRMS",
+        readiness: "ready",
+        nextAction: "configure_or_generate_plan",
+        nextCommand: `/bc run "<path>"`,
+        nextStep: "Add a requirement or preview a test case document suite."
+      })
+    );
+    expect(status.userSummary.counts).toEqual(
+      expect.objectContaining({
+        authProfiles: 1,
+        openBugs: 0,
+        openGaps: 0,
+        unfinishedSuites: 0
+      })
+    );
+    expect(status.quickCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ command: "/bc status" }),
+        expect.objectContaining({ command: `/bc run "<path>"` })
+      ])
+    );
     expect(JSON.stringify(status)).not.toContain("secret-token");
   });
 
@@ -1722,6 +1745,10 @@ describe("handleBrainCreatorTool", () => {
     );
 
     expect(status.facadeNextAction).toBe("continue_case_source_suite");
+    expect(status.userSummary.nextCommand).toBe("/bc continue");
+    expect(status.quickCommands).toEqual(
+      expect.arrayContaining([expect.objectContaining({ command: "/bc continue" })])
+    );
     expect(status.suites.unfinished).toEqual([
       expect.objectContaining({
         suiteId: firstRun.suite.id,
