@@ -33,7 +33,7 @@ Use Brain Creator as an agent-native testing business brain through MCP tools. C
       → 主动提示用户当前系统状态，并给出下一步建议
 ```
 
-> **注意：** 结构化命令（如 `/bc status`、`/bc run`）是未来迭代方向，当前版本尚未实现独立的命令解析器。现在通过自然语言描述意图即可触发同样的快速维护行为——说"查看状态"和未来输入 `/bc status` 等效。
+> **注意：** 自然语言仍是推荐入口。若用户明确输入 `/bc ...`，调用 `bc_command` 解析最小快捷命令：`/bc status`、`/bc run "<path>"`、`/bc continue`、`/bc regress bugs`、`/bc review suite`。`bc_command` 会转发到对应 Facade 工具；不要让用户手动编排底层 `bc_*` 工具。
 
 ---
 

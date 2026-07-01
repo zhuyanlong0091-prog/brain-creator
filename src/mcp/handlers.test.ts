@@ -1061,6 +1061,101 @@ describe("handleBrainCreatorTool", () => {
     expect(JSON.stringify(status)).not.toContain("secret-token");
   });
 
+  it("parses minimal /bc commands into facade tool executions", async () => {
+    const workDir = await tempDir();
+    let runCount = 0;
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => {
+        runCount += 1;
+        return runCount === 2
+          ? { exitCode: 1, stdout: "", stderr: "TC-002 failed" }
+          : { exitCode: 0, stdout: "passed", stderr: "" };
+      }
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc status"
+      })
+    );
+    const preview = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: `/bc run "${source}"`
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_run", {
+      mode: "case-source-suite",
+      systemId: system.id,
+      source,
+      confirm: true,
+      maxHealAttempts: 0
+    });
+    const continued = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc continue"
+      })
+    );
+    const regression = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc regress bugs"
+      })
+    );
+
+    expect(status.tool).toBe("bc_status");
+    expect(status.result.system.name).toBe("HRMS");
+    expect(preview.tool).toBe("bc_run");
+    expect(preview.toolInput).toEqual(
+      expect.objectContaining({
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: false
+      })
+    );
+    expect(preview.result.status).toBe("preview");
+    expect(continued.toolInput).toEqual(
+      expect.objectContaining({ mode: "case-source-suite", resume: true, confirm: true })
+    );
+    expect(continued.result.suiteRun.caseResults).toEqual([
+      expect.objectContaining({ caseNo: "TC-002", status: "passed" })
+    ]);
+    expect(regression.tool).toBe("bc_run");
+    expect(regression.toolInput).toEqual(
+      expect.objectContaining({ mode: "bug-regression", systemId: system.id })
+    );
+  });
+
   it("previews a case source suite without executing before confirmation", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({

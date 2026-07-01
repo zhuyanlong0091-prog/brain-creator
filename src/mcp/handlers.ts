@@ -110,6 +110,8 @@ export async function handleBrainCreatorTool(
 ): Promise<CallToolResult> {
   try {
     switch (name) {
+      case "bc_command":
+        return textResult(await commandFacade(context, input));
       case "bc_status":
         return textResult(await statusFacade(context, input));
       case "bc_run":
@@ -315,6 +317,24 @@ export async function handleBrainCreatorTool(
   } catch (error) {
     return envelopeResult(errorEnvelope(error), true);
   }
+}
+
+async function commandFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const command = stringArg(input, "command");
+  const parsed = parseBrainCreatorCommand(command, systemId);
+  const result =
+    parsed.tool === "bc_status"
+      ? await statusFacade(context, parsed.toolInput)
+      : parsed.tool === "bc_review"
+        ? await reviewFacade(context, parsed.toolInput)
+        : await runFacade(context, parsed.toolInput);
+  return {
+    command,
+    tool: parsed.tool,
+    toolInput: parsed.toolInput,
+    result
+  };
 }
 
 async function statusFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
@@ -1606,6 +1626,74 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
     throw new Error(`${key} is invalid`);
   }
   return value as "suite-run" | "case" | "bug" | "gap" | "artifact";
+}
+
+function parseBrainCreatorCommand(command: string, systemId: string): {
+  tool: "bc_status" | "bc_run" | "bc_review";
+  toolInput: Record<string, unknown>;
+} {
+  const tokens = commandTokens(command);
+  if (tokens[0]?.toLowerCase() !== "/bc") {
+    throw new Error("Brain Creator command must start with /bc");
+  }
+  const action = tokens[1]?.toLowerCase();
+  if (action === "status") {
+    return { tool: "bc_status", toolInput: { systemId } };
+  }
+  if (action === "run") {
+    const source = tokens.slice(2).join(" ").trim();
+    if (!source) {
+      throw new Error("/bc run requires a case source path");
+    }
+    return {
+      tool: "bc_run",
+      toolInput: {
+        mode: "case-source-suite",
+        systemId,
+        source,
+        confirm: false
+      }
+    };
+  }
+  if (action === "continue") {
+    return {
+      tool: "bc_run",
+      toolInput: {
+        mode: "case-source-suite",
+        systemId,
+        resume: true,
+        confirm: true
+      }
+    };
+  }
+  if (action === "regress" && tokens[2]?.toLowerCase() === "bugs") {
+    return {
+      tool: "bc_run",
+      toolInput: {
+        mode: "bug-regression",
+        systemId
+      }
+    };
+  }
+  if (action === "review" && tokens[2]?.toLowerCase() === "suite") {
+    return {
+      tool: "bc_review",
+      toolInput: {
+        target: "suite-run",
+        systemId
+      }
+    };
+  }
+  throw new Error(`Unsupported Brain Creator command: ${command}`);
+}
+
+function commandTokens(command: string) {
+  const tokens: string[] = [];
+  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  for (const match of command.matchAll(pattern)) {
+    tokens.push(match[1] ?? match[2] ?? match[3] ?? "");
+  }
+  return tokens;
 }
 
 function configureTargetArg(input: Record<string, unknown>, key: string) {
