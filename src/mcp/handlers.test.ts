@@ -1156,6 +1156,70 @@ describe("handleBrainCreatorTool", () => {
     );
   });
 
+  it("parses /bc run filters and review aliases", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+
+    const filteredPreview = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: `/bc run "${source}" --case TC-001,TC-002 --module 招聘需求 --priority P1`
+      })
+    );
+    const bugs = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc bugs"
+      })
+    );
+    const reviewBugs = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc review bugs"
+      })
+    );
+    const gaps = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc gaps"
+      })
+    );
+
+    expect(filteredPreview.tool).toBe("bc_run");
+    expect(filteredPreview.toolInput).toEqual(
+      expect.objectContaining({
+        mode: "case-source-suite",
+        source,
+        caseNos: ["TC-001", "TC-002"],
+        modules: ["招聘需求"],
+        priorities: ["P1"],
+        confirm: false
+      })
+    );
+    expect(filteredPreview.result.selection.filters).toEqual({
+      caseNos: ["TC-001", "TC-002"],
+      modules: ["招聘需求"],
+      priorities: ["P1"]
+    });
+    expect(bugs.toolInput).toEqual(expect.objectContaining({ target: "bug", systemId: system.id }));
+    expect(reviewBugs.toolInput).toEqual(expect.objectContaining({ target: "bug", systemId: system.id }));
+    expect(gaps.toolInput).toEqual(expect.objectContaining({ target: "gap", systemId: system.id }));
+  });
+
   it("previews a case source suite without executing before confirmation", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({

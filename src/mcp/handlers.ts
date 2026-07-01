@@ -1641,18 +1641,9 @@ function parseBrainCreatorCommand(command: string, systemId: string): {
     return { tool: "bc_status", toolInput: { systemId } };
   }
   if (action === "run") {
-    const source = tokens.slice(2).join(" ").trim();
-    if (!source) {
-      throw new Error("/bc run requires a case source path");
-    }
     return {
       tool: "bc_run",
-      toolInput: {
-        mode: "case-source-suite",
-        systemId,
-        source,
-        confirm: false
-      }
+      toolInput: parseRunCommandInput(tokens.slice(2), systemId)
     };
   }
   if (action === "continue") {
@@ -1675,16 +1666,92 @@ function parseBrainCreatorCommand(command: string, systemId: string): {
       }
     };
   }
-  if (action === "review" && tokens[2]?.toLowerCase() === "suite") {
+  if (action === "bugs") {
+    return { tool: "bc_review", toolInput: { target: "bug", systemId } };
+  }
+  if (action === "gaps") {
+    return { tool: "bc_review", toolInput: { target: "gap", systemId } };
+  }
+  if (action === "review" && tokens[2]) {
+    const target = commandReviewTarget(tokens[2]);
     return {
       tool: "bc_review",
       toolInput: {
-        target: "suite-run",
+        target,
         systemId
       }
     };
   }
   throw new Error(`Unsupported Brain Creator command: ${command}`);
+}
+
+function parseRunCommandInput(tokens: string[], systemId: string) {
+  const flagIndex = tokens.findIndex((token) => token.startsWith("--"));
+  const sourceTokens = flagIndex >= 0 ? tokens.slice(0, flagIndex) : tokens;
+  const source = sourceTokens.join(" ").trim();
+  if (!source) {
+    throw new Error("/bc run requires a case source path");
+  }
+  const toolInput: Record<string, unknown> = {
+    mode: "case-source-suite",
+    systemId,
+    source,
+    confirm: false
+  };
+  if (flagIndex >= 0) {
+    for (let index = flagIndex; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (!token.startsWith("--")) {
+        throw new Error(`Unexpected /bc run argument: ${token}`);
+      }
+      const values: string[] = [];
+      while (tokens[index + 1] && !tokens[index + 1].startsWith("--")) {
+        values.push(tokens[index + 1]);
+        index += 1;
+      }
+      const parsedValues = splitCommandValues(values);
+      if (parsedValues.length === 0) {
+        throw new Error(`${token} requires a value`);
+      }
+      if (token === "--case" || token === "--cases") {
+        toolInput.caseNos = parsedValues;
+      } else if (token === "--module" || token === "--modules") {
+        toolInput.modules = parsedValues;
+      } else if (token === "--priority" || token === "--priorities") {
+        toolInput.priorities = parsedValues;
+      } else {
+        throw new Error(`Unsupported /bc run option: ${token}`);
+      }
+    }
+  }
+  return toolInput;
+}
+
+function splitCommandValues(values: string[]) {
+  return values
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function commandReviewTarget(token: string) {
+  const normalized = token.toLowerCase();
+  if (normalized === "suite" || normalized === "suites" || normalized === "suite-run") {
+    return "suite-run";
+  }
+  if (normalized === "bug" || normalized === "bugs") {
+    return "bug";
+  }
+  if (normalized === "gap" || normalized === "gaps") {
+    return "gap";
+  }
+  if (normalized === "case" || normalized === "cases") {
+    return "case";
+  }
+  if (normalized === "artifact" || normalized === "artifacts") {
+    return "artifact";
+  }
+  throw new Error(`Unsupported /bc review target: ${token}`);
 }
 
 function commandTokens(command: string) {
