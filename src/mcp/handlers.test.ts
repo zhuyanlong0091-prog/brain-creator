@@ -1081,6 +1081,21 @@ describe("handleBrainCreatorTool", () => {
         expect.objectContaining({ command: `/bc run "<path>"` })
       ])
     );
+    expect(status.toolGuidance).toEqual(
+      expect.objectContaining({
+        defaultLayer: "facade",
+        nextFacadeTool: "bc_run",
+        internalToolsPolicy:
+          "Use fine-grained bc_* tools only for debugging, audit, or unsupported facade details."
+      })
+    );
+    expect(status.toolGuidance.primaryTools.map((tool: { name: string }) => tool.name)).toEqual([
+      "bc_command",
+      "bc_status",
+      "bc_configure",
+      "bc_run",
+      "bc_review"
+    ]);
     expect(JSON.stringify(status)).not.toContain("secret-token");
   });
 

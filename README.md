@@ -28,7 +28,7 @@ Brain Creator v2 现在采用三层入口：
 - **Agent Facade 入口：** Agent 默认使用 `bc_status`、`bc_configure`、`bc_run`、`bc_review`。
 - **内部工具入口：** 现有细粒度 `bc_*` 工具继续保留，用于兼容、调试、审计和 Facade 内部编排。
 
-新会话中已知 `systemId` 时，Agent 应先调用 `bc_status`。返回值包含完整系统快照，也包含面向用户展示的 `userSummary` 和可直接建议的 `quickCommands`，用于减少后续手动组合多个底层查询工具。
+新会话中已知 `systemId` 时，Agent 应先调用 `bc_status`。返回值包含完整系统快照，也包含面向用户展示的 `userSummary`、可直接建议的 `quickCommands` 和机器可读的 `toolGuidance`。`toolGuidance` 会明确默认使用 Facade 工具，底层细粒度工具仅用于调试、审计或 Facade 无法覆盖的场景。
 
 如果用户不知道 `systemId`，Facade 工具可接受 `systemName` / `environment`，快捷命令也可使用 `--system HRMS --env test`。当匹配到多个系统时，Brain Creator 会返回候选列表，要求补充环境或系统 ID，不会盲选。
 
@@ -232,7 +232,7 @@ Brain Creator v2 uses three layers:
 - **Agent facade entry:** agents should default to `bc_status`, `bc_configure`, `bc_run`, and `bc_review`.
 - **Internal tool entry:** existing fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and facade orchestration.
 
-When a new session already knows `systemId`, the agent should call `bc_status` first. The response includes the full system snapshot plus user-facing `userSummary` and suggested `quickCommands`, reducing the need to compose several low-level list tools.
+When a new session already knows `systemId`, the agent should call `bc_status` first. The response includes the full system snapshot plus user-facing `userSummary`, suggested `quickCommands`, and machine-readable `toolGuidance`. `toolGuidance` tells the agent to default to facade tools and reserve fine-grained tools for debugging, audit, or unsupported facade details.
 
 If the user does not know `systemId`, facade tools accept `systemName` / `environment`, and slash commands can use `--system HRMS --env test`. When multiple systems match, Brain Creator returns candidates and asks for environment or system ID instead of guessing.
 
