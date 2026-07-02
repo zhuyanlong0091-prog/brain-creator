@@ -1438,6 +1438,16 @@ describe("handleBrainCreatorTool", () => {
         request: "继续 HRMS 未完成套件"
       })
     );
+    const filteredDocument = dataOf(
+      await handleBrainCreatorTool(context, "bc_intent_preview", {
+        request: `执行 HRMS 的这个 Excel: ${source} 只跑模块 招聘需求 优先级 P0 用例 TC-001,TC-002`
+      })
+    );
+    const regressBugs = dataOf(
+      await handleBrainCreatorTool(context, "bc_intent_preview", {
+        request: "回归 HRMS open bug"
+      })
+    );
 
     expect(executeDocument).toEqual(
       expect.objectContaining({
@@ -1464,6 +1474,27 @@ describe("handleBrainCreatorTool", () => {
         resume: true,
         confirm: true
       })
+    );
+    expect(filteredDocument.toolInput).toEqual(
+      expect.objectContaining({
+        mode: "case-source-suite",
+        systemId: hrms.id,
+        source,
+        caseNos: ["TC-001", "TC-002"],
+        modules: ["招聘需求"],
+        priorities: ["P0"],
+        confirm: false
+      })
+    );
+    expect(regressBugs).toEqual(
+      expect.objectContaining({
+        intent: "regress-open-bugs",
+        tool: "bc_run",
+        requiresConfirmation: false
+      })
+    );
+    expect(regressBugs.toolInput).toEqual(
+      expect.objectContaining({ mode: "bug-regression", systemId: hrms.id })
     );
     expect(context.service.listCaseSources(hrms.id)).toEqual([]);
   });

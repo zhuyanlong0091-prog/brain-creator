@@ -93,7 +93,10 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       systemId: z.string().optional(),
       systemName: z.string().optional(),
       environment: z.string().optional(),
-      source: z.string().optional()
+      source: z.string().optional(),
+      caseNos: z.array(z.string()).default([]),
+      modules: z.array(z.string()).default([]),
+      priorities: z.array(z.string()).default([])
     })
   },
   {
