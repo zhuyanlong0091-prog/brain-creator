@@ -49,7 +49,7 @@ Default to the high-level facade tools. The fine-grained `bc_*` tools remain ava
    - `mode: "full-workflow"` when the user says "confirm and run" for a draft case.
    - `mode: "case-source-suite"` when the user supplies an `.xlsx` or `.md` test case document path.
    - `mode: "bug-regression"` when the user asks to retest open bugs.
-4. Use `bc_review` for suite runs, cases, bugs, gaps, and artifacts.
+4. Use `bc_review` for suite runs, cases, bugs, gaps, and artifacts. Prefer `reviewSummary` for concise user-facing replies; use `reportMarkdown` or `regressionMarkdown` only when the user needs a detailed handoff.
 5. Use internal tools such as `bc_generate_plan`, `bc_run_chain`, `bc_list_gaps`, or `bc_read_spec` only when a facade lacks the needed detail or the user is debugging/auditing.
 
 When the user provides a test case document path, first call `bc_run` with `mode: "case-source-suite"` and `confirm: false`. Present the preview summary, risks, bridge status, and sample cases. Only after explicit user confirmation call the same mode with `confirm: true`.
@@ -74,7 +74,7 @@ When the user gives a request such as "Use Brain Creator to connect this CRM and
 4. For a natural-language requirement, generate a draft plan through the existing planning flow, present it to the user, and wait for approval before code generation.
 5. When the user says "approve and run" or "确认并执行", prefer `bc_run mode=full-workflow`.
 6. When the user provides a test case document path, prefer `bc_run mode=case-source-suite confirm=false`; include `caseNos`, `modules`, or `priorities` when the user narrows the scope. After explicit confirmation, call `bc_run mode=case-source-suite confirm=true` with the same filters.
-7. Use `bc_review` to summarize suite runs, cases, bugs, gaps, and artifacts when reporting outcomes or continuing later. For suite-run handoff, include the returned suite `reportMarkdown`; for BugReport handoff, include the returned bug `reportMarkdown`; after bug regression, include `regressionMarkdown` when useful.
+7. Use `bc_review` to summarize suite runs, cases, bugs, gaps, and artifacts when reporting outcomes or continuing later. Read `reviewSummary` first because it normalizes `title`, `status`, `metrics`, `evidencePaths`, `nextAction`, and `userMessage`. For detailed suite-run or BugReport handoff, include `reportMarkdown`; after bug regression, include `regressionMarkdown` when useful.
 8. If an external preflight, auth, bridge, or evidence issue blocks execution, create/report a Gap instead of claiming success.
 
 Users should not need to say `Skill("brain-creator")`. Treat natural-language requests such as "Use Brain Creator to connect this system", "用 Brain Creator 接入这个系统", "generate a reviewed test plan", "run the approved chain", or "show open gaps" as Brain Creator entrypoints. Keep `Skill("brain-creator")` only as an explicit fallback when automatic skill matching fails.

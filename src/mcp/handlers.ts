@@ -880,20 +880,25 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
       status: bugStatusArg(input, "status")
     });
     const regressionCandidates = bugRegressionCandidates(bugs);
+    const summary = bugReviewSummary(bugs);
+    const nextAction = bugs.some((bug) => bug.status === "open" || bug.status === "retest-failed")
+      ? "run_bug_regression"
+      : "no_open_bug";
     return {
-      summary: bugReviewSummary(bugs),
+      summary,
       bugs,
       regressionCandidates: regressionCandidateSummary(regressionCandidates),
       reportMarkdown: bugReviewMarkdown(bugs),
-      nextAction: bugs.some((bug) => bug.status === "open" || bug.status === "retest-failed")
-        ? "run_bug_regression"
-        : "no_open_bug",
+      reviewSummary: bugReviewResultSummary(summary, bugs, nextAction),
+      nextAction,
       systemResolution: resolution
     };
   }
   if (target === "suite-run") {
+    const review = suiteRunReview(context, systemId, optionalStringArg(input, "id"));
     return {
-      ...suiteRunReview(context, systemId, optionalStringArg(input, "id")),
+      ...review,
+      reviewSummary: suiteRunReviewSummary(review),
       systemResolution: resolution
     };
   }
@@ -904,11 +909,13 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
     };
   }
   if (target === "gap") {
+    const gaps = context.service.listGaps({
+      projectId: systemId,
+      status: gapStatusArg(input, "status")
+    });
     return {
-      items: context.service.listGaps({
-        projectId: systemId,
-        status: gapStatusArg(input, "status")
-      }),
+      items: gaps,
+      reviewSummary: gapReviewSummary(gaps),
       systemResolution: resolution
     };
   }
@@ -1324,6 +1331,58 @@ function suiteRunNextAction(bugReports: BugReport[], gaps: Gap[]) {
     return "review_gaps";
   }
   return "no_action";
+}
+
+function suiteRunReviewSummary(review: ReturnType<typeof suiteRunReview>) {
+  return {
+    title: "Suite Run Review",
+    status: review.summary.latestStatus ?? "empty",
+    metrics: review.summary,
+    evidencePaths: uniqueStrings(review.runs.flatMap((run) => run.artifactPaths)),
+    nextAction: review.nextAction,
+    userMessage:
+      `Suite review: ${review.summary.totalCases} cases, ` +
+      `${review.summary.passed} passed, ${review.summary.failed} failed, ` +
+      `${review.summary.blocked} blocked.`
+  };
+}
+
+function bugReviewResultSummary(
+  summary: ReturnType<typeof bugReviewSummary>,
+  bugs: BugReport[],
+  nextAction: string
+) {
+  return {
+    title: "Bug Review",
+    status: summary.open > 0 || summary.retestFailed > 0 ? "action_required" : "completed",
+    metrics: summary,
+    evidencePaths: uniqueStrings(bugs.flatMap((bug) => bug.evidencePaths)),
+    nextAction,
+    userMessage:
+      `Bug review: ${summary.open} open, ${summary.retestFailed} retest failed, ` +
+      `${summary.retestPassed} retest passed.`
+  };
+}
+
+function gapReviewSummary(gaps: Gap[]) {
+  const metrics = {
+    total: gaps.length,
+    open: gaps.filter((gap) => gap.status === "open").length,
+    resolved: gaps.filter((gap) => gap.status === "resolved").length,
+    bySeverity: countBy(gaps, (gap) => gap.severity)
+  };
+  return {
+    title: "Gap Review",
+    status: metrics.open > 0 ? "action_required" : "completed",
+    metrics,
+    evidencePaths: [],
+    nextAction: metrics.open > 0 ? "resolve_gaps" : "no_action",
+    userMessage: `Gap review: ${metrics.open} open, ${metrics.resolved} resolved.`
+  };
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 async function maybeWriteCaseSourceResults(input: {
