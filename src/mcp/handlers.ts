@@ -347,6 +347,7 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
   const resolution = resolveSystemReference(context, { ...input, systemName });
   const source = optionalStringArg(input, "source") ?? extractCaseSource(request);
   const normalizedRequest = request.toLowerCase();
+  const filters = intentCaseSourceFilters(input, request);
 
   if (isContinueRequest(normalizedRequest)) {
     return {
@@ -362,6 +363,21 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemResolution: resolution,
       requiresConfirmation: false,
       userMessage: "Continue the latest unfinished suite for the selected system."
+    };
+  }
+
+  if (isBugRegressionRequest(normalizedRequest)) {
+    return {
+      request,
+      intent: "regress-open-bugs",
+      tool: "bc_run",
+      toolInput: {
+        mode: "bug-regression",
+        systemId: resolution.systemId
+      },
+      systemResolution: resolution,
+      requiresConfirmation: false,
+      userMessage: "Run regression for open BugReports in the selected system."
     };
   }
 
@@ -393,6 +409,7 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
         mode: "case-source-suite",
         systemId: resolution.systemId,
         source,
+        ...filters,
         confirm: false
       },
       systemResolution: resolution,
@@ -1958,11 +1975,72 @@ function extractCaseSource(request: string) {
   return match?.[0]?.trim();
 }
 
+function intentCaseSourceFilters(input: Record<string, unknown>, request: string) {
+  const caseNos = mergeUniqueStrings(stringArrayArg(input, "caseNos"), extractCaseNos(request));
+  const modules = mergeUniqueStrings(stringArrayArg(input, "modules"), extractTaggedValues(request, ["模块", "module"], [
+    "优先级",
+    "priority",
+    "用例",
+    "case"
+  ]));
+  const priorities = mergeUniqueStrings(
+    stringArrayArg(input, "priorities"),
+    extractTaggedValues(request, ["优先级", "priority"], ["模块", "module", "用例", "case"]),
+    extractPriorities(request)
+  );
+  const filters: Record<string, string[]> = {};
+  if (caseNos.length > 0) {
+    filters.caseNos = caseNos;
+  }
+  if (modules.length > 0) {
+    filters.modules = modules;
+  }
+  if (priorities.length > 0) {
+    filters.priorities = priorities;
+  }
+  return filters;
+}
+
+function mergeUniqueStrings(...groups: string[][]) {
+  return [...new Set(groups.flat().map((item) => item.trim()).filter(Boolean))];
+}
+
+function extractCaseNos(request: string) {
+  return request.match(/\bTC[-_\s]?\d+\b/gi)?.map((item) => item.replace(/\s+/, "-")) ?? [];
+}
+
+function extractPriorities(request: string) {
+  return request.match(/\bP[0-3]\b/gi)?.map((item) => item.toUpperCase()) ?? [];
+}
+
+function extractTaggedValues(request: string, labels: string[], stopLabels: string[]) {
+  const labelPattern = labels.map(escapeRegExp).join("|");
+  const stopPattern = stopLabels.map(escapeRegExp).join("|");
+  const match = request.match(
+    new RegExp(`(?:${labelPattern})\\s*[:：]?\\s*(.+?)(?=\\s*(?:${stopPattern})(?:\\s|[:：]|$)|$)`, "i")
+  );
+  return match ? splitCommandValues([match[1]]) : [];
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function isContinueRequest(normalizedRequest: string) {
   return (
     normalizedRequest.includes("continue") ||
     normalizedRequest.includes("resume") ||
     normalizedRequest.includes("继续")
+  );
+}
+
+function isBugRegressionRequest(normalizedRequest: string) {
+  return (
+    normalizedRequest.includes("bug") &&
+    (normalizedRequest.includes("regress") ||
+      normalizedRequest.includes("retest") ||
+      normalizedRequest.includes("回归") ||
+      normalizedRequest.includes("重测"))
   );
 }
 
