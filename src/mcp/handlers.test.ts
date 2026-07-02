@@ -1748,6 +1748,111 @@ describe("handleBrainCreatorTool", () => {
     expect(review.nextAction).toBe("review_bugs");
   });
 
+  it("adds unified review summaries for agent-facing suite, bug, and gap reviews", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => ({ exitCode: 1, stdout: "", stderr: "expected banner missing" })
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture([["TC-009", "Create job request", "Recruiting", "Logged in", "1. Click New", "Created", "", "P0", "", "", ""]]));
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const run = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true,
+        maxHealAttempts: 0
+      })
+    );
+    const gap = dataOf(
+      await handleBrainCreatorTool(context, "bc_report_gap", {
+        projectId: system.id,
+        sourceType: "manual",
+        sourceId: "gap-source",
+        reason: "Need stable selector evidence",
+        severity: "medium",
+        owner: "qa"
+      })
+    );
+
+    const suiteReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "suite-run",
+        systemId: system.id
+      })
+    );
+    const bugReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "bug",
+        systemId: system.id,
+        status: "open"
+      })
+    );
+    const gapReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "gap",
+        systemId: system.id,
+        status: "open"
+      })
+    );
+
+    expect(suiteReview.reviewSummary).toEqual(
+      expect.objectContaining({
+        title: "Suite Run Review",
+        status: "failed",
+        nextAction: "review_bugs",
+        evidencePaths: run.suiteRun.artifactPaths
+      })
+    );
+    expect(suiteReview.reviewSummary.metrics).toEqual(
+      expect.objectContaining({ totalCases: 1, failed: 1, bugReports: 1, gaps: 0 })
+    );
+    expect(suiteReview.reviewSummary.userMessage).toContain("1 failed");
+    expect(bugReview.reviewSummary).toEqual(
+      expect.objectContaining({
+        title: "Bug Review",
+        status: "action_required",
+        nextAction: "run_bug_regression"
+      })
+    );
+    expect(bugReview.reviewSummary.metrics).toEqual(expect.objectContaining({ open: 1 }));
+    expect(bugReview.reviewSummary.evidencePaths).toEqual(run.suiteRun.artifactPaths);
+    expect(gapReview.reviewSummary).toEqual(
+      expect.objectContaining({
+        title: "Gap Review",
+        status: "action_required",
+        nextAction: "resolve_gaps"
+      })
+    );
+    expect(gapReview.reviewSummary.metrics).toEqual(expect.objectContaining({ open: 1 }));
+    expect(gapReview.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: gap.id })]));
+  });
+
   it("does not write document case results back without explicit write-back confirmation", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
