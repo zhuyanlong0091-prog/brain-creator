@@ -491,6 +491,12 @@ describe("handleBrainCreatorTool", () => {
         systemId: system.id
       })
     );
+    const artifactReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "artifact",
+        systemId: system.id
+      })
+    );
 
     expect(result.chainRun.status).toBe("succeeded");
     expect(chainRuns).toEqual([expect.objectContaining({ id: result.chainRun.id })]);
@@ -522,6 +528,16 @@ describe("handleBrainCreatorTool", () => {
         latestTest: expect.objectContaining({ snippet: expect.stringContaining("@playwright/test") })
       })
     );
+    expect(artifactReview.reviewSummary).toEqual(
+      expect.objectContaining({
+        title: "Artifact Review",
+        status: "ready",
+        nextAction: "read_artifacts",
+        evidencePaths: [result.chainRun.specPath, result.chainRun.testPath]
+      })
+    );
+    expect(artifactReview.reviewSummary.metrics).toEqual({ specs: 1, tests: 1 });
+    expect(artifactReview.reviewSummary.userMessage).toContain("1 specs");
     expect(context.service.listChainRuns(system.id)).toEqual([
       expect.objectContaining({ id: result.chainRun.id })
     ]);

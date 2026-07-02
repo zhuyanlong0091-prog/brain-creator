@@ -919,8 +919,10 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
       systemResolution: resolution
     };
   }
+  const overview = await artifactOverview(context, { systemId });
   return {
-    ...(await artifactOverview(context, { systemId })),
+    ...overview,
+    reviewSummary: artifactReviewSummary(overview),
     systemResolution: resolution
   };
 }
@@ -1378,6 +1380,22 @@ function gapReviewSummary(gaps: Gap[]) {
     evidencePaths: [],
     nextAction: metrics.open > 0 ? "resolve_gaps" : "no_action",
     userMessage: `Gap review: ${metrics.open} open, ${metrics.resolved} resolved.`
+  };
+}
+
+function artifactReviewSummary(overview: Awaited<ReturnType<typeof artifactOverview>>) {
+  const evidencePaths = uniqueStrings([
+    overview.latestSpec?.path,
+    overview.latestTest?.path
+  ].filter((path): path is string => Boolean(path)));
+  const hasArtifacts = overview.counts.specs > 0 || overview.counts.tests > 0;
+  return {
+    title: "Artifact Review",
+    status: hasArtifacts ? "ready" : "empty",
+    metrics: overview.counts,
+    evidencePaths,
+    nextAction: hasArtifacts ? "read_artifacts" : "no_artifact",
+    userMessage: `Artifact review: ${overview.counts.specs} specs, ${overview.counts.tests} tests.`
   };
 }
 
