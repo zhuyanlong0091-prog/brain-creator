@@ -102,6 +102,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     inputSchema: z.object({
       mode: z.enum(["approved-case", "full-workflow", "case-source-suite", "bug-regression"]),
       systemId: z.string().optional(),
+      systemName: z.string().optional(),
+      environment: z.string().optional(),
       caseId: z.string().optional(),
       source: z.string().optional(),
       suiteId: z.string().optional(),
@@ -122,7 +124,9 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     description: "Facade review entry for suite runs, cases, bugs, gaps, and artifacts.",
     inputSchema: z.object({
       target: z.enum(["suite-run", "case", "bug", "gap", "artifact"]),
-      systemId: z.string(),
+      systemId: z.string().optional(),
+      systemName: z.string().optional(),
+      environment: z.string().optional(),
       status: z.string().optional(),
       id: z.string().optional()
     })

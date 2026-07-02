@@ -1317,6 +1317,72 @@ describe("handleBrainCreatorTool", () => {
     expect(resolved.result.system.environment).toBe("staging");
   });
 
+  it("resolves bc_run and bc_review by system name", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const crm = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "CRM Console",
+        environment: "staging",
+        baseUrl: "https://crm.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://crm.example.test"]
+      })
+    );
+    const hrms = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    context.service.createTestCase({
+      systemId: crm.id,
+      requirement: "CRM lead flow",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    const hrmsCase = context.service.createTestCase({
+      systemId: hrms.id,
+      requirement: "HRMS offer flow",
+      scenarios: [],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+
+    const preview = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemName: "hrms",
+        source,
+        confirm: false
+      })
+    );
+    const cases = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "case",
+        systemName: "HRMS"
+      })
+    );
+
+    expect(preview.source.systemId).toBe(hrms.id);
+    expect(preview.systemResolution).toEqual(
+      expect.objectContaining({ systemId: hrms.id, matchedBy: "name" })
+    );
+    expect(cases.items).toEqual([expect.objectContaining({ id: hrmsCase.id, systemId: hrms.id })]);
+    expect(cases.systemResolution).toEqual(
+      expect.objectContaining({ systemId: hrms.id, matchedBy: "name" })
+    );
+  });
+
   it("previews a case source suite without executing before confirmation", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
