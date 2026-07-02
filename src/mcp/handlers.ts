@@ -394,7 +394,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       openBugs: openBugs.length,
       openGaps: snapshot.openGaps.length,
       unfinishedSuites: unfinishedSuites.length
-    })
+    }),
+    toolGuidance: statusToolGuidance(nextAction)
   };
 }
 
@@ -1471,6 +1472,40 @@ function statusQuickCommands(state: { openBugs: number; openGaps: number; unfini
     commands.push({ command: "/bc gaps", description: "Review open Gaps." });
   }
   return commands;
+}
+
+function statusToolGuidance(nextAction: string) {
+  return {
+    defaultLayer: "facade",
+    primaryTools: [
+      { name: "bc_command", use: "Parse explicit /bc shortcuts into facade calls." },
+      { name: "bc_status", use: "Restore session state, readiness, next action, and quick commands." },
+      { name: "bc_configure", use: "Configure systems, auth, terms, rules, and checkpoints." },
+      { name: "bc_run", use: "Execute approved cases, document suites, workflows, and bug regression." },
+      { name: "bc_review", use: "Review suites, cases, bugs, gaps, and artifacts." }
+    ],
+    nextFacadeTool: nextFacadeToolForAction(nextAction),
+    internalToolsPolicy:
+      "Use fine-grained bc_* tools only for debugging, audit, or unsupported facade details."
+  };
+}
+
+function nextFacadeToolForAction(action: string) {
+  if (action === "configure_bridge") {
+    return "brain-creator-doctor";
+  }
+  if (action === "review_gaps" || action === "review_bugs") {
+    return "bc_review";
+  }
+  if (
+    action === "continue_case_source_suite" ||
+    action === "run_approved_case" ||
+    action === "run_case_source_suite" ||
+    action === "configure_or_generate_plan"
+  ) {
+    return "bc_run";
+  }
+  return "bc_status";
 }
 
 function nextCommandForAction(action: string) {
