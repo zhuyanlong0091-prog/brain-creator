@@ -30,7 +30,7 @@ Brain Creator v2 现在采用三层入口：
 
 新会话中已知 `systemId` 时，Agent 应先调用 `bc_status`。返回值包含完整系统快照，也包含面向用户展示的 `userSummary` 和可直接建议的 `quickCommands`，用于减少后续手动组合多个底层查询工具。
 
-如果用户不知道 `systemId`，可以提供 `systemName` / `environment`，或在快捷命令中使用 `--system HRMS --env test`。当匹配到多个系统时，Brain Creator 会返回候选列表，要求补充环境或系统 ID，不会盲选。
+如果用户不知道 `systemId`，Facade 工具可接受 `systemName` / `environment`，快捷命令也可使用 `--system HRMS --env test`。当匹配到多个系统时，Brain Creator 会返回候选列表，要求补充环境或系统 ID，不会盲选。
 
 如果用户明确输入 `/bc ...`，Agent 可以调用 `bc_command` 作为最小命令解析入口。当前支持：
 
@@ -234,7 +234,7 @@ Brain Creator v2 uses three layers:
 
 When a new session already knows `systemId`, the agent should call `bc_status` first. The response includes the full system snapshot plus user-facing `userSummary` and suggested `quickCommands`, reducing the need to compose several low-level list tools.
 
-If the user does not know `systemId`, the agent can pass `systemName` / `environment`, or use `--system HRMS --env test` in slash commands. When multiple systems match, Brain Creator returns candidates and asks for environment or system ID instead of guessing.
+If the user does not know `systemId`, facade tools accept `systemName` / `environment`, and slash commands can use `--system HRMS --env test`. When multiple systems match, Brain Creator returns candidates and asks for environment or system ID instead of guessing.
 
 When the user explicitly types `/bc ...`, the agent can call `bc_command` as the minimal command parser. Supported commands:
 

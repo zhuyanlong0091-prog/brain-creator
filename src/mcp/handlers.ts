@@ -406,10 +406,18 @@ async function runFacade(context: BrainCreatorMcpContext, input: Record<string, 
   if (mode === "full-workflow") {
     return fullWorkflow(context, { ...input, caseId: stringArg(input, "caseId") });
   }
+  const resolution = resolveSystemReference(context, input);
+  const inputWithSystem = { ...input, systemId: resolution.systemId };
   if (mode === "case-source-suite") {
-    return runCaseSourceSuite(context, input);
+    return {
+      ...(await runCaseSourceSuite(context, inputWithSystem)),
+      systemResolution: resolution
+    };
   }
-  return runBugRegression(context, input);
+  return {
+    ...(await runBugRegression(context, inputWithSystem)),
+    systemResolution: resolution
+  };
 }
 
 async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
@@ -770,7 +778,8 @@ async function runBugRegression(context: BrainCreatorMcpContext, input: Record<s
 }
 
 async function reviewFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
-  const systemId = stringArg(input, "systemId");
+  const resolution = resolveSystemReference(context, input);
+  const systemId = resolution.systemId;
   const target = reviewTargetArg(input, "target");
   if (target === "bug") {
     const bugs = context.service.listBugReports({
@@ -785,22 +794,35 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
       reportMarkdown: bugReviewMarkdown(bugs),
       nextAction: bugs.some((bug) => bug.status === "open" || bug.status === "retest-failed")
         ? "run_bug_regression"
-        : "no_open_bug"
+        : "no_open_bug",
+      systemResolution: resolution
     };
   }
   if (target === "suite-run") {
-    return suiteRunReview(context, systemId, optionalStringArg(input, "id"));
+    return {
+      ...suiteRunReview(context, systemId, optionalStringArg(input, "id")),
+      systemResolution: resolution
+    };
   }
   if (target === "case") {
-    return context.service.listTestCases(systemId);
+    return {
+      items: context.service.listTestCases(systemId),
+      systemResolution: resolution
+    };
   }
   if (target === "gap") {
-    return context.service.listGaps({
-      projectId: systemId,
-      status: gapStatusArg(input, "status")
-    });
+    return {
+      items: context.service.listGaps({
+        projectId: systemId,
+        status: gapStatusArg(input, "status")
+      }),
+      systemResolution: resolution
+    };
   }
-  return artifactOverview(context, { systemId });
+  return {
+    ...(await artifactOverview(context, { systemId })),
+    systemResolution: resolution
+  };
 }
 
 function configureFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
