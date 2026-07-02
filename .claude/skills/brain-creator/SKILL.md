@@ -41,6 +41,7 @@ Use Brain Creator as an agent-native testing business brain through MCP tools. C
 
 Default to the high-level facade tools. The fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and fallback, but the user should not have to orchestrate them. `bc_status` returns `toolGuidance`; follow it before reaching for internal tools.
 
+0. For ambiguous natural-language operational requests, use `bc_intent_preview` to map the user wording to a suggested facade call. It must not execute; present the preview and keep the approval boundary for document suites.
 1. Use `bc_status` as the first call in a new session. Prefer `systemId` when known; otherwise pass `systemName` and, when needed, `environment`. The Facade tools `bc_status`, `bc_run`, and `bc_review` all support this system resolution. If multiple systems match, ask the user to choose instead of guessing.
 2. Use `bc_configure` for high-level setup of systems, auth, terms, rules, and auth checkpoints.
 3. Use `bc_run` for execution:

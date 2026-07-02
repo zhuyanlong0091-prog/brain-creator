@@ -10,5 +10,6 @@ playwright-report/
 .playwright-mcp/
 /specs/
 /tests/seed-*.spec.ts
+/tests/generated/case_*.spec.ts
 test_execution_agent_arch.png
 dummy.md

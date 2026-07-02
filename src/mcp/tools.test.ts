@@ -5,6 +5,7 @@ describe("BRAIN_CREATOR_TOOLS", () => {
   it("defines the core Brain Creator v2 MCP tools", () => {
     expect(BRAIN_CREATOR_TOOLS.map((tool) => tool.name)).toEqual([
       "bc_command",
+      "bc_intent_preview",
       "bc_status",
       "bc_run",
       "bc_review",

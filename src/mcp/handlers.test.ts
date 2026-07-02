@@ -1398,6 +1398,76 @@ describe("handleBrainCreatorTool", () => {
     );
   });
 
+  it("previews natural-language entrypoints as facade calls without executing", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "CRM Console",
+      environment: "staging",
+      baseUrl: "https://crm.example.test",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://crm.example.test"]
+    });
+    const hrms = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+
+    const executeDocument = dataOf(
+      await handleBrainCreatorTool(context, "bc_intent_preview", {
+        request: `执行 HRMS 的这个 Excel: ${source}`
+      })
+    );
+    const reviewBugs = dataOf(
+      await handleBrainCreatorTool(context, "bc_intent_preview", {
+        request: "查看 HRMS open bug"
+      })
+    );
+    const continueSuite = dataOf(
+      await handleBrainCreatorTool(context, "bc_intent_preview", {
+        request: "继续 HRMS 未完成套件"
+      })
+    );
+
+    expect(executeDocument).toEqual(
+      expect.objectContaining({
+        intent: "case-source-suite-preview",
+        tool: "bc_run",
+        requiresConfirmation: true
+      })
+    );
+    expect(executeDocument.toolInput).toEqual(
+      expect.objectContaining({
+        mode: "case-source-suite",
+        systemId: hrms.id,
+        source,
+        confirm: false
+      })
+    );
+    expect(reviewBugs.toolInput).toEqual(
+      expect.objectContaining({ target: "bug", systemId: hrms.id, status: "open" })
+    );
+    expect(continueSuite.toolInput).toEqual(
+      expect.objectContaining({
+        mode: "case-source-suite",
+        systemId: hrms.id,
+        resume: true,
+        confirm: true
+      })
+    );
+    expect(context.service.listCaseSources(hrms.id)).toEqual([]);
+  });
+
   it("previews a case source suite without executing before confirmation", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({

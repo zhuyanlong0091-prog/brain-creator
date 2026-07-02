@@ -3,6 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 export type BrainCreatorToolName =
   | "bc_command"
+  | "bc_intent_preview"
   | "bc_status"
   | "bc_run"
   | "bc_review"
@@ -80,6 +81,19 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       systemName: z.string().optional(),
       environment: z.string().optional(),
       command: z.string()
+    })
+  },
+  {
+    name: "bc_intent_preview",
+    title: "Brain Creator intent preview",
+    description:
+      "Preview how a natural-language Brain Creator request maps to a facade tool call. Does not execute the suggested tool.",
+    inputSchema: z.object({
+      request: z.string(),
+      systemId: z.string().optional(),
+      systemName: z.string().optional(),
+      environment: z.string().optional(),
+      source: z.string().optional()
     })
   },
   {

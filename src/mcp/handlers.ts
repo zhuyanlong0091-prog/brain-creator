@@ -112,6 +112,8 @@ export async function handleBrainCreatorTool(
     switch (name) {
       case "bc_command":
         return textResult(await commandFacade(context, input));
+      case "bc_intent_preview":
+        return textResult(intentPreviewFacade(context, input));
       case "bc_status":
         return textResult(await statusFacade(context, input));
       case "bc_run":
@@ -336,6 +338,79 @@ async function commandFacade(context: BrainCreatorMcpContext, input: Record<stri
     toolInput: parsed.toolInput,
     systemResolution: resolution,
     result
+  };
+}
+
+function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const request = stringArg(input, "request");
+  const systemName = optionalStringArg(input, "systemName") ?? inferSystemName(context, request);
+  const resolution = resolveSystemReference(context, { ...input, systemName });
+  const source = optionalStringArg(input, "source") ?? extractCaseSource(request);
+  const normalizedRequest = request.toLowerCase();
+
+  if (isContinueRequest(normalizedRequest)) {
+    return {
+      request,
+      intent: "continue-suite",
+      tool: "bc_run",
+      toolInput: {
+        mode: "case-source-suite",
+        systemId: resolution.systemId,
+        resume: true,
+        confirm: true
+      },
+      systemResolution: resolution,
+      requiresConfirmation: false,
+      userMessage: "Continue the latest unfinished suite for the selected system."
+    };
+  }
+
+  if (isBugReviewRequest(normalizedRequest)) {
+    return {
+      request,
+      intent: "review-open-bugs",
+      tool: "bc_review",
+      toolInput: {
+        target: "bug",
+        systemId: resolution.systemId,
+        status: "open"
+      },
+      systemResolution: resolution,
+      requiresConfirmation: false,
+      userMessage: "Review open BugReports for the selected system."
+    };
+  }
+
+  if (isDocumentSuiteRequest(normalizedRequest, source)) {
+    if (!source) {
+      throw new Error("A test case document path is required for a document suite request.");
+    }
+    return {
+      request,
+      intent: "case-source-suite-preview",
+      tool: "bc_run",
+      toolInput: {
+        mode: "case-source-suite",
+        systemId: resolution.systemId,
+        source,
+        confirm: false
+      },
+      systemResolution: resolution,
+      requiresConfirmation: true,
+      userMessage: "Preview the document suite first; ask the user to confirm before executing."
+    };
+  }
+
+  return {
+    request,
+    intent: "status",
+    tool: "bc_status",
+    toolInput: {
+      systemId: resolution.systemId
+    },
+    systemResolution: resolution,
+    requiresConfirmation: false,
+    userMessage: "Inspect the selected system status before choosing the next facade action."
   };
 }
 
@@ -1864,6 +1939,45 @@ function systemCandidatesText(systems: Array<{ id: string; name: string; environ
 
 function normalizeSystemLookup(value: string) {
   return value.trim().toLowerCase();
+}
+
+function inferSystemName(context: BrainCreatorMcpContext, request: string) {
+  const normalizedRequest = normalizeSystemLookup(request);
+  const matches = context.service
+    .listSystemProfiles()
+    .filter((system) => system.status !== "cancelled")
+    .filter((system) => normalizedRequest.includes(normalizeSystemLookup(system.name)));
+  if (matches.length === 1) {
+    return matches[0].name;
+  }
+  return undefined;
+}
+
+function extractCaseSource(request: string) {
+  const match = request.match(/(?:[A-Za-z]:[\\/][^\r\n]*?\.(?:xlsx|md)|[./\\][^\r\n]*?\.(?:xlsx|md))/i);
+  return match?.[0]?.trim();
+}
+
+function isContinueRequest(normalizedRequest: string) {
+  return (
+    normalizedRequest.includes("continue") ||
+    normalizedRequest.includes("resume") ||
+    normalizedRequest.includes("继续")
+  );
+}
+
+function isBugReviewRequest(normalizedRequest: string) {
+  return normalizedRequest.includes("bug") && !normalizedRequest.includes("regress");
+}
+
+function isDocumentSuiteRequest(normalizedRequest: string, source?: string) {
+  return Boolean(
+    source ||
+      normalizedRequest.includes("excel") ||
+      normalizedRequest.includes(".xlsx") ||
+      normalizedRequest.includes(".md") ||
+      normalizedRequest.includes("测试用例文档")
+  );
 }
 
 function parseBrainCreatorCommand(command: string, systemId: string): {
