@@ -30,9 +30,12 @@ Brain Creator v2 现在采用三层入口：
 
 新会话中已知 `systemId` 时，Agent 应先调用 `bc_status`。返回值包含完整系统快照，也包含面向用户展示的 `userSummary` 和可直接建议的 `quickCommands`，用于减少后续手动组合多个底层查询工具。
 
+如果用户不知道 `systemId`，可以提供 `systemName` / `environment`，或在快捷命令中使用 `--system HRMS --env test`。当匹配到多个系统时，Brain Creator 会返回候选列表，要求补充环境或系统 ID，不会盲选。
+
 如果用户明确输入 `/bc ...`，Agent 可以调用 `bc_command` 作为最小命令解析入口。当前支持：
 
 - `/bc status`：查看当前系统状态。
+- `/bc status --system HRMS --env test`：按系统名和环境查看状态。
 - `/bc run "<path>"`：预览测试用例文档套件，不会直接执行；可追加 `--case TC-001,TC-002`、`--module 招聘需求`、`--priority P1`。
 - `/bc continue`：继续最近未完成的套件。
 - `/bc regress bugs`：回归当前系统的 open bug。
@@ -231,9 +234,12 @@ Brain Creator v2 uses three layers:
 
 When a new session already knows `systemId`, the agent should call `bc_status` first. The response includes the full system snapshot plus user-facing `userSummary` and suggested `quickCommands`, reducing the need to compose several low-level list tools.
 
+If the user does not know `systemId`, the agent can pass `systemName` / `environment`, or use `--system HRMS --env test` in slash commands. When multiple systems match, Brain Creator returns candidates and asks for environment or system ID instead of guessing.
+
 When the user explicitly types `/bc ...`, the agent can call `bc_command` as the minimal command parser. Supported commands:
 
 - `/bc status`: inspect the current system status.
+- `/bc status --system HRMS --env test`: inspect status by system name and environment.
 - `/bc run "<path>"`: preview a test case document suite without executing it; optional filters include `--case TC-001,TC-002`, `--module Recruiting`, and `--priority P1`.
 - `/bc continue`: resume the latest unfinished suite.
 - `/bc regress bugs`: regress open bugs for the current system.

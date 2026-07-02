@@ -320,9 +320,10 @@ export async function handleBrainCreatorTool(
 }
 
 async function commandFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
-  const systemId = stringArg(input, "systemId");
   const command = stringArg(input, "command");
-  const parsed = parseBrainCreatorCommand(command, systemId);
+  const commandInput = commandWithSystemReference(command);
+  const resolution = resolveSystemReference(context, input, commandInput.systemReference);
+  const parsed = parseBrainCreatorCommandTokens(commandInput.tokens, resolution.systemId);
   const result =
     parsed.tool === "bc_status"
       ? await statusFacade(context, parsed.toolInput)
@@ -333,12 +334,14 @@ async function commandFacade(context: BrainCreatorMcpContext, input: Record<stri
     command,
     tool: parsed.tool,
     toolInput: parsed.toolInput,
+    systemResolution: resolution,
     result
   };
 }
 
 async function statusFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
-  const systemId = stringArg(input, "systemId");
+  const resolution = resolveSystemReference(context, input);
+  const systemId = resolution.systemId;
   const snapshot = await sessionResume(context, { systemId });
   const caseSources = context.service.listCaseSources(systemId);
   const suites = context.service.listCaseSuites(systemId);
@@ -356,6 +359,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   });
   return {
     ...snapshot,
+    systemResolution: resolution,
     caseSources: {
       total: caseSources.length,
       recent: caseSources.slice(-5)
@@ -1729,11 +1733,93 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
   return value as "suite-run" | "case" | "bug" | "gap" | "artifact";
 }
 
+function resolveSystemReference(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>,
+  commandReference: { systemName?: string; environment?: string } = {}
+) {
+  const systemId = optionalStringArg(input, "systemId");
+  const systemName = optionalStringArg(input, "systemName") ?? commandReference.systemName;
+  const environment = optionalStringArg(input, "environment") ?? commandReference.environment;
+  const systems = context.service.listSystemProfiles().filter((system) => system.status !== "cancelled");
+
+  if (systemId) {
+    const system = systems.find((item) => item.id === systemId);
+    if (!system) {
+      throw new Error(`Brain Creator system not found: ${systemId}`);
+    }
+    return {
+      systemId: system.id,
+      systemName: system.name,
+      environment: system.environment,
+      matchedBy: "id"
+    };
+  }
+
+  if (!systemName) {
+    if (systems.length === 1) {
+      const [system] = systems;
+      return {
+        systemId: system.id,
+        systemName: system.name,
+        environment: system.environment,
+        matchedBy: "single-active-system"
+      };
+    }
+    throw new Error(
+      `systemId or systemName is required. Available systems: ${systemCandidatesText(systems)}`
+    );
+  }
+
+  const normalizedName = normalizeSystemLookup(systemName);
+  const normalizedEnvironment = environment ? normalizeSystemLookup(environment) : undefined;
+  const nameMatches = systems.filter((system) =>
+    normalizeSystemLookup(system.name).includes(normalizedName)
+  );
+  const matches = normalizedEnvironment
+    ? nameMatches.filter((system) => normalizeSystemLookup(system.environment) === normalizedEnvironment)
+    : nameMatches;
+
+  if (matches.length === 1) {
+    const [system] = matches;
+    return {
+      systemId: system.id,
+      systemName: system.name,
+      environment: system.environment,
+      matchedBy: normalizedEnvironment ? "name-environment" : "name"
+    };
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Multiple Brain Creator systems match "${systemName}". Add environment or systemId. Candidates: ${systemCandidatesText(matches)}`
+    );
+  }
+  throw new Error(
+    `No Brain Creator system matches "${systemName}". Available systems: ${systemCandidatesText(systems)}`
+  );
+}
+
+function systemCandidatesText(systems: Array<{ id: string; name: string; environment: string }>) {
+  return systems.length === 0
+    ? "none"
+    : systems.map((system) => `${system.name} (${system.environment}, ${system.id})`).join("; ");
+}
+
+function normalizeSystemLookup(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function parseBrainCreatorCommand(command: string, systemId: string): {
   tool: "bc_status" | "bc_run" | "bc_review";
   toolInput: Record<string, unknown>;
 } {
-  const tokens = commandTokens(command);
+  return parseBrainCreatorCommandTokens(commandTokens(command), systemId);
+}
+
+function parseBrainCreatorCommandTokens(tokens: string[], systemId: string): {
+  tool: "bc_status" | "bc_run" | "bc_review";
+  toolInput: Record<string, unknown>;
+} {
   if (tokens[0]?.toLowerCase() !== "/bc") {
     throw new Error("Brain Creator command must start with /bc");
   }
@@ -1783,7 +1869,37 @@ function parseBrainCreatorCommand(command: string, systemId: string): {
       }
     };
   }
-  throw new Error(`Unsupported Brain Creator command: ${command}`);
+  throw new Error(`Unsupported Brain Creator command: ${tokens.join(" ")}`);
+}
+
+function commandWithSystemReference(command: string) {
+  const tokens = commandTokens(command);
+  const stripped: string[] = [];
+  const systemReference: { systemName?: string; environment?: string } = {};
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const normalized = token.toLowerCase();
+    if (normalized === "--system" || normalized === "--system-name") {
+      const value = tokens[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error(`${token} requires a value`);
+      }
+      systemReference.systemName = value;
+      index += 1;
+      continue;
+    }
+    if (normalized === "--env" || normalized === "--environment") {
+      const value = tokens[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error(`${token} requires a value`);
+      }
+      systemReference.environment = value;
+      index += 1;
+      continue;
+    }
+    stripped.push(token);
+  }
+  return { tokens: stripped, systemReference };
 }
 
 function parseRunCommandInput(tokens: string[], systemId: string) {

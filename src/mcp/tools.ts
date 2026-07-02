@@ -74,9 +74,11 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_command",
     title: "Brain Creator command",
     description:
-      "Minimal slash-command facade. Parses /bc status, /bc run <path> with optional --case/--module/--priority filters, /bc continue, /bc bugs, /bc gaps, and /bc regress bugs into existing facade tools.",
+      "Minimal slash-command facade. Parses /bc status, /bc run <path> with optional --system/--env and --case/--module/--priority filters, /bc continue, /bc bugs, /bc gaps, and /bc regress bugs into existing facade tools.",
     inputSchema: z.object({
-      systemId: z.string(),
+      systemId: z.string().optional(),
+      systemName: z.string().optional(),
+      environment: z.string().optional(),
       command: z.string()
     })
   },
@@ -84,9 +86,11 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_status",
     title: "Brain Creator status",
     description:
-      "Facade status entry for agents. Returns system, auth, bridge, cases, suites, bugs, gaps, artifacts, and next action.",
+      "Facade status entry for agents. Resolves by systemId or systemName and returns system, auth, bridge, cases, suites, bugs, gaps, artifacts, user summary, quick commands, and next action.",
     inputSchema: z.object({
-      systemId: z.string(),
+      systemId: z.string().optional(),
+      systemName: z.string().optional(),
+      environment: z.string().optional(),
       include: z.array(z.string()).default([])
     })
   },
