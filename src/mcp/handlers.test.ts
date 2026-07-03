@@ -1464,6 +1464,11 @@ describe("handleBrainCreatorTool", () => {
         request: "回归 HRMS open bug"
       })
     );
+    const filteredBugRegression = dataOf(
+      await handleBrainCreatorTool(context, "bc_intent_preview", {
+        request: "回归 HRMS Recruiting 模块 P0 bug bug_manual123"
+      })
+    );
 
     expect(executeDocument).toEqual(
       expect.objectContaining({
@@ -1511,6 +1516,15 @@ describe("handleBrainCreatorTool", () => {
     );
     expect(regressBugs.toolInput).toEqual(
       expect.objectContaining({ mode: "bug-regression", systemId: hrms.id })
+    );
+    expect(filteredBugRegression.toolInput).toEqual(
+      expect.objectContaining({
+        mode: "bug-regression",
+        systemId: hrms.id,
+        bugIds: ["bug_manual123"],
+        modules: ["Recruiting"],
+        priorities: ["P0"]
+      })
     );
     expect(context.service.listCaseSources(hrms.id)).toEqual([]);
   });
@@ -2333,6 +2347,105 @@ describe("handleBrainCreatorTool", () => {
         expect.objectContaining({ caseNo: "TC-002", status: "retest-failed" })
       ])
     );
+  });
+
+  it("filters bug regression candidates by id, module, and priority", async () => {
+    const workDir = await tempDir();
+    let regressionRun = false;
+    let retestCount = 0;
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (agent === "generator" && outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => {
+        if (!regressionRun) {
+          return { exitCode: 1, stdout: "", stderr: "initial suite failed" };
+        }
+        retestCount += 1;
+        return { exitCode: 0, stdout: "fixed", stderr: "" };
+      }
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(
+      source,
+      createXlsxFixture([
+        ["TC-101", "Create job request", "Recruiting", "Logged in", "1. Click New", "Created", "", "P0", "", "", ""],
+        ["TC-102", "Send offer", "Offer", "Candidate ready", "1. Click Offer", "Offer sent", "", "P1", "", "", ""]
+      ])
+    );
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    await handleBrainCreatorTool(context, "bc_run", {
+      mode: "case-source-suite",
+      systemId: system.id,
+      source,
+      confirm: true,
+      maxHealAttempts: 0
+    });
+    const beforeReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "bug",
+        systemId: system.id,
+        status: "open"
+      })
+    );
+    const recruitingBug = beforeReview.bugs.find((bug: { module: string }) => bug.module === "Recruiting");
+
+    regressionRun = true;
+    const regression = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "bug-regression",
+        systemId: system.id,
+        bugIds: beforeReview.bugs.map((bug: { id: string }) => bug.id),
+        modules: ["Recruiting"],
+        priorities: ["P0"],
+        maxHealAttempts: 0
+      })
+    );
+    const afterReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "bug",
+        systemId: system.id
+      })
+    );
+
+    expect(beforeReview.bugs).toEqual([
+      expect.objectContaining({ caseNo: "TC-101", module: "Recruiting", priority: "P0" }),
+      expect.objectContaining({ caseNo: "TC-102", module: "Offer", priority: "P1" })
+    ]);
+    expect(regression.summary).toEqual(
+      expect.objectContaining({ candidates: 1, attempted: 1, retestPassed: 1 })
+    );
+    expect(regression.bugs).toEqual([
+      expect.objectContaining({ id: recruitingBug.id, caseNo: "TC-101", status: "retest-passed" })
+    ]);
+    expect(afterReview.bugs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ caseNo: "TC-101", status: "retest-passed" }),
+        expect.objectContaining({ caseNo: "TC-102", status: "open" })
+      ])
+    );
+    expect(retestCount).toBe(1);
   });
 
   it("rejects bc_full_workflow for non-draft cases", async () => {
