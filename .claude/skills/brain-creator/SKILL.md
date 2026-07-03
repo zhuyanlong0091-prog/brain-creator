@@ -33,7 +33,7 @@ Use Brain Creator as an agent-native testing business brain through MCP tools. C
       → 主动提示用户当前系统状态，并给出下一步建议
 ```
 
-> **注意：** 自然语言仍是推荐入口。若用户明确输入 `/bc ...`，调用 `bc_command` 解析最小快捷命令：`/bc status`、`/bc run "<path>"`（可带 `--case`、`--module`、`--priority`）、`/bc continue`、`/bc bugs`、`/bc gaps`、`/bc regress bugs`、`/bc review suite`。`bc_command` 会转发到对应 Facade 工具；不要让用户手动编排底层 `bc_*` 工具。
+> **注意：** 自然语言仍是推荐入口。若用户明确输入 `/bc ...`，调用 `bc_command` 解析最小快捷命令：`/bc status`、`/bc run "<path>"`（可带 `--case`、`--module`、`--priority`）、`/bc continue`、`/bc bugs`、`/bc gaps`、`/bc regress bugs`（可带 `--bug`、`--module`、`--priority`）、`/bc review suite`。`bc_command` 会转发到对应 Facade 工具；不要让用户手动编排底层 `bc_*` 工具。
 
 ---
 
@@ -60,7 +60,7 @@ Document source details:
 - If the user asks to run only specific cases, modules, or priorities, pass `caseNos`, `modules`, and `priorities` to `bc_run mode="case-source-suite"`. These filters are intersected. Preview with the same filters before asking for confirmation.
 - Do not write results back to a source document by default. Only when the user explicitly asks to update Excel/source results, pass both `writeBack: true` and `confirmWriteBack: true`. Write-back currently supports local `.xlsx` only, updates actual result, case status, and BugID, and returns `backupPath` for the pre-write backup.
 - To continue an interrupted or failed suite, first call `bc_status` and inspect `suites.unfinished`. Prefer `bc_run mode="case-source-suite"` with `resume: true` and `confirm: true`; Brain Creator reuses the latest unfinished suite's `source` and `suiteId` and reruns only cases that have not passed. Use explicit `source` + `suiteId` only when the user selects a specific older suite.
-- For bugs, call `bc_review target="bug"` to get a status summary, regression candidates, BugReport list, and `reportMarkdown`. When the user asks to regress open bugs, call `bc_run mode="bug-regression"`; include the returned `regressionMarkdown` in the handoff when useful.
+- For bugs, call `bc_review target="bug"` to get a status summary, regression candidates, BugReport list, and `reportMarkdown`. When the user asks to regress open bugs, call `bc_run mode="bug-regression"`; pass `bugIds`, `modules`, and `priorities` when the user narrows the regression scope. These filters are intersected. Include the returned `regressionMarkdown` in the handoff when useful.
 
 ---
 

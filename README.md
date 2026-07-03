@@ -40,7 +40,7 @@ Brain Creator v2 现在采用三层入口：
 - `/bc status --system HRMS --env test`：按系统名和环境查看状态。
 - `/bc run "<path>"`：预览测试用例文档套件，不会直接执行；可追加 `--case TC-001,TC-002`、`--module 招聘需求`、`--priority P1`。
 - `/bc continue`：继续最近未完成的套件。
-- `/bc regress bugs`：回归当前系统的 open bug。
+- `/bc regress bugs`：回归当前系统的 open bug；可追加 `--bug bug_xxx`、`--module Recruiting`、`--priority P0`。
 - `/bc bugs` 或 `/bc review bugs`：查看 BugReport。
 - `/bc gaps`：查看 Gap。
 - `/bc review suite`：复盘最近的 suite run。
@@ -55,7 +55,7 @@ Brain Creator v2 现在采用三层入口：
 - 包含标准测试用例表头的 `.md` 文件。
 - `obsidian:<path>`、`claudian:<path>` 和 `[[path]]` 引用形式；Brain Creator 会读取引用文件，但资产中保留原始 source 引用。
 
-如果 suite run 中途失败，后续可直接说“继续上次未完成套件”。Agent 应先调用 `bc_status` 查看 `suites.unfinished`，再调用 `bc_run mode=case-source-suite resume=true confirm=true`；Brain Creator 会复用最近未完成 suite 的 source 和 `suiteId`，只重跑尚未通过的用例。Suite / Bug / Gap / Artifact 复盘请使用 `bc_review`，结果会包含统一的 `reviewSummary`，其中有 `title`、`status`、`metrics`、`evidencePaths`、`nextAction` 和 `userMessage`，适合 Agent 优先用来回复用户。需要详细报告时，Suite 和 Bug 复盘仍可使用 `reportMarkdown`；当用户说“回归所有 open bug”时，Agent 应调用 `bc_run mode=bug-regression`，结果会包含状态汇总和 `regressionMarkdown`。
+如果 suite run 中途失败，后续可直接说“继续上次未完成套件”。Agent 应先调用 `bc_status` 查看 `suites.unfinished`，再调用 `bc_run mode=case-source-suite resume=true confirm=true`；Brain Creator 会复用最近未完成 suite 的 source 和 `suiteId`，只重跑尚未通过的用例。Suite / Bug / Gap / Artifact 复盘请使用 `bc_review`，结果会包含统一的 `reviewSummary`，其中有 `title`、`status`、`metrics`、`evidencePaths`、`nextAction` 和 `userMessage`，适合 Agent 优先用来回复用户。需要详细报告时，Suite 和 Bug 复盘仍可使用 `reportMarkdown`；当用户说“回归所有 open bug”时，Agent 应调用 `bc_run mode=bug-regression`，默认回归 open / retest-failed bug，也可用 `bugIds`、`modules`、`priorities` 取交集筛选；结果会包含状态汇总和 `regressionMarkdown`。
 
 源文档写回默认关闭。只有用户明确要求“写回 Excel / 更新源文档”时，Agent 才能在 `bc_run mode=case-source-suite` 中同时传入 `writeBack: true` 和 `confirmWriteBack: true`。当前写回仅支持本地 `.xlsx`，会更新“实际结果 / 用例状态 / BugID”三列；写回前会在源文件同目录的 `.brain-creator/backups` 中创建备份，并在返回结果中提供 `backupPath`。Markdown、Obsidian、Claudian 引用只执行与记录结果，不修改源文档。
 
@@ -246,7 +246,7 @@ When the user explicitly types `/bc ...`, the agent can call `bc_command` as the
 - `/bc status --system HRMS --env test`: inspect status by system name and environment.
 - `/bc run "<path>"`: preview a test case document suite without executing it; optional filters include `--case TC-001,TC-002`, `--module Recruiting`, and `--priority P1`.
 - `/bc continue`: resume the latest unfinished suite.
-- `/bc regress bugs`: regress open bugs for the current system.
+- `/bc regress bugs`: regress open bugs for the current system; optional filters include `--bug bug_xxx`, `--module Recruiting`, and `--priority P0`.
 - `/bc bugs` or `/bc review bugs`: review BugReports.
 - `/bc gaps`: review Gaps.
 - `/bc review suite`: review the latest suite run.
@@ -261,7 +261,7 @@ Supported document sources:
 - `.md` files that contain the standard executable test case table headers.
 - `obsidian:<path>`, `claudian:<path>`, and `[[path]]` references. Brain Creator reads the referenced file while keeping the original source reference in its assets.
 
-If a suite run fails midway, the user can simply say "continue the unfinished suite." The agent should call `bc_status` to inspect `suites.unfinished`, then call `bc_run mode=case-source-suite resume=true confirm=true`; Brain Creator reuses the latest unfinished suite source and `suiteId` and reruns only cases that have not passed in that suite. Use `bc_review` for Suite, Bug, Gap, and Artifact reviews. The response includes a unified `reviewSummary` with `title`, `status`, `metrics`, `evidencePaths`, `nextAction`, and `userMessage`, which agents should read first for user-facing summaries. Use `reportMarkdown` for detailed Suite/Bug handoffs. When the user says "regress all open bugs", call `bc_run mode=bug-regression`; the result includes a status summary and `regressionMarkdown`.
+If a suite run fails midway, the user can simply say "continue the unfinished suite." The agent should call `bc_status` to inspect `suites.unfinished`, then call `bc_run mode=case-source-suite resume=true confirm=true`; Brain Creator reuses the latest unfinished suite source and `suiteId` and reruns only cases that have not passed in that suite. Use `bc_review` for Suite, Bug, Gap, and Artifact reviews. The response includes a unified `reviewSummary` with `title`, `status`, `metrics`, `evidencePaths`, `nextAction`, and `userMessage`, which agents should read first for user-facing summaries. Use `reportMarkdown` for detailed Suite/Bug handoffs. When the user says "regress all open bugs", call `bc_run mode=bug-regression`; it defaults to open / retest-failed bugs and can narrow candidates by intersecting `bugIds`, `modules`, and `priorities`. The result includes a status summary and `regressionMarkdown`.
 
 Source document write-back is off by default. Only when the user explicitly asks to write results back to Excel or update the source document should the agent pass both `writeBack: true` and `confirmWriteBack: true` to `bc_run mode=case-source-suite`. Current write-back supports local `.xlsx` only and updates the actual result, case status, and BugID columns. Before writing, Brain Creator creates a backup under `.brain-creator/backups` beside the source file and returns `backupPath`. Markdown, Obsidian, and Claudian references are executed and recorded but not modified.
 

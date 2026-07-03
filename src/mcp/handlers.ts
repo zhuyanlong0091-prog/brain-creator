@@ -348,6 +348,7 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
   const source = optionalStringArg(input, "source") ?? extractCaseSource(request);
   const normalizedRequest = request.toLowerCase();
   const filters = intentCaseSourceFilters(input, request);
+  const bugFilters = intentBugRegressionFilters(input, request);
 
   if (isContinueRequest(normalizedRequest)) {
     return {
@@ -373,7 +374,8 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
       tool: "bc_run",
       toolInput: {
         mode: "bug-regression",
-        systemId: resolution.systemId
+        systemId: resolution.systemId,
+        ...bugFilters
       },
       systemResolution: resolution,
       requiresConfirmation: false,
@@ -783,13 +785,15 @@ async function executeDocumentCase(
 async function runBugRegression(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const systemId = stringArg(input, "systemId");
   const requestedBugIds = stringArrayArg(input, "bugIds");
+  const filters = bugRegressionFilters(input);
   const candidates = context.service
     .listBugReports({ systemId })
     .filter((bug) =>
       requestedBugIds.length > 0
         ? requestedBugIds.includes(bug.id)
         : bug.status === "open" || bug.status === "retest-failed"
-    );
+    )
+    .filter((bug) => matchesBugRegressionFilters(bug, filters));
   const bridge = await preflightAgentBridge(context.agentBridge);
   if (!bridge.ok) {
     const gap = context.service.reportGap({
@@ -2078,8 +2082,54 @@ function intentCaseSourceFilters(input: Record<string, unknown>, request: string
   return filters;
 }
 
+function intentBugRegressionFilters(input: Record<string, unknown>, request: string) {
+  const bugIds = mergeUniqueStrings(stringArrayArg(input, "bugIds"), extractBugIds(request));
+  const modules = mergeUniqueStrings(
+    stringArrayArg(input, "modules"),
+    extractTaggedValues(request, ["模块", "module"], ["优先级", "priority", "bug", "用例", "case"]),
+    extractPrecedingTaggedValues(request, ["模块", "module"])
+  ).filter((item) => !isPriorityToken(item));
+  const priorities = mergeUniqueStrings(
+    stringArrayArg(input, "priorities"),
+    extractTaggedValues(request, ["优先级", "priority"], ["模块", "module", "bug", "用例", "case"]),
+    extractPriorities(request)
+  );
+  const filters: Record<string, string[]> = {};
+  if (bugIds.length > 0) {
+    filters.bugIds = bugIds;
+  }
+  if (modules.length > 0) {
+    filters.modules = modules;
+  }
+  if (priorities.length > 0) {
+    filters.priorities = priorities;
+  }
+  return filters;
+}
+
+function bugRegressionFilters(input: Record<string, unknown>) {
+  return {
+    modules: new Set(stringArrayArg(input, "modules").map((item) => normalizeSystemLookup(item))),
+    priorities: new Set(stringArrayArg(input, "priorities").map((item) => normalizeSystemLookup(item)))
+  };
+}
+
+function matchesBugRegressionFilters(bug: BugReport, filters: ReturnType<typeof bugRegressionFilters>) {
+  if (filters.modules.size > 0 && !filters.modules.has(normalizeSystemLookup(bug.module))) {
+    return false;
+  }
+  if (filters.priorities.size > 0 && !filters.priorities.has(normalizeSystemLookup(bug.priority))) {
+    return false;
+  }
+  return true;
+}
+
 function mergeUniqueStrings(...groups: string[][]) {
   return [...new Set(groups.flat().map((item) => item.trim()).filter(Boolean))];
+}
+
+function extractBugIds(request: string) {
+  return request.match(/\bbug[_-][a-z0-9_-]+\b/gi) ?? [];
 }
 
 function extractCaseNos(request: string) {
@@ -2090,6 +2140,10 @@ function extractPriorities(request: string) {
   return request.match(/\bP[0-3]\b/gi)?.map((item) => item.toUpperCase()) ?? [];
 }
 
+function isPriorityToken(value: string) {
+  return /^P[0-3]$/i.test(value);
+}
+
 function extractTaggedValues(request: string, labels: string[], stopLabels: string[]) {
   const labelPattern = labels.map(escapeRegExp).join("|");
   const stopPattern = stopLabels.map(escapeRegExp).join("|");
@@ -2097,6 +2151,12 @@ function extractTaggedValues(request: string, labels: string[], stopLabels: stri
     new RegExp(`(?:${labelPattern})\\s*[:：]?\\s*(.+?)(?=\\s*(?:${stopPattern})(?:\\s|[:：]|$)|$)`, "i")
   );
   return match ? splitCommandValues([match[1]]) : [];
+}
+
+function extractPrecedingTaggedValues(request: string, labels: string[]) {
+  const labelPattern = labels.map(escapeRegExp).join("|");
+  const matches = [...request.matchAll(new RegExp(`(?:^|\\s)([A-Za-z0-9_-]+)\\s*(?:${labelPattern})(?=\\s|$)`, "gi"))];
+  return matches.map((match) => match[1]).filter(Boolean);
 }
 
 function escapeRegExp(value: string) {
@@ -2173,10 +2233,7 @@ function parseBrainCreatorCommandTokens(tokens: string[], systemId: string): {
   if (action === "regress" && tokens[2]?.toLowerCase() === "bugs") {
     return {
       tool: "bc_run",
-      toolInput: {
-        mode: "bug-regression",
-        systemId
-      }
+      toolInput: parseBugRegressionCommandInput(tokens.slice(3), systemId)
     };
   }
   if (action === "bugs") {
@@ -2265,6 +2322,38 @@ function parseRunCommandInput(tokens: string[], systemId: string) {
       } else {
         throw new Error(`Unsupported /bc run option: ${token}`);
       }
+    }
+  }
+  return toolInput;
+}
+
+function parseBugRegressionCommandInput(tokens: string[], systemId: string) {
+  const toolInput: Record<string, unknown> = {
+    mode: "bug-regression",
+    systemId
+  };
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token.startsWith("--")) {
+      throw new Error(`Unexpected /bc regress bugs argument: ${token}`);
+    }
+    const values: string[] = [];
+    while (tokens[index + 1] && !tokens[index + 1].startsWith("--")) {
+      values.push(tokens[index + 1]);
+      index += 1;
+    }
+    const parsedValues = splitCommandValues(values);
+    if (parsedValues.length === 0) {
+      throw new Error(`${token} requires a value`);
+    }
+    if (token === "--bug" || token === "--bugs") {
+      toolInput.bugIds = parsedValues;
+    } else if (token === "--module" || token === "--modules") {
+      toolInput.modules = parsedValues;
+    } else if (token === "--priority" || token === "--priorities") {
+      toolInput.priorities = parsedValues;
+    } else {
+      throw new Error(`Unsupported /bc regress bugs option: ${token}`);
     }
   }
   return toolInput;

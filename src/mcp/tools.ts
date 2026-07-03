@@ -94,6 +94,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       systemName: z.string().optional(),
       environment: z.string().optional(),
       source: z.string().optional(),
+      bugIds: z.array(z.string()).default([]),
       caseNos: z.array(z.string()).default([]),
       modules: z.array(z.string()).default([]),
       priorities: z.array(z.string()).default([])
