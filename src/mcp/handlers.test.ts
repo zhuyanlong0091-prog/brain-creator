@@ -1185,6 +1185,12 @@ describe("handleBrainCreatorTool", () => {
         command: "/bc regress bugs"
       })
     );
+    const filteredRegression = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc regress bugs --bug bug_123,bug_456 --module Recruiting --priority P0"
+      })
+    );
 
     expect(status.tool).toBe("bc_status");
     expect(status.result.system.name).toBe("HRMS");
@@ -1207,6 +1213,15 @@ describe("handleBrainCreatorTool", () => {
     expect(regression.tool).toBe("bc_run");
     expect(regression.toolInput).toEqual(
       expect.objectContaining({ mode: "bug-regression", systemId: system.id })
+    );
+    expect(filteredRegression.toolInput).toEqual(
+      expect.objectContaining({
+        mode: "bug-regression",
+        systemId: system.id,
+        bugIds: ["bug_123", "bug_456"],
+        modules: ["Recruiting"],
+        priorities: ["P0"]
+      })
     );
   });
 

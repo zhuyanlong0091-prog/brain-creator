@@ -2233,10 +2233,7 @@ function parseBrainCreatorCommandTokens(tokens: string[], systemId: string): {
   if (action === "regress" && tokens[2]?.toLowerCase() === "bugs") {
     return {
       tool: "bc_run",
-      toolInput: {
-        mode: "bug-regression",
-        systemId
-      }
+      toolInput: parseBugRegressionCommandInput(tokens.slice(3), systemId)
     };
   }
   if (action === "bugs") {
@@ -2325,6 +2322,38 @@ function parseRunCommandInput(tokens: string[], systemId: string) {
       } else {
         throw new Error(`Unsupported /bc run option: ${token}`);
       }
+    }
+  }
+  return toolInput;
+}
+
+function parseBugRegressionCommandInput(tokens: string[], systemId: string) {
+  const toolInput: Record<string, unknown> = {
+    mode: "bug-regression",
+    systemId
+  };
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token.startsWith("--")) {
+      throw new Error(`Unexpected /bc regress bugs argument: ${token}`);
+    }
+    const values: string[] = [];
+    while (tokens[index + 1] && !tokens[index + 1].startsWith("--")) {
+      values.push(tokens[index + 1]);
+      index += 1;
+    }
+    const parsedValues = splitCommandValues(values);
+    if (parsedValues.length === 0) {
+      throw new Error(`${token} requires a value`);
+    }
+    if (token === "--bug" || token === "--bugs") {
+      toolInput.bugIds = parsedValues;
+    } else if (token === "--module" || token === "--modules") {
+      toolInput.modules = parsedValues;
+    } else if (token === "--priority" || token === "--priorities") {
+      toolInput.priorities = parsedValues;
+    } else {
+      throw new Error(`Unsupported /bc regress bugs option: ${token}`);
     }
   }
   return toolInput;

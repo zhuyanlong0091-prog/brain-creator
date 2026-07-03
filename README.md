@@ -40,7 +40,7 @@ Brain Creator v2 现在采用三层入口：
 - `/bc status --system HRMS --env test`：按系统名和环境查看状态。
 - `/bc run "<path>"`：预览测试用例文档套件，不会直接执行；可追加 `--case TC-001,TC-002`、`--module 招聘需求`、`--priority P1`。
 - `/bc continue`：继续最近未完成的套件。
-- `/bc regress bugs`：回归当前系统的 open bug。
+- `/bc regress bugs`：回归当前系统的 open bug；可追加 `--bug bug_xxx`、`--module Recruiting`、`--priority P0`。
 - `/bc bugs` 或 `/bc review bugs`：查看 BugReport。
 - `/bc gaps`：查看 Gap。
 - `/bc review suite`：复盘最近的 suite run。
@@ -246,7 +246,7 @@ When the user explicitly types `/bc ...`, the agent can call `bc_command` as the
 - `/bc status --system HRMS --env test`: inspect status by system name and environment.
 - `/bc run "<path>"`: preview a test case document suite without executing it; optional filters include `--case TC-001,TC-002`, `--module Recruiting`, and `--priority P1`.
 - `/bc continue`: resume the latest unfinished suite.
-- `/bc regress bugs`: regress open bugs for the current system.
+- `/bc regress bugs`: regress open bugs for the current system; optional filters include `--bug bug_xxx`, `--module Recruiting`, and `--priority P0`.
 - `/bc bugs` or `/bc review bugs`: review BugReports.
 - `/bc gaps`: review Gaps.
 - `/bc review suite`: review the latest suite run.
