@@ -451,6 +451,15 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     caseSources: caseSources.length,
     unfinishedSuites: unfinishedSuites.length
   });
+  const userSummary = statusUserSummary({
+    systemName: snapshot.system.name,
+    bridgeOk: snapshot.bridge.ok,
+    authProfiles: snapshot.auth.profiles.length,
+    openBugs: openBugs.length,
+    openGaps: snapshot.openGaps.length,
+    unfinishedSuites: unfinishedSuites.length,
+    nextAction
+  });
   return {
     ...snapshot,
     systemResolution: resolution,
@@ -475,15 +484,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       recent: bugs.slice(-5)
     },
     facadeNextAction: nextAction,
-    userSummary: statusUserSummary({
-      systemName: snapshot.system.name,
-      bridgeOk: snapshot.bridge.ok,
-      authProfiles: snapshot.auth.profiles.length,
-      openBugs: openBugs.length,
-      openGaps: snapshot.openGaps.length,
-      unfinishedSuites: unfinishedSuites.length,
-      nextAction
-    }),
+    userSummary,
+    statusMarkdown: statusMarkdown(userSummary),
     quickCommands: statusQuickCommands({
       openBugs: openBugs.length,
       openGaps: snapshot.openGaps.length,
@@ -1627,6 +1629,21 @@ function statusUserSummary(state: {
       unfinishedSuites: state.unfinishedSuites
     }
   };
+}
+
+function statusMarkdown(summary: ReturnType<typeof statusUserSummary>) {
+  return [
+    `# Brain Creator Status: ${summary.systemName}`,
+    "",
+    `- Readiness: ${summary.readiness}`,
+    `- Auth profiles: ${summary.counts.authProfiles}`,
+    `- Open bugs: ${summary.counts.openBugs}`,
+    `- Open gaps: ${summary.counts.openGaps}`,
+    `- Unfinished suites: ${summary.counts.unfinishedSuites}`,
+    "",
+    `Next: ${summary.nextStep}`,
+    `Command: \`${summary.nextCommand}\``
+  ].join("\n");
 }
 
 function statusQuickCommands(state: { openBugs: number; openGaps: number; unfinishedSuites: number }) {

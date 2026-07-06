@@ -224,6 +224,7 @@ describe("Brain Creator local integration files", () => {
       "bc_run mode=case-source-suite confirm=false",
       "bc_run mode=case-source-suite confirm=true",
       "bc_run mode=bug-regression",
+      "statusMarkdown",
       "bc_review target=\"bug\"",
       "bc_review target=\"gap\"",
       "bc_report_gap"

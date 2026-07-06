@@ -30,7 +30,7 @@ Brain Creator v2 现在采用三层入口：
 
 当用户直接说“执行 HRMS 的这个 Excel”“只跑招聘需求模块/P0/TC-001”“查看 HRMS open bug”“回归 HRMS open bug”“继续 HRMS 未完成套件”这类自然语言时，Agent 可以先调用 `bc_intent_preview`。该工具只返回建议的 Facade 调用，不会执行；需要执行测试用例文档时仍必须先预览并等待用户确认。
 
-新会话中已知 `systemId` 时，Agent 应先调用 `bc_status`。返回值包含完整系统快照，也包含面向用户展示的 `userSummary`、可直接建议的 `quickCommands` 和机器可读的 `toolGuidance`。`toolGuidance` 会明确默认使用 Facade 工具，底层细粒度工具仅用于调试、审计或 Facade 无法覆盖的场景。
+新会话中已知 `systemId` 时，Agent 应先调用 `bc_status`。返回值包含完整系统快照，也包含面向用户展示的 `userSummary`、可直接转述的 `statusMarkdown`、可直接建议的 `quickCommands` 和机器可读的 `toolGuidance`。`toolGuidance` 会明确默认使用 Facade 工具，底层细粒度工具仅用于调试、审计或 Facade 无法覆盖的场景。
 
 如果用户不知道 `systemId`，Facade 工具可接受 `systemName` / `environment`，快捷命令也可使用 `--system HRMS --env test`。当匹配到多个系统时，Brain Creator 会返回候选列表，要求补充环境或系统 ID，不会盲选。
 
@@ -61,7 +61,7 @@ Brain Creator v2 现在采用三层入口：
 
 | 用户说法 | Agent 默认入口 | 确认边界 | 用户应该看到 |
 |---|---|---|---|
-| “当前 HRMS 状态怎么样？” | `bc_status` | 不需要确认 | 系统、鉴权、suite、Bug、Gap、产物摘要和下一步建议。 |
+| “当前 HRMS 状态怎么样？” | `bc_status` | 不需要确认 | 系统、鉴权、suite、Bug、Gap、产物摘要、下一步建议和 `statusMarkdown`。 |
 | “我想接入一个新系统” | `bc_configure target=system` | 创建前确认系统名称、环境和 URL 范围 | 新系统 ID、环境、默认语言和后续鉴权/建模建议。 |
 | “配置这个系统的 token/cookie/password” | `bc_configure target=auth` | 不在聊天中回显密钥；敏感值只进工具输入 | 脱敏后的鉴权配置和验证状态。 |
 | “需要我手动登录/验证码/2FA” | `bc_configure target=checkpoint` | 等用户明确完成后再继续 | checkpoint 原因、恢复方式和等待状态。 |
@@ -252,7 +252,7 @@ Brain Creator v2 uses three layers:
 
 When the user says things like "execute this Excel for HRMS", "only run the recruiting module / P0 / TC-001", "show HRMS open bugs", "regress HRMS open bugs", or "continue the unfinished HRMS suite", the agent can call `bc_intent_preview` first. It only returns the suggested facade call and does not execute it; document-suite execution still requires preview and explicit user confirmation.
 
-When a new session already knows `systemId`, the agent should call `bc_status` first. The response includes the full system snapshot plus user-facing `userSummary`, suggested `quickCommands`, and machine-readable `toolGuidance`. `toolGuidance` tells the agent to default to facade tools and reserve fine-grained tools for debugging, audit, or unsupported facade details.
+When a new session already knows `systemId`, the agent should call `bc_status` first. The response includes the full system snapshot plus user-facing `userSummary`, directly reusable `statusMarkdown`, suggested `quickCommands`, and machine-readable `toolGuidance`. `toolGuidance` tells the agent to default to facade tools and reserve fine-grained tools for debugging, audit, or unsupported facade details.
 
 If the user does not know `systemId`, facade tools accept `systemName` / `environment`, and slash commands can use `--system HRMS --env test`. When multiple systems match, Brain Creator returns candidates and asks for environment or system ID instead of guessing.
 
@@ -283,7 +283,7 @@ If a suite run fails midway, the user can simply say "continue the unfinished su
 
 | User wording | Agent default entry | Confirmation boundary | User-visible result |
 |---|---|---|---|
-| "What is the current HRMS status?" | `bc_status` | No confirmation required | System, auth, suite, bug, gap, artifact summary, and next action. |
+| "What is the current HRMS status?" | `bc_status` | No confirmation required | System, auth, suite, bug, gap, artifact summary, next action, and `statusMarkdown`. |
 | "Connect a new business system" | `bc_configure target=system` | Confirm system name, environment, and URL scope before creation | New system id, environment, default locale, and setup suggestions. |
 | "Configure token/cookie/password auth" | `bc_configure target=auth` | Do not echo secrets in chat; sensitive values only enter tool input | Redacted auth profile and verification state. |
 | "I need to complete login/CAPTCHA/2FA manually" | `bc_configure target=checkpoint` | Wait for explicit user completion before continuing | Checkpoint reason, resume instructions, and waiting state. |

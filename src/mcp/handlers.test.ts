@@ -1091,6 +1091,14 @@ describe("handleBrainCreatorTool", () => {
         unfinishedSuites: 0
       })
     );
+    expect(status.statusMarkdown).toContain("# Brain Creator Status: HRMS");
+    expect(status.statusMarkdown).toContain("- Readiness: ready");
+    expect(status.statusMarkdown).toContain("- Auth profiles: 1");
+    expect(status.statusMarkdown).toContain("- Open bugs: 0");
+    expect(status.statusMarkdown).toContain("- Open gaps: 0");
+    expect(status.statusMarkdown).toContain("- Unfinished suites: 0");
+    expect(status.statusMarkdown).toContain("Next: Add a requirement or preview a test case document suite.");
+    expect(status.statusMarkdown).toContain("Command: `/bc run \"<path>\"`");
     expect(status.quickCommands).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ command: "/bc status" }),
