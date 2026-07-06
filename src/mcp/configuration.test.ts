@@ -207,6 +207,32 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("Do not create or prioritize a Web UI");
   });
 
+  it("documents the user entrypoint map in README and the Brain Creator skill", async () => {
+    const readme = await readFile("README.md", "utf8");
+    const skill = await readFile("skills/brain-creator/SKILL.md", "utf8");
+
+    expect(readme).toContain("### 用户入口到 Agent 工具映射");
+    expect(readme).toContain("### User Entrypoint To Agent Tool Map");
+    expect(skill).toContain("## User Entrypoint Map");
+
+    for (const marker of [
+      "bc_status",
+      "bc_intent_preview",
+      "bc_configure target=system",
+      "bc_configure target=auth",
+      "bc_configure target=checkpoint",
+      "bc_run mode=case-source-suite confirm=false",
+      "bc_run mode=case-source-suite confirm=true",
+      "bc_run mode=bug-regression",
+      "bc_review target=\"bug\"",
+      "bc_review target=\"gap\"",
+      "bc_report_gap"
+    ]) {
+      expect(readme).toContain(marker);
+      expect(skill).toContain(marker);
+    }
+  });
+
   it("registers the Brain Creator entrypoint as a Claude Code project skill", async () => {
     const canonical = await readFile("skills/brain-creator/SKILL.md", "utf8");
     const claudeSkill = await readFile(".claude/skills/brain-creator/SKILL.md", "utf8");

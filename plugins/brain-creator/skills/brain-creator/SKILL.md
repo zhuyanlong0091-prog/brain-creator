@@ -41,6 +41,22 @@ Use Brain Creator as an agent-native testing business brain through MCP tools. C
 
 Default to the high-level facade tools. The fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and fallback, but the user should not have to orchestrate them. `bc_status` returns `toolGuidance`; follow it before reaching for internal tools.
 
+## User Entrypoint Map
+
+| User intent | Default tool path | Confirmation boundary | Reply focus |
+|---|---|---|---|
+| Check current system state | `bc_status` | None | Summarize system, auth, suites, bugs, gaps, artifacts, and next action. |
+| Connect a new system | `bc_configure target=system` | Confirm name, environment, base URL, and allowlist before creation. | Return system id and setup recommendations. |
+| Configure auth | `bc_configure target=auth` | Never echo secrets; keep sensitive values only in the tool input. | Return redacted auth state and verification result. |
+| Wait for manual login, CAPTCHA, recovery, or 2FA | `bc_configure target=checkpoint` | Continue only after the user says the checkpoint is complete. | Explain why execution is waiting and how to resume. |
+| Preview ambiguous operational wording | `bc_intent_preview` | Preview only; do not execute. | Show the suggested facade call, parameters, and risks. |
+| Preview a test document suite | `bc_run mode=case-source-suite confirm=false` | Required before execution. | Show counts, module and priority stats, sample cases, bridge state, and risks. |
+| Execute a confirmed test document suite | `bc_run mode=case-source-suite confirm=true` | Requires prior preview; Excel write-back also requires explicit write-back confirmation. | Report suite results, BugReports, Gaps, and evidence paths. |
+| Continue an unfinished suite | `bc_status` then `bc_run mode=case-source-suite confirm=true` | Confirm the latest unfinished suite is the intended target when ambiguous. | Report rerun results and remaining blockers. |
+| Regress open bugs | `bc_run mode=bug-regression` | No plan approval required; make any `bugIds`, `modules`, and `priorities` filters visible. | Report candidates, pass/fail/blocked counts, and `regressionMarkdown`. |
+| Review bugs, gaps, artifacts, cases, or suites | `bc_review target="bug"`, `bc_review target="gap"`, or the matching target | None | Prefer `reviewSummary`; include `reportMarkdown` only when useful. |
+| Record an external blocker or missing evidence | `bc_report_gap` | Require reason, severity, and owner context. | Return the Gap id, status, and next handling suggestion. |
+
 0. For ambiguous natural-language operational requests, use `bc_intent_preview` to map the user wording to a suggested facade call. It must not execute; present the preview and keep the approval boundary for document suites. It can preview document-suite filters (`caseNos`, `modules`, `priorities`), open bug review, open bug regression, and suite continuation.
 1. Use `bc_status` as the first call in a new session. Prefer `systemId` when known; otherwise pass `systemName` and, when needed, `environment`. The Facade tools `bc_status`, `bc_run`, and `bc_review` all support this system resolution. If multiple systems match, ask the user to choose instead of guessing.
 2. Use `bc_configure` for high-level setup of systems, auth, terms, rules, and auth checkpoints.

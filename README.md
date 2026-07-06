@@ -57,6 +57,22 @@ Brain Creator v2 现在采用三层入口：
 
 如果 suite run 中途失败，后续可直接说“继续上次未完成套件”。Agent 应先调用 `bc_status` 查看 `suites.unfinished`，再调用 `bc_run mode=case-source-suite resume=true confirm=true`；Brain Creator 会复用最近未完成 suite 的 source 和 `suiteId`，只重跑尚未通过的用例。Suite / Bug / Gap / Artifact 复盘请使用 `bc_review`，结果会包含统一的 `reviewSummary`，其中有 `title`、`status`、`metrics`、`evidencePaths`、`nextAction` 和 `userMessage`，适合 Agent 优先用来回复用户。需要详细报告时，Suite 和 Bug 复盘仍可使用 `reportMarkdown`；当用户说“回归所有 open bug”时，Agent 应调用 `bc_run mode=bug-regression`，默认回归 open / retest-failed bug，也可用 `bugIds`、`modules`、`priorities` 取交集筛选；结果会包含状态汇总和 `regressionMarkdown`。
 
+### 用户入口到 Agent 工具映射
+
+| 用户说法 | Agent 默认入口 | 确认边界 | 用户应该看到 |
+|---|---|---|---|
+| “当前 HRMS 状态怎么样？” | `bc_status` | 不需要确认 | 系统、鉴权、suite、Bug、Gap、产物摘要和下一步建议。 |
+| “我想接入一个新系统” | `bc_configure target=system` | 创建前确认系统名称、环境和 URL 范围 | 新系统 ID、环境、默认语言和后续鉴权/建模建议。 |
+| “配置这个系统的 token/cookie/password” | `bc_configure target=auth` | 不在聊天中回显密钥；敏感值只进工具输入 | 脱敏后的鉴权配置和验证状态。 |
+| “需要我手动登录/验证码/2FA” | `bc_configure target=checkpoint` | 等用户明确完成后再继续 | checkpoint 原因、恢复方式和等待状态。 |
+| “帮我判断这句话该怎么执行” | `bc_intent_preview` | 只预览，不执行 | 建议使用的 Facade、参数和风险提示。 |
+| “执行这个 Excel/Markdown 用例文档” | `bc_run mode=case-source-suite confirm=false` | 必须先预览，等待用户确认 | 用例总数、模块/优先级统计、样例用例、风险和 bridge 状态。 |
+| “确认执行刚才的用例文档” | `bc_run mode=case-source-suite confirm=true` | 只能在预览后执行；写回 Excel 还需额外确认 | suite run 结果、BugReport、Gap 和证据路径。 |
+| “继续上次未完成的套件” | `bc_status` 后接 `bc_run mode=case-source-suite confirm=true` | 确认使用最近未完成 suite | 只重跑未通过用例的结果和剩余阻塞项。 |
+| “回归 open bug / 只回归 P0 招聘模块 bug” | `bc_run mode=bug-regression` | 不需要额外计划审批，但筛选条件要透明展示 | 回归候选、通过/失败/阻塞统计和 `regressionMarkdown`。 |
+| “查看 Bug / Gap / 产物 / suite run” | `bc_review target="bug"`、`bc_review target="gap"` 或对应 target | 不需要确认 | 统一 `reviewSummary`，必要时附 `reportMarkdown`。 |
+| “这个问题无法判断，记录一个缺口” | `bc_report_gap` | 需要说明原因、严重级别和 owner | Gap 编号、状态和后续处理建议。 |
+
 源文档写回默认关闭。只有用户明确要求“写回 Excel / 更新源文档”时，Agent 才能在 `bc_run mode=case-source-suite` 中同时传入 `writeBack: true` 和 `confirmWriteBack: true`。当前写回仅支持本地 `.xlsx`，会更新“实际结果 / 用例状态 / BugID”三列；写回前会在源文件同目录的 `.brain-creator/backups` 中创建备份，并在返回结果中提供 `backupPath`。Markdown、Obsidian、Claudian 引用只执行与记录结果，不修改源文档。
 
 ### 快速开始
@@ -262,6 +278,22 @@ Supported document sources:
 - `obsidian:<path>`, `claudian:<path>`, and `[[path]]` references. Brain Creator reads the referenced file while keeping the original source reference in its assets.
 
 If a suite run fails midway, the user can simply say "continue the unfinished suite." The agent should call `bc_status` to inspect `suites.unfinished`, then call `bc_run mode=case-source-suite resume=true confirm=true`; Brain Creator reuses the latest unfinished suite source and `suiteId` and reruns only cases that have not passed in that suite. Use `bc_review` for Suite, Bug, Gap, and Artifact reviews. The response includes a unified `reviewSummary` with `title`, `status`, `metrics`, `evidencePaths`, `nextAction`, and `userMessage`, which agents should read first for user-facing summaries. Use `reportMarkdown` for detailed Suite/Bug handoffs. When the user says "regress all open bugs", call `bc_run mode=bug-regression`; it defaults to open / retest-failed bugs and can narrow candidates by intersecting `bugIds`, `modules`, and `priorities`. The result includes a status summary and `regressionMarkdown`.
+
+### User Entrypoint To Agent Tool Map
+
+| User wording | Agent default entry | Confirmation boundary | User-visible result |
+|---|---|---|---|
+| "What is the current HRMS status?" | `bc_status` | No confirmation required | System, auth, suite, bug, gap, artifact summary, and next action. |
+| "Connect a new business system" | `bc_configure target=system` | Confirm system name, environment, and URL scope before creation | New system id, environment, default locale, and setup suggestions. |
+| "Configure token/cookie/password auth" | `bc_configure target=auth` | Do not echo secrets in chat; sensitive values only enter tool input | Redacted auth profile and verification state. |
+| "I need to complete login/CAPTCHA/2FA manually" | `bc_configure target=checkpoint` | Wait for explicit user completion before continuing | Checkpoint reason, resume instructions, and waiting state. |
+| "Help me decide how to run this request" | `bc_intent_preview` | Preview only; no execution | Suggested facade, parameters, and risks. |
+| "Execute this Excel/Markdown test case document" | `bc_run mode=case-source-suite confirm=false` | Must preview and wait for user confirmation | Case count, module/priority stats, sample cases, risks, and bridge status. |
+| "Confirm and run that document" | `bc_run mode=case-source-suite confirm=true` | Only after preview; Excel write-back requires a separate explicit confirmation | Suite run result, BugReports, Gaps, and evidence paths. |
+| "Continue the unfinished suite" | `bc_status` then `bc_run mode=case-source-suite confirm=true` | Confirm the latest unfinished suite is the intended target | Results for rerun unfinished cases and remaining blockers. |
+| "Regress open bugs / only P0 recruiting bugs" | `bc_run mode=bug-regression` | No plan approval required, but filters must be visible | Regression candidates, pass/fail/blocked summary, and `regressionMarkdown`. |
+| "Review Bugs / Gaps / artifacts / suite runs" | `bc_review target="bug"`, `bc_review target="gap"`, or the matching target | No confirmation required | Unified `reviewSummary`, with `reportMarkdown` when useful. |
+| "Record this as a gap" | `bc_report_gap` | Require reason, severity, and owner context | Gap id, status, and next handling suggestion. |
 
 Source document write-back is off by default. Only when the user explicitly asks to write results back to Excel or update the source document should the agent pass both `writeBack: true` and `confirmWriteBack: true` to `bc_run mode=case-source-suite`. Current write-back supports local `.xlsx` only and updates the actual result, case status, and BugID columns. Before writing, Brain Creator creates a backup under `.brain-creator/backups` beside the source file and returns `backupPath`. Markdown, Obsidian, and Claudian references are executed and recorded but not modified.
 
