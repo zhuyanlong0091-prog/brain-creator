@@ -45,7 +45,7 @@ Default to the high-level facade tools. The fine-grained `bc_*` tools remain ava
 
 | User intent | Default tool path | Confirmation boundary | Reply focus |
 |---|---|---|---|
-| Check current system state | `bc_status` | None | Summarize system, auth, suites, bugs, gaps, artifacts, and next action. |
+| Check current system state | `bc_status` | None | Prefer `statusMarkdown`; summarize system, auth, suites, bugs, gaps, artifacts, and next action. |
 | Connect a new system | `bc_configure target=system` | Confirm name, environment, base URL, and allowlist before creation. | Return system id and setup recommendations. |
 | Configure auth | `bc_configure target=auth` | Never echo secrets; keep sensitive values only in the tool input. | Return redacted auth state and verification result. |
 | Wait for manual login, CAPTCHA, recovery, or 2FA | `bc_configure target=checkpoint` | Continue only after the user says the checkpoint is complete. | Explain why execution is waiting and how to resume. |
@@ -58,7 +58,7 @@ Default to the high-level facade tools. The fine-grained `bc_*` tools remain ava
 | Record an external blocker or missing evidence | `bc_report_gap` | Require reason, severity, and owner context. | Return the Gap id, status, and next handling suggestion. |
 
 0. For ambiguous natural-language operational requests, use `bc_intent_preview` to map the user wording to a suggested facade call. It must not execute; present the preview and keep the approval boundary for document suites. It can preview document-suite filters (`caseNos`, `modules`, `priorities`), open bug review, open bug regression, and suite continuation.
-1. Use `bc_status` as the first call in a new session. Prefer `systemId` when known; otherwise pass `systemName` and, when needed, `environment`. The Facade tools `bc_status`, `bc_run`, and `bc_review` all support this system resolution. If multiple systems match, ask the user to choose instead of guessing.
+1. Use `bc_status` as the first call in a new session. Prefer `systemId` when known; otherwise pass `systemName` and, when needed, `environment`. The Facade tools `bc_status`, `bc_run`, and `bc_review` all support this system resolution. If multiple systems match, ask the user to choose instead of guessing. Prefer `statusMarkdown` for concise user-facing status replies, then inspect structured fields only when the user asks for detail.
 2. Use `bc_configure` for high-level setup of systems, auth, terms, rules, and auth checkpoints.
 3. Use `bc_run` for execution:
    - `mode: "approved-case"` for an already approved case.
