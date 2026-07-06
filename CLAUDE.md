@@ -6,7 +6,7 @@
 
 **Brain Creator v2** — 面向 Claude Code / Codex 的智能体原生测试业务脑。它不是 Web UI，产品入口是智能体对话。提供 MCP 服务器（MCP Server），暴露 40+ 工具用于业务系统上下文、鉴权（Auth）、术语（Glossary）、业务规则（Rule）、测试计划（Plan）、Playwright 测试生成/修复（Generator/Healer）和缺口追踪（Gap）。
 
-仓库：`brain-creator` npm 包（MIT license），版本 2.0.1。
+仓库：`brain-creator` npm 包（MIT license），版本 2.0.2。
 
 ### 入口设计（v2 最新）
 

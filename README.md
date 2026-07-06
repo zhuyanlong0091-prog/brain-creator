@@ -159,6 +159,7 @@ npm publish --access public --otp=<当前 2FA 验证码>
 ```
 
 发布清单见 [docs/release-checklist.md](docs/release-checklist.md)。
+2.0.2 发布说明见 [docs/release-notes-2.0.2.md](docs/release-notes-2.0.2.md)。
 
 ### Codex `/plugin` 本地发布
 
@@ -351,6 +352,7 @@ npm publish --access public --otp=<current-2fa-code>
 ```
 
 See [docs/release-checklist.md](docs/release-checklist.md).
+See [docs/release-notes-2.0.2.md](docs/release-notes-2.0.2.md) for the 2.0.2 patch notes.
 
 ### Codex `/plugin` Local Publish
 
