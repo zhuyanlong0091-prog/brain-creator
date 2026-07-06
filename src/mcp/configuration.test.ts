@@ -29,7 +29,13 @@ describe("Brain Creator local integration files", () => {
 
   it("packages Brain Creator MCP as an installable CLI entrypoint", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+    const packageLock = JSON.parse(await readFile("package-lock.json", "utf8"));
+    const serverModule = await readFile("src/mcp/server.ts", "utf8");
 
+    expect(packageJson.version).toBe("2.0.2");
+    expect(packageLock.version).toBe("2.0.2");
+    expect(packageLock.packages[""].version).toBe("2.0.2");
+    expect(serverModule).toContain('version: "2.0.2"');
     expect(packageJson.bin).toEqual({
       "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
       "brain-creator-doctor": "dist/cli/doctor.js",
@@ -79,6 +85,7 @@ describe("Brain Creator local integration files", () => {
     const manifest = JSON.parse(await readFile("plugin/manifest.json", "utf8"));
 
     expect(manifest.name).toBe("brain-creator");
+    expect(manifest.version).toBe("2.0.2");
     expect(manifest.mcpServers["brain-creator"]).toEqual({
       command: "npx",
       args: ["brain-creator-mcp"],
@@ -109,7 +116,7 @@ describe("Brain Creator local integration files", () => {
     const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
 
     expect(pluginManifest.name).toBe("brain-creator");
-    expect(pluginManifest.version).toBe("2.0.1");
+    expect(pluginManifest.version).toBe("2.0.2");
     expect(pluginManifest.description).toContain("Agent-native testing brain");
     expect(pluginManifest.skills).toBe("./skills/");
     expect(pluginManifest.mcpServers).toBe("./.mcp.json");
@@ -296,5 +303,15 @@ describe("Brain Creator local integration files", () => {
 
     expect(config).toContain("PLAYWRIGHT_CHROMIUM_EXECUTABLE");
     expect(config).not.toContain("C:\\Users\\");
+  });
+
+  it("documents the 2.0.2 patch release notes", async () => {
+    const notes = await readFile("docs/release-notes-2.0.2.md", "utf8");
+
+    expect(notes).toContain("Brain Creator 2.0.2");
+    expect(notes).toContain("user entrypoint");
+    expect(notes).toContain("statusMarkdown");
+    expect(notes).toContain("reviewMarkdown");
+    expect(notes).toContain("npm publish");
   });
 });
