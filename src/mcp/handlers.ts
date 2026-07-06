@@ -890,21 +890,25 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
     const nextAction = bugs.some((bug) => bug.status === "open" || bug.status === "retest-failed")
       ? "run_bug_regression"
       : "no_open_bug";
+    const reviewSummary = bugReviewResultSummary(summary, bugs, nextAction);
     return {
       summary,
       bugs,
       regressionCandidates: regressionCandidateSummary(regressionCandidates),
       reportMarkdown: bugReviewMarkdown(bugs),
-      reviewSummary: bugReviewResultSummary(summary, bugs, nextAction),
+      reviewSummary,
+      reviewMarkdown: reviewMarkdownFromSummary(reviewSummary),
       nextAction,
       systemResolution: resolution
     };
   }
   if (target === "suite-run") {
     const review = suiteRunReview(context, systemId, optionalStringArg(input, "id"));
+    const reviewSummary = suiteRunReviewSummary(review);
     return {
       ...review,
-      reviewSummary: suiteRunReviewSummary(review),
+      reviewSummary,
+      reviewMarkdown: reviewMarkdownFromSummary(reviewSummary),
       systemResolution: resolution
     };
   }
@@ -919,16 +923,20 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
       projectId: systemId,
       status: gapStatusArg(input, "status")
     });
+    const reviewSummary = gapReviewSummary(gaps);
     return {
       items: gaps,
-      reviewSummary: gapReviewSummary(gaps),
+      reviewSummary,
+      reviewMarkdown: reviewMarkdownFromSummary(reviewSummary),
       systemResolution: resolution
     };
   }
   const overview = await artifactOverview(context, { systemId });
+  const reviewSummary = artifactReviewSummary(overview);
   return {
     ...overview,
-    reviewSummary: artifactReviewSummary(overview),
+    reviewSummary,
+    reviewMarkdown: reviewMarkdownFromSummary(reviewSummary),
     systemResolution: resolution
   };
 }
@@ -1403,6 +1411,35 @@ function artifactReviewSummary(overview: Awaited<ReturnType<typeof artifactOverv
     nextAction: hasArtifacts ? "read_artifacts" : "no_artifact",
     userMessage: `Artifact review: ${overview.counts.specs} specs, ${overview.counts.tests} tests.`
   };
+}
+
+function reviewMarkdownFromSummary(summary: {
+  title: string;
+  status: string;
+  metrics: Record<string, unknown>;
+  evidencePaths: string[];
+  nextAction: string;
+  userMessage: string;
+}) {
+  const lines = [
+    `# ${summary.title}`,
+    "",
+    `- Status: ${summary.status}`,
+    `- Next action: ${summary.nextAction}`,
+    `- Message: ${summary.userMessage}`,
+    "",
+    "## Metrics"
+  ];
+  for (const [key, value] of Object.entries(summary.metrics)) {
+    lines.push(`- ${key}: ${JSON.stringify(value)}`);
+  }
+  if (summary.evidencePaths.length > 0) {
+    lines.push("", "## Evidence");
+    for (const path of summary.evidencePaths) {
+      lines.push(`- ${path}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function uniqueStrings(values: string[]) {

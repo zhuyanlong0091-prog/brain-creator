@@ -536,6 +536,9 @@ describe("handleBrainCreatorTool", () => {
         evidencePaths: [result.chainRun.specPath, result.chainRun.testPath]
       })
     );
+    expect(artifactReview.reviewMarkdown).toContain("# Artifact Review");
+    expect(artifactReview.reviewMarkdown).toContain("- Status: ready");
+    expect(artifactReview.reviewMarkdown).toContain("- Next action: read_artifacts");
     expect(artifactReview.reviewSummary.metrics).toEqual({ specs: 1, tests: 1 });
     expect(artifactReview.reviewSummary.userMessage).toContain("1 specs");
     expect(context.service.listChainRuns(system.id)).toEqual([
@@ -1886,6 +1889,9 @@ describe("handleBrainCreatorTool", () => {
       expect.objectContaining({ totalCases: 1, failed: 1, bugReports: 1, gaps: 0 })
     );
     expect(suiteReview.reviewSummary.userMessage).toContain("1 failed");
+    expect(suiteReview.reviewMarkdown).toContain("# Suite Run Review");
+    expect(suiteReview.reviewMarkdown).toContain("- Status: failed");
+    expect(suiteReview.reviewMarkdown).toContain("- Next action: review_bugs");
     expect(bugReview.reviewSummary).toEqual(
       expect.objectContaining({
         title: "Bug Review",
@@ -1895,6 +1901,9 @@ describe("handleBrainCreatorTool", () => {
     );
     expect(bugReview.reviewSummary.metrics).toEqual(expect.objectContaining({ open: 1 }));
     expect(bugReview.reviewSummary.evidencePaths).toEqual(run.suiteRun.artifactPaths);
+    expect(bugReview.reviewMarkdown).toContain("# Bug Review");
+    expect(bugReview.reviewMarkdown).toContain("- Status: action_required");
+    expect(bugReview.reviewMarkdown).toContain("- Next action: run_bug_regression");
     expect(gapReview.reviewSummary).toEqual(
       expect.objectContaining({
         title: "Gap Review",
@@ -1903,6 +1912,9 @@ describe("handleBrainCreatorTool", () => {
       })
     );
     expect(gapReview.reviewSummary.metrics).toEqual(expect.objectContaining({ open: 1 }));
+    expect(gapReview.reviewMarkdown).toContain("# Gap Review");
+    expect(gapReview.reviewMarkdown).toContain("- Status: action_required");
+    expect(gapReview.reviewMarkdown).toContain("- Next action: resolve_gaps");
     expect(gapReview.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: gap.id })]));
   });
 

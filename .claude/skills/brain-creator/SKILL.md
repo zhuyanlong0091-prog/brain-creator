@@ -54,7 +54,7 @@ Default to the high-level facade tools. The fine-grained `bc_*` tools remain ava
 | Execute a confirmed test document suite | `bc_run mode=case-source-suite confirm=true` | Requires prior preview; Excel write-back also requires explicit write-back confirmation. | Report suite results, BugReports, Gaps, and evidence paths. |
 | Continue an unfinished suite | `bc_status` then `bc_run mode=case-source-suite confirm=true` | Confirm the latest unfinished suite is the intended target when ambiguous. | Report rerun results and remaining blockers. |
 | Regress open bugs | `bc_run mode=bug-regression` | No plan approval required; make any `bugIds`, `modules`, and `priorities` filters visible. | Report candidates, pass/fail/blocked counts, and `regressionMarkdown`. |
-| Review bugs, gaps, artifacts, cases, or suites | `bc_review target="bug"`, `bc_review target="gap"`, or the matching target | None | Prefer `reviewSummary`; include `reportMarkdown` only when useful. |
+| Review bugs, gaps, artifacts, cases, or suites | `bc_review target="bug"`, `bc_review target="gap"`, or the matching target | None | Prefer `reviewMarkdown` for concise replies, use `reviewSummary` for structured reasoning, and include `reportMarkdown` only when useful. |
 | Record an external blocker or missing evidence | `bc_report_gap` | Require reason, severity, and owner context. | Return the Gap id, status, and next handling suggestion. |
 
 0. For ambiguous natural-language operational requests, use `bc_intent_preview` to map the user wording to a suggested facade call. It must not execute; present the preview and keep the approval boundary for document suites. It can preview document-suite filters (`caseNos`, `modules`, `priorities`), open bug review, open bug regression, and suite continuation.
@@ -65,7 +65,7 @@ Default to the high-level facade tools. The fine-grained `bc_*` tools remain ava
    - `mode: "full-workflow"` when the user says "confirm and run" for a draft case.
    - `mode: "case-source-suite"` when the user supplies an `.xlsx` or `.md` test case document path.
    - `mode: "bug-regression"` when the user asks to retest open bugs.
-4. Use `bc_review` for suite runs, cases, bugs, gaps, and artifacts. Prefer `reviewSummary` for concise user-facing replies; use `reportMarkdown` or `regressionMarkdown` only when the user needs a detailed handoff.
+4. Use `bc_review` for suite runs, cases, bugs, gaps, and artifacts. Prefer `reviewMarkdown` for concise user-facing replies, inspect `reviewSummary` for structured status and next actions, and use `reportMarkdown` or `regressionMarkdown` only when the user needs a detailed handoff.
 5. Use internal tools such as `bc_generate_plan`, `bc_run_chain`, `bc_list_gaps`, or `bc_read_spec` only when a facade lacks the needed detail or the user is debugging/auditing.
 
 When the user provides a test case document path, first call `bc_run` with `mode: "case-source-suite"` and `confirm: false`. Present the preview summary, risks, bridge status, and sample cases. Only after explicit user confirmation call the same mode with `confirm: true`.
