@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
+import { formatScenariosAsMarkdown } from "../agent/caseFormatter.js";
 import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
 import { generateSeedFile } from "../agent/seedGenerator.js";
 import { createConfiguredAgentBridge } from "../agent/bridgeProvider.js";
@@ -17,6 +18,7 @@ import {
   runAgent,
   runChain,
   type AgentBridge,
+  type AgentBridgeWithMetadata,
   type CommandRunner
 } from "../agent/orchestrator.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
@@ -43,14 +45,14 @@ export type BrainCreatorMcpContext = {
   repository: JsonFileBrainCreatorRepository;
   service: BrainCreatorService;
   workDir: string;
-  agentBridge?: AgentBridge;
+  agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
 };
 
 type CreateContextInput = {
   dataFilePath?: string;
   workDir?: string;
-  agentBridge?: AgentBridge;
+  agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
 };
 
@@ -677,6 +679,20 @@ async function executeDocumentCase(
       caseId: testCase.id,
       maxHealAttempts: input.maxHealAttempts
     });
+    if (!("chainRun" in result)) {
+      return {
+        caseResult: {
+          caseNo: input.documentCase.caseNo,
+          title: input.documentCase.title,
+          status: "blocked",
+          testCaseId: testCase.id,
+          gapIds: [],
+          error:
+            "Host-agent task package is waiting for the current agent to generate the requested test output."
+        },
+        artifactPaths: [result.specPath, result.testPath]
+      };
+    }
     const artifactPaths = [result.chainRun.specPath, result.chainRun.testPath].filter(
       (item): item is string => typeof item === "string"
     );
@@ -1002,11 +1018,44 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     throw new Error(`Agent bridge unavailable: ${bridgeCheck.error}`);
   }
   const testCase = context.service.getTestCase(stringArg(input, "caseId"));
+  if (testCase.status !== "approved") {
+    throw new Error("Test case must be approved before running chain");
+  }
   const system = context.repository.systemProfiles.find((item) => item.id === testCase.systemId);
   if (!system) {
     throw new Error("Business system not found");
   }
   const authProfile = findAuthProfile(context, testCase.systemId);
+  if (context.agentBridge?.provider === "host-agent") {
+    const specsDir = join(context.workDir, "specs");
+    const generatedDir = join(context.workDir, "tests", "generated");
+    const specPath = join(specsDir, `${testCase.id}.md`);
+    const testPath = join(generatedDir, `${testCase.id}.spec.ts`);
+    await mkdir(specsDir, { recursive: true });
+    await mkdir(generatedDir, { recursive: true });
+    await writeFile(specPath, formatScenariosAsMarkdown(testCase.scenarios), "utf8");
+    const seed = await generateSeedFile({
+      outputDir: join(context.workDir, "tests"),
+      system,
+      authProfile
+    });
+    const taskPackage = await prepareAgentTask(context, {
+      systemId: system.id,
+      agent: "generator",
+      inputSummary: testCase.requirement,
+      args: ["--spec", specPath, "--seed", seed.seedPath, "--output", testPath],
+      outputPaths: [testPath]
+    });
+    return {
+      ...taskPackage,
+      mode: "host-agent",
+      stage: "generator",
+      testCase,
+      specPath,
+      seedPath: seed.seedPath,
+      testPath
+    };
+  }
   const result = await runChain({
     workDir: context.workDir,
     system,
