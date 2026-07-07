@@ -81,6 +81,19 @@ describe("createClaudeSubagentBridge", () => {
     expect(result.stderr).toContain("planner failed");
   });
 
+  it("preflights by checking the configured command without starting a subagent", async () => {
+    const bridge = createClaudeSubagentBridge({
+      command: process.execPath,
+      timeoutMs: 5000
+    });
+
+    await expect(bridge.preflight?.()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true
+      })
+    );
+  });
+
   itOnWindows("runs Windows command shims through a shell while preserving stdin", async () => {
     const workDir = await tempDir();
     const scriptPath = join(workDir, "shim-target.mjs");

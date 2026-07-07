@@ -41,6 +41,11 @@ export type AgentBridgeInput = {
 };
 
 export type AgentBridge = (input: AgentBridgeInput) => Promise<CommandResult>;
+export type AgentBridgePreflight = () => Promise<Omit<BridgePreflight, "checkedAt">>;
+export type AgentBridgeWithMetadata = AgentBridge & {
+  provider?: string;
+  preflight?: AgentBridgePreflight;
+};
 
 export type BridgePreflight = {
   ok: boolean;
@@ -54,7 +59,7 @@ export type BridgePreflight = {
  * bridge 未配置或不可达时返回结构化错误，避免进入 120s 超时。
  */
 export async function preflightAgentBridge(
-  bridge: AgentBridge | undefined,
+  bridge: AgentBridgeWithMetadata | undefined,
   timeoutMs = 5000
 ): Promise<BridgePreflight> {
   if (!bridge) {
@@ -64,6 +69,19 @@ export async function preflightAgentBridge(
         "Agent bridge not configured. Set BRAIN_CREATOR_AGENT_COMMAND to enable Planner/Generator/Healer.",
       checkedAt: new Date().toISOString()
     };
+  }
+  if (bridge.preflight) {
+    try {
+      const result = await withTimeout(bridge.preflight(), timeoutMs);
+      return { ...result, checkedAt: new Date().toISOString() };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        error: `Agent bridge preflight failed (${timeoutMs}ms timeout): ${message}`,
+        checkedAt: new Date().toISOString()
+      };
+    }
   }
   try {
     const result = await withTimeout(

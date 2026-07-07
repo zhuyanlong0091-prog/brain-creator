@@ -10,8 +10,7 @@ describe("Brain Creator local integration files", () => {
       command: "brain-creator-mcp",
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
-        BRAIN_CREATOR_AGENT_COMMAND: "claude",
-        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });
@@ -19,8 +18,7 @@ describe("Brain Creator local integration files", () => {
       command: "brain-creator-mcp",
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
-        BRAIN_CREATOR_AGENT_COMMAND: "claude",
-        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });
@@ -91,8 +89,7 @@ describe("Brain Creator local integration files", () => {
       args: ["brain-creator-mcp"],
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
-        BRAIN_CREATOR_AGENT_COMMAND: "claude",
-        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });
@@ -134,8 +131,7 @@ describe("Brain Creator local integration files", () => {
       args: ["brain-creator-mcp"],
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
-        BRAIN_CREATOR_AGENT_COMMAND: "claude",
-        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });

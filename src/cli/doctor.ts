@@ -85,53 +85,64 @@ function bridgeCommandCheck(
   env: DoctorEnv,
   commandExists: (command: string, env: DoctorEnv) => boolean
 ): DoctorCheck {
-  const command = env.BRAIN_CREATOR_AGENT_COMMAND;
+  const configuredProvider = bridgeProvider(env);
+  const detected = detectBridge(env, configuredProvider, commandExists);
+  const provider = detected.provider;
+  const command = detected.command;
+  if (provider === "disabled") {
+    return {
+      name: "Agent bridge provider",
+      status: "fail",
+      message: "Agent bridge provider is disabled.",
+      remediation: "Set BRAIN_CREATOR_AGENT_PROVIDER=auto, claude, or codex before running real suites."
+    };
+  }
   if (!command) {
     return {
-      name: "Claude bridge command",
+      name: "Agent bridge provider",
       status: "fail",
-      message: "No Claude subprocess bridge command is configured.",
-      remediation: "Set BRAIN_CREATOR_AGENT_COMMAND=claude before starting Brain Creator MCP."
+      message: "No agent bridge provider is configured or detectable.",
+      remediation: "Set BRAIN_CREATOR_AGENT_PROVIDER=auto, claude, or codex before starting Brain Creator MCP."
     };
   }
   if (!commandExists(command, env)) {
     return {
-      name: "Claude bridge command",
+      name: "Agent bridge provider",
       status: "fail",
       message: `${command} is configured but was not found on PATH.`,
-      remediation: "Install Claude Code CLI or set BRAIN_CREATOR_AGENT_COMMAND to an available wrapper command."
+      remediation: "Install the selected agent CLI or set the provider command to an available wrapper command."
     };
   }
   return {
-    name: "Claude bridge command",
+    name: "Agent bridge provider",
     status: "pass",
-    message: `${command} is available.`
+    message: `${provider} provider command ${command} is available.`
   };
 }
 
 function bridgeArgsCheck(env: DoctorEnv): DoctorCheck {
-  const args = env.BRAIN_CREATOR_AGENT_ARGS;
+  const provider = bridgeProvider(env);
+  const args = bridgeArgs(env, provider);
   if (!args) {
     return {
-      name: "Claude bridge args",
-      status: "fail",
-      message: "Claude bridge args are not configured.",
-      remediation:
-        "Set BRAIN_CREATOR_AGENT_ARGS='[\"--print\",\"--permission-mode\",\"acceptEdits\"]'."
+      name: "Agent bridge args",
+      status: provider === "auto" ? "pass" : "fail",
+      message: provider === "auto" ? "Agent bridge args will use provider defaults." : "Agent bridge args are not configured.",
+      remediation: provider === "auto" ? undefined : "Set provider-specific bridge args before starting Brain Creator MCP."
     };
   }
-  if (!args.includes("--print")) {
+  if ((provider === "claude" || env.BRAIN_CREATOR_AGENT_COMMAND) && !args.includes("--print")) {
     return {
-      name: "Claude bridge args",
+      name: "Agent bridge args",
       status: "warn",
       message: "Claude bridge args do not include --print, so non-interactive runs may hang.",
-      remediation: "Include --print in BRAIN_CREATOR_AGENT_ARGS."
+      remediation: "Include --print in Claude bridge args."
     };
   }
   return {
-    name: "Claude bridge args",
+    name: "Agent bridge args",
     status: "pass",
-    message: "Claude bridge args are configured for non-interactive runs."
+    message: `${provider} bridge args are configured for non-interactive runs.`
   };
 }
 
@@ -146,10 +157,69 @@ function bridgeTimeoutCheck(env: DoctorEnv): DoctorCheck {
     };
   }
   return {
-    name: "Claude bridge timeout",
+    name: "Agent bridge timeout",
     status: "pass",
-    message: `Claude bridge timeout is ${timeout}ms.`
+    message: `Agent bridge timeout is ${timeout}ms.`
   };
+}
+
+function bridgeProvider(env: DoctorEnv) {
+  if (env.BRAIN_CREATOR_AGENT_PROVIDER === "claude" || env.BRAIN_CREATOR_AGENT_PROVIDER === "codex" || env.BRAIN_CREATOR_AGENT_PROVIDER === "disabled") {
+    return env.BRAIN_CREATOR_AGENT_PROVIDER;
+  }
+  if (env.BRAIN_CREATOR_AGENT_COMMAND) {
+    return "claude";
+  }
+  return env.BRAIN_CREATOR_AGENT_PROVIDER === "auto" ? "auto" : "auto";
+}
+
+function bridgeCommand(env: DoctorEnv, provider: string) {
+  if (env.BRAIN_CREATOR_AGENT_COMMAND) {
+    return env.BRAIN_CREATOR_AGENT_COMMAND;
+  }
+  if (provider === "claude") {
+    return env.BRAIN_CREATOR_CLAUDE_COMMAND ?? "claude";
+  }
+  if (provider === "codex") {
+    return env.BRAIN_CREATOR_CODEX_COMMAND ?? "codex";
+  }
+  if (provider === "auto") {
+    return env.BRAIN_CREATOR_CLAUDE_COMMAND ?? env.BRAIN_CREATOR_CODEX_COMMAND;
+  }
+  return undefined;
+}
+
+function detectBridge(
+  env: DoctorEnv,
+  provider: string,
+  commandExists: (command: string, env: DoctorEnv) => boolean
+) {
+  const explicit = bridgeCommand(env, provider);
+  if (explicit) {
+    return { provider, command: explicit };
+  }
+  if (provider === "auto") {
+    if (commandExists("codex", env)) {
+      return { provider: "codex", command: "codex" };
+    }
+    if (commandExists("claude", env)) {
+      return { provider: "claude", command: "claude" };
+    }
+  }
+  return { provider, command: undefined };
+}
+
+function bridgeArgs(env: DoctorEnv, provider: string) {
+  if (env.BRAIN_CREATOR_AGENT_ARGS) {
+    return env.BRAIN_CREATOR_AGENT_ARGS;
+  }
+  if (provider === "claude") {
+    return env.BRAIN_CREATOR_CLAUDE_ARGS;
+  }
+  if (provider === "codex") {
+    return env.BRAIN_CREATOR_CODEX_ARGS;
+  }
+  return undefined;
 }
 
 function agentDefinitionsCheck(
@@ -186,7 +256,12 @@ function commandIsAvailable(command: string, env: DoctorEnv) {
 }
 
 function windowsPathExtensions(env: DoctorEnv) {
-  if (extname(env.BRAIN_CREATOR_AGENT_COMMAND ?? "")) {
+  const command =
+    env.BRAIN_CREATOR_AGENT_COMMAND ??
+    env.BRAIN_CREATOR_CLAUDE_COMMAND ??
+    env.BRAIN_CREATOR_CODEX_COMMAND ??
+    "";
+  if (extname(command)) {
     return [""];
   }
   return (env.PATHEXT ?? process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD;.PS1")

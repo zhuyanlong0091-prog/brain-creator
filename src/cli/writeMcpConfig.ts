@@ -15,6 +15,7 @@ type BrainCreatorMcpServer = {
 export type WriteMcpConfigOptions = {
   targetDir?: string;
   commandMode?: "local" | "global";
+  provider?: "auto" | "claude" | "codex" | "disabled";
 };
 
 export type WriteMcpConfigResult = {
@@ -22,24 +23,44 @@ export type WriteMcpConfigResult = {
   status: "created" | "updated";
 };
 
-const brainCreatorMcpEnv = {
-  BRAIN_CREATOR_WORKSPACE: ".",
-  BRAIN_CREATOR_AGENT_COMMAND: "claude",
-  BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
-  BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
-};
+function brainCreatorMcpEnv(provider: NonNullable<WriteMcpConfigOptions["provider"]>) {
+  const base = {
+    BRAIN_CREATOR_WORKSPACE: ".",
+    BRAIN_CREATOR_AGENT_PROVIDER: provider,
+    BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+  };
+  if (provider === "claude") {
+    return {
+      ...base,
+      BRAIN_CREATOR_CLAUDE_COMMAND: "claude",
+      BRAIN_CREATOR_CLAUDE_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]"
+    };
+  }
+  if (provider === "codex") {
+    return {
+      ...base,
+      BRAIN_CREATOR_CODEX_COMMAND: "codex",
+      BRAIN_CREATOR_CODEX_ARGS:
+        "[\"exec\",\"--json\",\"--ephemeral\",\"--sandbox\",\"workspace-write\",\"--ask-for-approval\",\"never\",\"-C\",\"{cwd}\",\"-\"]"
+    };
+  }
+  return base;
+}
 
-function brainCreatorMcpServer(commandMode: "local" | "global"): BrainCreatorMcpServer {
+function brainCreatorMcpServer(
+  commandMode: "local" | "global",
+  provider: NonNullable<WriteMcpConfigOptions["provider"]>
+): BrainCreatorMcpServer {
   if (commandMode === "global") {
     return {
       command: "brain-creator-mcp",
-      env: brainCreatorMcpEnv
+      env: brainCreatorMcpEnv(provider)
     };
   }
   return {
     command: "npx",
     args: ["brain-creator-mcp"],
-    env: brainCreatorMcpEnv
+    env: brainCreatorMcpEnv(provider)
   };
 }
 
@@ -48,6 +69,7 @@ export async function writeBrainCreatorMcpConfig(
 ): Promise<WriteMcpConfigResult> {
   const targetDir = resolve(options.targetDir ?? process.cwd());
   const commandMode = options.commandMode ?? "local";
+  const provider = options.provider ?? "auto";
   const configPath = join(targetDir, ".mcp.json");
   const existing = await readExistingConfig(configPath);
   const status = existing ? "updated" : "created";
@@ -55,7 +77,7 @@ export async function writeBrainCreatorMcpConfig(
     ...existing,
     mcpServers: {
       ...(existing?.mcpServers ?? {}),
-      "brain-creator": brainCreatorMcpServer(commandMode)
+      "brain-creator": brainCreatorMcpServer(commandMode, provider)
     }
   };
 
@@ -75,7 +97,16 @@ if (process.argv[1]?.endsWith("writeMcpConfig.js")) {
   const targetArgIndex = process.argv.findIndex((arg) => arg === "--target");
   const targetDir = targetArgIndex >= 0 ? process.argv[targetArgIndex + 1] : undefined;
   const commandMode = process.argv.includes("--global") ? "global" : "local";
-  writeBrainCreatorMcpConfig({ targetDir, commandMode })
+  const providerArgIndex = process.argv.findIndex((arg) => arg === "--provider");
+  const provider = providerArgIndex >= 0 ? process.argv[providerArgIndex + 1] : undefined;
+  writeBrainCreatorMcpConfig({
+    targetDir,
+    commandMode,
+    provider:
+      provider === "claude" || provider === "codex" || provider === "disabled" || provider === "auto"
+        ? provider
+        : undefined
+  })
     .then((result) => {
       console.log(`Brain Creator MCP config ${result.status}: ${result.path}`);
     })

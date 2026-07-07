@@ -91,11 +91,12 @@ npx tsc --noEmit
 npm run mcp
 ```
 
-本地运行真实 Planner / Generator / Healer 时，需要配置 Claude 子进程桥接：
+本地运行真实 Planner / Generator / Healer 时，Brain Creator 支持多 provider bridge。默认 MCP 配置使用 `BRAIN_CREATOR_AGENT_PROVIDER=auto`；Claude Code 可显式使用 `claude`，Codex 可显式使用 `codex`：
 
 ```bash
-BRAIN_CREATOR_AGENT_COMMAND=claude
-BRAIN_CREATOR_AGENT_ARGS='["--print","--permission-mode","acceptEdits"]'
+BRAIN_CREATOR_AGENT_PROVIDER=codex
+BRAIN_CREATOR_CODEX_COMMAND=codex
+BRAIN_CREATOR_CODEX_ARGS='["exec","--json","--ephemeral","--sandbox","workspace-write","--ask-for-approval","never","-C","{cwd}","-"]'
 BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
 
@@ -116,8 +117,8 @@ npx brain-creator-doctor
 
 - `npm install --save-dev brain-creator`：把 Brain Creator 安装到当前业务项目。
 - `npx brain-creator-install-assets`：把 Brain Creator Skill 和 Playwright Planner / Generator / Healer agent 定义安装到当前业务项目。
-- `npx brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，默认写入 `npx brain-creator-mcp`，因此适配本地安装。
-- `npx brain-creator-doctor`：在真正使用前检查 workspace、Claude bridge 和 agent 定义。
+- `npx brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，默认写入 `npx brain-creator-mcp` 和 `BRAIN_CREATOR_AGENT_PROVIDER=auto`，因此适配本地安装。
+- `npx brain-creator-doctor`：在真正使用前检查 workspace、agent bridge provider 和 agent 定义。
 
 如果你偏好全局安装，也可以执行：
 
@@ -410,11 +411,12 @@ Start the Brain Creator MCP server:
 npm run mcp
 ```
 
-Configure the Claude subprocess bridge when running real Planner / Generator / Healer flows locally:
+Configure the agent bridge when running real Planner / Generator / Healer flows locally. The default MCP config uses `BRAIN_CREATOR_AGENT_PROVIDER=auto`; use `claude` for Claude Code or `codex` for Codex subprocess execution:
 
 ```bash
-BRAIN_CREATOR_AGENT_COMMAND=claude
-BRAIN_CREATOR_AGENT_ARGS='["--print","--permission-mode","acceptEdits"]'
+BRAIN_CREATOR_AGENT_PROVIDER=codex
+BRAIN_CREATOR_CODEX_COMMAND=codex
+BRAIN_CREATOR_CODEX_ARGS='["exec","--json","--ephemeral","--sandbox","workspace-write","--ask-for-approval","never","-C","{cwd}","-"]'
 BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
 
@@ -474,5 +476,5 @@ npm run verify:live-claude-skill-workflow
 
 - Brain Creator v2 is local-first and uses JSON persistence.
 - The normal interface is Claude Code / Codex, not a browser UI.
-- The Playwright CLI currently supplies Claude agent definitions; Brain Creator calls them through a Claude subprocess bridge.
+- Brain Creator can call Planner / Generator / Healer through a Claude subprocess bridge, a Codex subprocess bridge, or preview-only disabled mode.
 - PostgreSQL, CI live-smoke execution, LLM quality review, and parallel agent execution are future enhancements.
