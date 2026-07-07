@@ -271,6 +271,12 @@ export type AgentTask = {
     specPath: string;
     testPath: string;
   };
+  suiteContext?: {
+    suiteId: string;
+    sourceId: string;
+    caseNo: string;
+    title: string;
+  };
   submitTool: "bc_submit_agent_output";
   createdAt: string;
   updatedAt: string;

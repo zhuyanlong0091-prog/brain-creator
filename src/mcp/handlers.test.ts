@@ -2345,6 +2345,90 @@ describe("handleBrainCreatorTool", () => {
     expect(runCount).toBe(3);
   });
 
+  it("resumes a host-agent case source suite after submitted tasks mark cases as passed", async () => {
+    const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
+    process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
+    try {
+      const workDir = await tempDir();
+      const context = createBrainCreatorMcpContext({
+        dataFilePath: join(workDir, "assets.json"),
+        workDir
+      });
+      const source = join(workDir, "cases.xlsx");
+      await writeFile(source, createXlsxFixture());
+      const system = dataOf(
+        await handleBrainCreatorTool(context, "bc_create_system", {
+          name: "HRMS",
+          environment: "test",
+          baseUrl: "https://hrms.example.test",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["https://hrms.example.test"]
+        })
+      );
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      });
+
+      const firstRun = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source,
+          confirm: true
+        })
+      );
+      const firstTask = context.service.listAgentTasks(system.id)[0];
+      await writeFile(firstTask.outputPaths[0], "import { test, expect } from '../seed';\n", "utf8");
+      const submitted = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: firstTask.id,
+          status: "succeeded",
+          stdout: "TC-001 generated",
+          stderr: "",
+          outputPaths: firstTask.outputPaths
+        })
+      );
+      const resumed = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source,
+          suiteId: firstRun.suite.id,
+          confirm: true
+        })
+      );
+
+      expect(firstRun.suiteRun).toEqual(
+        expect.objectContaining({ total: 2, blocked: 2 })
+      );
+      expect(submitted.suiteRun).toEqual(
+        expect.objectContaining({
+          suiteId: firstRun.suite.id,
+          total: 1,
+          passed: 1,
+          blocked: 0
+        })
+      );
+      expect(resumed.suite.id).toBe(firstRun.suite.id);
+      expect(resumed.progress).toEqual(
+        expect.objectContaining({
+          alreadyPassed: 1,
+          remaining: 1,
+          remainingCaseNos: ["TC-002"]
+        })
+      );
+      expect(resumed.suiteRun.caseResults).toEqual([
+        expect.objectContaining({ caseNo: "TC-002", status: "blocked" })
+      ]);
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
+    }
+  });
+
   it("continues the latest unfinished case source suite without repeating source details", async () => {
     const workDir = await tempDir();
     let runCount = 0;

@@ -225,6 +225,7 @@ type CreateAgentTaskInput = {
   promptPath: string;
   contextPath: string;
   chainContext?: AgentTask["chainContext"];
+  suiteContext?: AgentTask["suiteContext"];
 };
 
 type SubmitAgentTaskInput = {
@@ -1064,6 +1065,7 @@ export class BrainCreatorService {
       promptPath: input.promptPath,
       contextPath: input.contextPath,
       chainContext: input.chainContext,
+      suiteContext: input.suiteContext,
       submitTool: "bc_submit_agent_output",
       createdAt: now,
       updatedAt: now
