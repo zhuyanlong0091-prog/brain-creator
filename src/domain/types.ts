@@ -266,6 +266,11 @@ export type AgentTask = {
   outputPaths: string[];
   promptPath: string;
   contextPath: string;
+  chainContext?: {
+    testCaseId: string;
+    specPath: string;
+    testPath: string;
+  };
   submitTool: "bc_submit_agent_output";
   createdAt: string;
   updatedAt: string;

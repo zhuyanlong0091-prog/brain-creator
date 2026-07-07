@@ -26,6 +26,7 @@ import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import { id } from "../shared/id.js";
 import type {
   AgentRun,
+  AgentTask,
   AuthCheckpoint,
   AuthProfile,
   BugReport,
@@ -1044,7 +1045,12 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
       agent: "generator",
       inputSummary: testCase.requirement,
       args: ["--spec", specPath, "--seed", seed.seedPath, "--output", testPath],
-      outputPaths: [testPath]
+      outputPaths: [testPath],
+      chainContext: {
+        testCaseId: testCase.id,
+        specPath,
+        testPath
+      }
     });
     return {
       ...taskPackage,
@@ -1215,6 +1221,7 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
   const args = stringArrayArg(input, "args");
   const outputPaths = stringArrayArg(input, "outputPaths");
   const inputSummary = stringArg(input, "inputSummary");
+  const chainContext = chainContextArg(input);
   const task = context.service.createAgentTask({
     id: taskId,
     systemId,
@@ -1223,7 +1230,8 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
     args,
     outputPaths,
     promptPath,
-    contextPath
+    contextPath,
+    chainContext
   });
   await mkdir(taskDir, { recursive: true });
   await writeFile(promptPath, hostAgentPrompt({ systemId, agent, inputSummary, args, outputPaths }), "utf8");
@@ -1238,6 +1246,7 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
         inputSummary,
         args,
         outputPaths,
+        chainContext,
         workDir: context.workDir,
         submitTool: "bc_submit_agent_output"
       },
@@ -1258,13 +1267,45 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
 }
 
 function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
-  return context.service.submitAgentTask({
+  const result = context.service.submitAgentTask({
     taskId: stringArg(input, "taskId"),
     status: agentOutputStatusArg(input, "status"),
     stdout: optionalStringArg(input, "stdout") ?? "",
     stderr: optionalStringArg(input, "stderr") ?? "",
     outputPaths: optionalStringArrayArg(input, "outputPaths")
   });
+  const { chainContext } = result.task;
+  if (!chainContext) {
+    return result;
+  }
+  const status = result.agentRun.status === "succeeded" ? "succeeded" : "failed";
+  const gaps =
+    status === "failed"
+      ? [
+          context.service.reportGap({
+            projectId: result.task.systemId,
+            sourceType: "host-agent-task",
+            sourceId: result.task.id,
+            reason: result.agentRun.error ?? "Host agent task failed",
+            severity: "high",
+            owner: "qa"
+          })
+        ]
+      : [];
+  const chainRun: ChainRun = {
+    id: id("chain"),
+    systemId: result.task.systemId,
+    testCaseId: chainContext.testCaseId,
+    status,
+    generateRunId: result.agentRun.id,
+    specPath: chainContext.specPath,
+    testPath: chainContext.testPath,
+    gaps,
+    createdAt: result.agentRun.createdAt,
+    completedAt: new Date().toISOString()
+  };
+  context.service.recordChainRun(chainRun);
+  return { ...result, chainRun };
 }
 
 function hostAgentPrompt(input: {
@@ -2117,6 +2158,24 @@ function optionalNumberArg(input: Record<string, unknown>, key: string): number 
 
 function optionalBooleanArg(input: Record<string, unknown>, key: string): boolean {
   return input[key] === true;
+}
+
+function chainContextArg(input: Record<string, unknown>): AgentTask["chainContext"] | undefined {
+  const value = input.chainContext;
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object") {
+    throw new Error("chainContext must be an object");
+  }
+  const candidate = value as Record<string, unknown>;
+  const testCaseId = candidate.testCaseId;
+  const specPath = candidate.specPath;
+  const testPath = candidate.testPath;
+  if (typeof testCaseId !== "string" || typeof specPath !== "string" || typeof testPath !== "string") {
+    throw new Error("chainContext requires testCaseId, specPath, and testPath");
+  }
+  return { testCaseId, specPath, testPath };
 }
 
 function runModeArg(input: Record<string, unknown>, key: string) {

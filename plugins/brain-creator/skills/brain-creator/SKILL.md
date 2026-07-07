@@ -7,7 +7,7 @@ description: 当用户要求使用 Brain Creator 时触发：接入业务系统�
 
 Use Brain Creator as an agent-native testing business brain through MCP tools. Claude Code or Codex is the user interface; Brain Creator supplies system context, auth handling, business language, planning, generated artifacts, chain execution, and gap tracking.
 
-Agent bridge policy: Brain Creator may run Planner / Generator / Healer through Claude Code subprocess, Codex subprocess, host-agent task handoff, or disabled preview-only mode. Prefer `bc_status` or `bc_session_resume` to inspect bridge state before confirmed execution. If bridge state is blocked, report the blocker or create a Gap instead of waiting on a long timeout. In host-agent mode, `bc_prepare_agent_task` and approved `bc_run_chain` calls return `status: "needs_agent_execution"` task packages. Read `input.prompt.md` and `input.context.json`, create the requested outputs as the current agent, then call `bc_submit_agent_output`.
+Agent bridge policy: Brain Creator may run Planner / Generator / Healer through Claude Code subprocess, Codex subprocess, host-agent task handoff, or disabled preview-only mode. Prefer `bc_status` or `bc_session_resume` to inspect bridge state before confirmed execution. If bridge state is blocked, report the blocker or create a Gap instead of waiting on a long timeout. In host-agent mode, `bc_prepare_agent_task` and approved `bc_run_chain` calls return `status: "needs_agent_execution"` task packages. Read `input.prompt.md` and `input.context.json`, create the requested outputs as the current agent, then call `bc_submit_agent_output`; linked chain tasks will record AgentRun, ChainRun, and generated artifact ownership after successful submission.
 
 ## 入口路由（Entry Routing）
 
@@ -172,7 +172,7 @@ Use run tools only after a test case is approved.
 
 1. Confirm the test case has `status: "approved"`.
 2. Call `bc_run_chain` with the approved `caseId`.
-3. If `bc_run_chain` returns `status: "needs_agent_execution"` in host-agent mode, execute the returned task package yourself, write the requested output file, then call `bc_submit_agent_output`. Do not wait for a Claude or Codex subprocess.
+3. If `bc_run_chain` returns `status: "needs_agent_execution"` in host-agent mode, execute the returned task package yourself, write the requested output file, then call `bc_submit_agent_output`. Do not wait for a Claude or Codex subprocess. A successful submission records the linked chain run and generated artifact ownership.
 4. Call `bc_list_chain_runs` when you need execution history for the selected system.
 5. Report ChainRun status, generated spec path, generated test path, healer attempts, and any gaps.
 
