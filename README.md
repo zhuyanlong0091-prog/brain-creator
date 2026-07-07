@@ -100,7 +100,7 @@ BRAIN_CREATOR_CODEX_ARGS='["exec","--json","--ephemeral","--sandbox","workspace-
 BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
 
-`host-agent` 模式不会启动 Claude/Codex 子进程。Agent 应调用 `bc_prepare_agent_task`，读取返回的 `input.prompt.md` / `input.context.json`，完成输出文件后调用 `bc_submit_agent_output`。
+`host-agent` 模式不会启动 Claude/Codex 子进程。Agent 可直接调用 `bc_prepare_agent_task`，读取返回的 `input.prompt.md` / `input.context.json`，完成输出文件后调用 `bc_submit_agent_output`。如果用户已经批准用例并调用 `bc_run_chain`，Brain Creator 会自动写出 spec/seed，并返回 `status: "needs_agent_execution"` 的 generator 任务包；此时不要等待子进程，当前 Agent 应完成任务包后再调用 `bc_submit_agent_output`。
 
 Windows PowerShell 中请使用 `$env:` 设置同样的环境变量后再启动 MCP 客户端。
 
@@ -422,7 +422,7 @@ BRAIN_CREATOR_CODEX_ARGS='["exec","--json","--ephemeral","--sandbox","workspace-
 BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
 
-Host-agent mode does not start a Claude or Codex subprocess. The agent should call `bc_prepare_agent_task`, read the returned `input.prompt.md` and `input.context.json`, create the requested outputs, then call `bc_submit_agent_output`.
+Host-agent mode does not start a Claude or Codex subprocess. The agent may call `bc_prepare_agent_task`, read the returned `input.prompt.md` and `input.context.json`, create the requested outputs, then call `bc_submit_agent_output`. When an approved case is run through `bc_run_chain`, Brain Creator now writes the spec/seed files and returns a generator task package with `status: "needs_agent_execution"`; the current agent should execute that package instead of waiting for a subprocess.
 
 On Windows PowerShell, set the same values with `$env:` before launching the MCP client.
 

@@ -549,6 +549,70 @@ describe("handleBrainCreatorTool", () => {
     ]);
   });
 
+  it("returns a host-agent task package instead of running the chain subprocess", async () => {
+    const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
+    process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
+    try {
+      const workDir = await tempDir();
+      const context = createBrainCreatorMcpContext({
+        dataFilePath: join(workDir, "assets.json"),
+        workDir
+      });
+      const system = dataOf(
+        await handleBrainCreatorTool(context, "bc_create_system", {
+          name: "Orders Console",
+          environment: "staging",
+          baseUrl: "https://shop.example.test",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["https://shop.example.test"]
+        })
+      );
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "staging",
+        role: "qa-admin",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      });
+      const testCase = context.service.createTestCase({
+        systemId: system.id,
+        requirement: "Generate host-agent checkout test",
+        scenarios: [
+          {
+            id: "scenario_1",
+            title: "Checkout",
+            priority: "critical",
+            steps: [{ action: "assert", target: "Order total", expected: "visible" }]
+          }
+        ],
+        newTerms: [],
+        ruleCheckResult: { passed: true, checks: [] }
+      });
+      context.service.approveTestCase(testCase.id);
+
+      const result = dataOf(
+        await handleBrainCreatorTool(context, "bc_run_chain", {
+          caseId: testCase.id
+        })
+      );
+
+      expect(result.status).toBe("needs_agent_execution");
+      expect(result.mode).toBe("host-agent");
+      expect(result.task).toEqual(
+        expect.objectContaining({
+          agent: "generator",
+          systemId: system.id,
+          status: "pending"
+        })
+      );
+      expect(await readFile(result.promptPath, "utf8")).toContain("Generate host-agent checkout test");
+      expect(context.service.listChainRuns(system.id)).toEqual([]);
+      expect(context.service.listAgentRuns(system.id)).toEqual([]);
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
+    }
+  });
+
   it("rejects artifact reads outside the workspace even when the path is recorded", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
