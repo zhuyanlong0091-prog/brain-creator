@@ -970,6 +970,102 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.getTestCase(testCase.id).status).toBe("passed");
   });
 
+  it("records a standard gap when a host-agent healer submit still fails Playwright", async () => {
+    const workDir = await tempDir();
+    const hostBridge = Object.assign(
+      async () => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: "host-agent handoff"
+      }),
+      {
+        provider: "host-agent",
+        preflight: async () => ({ ok: true })
+      }
+    );
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: hostBridge,
+      runner: async () => ({ exitCode: 1, stdout: "", stderr: "still missing amount" })
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Generate host-agent checkout test",
+      scenarios: [
+        {
+          id: "scenario_1",
+          title: "Checkout",
+          priority: "critical",
+          steps: [{ action: "assert", target: "Order total", expected: "visible" }]
+        }
+      ],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+    const taskPackage = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_chain", {
+        caseId: testCase.id
+      })
+    );
+    await writeFile(taskPackage.testPath, "import { test, expect } from '../seed';\n", "utf8");
+    const needsHealing = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: taskPackage.task.id,
+        status: "succeeded",
+        stdout: "generated test",
+        stderr: "",
+        outputPaths: [taskPackage.testPath]
+      })
+    );
+
+    const healed = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: needsHealing.task.id,
+        status: "succeeded",
+        stdout: "healed test",
+        stderr: "",
+        outputPaths: [taskPackage.testPath]
+      })
+    );
+
+    expect(healed.chainRun).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        testCaseId: testCase.id,
+        healRunId: healed.agentRun.id,
+        gaps: [
+          expect.objectContaining({
+            sourceType: "host-agent-healer",
+            sourceId: needsHealing.task.id,
+            reason: expect.stringContaining("still missing amount")
+          })
+        ]
+      })
+    );
+    expect(context.service.getTestCase(testCase.id).status).toBe("failed");
+    expect(context.service.listGaps({ projectId: system.id, status: "open" })).toEqual([
+      expect.objectContaining({ sourceType: "host-agent-healer" })
+    ]);
+  });
+
   it("rejects artifact reads outside the workspace even when the path is recorded", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
@@ -2700,6 +2796,94 @@ describe("handleBrainCreatorTool", () => {
       expect(resumed.suiteRun.caseResults).toEqual([
         expect.objectContaining({ caseNo: "TC-002", status: "blocked" })
       ]);
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
+    }
+  });
+
+  it("records a failed suite case when a host-agent healer task still fails", async () => {
+    const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
+    process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
+    try {
+      const workDir = await tempDir();
+      const context = createBrainCreatorMcpContext({
+        dataFilePath: join(workDir, "assets.json"),
+        workDir
+      });
+      let runCount = 0;
+      context.runner = async () => {
+        runCount += 1;
+        return { exitCode: 1, stdout: "", stderr: `suite failure ${runCount}` };
+      };
+      const source = join(workDir, "cases.xlsx");
+      await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "未执行", "", ""]]));
+      const system = dataOf(
+        await handleBrainCreatorTool(context, "bc_create_system", {
+          name: "HRMS",
+          environment: "test",
+          baseUrl: "https://hrms.example.test",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["https://hrms.example.test"]
+        })
+      );
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      });
+
+      const firstRun = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source,
+          confirm: true
+        })
+      );
+      const generatorTask = context.service.listAgentTasks(system.id)[0];
+      await writeFile(generatorTask.outputPaths[0], "import { test, expect } from '../seed';\n", "utf8");
+      const needsHealing = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: generatorTask.id,
+          status: "succeeded",
+          stdout: "generated test",
+          stderr: "",
+          outputPaths: generatorTask.outputPaths
+        })
+      );
+      const healed = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: needsHealing.task.id,
+          status: "succeeded",
+          stdout: "healed test",
+          stderr: "",
+          outputPaths: generatorTask.outputPaths
+        })
+      );
+
+      expect(firstRun.suiteRun).toEqual(expect.objectContaining({ blocked: 1 }));
+      expect(healed.suiteRun).toEqual(
+        expect.objectContaining({
+          suiteId: firstRun.suite.id,
+          status: "failed",
+          total: 1,
+          failed: 1,
+          blocked: 0
+        })
+      );
+      expect(healed.suiteRun.caseResults).toEqual([
+        expect.objectContaining({
+          caseNo: "TC-001",
+          status: "failed",
+          error: expect.stringContaining("suite failure 2"),
+          gapIds: [healed.chainRun.gaps[0].id]
+        })
+      ]);
+      expect(context.service.listCaseSuites(system.id)[0]).toEqual(
+        expect.objectContaining({ id: firstRun.suite.id, status: "failed" })
+      );
     } finally {
       restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
     }
