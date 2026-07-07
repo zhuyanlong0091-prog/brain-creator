@@ -91,7 +91,7 @@ npx tsc --noEmit
 npm run mcp
 ```
 
-本地运行真实 Planner / Generator / Healer 时，Brain Creator 支持多 provider bridge。默认 MCP 配置使用 `BRAIN_CREATOR_AGENT_PROVIDER=auto`；Claude Code 可显式使用 `claude`，Codex 可显式使用 `codex`：
+本地运行真实 Planner / Generator / Healer 时，Brain Creator 支持多 provider bridge。默认 MCP 配置使用 `BRAIN_CREATOR_AGENT_PROVIDER=auto`；Claude Code 可显式使用 `claude`，Codex 子进程可显式使用 `codex`，Codex 插件/当前 Agent 执行可使用 `host-agent`：
 
 ```bash
 BRAIN_CREATOR_AGENT_PROVIDER=codex
@@ -99,6 +99,8 @@ BRAIN_CREATOR_CODEX_COMMAND=codex
 BRAIN_CREATOR_CODEX_ARGS='["exec","--json","--ephemeral","--sandbox","workspace-write","--ask-for-approval","never","-C","{cwd}","-"]'
 BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
+
+`host-agent` 模式不会启动 Claude/Codex 子进程。Agent 应调用 `bc_prepare_agent_task`，读取返回的 `input.prompt.md` / `input.context.json`，完成输出文件后调用 `bc_submit_agent_output`。
 
 Windows PowerShell 中请使用 `$env:` 设置同样的环境变量后再启动 MCP 客户端。
 
@@ -411,7 +413,7 @@ Start the Brain Creator MCP server:
 npm run mcp
 ```
 
-Configure the agent bridge when running real Planner / Generator / Healer flows locally. The default MCP config uses `BRAIN_CREATOR_AGENT_PROVIDER=auto`; use `claude` for Claude Code or `codex` for Codex subprocess execution:
+Configure the agent bridge when running real Planner / Generator / Healer flows locally. The default MCP config uses `BRAIN_CREATOR_AGENT_PROVIDER=auto`; use `claude` for Claude Code, `codex` for Codex subprocess execution, or `host-agent` when the current agent should execute task packages:
 
 ```bash
 BRAIN_CREATOR_AGENT_PROVIDER=codex
@@ -419,6 +421,8 @@ BRAIN_CREATOR_CODEX_COMMAND=codex
 BRAIN_CREATOR_CODEX_ARGS='["exec","--json","--ephemeral","--sandbox","workspace-write","--ask-for-approval","never","-C","{cwd}","-"]'
 BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
+
+Host-agent mode does not start a Claude or Codex subprocess. The agent should call `bc_prepare_agent_task`, read the returned `input.prompt.md` and `input.context.json`, create the requested outputs, then call `bc_submit_agent_output`.
 
 On Windows PowerShell, set the same values with `$env:` before launching the MCP client.
 
@@ -476,5 +480,5 @@ npm run verify:live-claude-skill-workflow
 
 - Brain Creator v2 is local-first and uses JSON persistence.
 - The normal interface is Claude Code / Codex, not a browser UI.
-- Brain Creator can call Planner / Generator / Healer through a Claude subprocess bridge, a Codex subprocess bridge, or preview-only disabled mode.
+- Brain Creator can call Planner / Generator / Healer through a Claude subprocess bridge, a Codex subprocess bridge, host-agent task handoff, or preview-only disabled mode.
 - PostgreSQL, CI live-smoke execution, LLM quality review, and parallel agent execution are future enhancements.

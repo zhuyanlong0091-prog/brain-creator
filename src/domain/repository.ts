@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type {
   ActionStep,
   AgentRun,
+  AgentTask,
   ApiFlow,
   AuthCheckpoint,
   AuthProfile,
@@ -39,6 +40,7 @@ export class InMemoryBrainCreatorRepository {
   businessRules: BusinessRule[] = [];
   testCases: TestCase[] = [];
   agentRuns: AgentRun[] = [];
+  agentTasks: AgentTask[] = [];
   chainRuns: ChainRun[] = [];
   caseSources: CaseSource[] = [];
   caseSuites: CaseSuite[] = [];
@@ -65,6 +67,7 @@ export class InMemoryBrainCreatorRepository {
     this.businessRules = [];
     this.testCases = [];
     this.agentRuns = [];
+    this.agentTasks = [];
     this.chainRuns = [];
     this.caseSources = [];
     this.caseSuites = [];
@@ -91,6 +94,7 @@ type RepositorySnapshot = Pick<
   | "businessRules"
   | "testCases"
   | "agentRuns"
+  | "agentTasks"
   | "chainRuns"
   | "caseSources"
   | "caseSuites"
@@ -129,6 +133,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     this.businessRules = snapshot.businessRules ?? [];
     this.testCases = snapshot.testCases ?? [];
     this.agentRuns = snapshot.agentRuns ?? [];
+    this.agentTasks = snapshot.agentTasks ?? [];
     this.chainRuns = snapshot.chainRuns ?? [];
     this.caseSources = snapshot.caseSources ?? [];
     this.caseSuites = snapshot.caseSuites ?? [];
@@ -153,6 +158,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       businessRules: this.businessRules,
       testCases: this.testCases,
       agentRuns: this.agentRuns,
+      agentTasks: this.agentTasks,
       chainRuns: this.chainRuns,
       caseSources: this.caseSources,
       caseSuites: this.caseSuites,

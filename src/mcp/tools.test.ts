@@ -38,6 +38,8 @@ describe("BRAIN_CREATOR_TOOLS", () => {
       "bc_cancel_plan",
       "bc_resume_plan",
       "bc_run_agent",
+      "bc_prepare_agent_task",
+      "bc_submit_agent_output",
       "bc_list_agent_runs",
       "bc_run_chain",
       "bc_full_workflow",

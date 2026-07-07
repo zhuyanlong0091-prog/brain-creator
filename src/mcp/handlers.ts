@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
@@ -21,6 +21,7 @@ import {
 } from "../agent/orchestrator.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
 import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
+import { id } from "../shared/id.js";
 import type {
   AgentRun,
   AuthCheckpoint,
@@ -229,6 +230,10 @@ export async function handleBrainCreatorTool(
         return textResult(context.service.resumeTestCase(stringArg(input, "caseId")));
       case "bc_run_agent":
         return textResult(await runSingleAgent(context, input));
+      case "bc_prepare_agent_task":
+        return textResult(await prepareAgentTask(context, input));
+      case "bc_submit_agent_output":
+        return textResult(submitAgentOutput(context, input));
       case "bc_list_agent_runs":
         return textResult(context.service.listAgentRuns(stringArg(input, "systemId")));
       case "bc_run_chain":
@@ -1145,6 +1150,102 @@ async function runSingleAgent(context: BrainCreatorMcpContext, input: Record<str
   });
   context.service.recordAgentRun(agentRun);
   return agentRun;
+}
+
+async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const systemId = stringArg(input, "systemId");
+  const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+  if (!system) {
+    throw new Error("Business system not found");
+  }
+  const taskId = id("agentTask");
+  const taskDir = join(context.workDir, ".brain-creator", "agent-tasks", taskId);
+  const promptPath = join(taskDir, "input.prompt.md");
+  const contextPath = join(taskDir, "input.context.json");
+  const agent = agentArg(input, "agent");
+  const args = stringArrayArg(input, "args");
+  const outputPaths = stringArrayArg(input, "outputPaths");
+  const inputSummary = stringArg(input, "inputSummary");
+  const task = context.service.createAgentTask({
+    id: taskId,
+    systemId,
+    agent,
+    inputSummary,
+    args,
+    outputPaths,
+    promptPath,
+    contextPath
+  });
+  await mkdir(taskDir, { recursive: true });
+  await writeFile(promptPath, hostAgentPrompt({ systemId, agent, inputSummary, args, outputPaths }), "utf8");
+  await writeFile(
+    contextPath,
+    `${JSON.stringify(
+      {
+        taskId,
+        systemId,
+        system,
+        agent,
+        inputSummary,
+        args,
+        outputPaths,
+        workDir: context.workDir,
+        submitTool: "bc_submit_agent_output"
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  return {
+    status: "needs_agent_execution",
+    task,
+    promptPath,
+    contextPath,
+    outputPaths,
+    submitTool: "bc_submit_agent_output",
+    nextAction: "The host agent should read the prompt/context, create requested outputs, then call bc_submit_agent_output."
+  };
+}
+
+function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  return context.service.submitAgentTask({
+    taskId: stringArg(input, "taskId"),
+    status: agentOutputStatusArg(input, "status"),
+    stdout: optionalStringArg(input, "stdout") ?? "",
+    stderr: optionalStringArg(input, "stderr") ?? "",
+    outputPaths: optionalStringArrayArg(input, "outputPaths")
+  });
+}
+
+function hostAgentPrompt(input: {
+  systemId: string;
+  agent: AgentRun["agent"];
+  inputSummary: string;
+  args: string[];
+  outputPaths: string[];
+}) {
+  return [
+    `# Brain Creator Host Agent Task`,
+    "",
+    `Agent: ${input.agent}`,
+    `System id: ${input.systemId}`,
+    `Task: ${input.inputSummary}`,
+    "",
+    "Execution contract:",
+    "- Execute this task as the current host agent; do not start a Claude or Codex subprocess.",
+    "- Do not ask the user for permission or clarification during this task.",
+    "- Keep secrets out of stdout and summaries.",
+    "- Write every requested output file exactly where specified.",
+    "",
+    "Arguments:",
+    input.args.length > 0 ? input.args.join(" ") : "(none)",
+    "",
+    "Expected output paths:",
+    input.outputPaths.length > 0 ? input.outputPaths.join("\n") : "(none)",
+    "",
+    "When complete, call `bc_submit_agent_output` with this task id and status."
+  ].join("\n");
 }
 
 async function readArtifact(
@@ -2430,6 +2531,10 @@ function stringArrayArg(input: Record<string, unknown>, key: string): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function optionalStringArrayArg(input: Record<string, unknown>, key: string): string[] | undefined {
+  return Array.isArray(input[key]) ? stringArrayArg(input, key) : undefined;
+}
+
 function recordArg(input: Record<string, unknown>, key: string): Record<string, string> {
   const value = input[key];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -2506,6 +2611,14 @@ function agentArg(input: Record<string, unknown>, key: string): AgentRun["agent"
     throw new Error(`${key} is invalid`);
   }
   return value as AgentRun["agent"];
+}
+
+function agentOutputStatusArg(input: Record<string, unknown>, key: string): "succeeded" | "failed" {
+  const value = stringArg(input, key);
+  if (!["succeeded", "failed"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as "succeeded" | "failed";
 }
 
 function scenarioArrayArg(input: Record<string, unknown>, key: string): TestCaseScenario[] {

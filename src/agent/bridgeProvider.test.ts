@@ -38,6 +38,31 @@ describe("createConfiguredAgentBridge", () => {
     expect(bridge).toBeUndefined();
   });
 
+  it("creates a host-agent bridge that preflights without subprocess execution", async () => {
+    const bridge = createConfiguredAgentBridge({
+      env: {
+        BRAIN_CREATOR_AGENT_PROVIDER: "host-agent"
+      }
+    });
+
+    expect(bridge?.provider).toBe("host-agent");
+    await expect(bridge?.preflight?.()).resolves.toEqual(expect.objectContaining({ ok: true }));
+    await expect(
+      bridge?.({
+        systemId: "system_1",
+        agent: "generator",
+        inputSummary: "Generate checkout test",
+        args: [],
+        outputPaths: []
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        exitCode: 1,
+        stderr: expect.stringContaining("bc_prepare_agent_task")
+      })
+    );
+  });
+
   it("parses JSON and shell-style bridge args", () => {
     expect(parseAgentArgs('["exec","--json"]')).toEqual(["exec", "--json"]);
     expect(parseAgentArgs("exec --json -")).toEqual(["exec", "--json", "-"]);

@@ -89,6 +89,13 @@ function bridgeCommandCheck(
   const detected = detectBridge(env, configuredProvider, commandExists);
   const provider = detected.provider;
   const command = detected.command;
+  if (provider === "host-agent") {
+    return {
+      name: "Agent bridge provider",
+      status: "pass",
+      message: "host-agent provider is ready; use bc_prepare_agent_task and bc_submit_agent_output.",
+    };
+  }
   if (provider === "disabled") {
     return {
       name: "Agent bridge provider",
@@ -122,6 +129,13 @@ function bridgeCommandCheck(
 
 function bridgeArgsCheck(env: DoctorEnv): DoctorCheck {
   const provider = bridgeProvider(env);
+  if (provider === "host-agent") {
+    return {
+      name: "Agent bridge args",
+      status: "pass",
+      message: "host-agent provider does not require subprocess args."
+    };
+  }
   const args = bridgeArgs(env, provider);
   if (!args) {
     return {
@@ -164,7 +178,12 @@ function bridgeTimeoutCheck(env: DoctorEnv): DoctorCheck {
 }
 
 function bridgeProvider(env: DoctorEnv) {
-  if (env.BRAIN_CREATOR_AGENT_PROVIDER === "claude" || env.BRAIN_CREATOR_AGENT_PROVIDER === "codex" || env.BRAIN_CREATOR_AGENT_PROVIDER === "disabled") {
+  if (
+    env.BRAIN_CREATOR_AGENT_PROVIDER === "claude" ||
+    env.BRAIN_CREATOR_AGENT_PROVIDER === "codex" ||
+    env.BRAIN_CREATOR_AGENT_PROVIDER === "host-agent" ||
+    env.BRAIN_CREATOR_AGENT_PROVIDER === "disabled"
+  ) {
     return env.BRAIN_CREATOR_AGENT_PROVIDER;
   }
   if (env.BRAIN_CREATOR_AGENT_COMMAND) {

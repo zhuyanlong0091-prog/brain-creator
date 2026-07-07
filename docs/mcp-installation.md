@@ -58,7 +58,7 @@ Then configure Claude Code or Codex MCP in the business project:
 }
 ```
 
-`BRAIN_CREATOR_AGENT_PROVIDER=auto` lets Brain Creator pick an available bridge. Use `claude` in Claude Code projects, `codex` in Codex projects, or `disabled` for preview-only workflows. For an explicit Codex subprocess bridge:
+`BRAIN_CREATOR_AGENT_PROVIDER=auto` lets Brain Creator pick an available bridge. Use `claude` in Claude Code projects, `codex` in Codex subprocess projects, `host-agent` when the current Codex/Claude agent should execute prepared task packages, or `disabled` for preview-only workflows. For an explicit Codex subprocess bridge:
 
 ```json
 {
@@ -68,6 +68,17 @@ Then configure Claude Code or Codex MCP in the business project:
   "BRAIN_CREATOR_AGENT_TIMEOUT_MS": "120000"
 }
 ```
+
+For a Codex plugin style workflow that should not start another subprocess, use host-agent mode:
+
+```json
+{
+  "BRAIN_CREATOR_AGENT_PROVIDER": "host-agent",
+  "BRAIN_CREATOR_AGENT_TIMEOUT_MS": "120000"
+}
+```
+
+In host-agent mode the agent should call `bc_prepare_agent_task`, read the returned `input.prompt.md` and `input.context.json`, create the requested outputs, then call `bc_submit_agent_output`.
 
 Run the preflight before the first Brain Creator workflow:
 
