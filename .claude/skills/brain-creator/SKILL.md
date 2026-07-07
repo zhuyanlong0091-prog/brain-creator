@@ -7,6 +7,8 @@ description: 当用户要求使用 Brain Creator 时触发：接入业务系统�
 
 Use Brain Creator as an agent-native testing business brain through MCP tools. Claude Code or Codex is the user interface; Brain Creator supplies system context, auth handling, business language, planning, generated artifacts, chain execution, and gap tracking.
 
+Agent bridge policy: Brain Creator may run Planner / Generator / Healer through Claude Code subprocess, Codex subprocess, or disabled preview-only mode. Prefer `bc_status` or `bc_session_resume` to inspect bridge state before confirmed execution. If bridge state is blocked, report the blocker or create a Gap instead of waiting on a long timeout.
+
 ## 入口路由（Entry Routing）
 
 用户通过两种方式使用 Brain Creator。每次用户消息到达时自动判断入口模式。

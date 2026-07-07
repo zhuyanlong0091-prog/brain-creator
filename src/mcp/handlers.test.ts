@@ -637,32 +637,38 @@ describe("handleBrainCreatorTool", () => {
   });
 
   it("records a failed single agent run when no bridge is configured", async () => {
-    const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
-    const system = dataOf(
-      await handleBrainCreatorTool(context, "bc_create_system", {
-        name: "Orders Console",
-        environment: "staging",
-        baseUrl: "https://shop.example.test",
-        defaultLocale: "zh-CN",
-        urlAllowlist: ["https://shop.example.test"]
-      })
-    );
+    const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
+    process.env.BRAIN_CREATOR_AGENT_PROVIDER = "disabled";
+    try {
+      const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
+      const system = dataOf(
+        await handleBrainCreatorTool(context, "bc_create_system", {
+          name: "Orders Console",
+          environment: "staging",
+          baseUrl: "https://shop.example.test",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["https://shop.example.test"]
+        })
+      );
 
-    const run = dataOf(
-      await handleBrainCreatorTool(context, "bc_run_agent", {
-        systemId: system.id,
-        agent: "planner",
-        inputSummary: "Explore robot purchase",
-        args: [],
-        outputPaths: []
-      })
-    );
+      const run = dataOf(
+        await handleBrainCreatorTool(context, "bc_run_agent", {
+          systemId: system.id,
+          agent: "planner",
+          inputSummary: "Explore robot purchase",
+          args: [],
+          outputPaths: []
+        })
+      );
 
-    expect(run.status).toBe("failed");
-    expect(run.error).toContain("Claude subagent bridge required");
-    expect(context.service.listAgentRuns(system.id)).toEqual([
-      expect.objectContaining({ id: run.id, status: "failed" })
-    ]);
+      expect(run.status).toBe("failed");
+      expect(run.error).toContain("Claude subagent bridge required");
+      expect(context.service.listAgentRuns(system.id)).toEqual([
+        expect.objectContaining({ id: run.id, status: "failed" })
+      ]);
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
+    }
   });
 
   it("uses a configured Claude subprocess bridge from environment variables", async () => {
@@ -906,14 +912,20 @@ describe("handleBrainCreatorTool", () => {
     expect(resume.nextAction).toContain("complete_onboarding");
 
     // 无 bridge 时的 next action
-    const noBridgeContext = createBrainCreatorMcpContext({ workDir });
-    const resumeNoBridge = dataOf(
-      await handleBrainCreatorTool(noBridgeContext, "bc_session_resume", {
-        systemId: system.id
-      })
-    );
-    expect(resumeNoBridge.bridge.ok).toBe(false);
-    expect(resumeNoBridge.bridge.error).toContain("BRAIN_CREATOR_AGENT_COMMAND");
+    const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
+    process.env.BRAIN_CREATOR_AGENT_PROVIDER = "disabled";
+    try {
+      const noBridgeContext = createBrainCreatorMcpContext({ workDir });
+      const resumeNoBridge = dataOf(
+        await handleBrainCreatorTool(noBridgeContext, "bc_session_resume", {
+          systemId: system.id
+        })
+      );
+      expect(resumeNoBridge.bridge.ok).toBe(false);
+      expect(resumeNoBridge.bridge.error).toContain("BRAIN_CREATOR_AGENT_COMMAND");
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
+    }
   });
 
   it("isolates bc_session_resume per system", async () => {

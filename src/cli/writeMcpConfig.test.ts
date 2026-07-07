@@ -24,8 +24,7 @@ describe("writeBrainCreatorMcpConfig", () => {
       args: ["brain-creator-mcp"],
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
-        BRAIN_CREATOR_AGENT_COMMAND: "claude",
-        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });
@@ -73,10 +72,24 @@ describe("writeBrainCreatorMcpConfig", () => {
       command: "brain-creator-mcp",
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
-        BRAIN_CREATOR_AGENT_COMMAND: "claude",
-        BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
+    });
+  });
+
+  it("can write a Codex provider MCP config when requested", async () => {
+    const targetDir = await tempDir();
+
+    const result = await writeBrainCreatorMcpConfig({ targetDir, provider: "codex" });
+
+    const config = JSON.parse(await readFile(result.path, "utf8"));
+    expect(config.mcpServers["brain-creator"].env).toEqual({
+      BRAIN_CREATOR_WORKSPACE: ".",
+      BRAIN_CREATOR_AGENT_PROVIDER: "codex",
+      BRAIN_CREATOR_CODEX_COMMAND: "codex",
+      BRAIN_CREATOR_CODEX_ARGS: "[\"exec\",\"--json\",\"--ephemeral\",\"--sandbox\",\"workspace-write\",\"--ask-for-approval\",\"never\",\"-C\",\"{cwd}\",\"-\"]",
+      BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
     });
   });
 });

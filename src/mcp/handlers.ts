@@ -4,7 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
 import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
 import { generateSeedFile } from "../agent/seedGenerator.js";
-import { createClaudeSubagentBridge } from "../agent/claudeBridge.js";
+import { createConfiguredAgentBridge } from "../agent/bridgeProvider.js";
 import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
@@ -66,41 +66,9 @@ export function createBrainCreatorMcpContext(
     workDir,
     agentBridge:
       input.agentBridge ??
-      (input.runner ? commandRunnerAgentBridge(input.runner) : configuredClaudeBridge()),
+      (input.runner ? commandRunnerAgentBridge(input.runner) : createConfiguredAgentBridge()),
     runner: input.runner
   };
-}
-
-function configuredClaudeBridge(): AgentBridge | undefined {
-  const command = process.env.BRAIN_CREATOR_AGENT_COMMAND;
-  if (!command) {
-    return undefined;
-  }
-  return createClaudeSubagentBridge({
-    command,
-    baseArgs: parseAgentArgs(process.env.BRAIN_CREATOR_AGENT_ARGS),
-    timeoutMs: parseAgentTimeout(process.env.BRAIN_CREATOR_AGENT_TIMEOUT_MS)
-  });
-}
-
-function parseAgentArgs(value: string | undefined): string[] | undefined {
-  if (!value) {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : undefined;
-  } catch {
-    return value.split(" ").map((item) => item.trim()).filter(Boolean);
-  }
-}
-
-function parseAgentTimeout(value: string | undefined): number | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 export async function handleBrainCreatorTool(

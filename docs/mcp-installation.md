@@ -50,12 +50,22 @@ Then configure Claude Code or Codex MCP in the business project:
       "args": ["brain-creator-mcp"],
       "env": {
         "BRAIN_CREATOR_WORKSPACE": ".",
-        "BRAIN_CREATOR_AGENT_COMMAND": "claude",
-        "BRAIN_CREATOR_AGENT_ARGS": "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
+        "BRAIN_CREATOR_AGENT_PROVIDER": "auto",
         "BRAIN_CREATOR_AGENT_TIMEOUT_MS": "120000"
       }
     }
   }
+}
+```
+
+`BRAIN_CREATOR_AGENT_PROVIDER=auto` lets Brain Creator pick an available bridge. Use `claude` in Claude Code projects, `codex` in Codex projects, or `disabled` for preview-only workflows. For an explicit Codex subprocess bridge:
+
+```json
+{
+  "BRAIN_CREATOR_AGENT_PROVIDER": "codex",
+  "BRAIN_CREATOR_CODEX_COMMAND": "codex",
+  "BRAIN_CREATOR_CODEX_ARGS": "[\"exec\",\"--json\",\"--ephemeral\",\"--sandbox\",\"workspace-write\",\"--ask-for-approval\",\"never\",\"-C\",\"{cwd}\",\"-\"]",
+  "BRAIN_CREATOR_AGENT_TIMEOUT_MS": "120000"
 }
 ```
 

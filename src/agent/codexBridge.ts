@@ -3,36 +3,30 @@ import { existsSync } from "node:fs";
 import { delimiter, extname, join } from "node:path";
 import type { AgentBridgeInput, AgentBridgeWithMetadata, CommandResult } from "./orchestrator.js";
 
-type ClaudeSubagentBridgeOptions = {
+type CodexExecBridgeOptions = {
   command?: string;
   baseArgs?: string[];
   timeoutMs?: number;
+  model?: string;
+  profile?: string;
 };
 
-const agentNames: Record<AgentBridgeInput["agent"], string> = {
-  planner: "playwright-test-planner",
-  generator: "playwright-test-generator",
-  healer: "playwright-test-healer"
-};
-
-export function createClaudeSubagentBridge(
-  options: ClaudeSubagentBridgeOptions = {}
-): AgentBridgeWithMetadata {
+export function createCodexExecBridge(options: CodexExecBridgeOptions = {}): AgentBridgeWithMetadata {
   const bridge: AgentBridgeWithMetadata = (input) =>
-    runClaudeSubagent({
-      command: options.command ?? "claude",
-      args: options.baseArgs ?? ["--print"],
-      stdin: buildSubagentPrompt(input),
+    runCodexExec({
+      command: options.command ?? "codex",
+      args: codexArgs(options, input),
+      stdin: buildCodexPrompt(input),
       cwd: input.cwd,
       timeoutMs: input.timeoutMs ?? options.timeoutMs
     });
-  bridge.provider = "claude";
+  bridge.provider = "codex";
   bridge.preflight = async () => {
-    const command = resolveCommand(options.command ?? "claude");
-    if (!hasPathSegment(options.command ?? "claude") && command.path === (options.command ?? "claude")) {
+    const command = resolveCommand(options.command ?? "codex");
+    if (!hasPathSegment(options.command ?? "codex") && command.path === (options.command ?? "codex")) {
       return {
         ok: false,
-        error: `Claude bridge command ${(options.command ?? "claude")} was not found on PATH.`
+        error: `Codex bridge command ${(options.command ?? "codex")} was not found on PATH.`
       };
     }
     return { ok: true };
@@ -40,15 +34,41 @@ export function createClaudeSubagentBridge(
   return bridge;
 }
 
-function buildSubagentPrompt(input: AgentBridgeInput) {
+function codexArgs(options: CodexExecBridgeOptions, input: AgentBridgeInput) {
+  const args = [
+    ...(options.baseArgs ?? [
+      "exec",
+      "--json",
+      "--ephemeral",
+      "--sandbox",
+      "workspace-write",
+      "--ask-for-approval",
+      "never",
+      "-C",
+      "{cwd}",
+      "-"
+    ])
+  ];
+  const cwd = input.cwd ?? process.cwd();
+  const withCwd = args.map((arg) => (arg === "{cwd}" ? cwd : arg));
+  if (options.model) {
+    withCwd.splice(1, 0, "--model", options.model);
+  }
+  if (options.profile) {
+    withCwd.splice(1, 0, "--profile", options.profile);
+  }
+  return withCwd;
+}
+
+function buildCodexPrompt(input: AgentBridgeInput) {
   return [
-    `Call #${agentNames[input.agent]} subagent.`,
+    `You are the Brain Creator ${input.agent} agent.`,
     "",
     "Execution contract:",
     "- This is a non-interactive Brain Creator run.",
     "- Do not ask the user for permission or clarification.",
-    "- If an expected output path is listed, create or overwrite that file directly.",
     "- Keep secrets out of stdout and summaries.",
+    "- Write every requested output file exactly where specified.",
     ...agentInstructions(input.agent),
     "",
     `System id: ${input.systemId}`,
@@ -66,7 +86,6 @@ function agentInstructions(agent: AgentBridgeInput["agent"]) {
   if (agent === "planner") {
     return [
       "- Planner output must be Markdown in Brain Creator's parser format.",
-      "- If the task provides exact Brain Creator parser format or enough deterministic evidence, skip browser exploration and write the parser spec directly.",
       "- Use one or more headings exactly like `## Scenario: Scenario title`.",
       "- Include `Priority: critical|high|medium|low` after each scenario heading.",
       "- Write steps as `- navigate: ...`, `- fill: target = value`, `- click: ...`, or `- assert: target => expected`."
@@ -84,12 +103,11 @@ function agentInstructions(agent: AgentBridgeInput["agent"]) {
   return [
     "- Healer output must repair the failing Playwright test in place.",
     "- Read the `--test` argument file and the `--error` details.",
-    "- Edit or rewrite the test file so `npx playwright test` can pass.",
-    "- If the application behavior truly contradicts the test intent, make the smallest safe test fix and explain it in stdout."
+    "- Edit or rewrite the test file so `npx playwright test` can pass."
   ];
 }
 
-function runClaudeSubagent(input: {
+function runCodexExec(input: {
   command: string;
   args: string[];
   stdin: string;
