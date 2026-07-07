@@ -36,6 +36,8 @@ export type BrainCreatorToolName =
   | "bc_cancel_plan"
   | "bc_resume_plan"
   | "bc_run_agent"
+  | "bc_prepare_agent_task"
+  | "bc_submit_agent_output"
   | "bc_list_agent_runs"
   | "bc_run_chain"
   | "bc_full_workflow"
@@ -435,6 +437,31 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       args: z.array(z.string()).default([]),
       outputPaths: z.array(z.string()).default([]),
       timeoutMs: z.number().int().positive().optional()
+    })
+  },
+  {
+    name: "bc_prepare_agent_task",
+    title: "Prepare host-agent task",
+    description:
+      "Prepare a Planner, Generator, or Healer task for the current host agent to execute without starting a subprocess.",
+    inputSchema: z.object({
+      systemId: z.string(),
+      agent: z.enum(["planner", "generator", "healer"]),
+      inputSummary: z.string(),
+      args: z.array(z.string()).default([]),
+      outputPaths: z.array(z.string()).default([])
+    })
+  },
+  {
+    name: "bc_submit_agent_output",
+    title: "Submit host-agent output",
+    description: "Submit the result of a prepared host-agent task and record an AgentRun.",
+    inputSchema: z.object({
+      taskId: z.string(),
+      status: z.enum(["succeeded", "failed"]),
+      stdout: z.string().default(""),
+      stderr: z.string().default(""),
+      outputPaths: z.array(z.string()).optional()
     })
   },
   {

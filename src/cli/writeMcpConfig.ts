@@ -15,7 +15,7 @@ type BrainCreatorMcpServer = {
 export type WriteMcpConfigOptions = {
   targetDir?: string;
   commandMode?: "local" | "global";
-  provider?: "auto" | "claude" | "codex" | "disabled";
+  provider?: "auto" | "claude" | "codex" | "host-agent" | "disabled";
 };
 
 export type WriteMcpConfigResult = {
@@ -102,8 +102,8 @@ if (process.argv[1]?.endsWith("writeMcpConfig.js")) {
   writeBrainCreatorMcpConfig({
     targetDir,
     commandMode,
-    provider:
-      provider === "claude" || provider === "codex" || provider === "disabled" || provider === "auto"
+      provider:
+      provider === "claude" || provider === "codex" || provider === "host-agent" || provider === "disabled" || provider === "auto"
         ? provider
         : undefined
   })

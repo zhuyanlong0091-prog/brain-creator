@@ -671,6 +671,86 @@ describe("handleBrainCreatorTool", () => {
     }
   });
 
+  it("prepares and submits a host-agent task without starting a subprocess", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+
+    const prepared = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare_agent_task", {
+        systemId: system.id,
+        agent: "generator",
+        inputSummary: "Generate checkout test",
+        args: ["--spec", "specs/case.md", "--output", "tests/generated/case.spec.ts"],
+        outputPaths: ["tests/generated/case.spec.ts"]
+      })
+    );
+
+    expect(prepared.status).toBe("needs_agent_execution");
+    expect(prepared.submitTool).toBe("bc_submit_agent_output");
+    expect(prepared.task).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^agentTask_/),
+        systemId: system.id,
+        agent: "generator",
+        status: "pending"
+      })
+    );
+    expect(await readFile(prepared.promptPath, "utf8")).toContain("Generate checkout test");
+    expect(JSON.parse(await readFile(prepared.contextPath, "utf8"))).toEqual(
+      expect.objectContaining({
+        systemId: system.id,
+        agent: "generator",
+        outputPaths: ["tests/generated/case.spec.ts"]
+      })
+    );
+
+    const submitted = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: prepared.task.id,
+        status: "succeeded",
+        stdout: "host agent wrote test",
+        stderr: "",
+        outputPaths: ["tests/generated/case.spec.ts"]
+      })
+    );
+
+    expect(submitted.task.status).toBe("submitted");
+    expect(submitted.agentRun).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^agent_/),
+        systemId: system.id,
+        agent: "generator",
+        status: "succeeded",
+        logs: ["host agent wrote test"]
+      })
+    );
+    expect(context.service.listAgentRuns(system.id)).toEqual([
+      expect.objectContaining({ id: submitted.agentRun.id, status: "succeeded" })
+    ]);
+    expect(
+      errorOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: prepared.task.id,
+          status: "succeeded",
+          stdout: "duplicate",
+          stderr: ""
+        })
+      )
+    ).toContain("already submitted");
+  });
+
   it("uses a configured Claude subprocess bridge from environment variables", async () => {
     const workDir = await tempDir();
     const scriptPath = join(workDir, "claude-fixture.mjs");

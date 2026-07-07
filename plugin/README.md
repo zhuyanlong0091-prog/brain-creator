@@ -14,4 +14,4 @@ The plugin must provide:
 - `npx brain-creator-mcp` as the default project-local MCP server command.
 - `npx brain-creator-doctor` as the preflight command.
 - `skills/brain-creator/SKILL.md` as the main agent entrypoint.
-- Default `BRAIN_CREATOR_AGENT_PROVIDER=auto` environment for Planner, Generator, and Healer dispatch, with Claude and Codex bridge support.
+- Default `BRAIN_CREATOR_AGENT_PROVIDER=auto` environment for Planner, Generator, and Healer dispatch, with Claude subprocess, Codex subprocess, and host-agent task handoff support.

@@ -103,4 +103,27 @@ describe("Brain Creator doctor", () => {
       ])
     );
   });
+
+  it("reports host-agent provider as ready without requiring a subprocess command", () => {
+    const report = buildDoctorReport({
+      cwd: resolve("business-project"),
+      env: {
+        BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      },
+      commandExists: () => false,
+      fileExists: () => true
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Agent bridge provider",
+          status: "pass",
+          message: expect.stringContaining("host-agent")
+        })
+      ])
+    );
+  });
 });

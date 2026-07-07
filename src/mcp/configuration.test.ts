@@ -255,6 +255,8 @@ describe("Brain Creator local integration files", () => {
     expect(toolsModule).toContain("bc_run");
     expect(toolsModule).toContain("bc_review");
     expect(toolsModule).toContain("bc_configure");
+    expect(toolsModule).toContain("bc_prepare_agent_task");
+    expect(toolsModule).toContain("bc_submit_agent_output");
     expect(toolsModule).toContain("bc_session_resume");
     expect(toolsModule).toContain("Resume session");
   });

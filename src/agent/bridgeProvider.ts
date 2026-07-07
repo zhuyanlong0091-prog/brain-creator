@@ -4,7 +4,7 @@ import { createClaudeSubagentBridge } from "./claudeBridge.js";
 import { createCodexExecBridge } from "./codexBridge.js";
 import type { AgentBridgeWithMetadata } from "./orchestrator.js";
 
-type BridgeProvider = "auto" | "claude" | "codex" | "disabled";
+type BridgeProvider = "auto" | "claude" | "codex" | "host-agent" | "disabled";
 type BridgeEnv = Record<string, string | undefined>;
 
 export type ConfiguredAgentBridgeOptions = {
@@ -20,6 +20,9 @@ export function createConfiguredAgentBridge(
   const provider = providerFromEnv(env);
   if (provider === "disabled") {
     return undefined;
+  }
+  if (provider === "host-agent") {
+    return createHostAgentBridge();
   }
   if (env.BRAIN_CREATOR_AGENT_COMMAND) {
     return createClaudeSubagentBridge({
@@ -69,7 +72,7 @@ export function parseAgentTimeout(value: string | undefined): number | undefined
 
 function providerFromEnv(env: BridgeEnv): BridgeProvider {
   const raw = env.BRAIN_CREATOR_AGENT_PROVIDER;
-  if (raw === "claude" || raw === "codex" || raw === "disabled" || raw === "auto") {
+  if (raw === "claude" || raw === "codex" || raw === "host-agent" || raw === "disabled" || raw === "auto") {
     return raw;
   }
   return "auto";
@@ -91,6 +94,18 @@ function createCodexBridge(env: BridgeEnv) {
     model: env.BRAIN_CREATOR_CODEX_MODEL,
     profile: env.BRAIN_CREATOR_CODEX_PROFILE
   });
+}
+
+function createHostAgentBridge(): AgentBridgeWithMetadata {
+  const bridge: AgentBridgeWithMetadata = async () => ({
+    exitCode: 1,
+    stdout: "",
+    stderr:
+      "Host-agent provider requires task handoff. Use bc_prepare_agent_task, execute the prompt in the current agent, then call bc_submit_agent_output."
+  });
+  bridge.provider = "host-agent";
+  bridge.preflight = async () => ({ ok: true });
+  return bridge;
 }
 
 function commandIsAvailable(command: string, env: BridgeEnv) {

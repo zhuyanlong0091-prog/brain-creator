@@ -26,6 +26,7 @@ export type AssetType =
   | "test-case"
   | "test-spec"
   | "test-file"
+  | "agent-task"
   | "agent-run"
   | "chain-run";
 
@@ -253,6 +254,25 @@ export type AgentRun = {
   logs: string[];
   error?: string;
   createdAt: string;
+};
+
+export type AgentTask = {
+  id: string;
+  systemId: string;
+  agent: AgentRun["agent"];
+  status: "pending" | "submitted" | "failed" | "cancelled";
+  inputSummary: string;
+  args: string[];
+  outputPaths: string[];
+  promptPath: string;
+  contextPath: string;
+  submitTool: "bc_submit_agent_output";
+  createdAt: string;
+  updatedAt: string;
+  submittedAt?: string;
+  agentRunId?: string;
+  stdout?: string;
+  stderr?: string;
 };
 
 export type ChainRun = {

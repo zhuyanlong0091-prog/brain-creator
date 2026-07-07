@@ -92,6 +92,19 @@ describe("writeBrainCreatorMcpConfig", () => {
       BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
     });
   });
+
+  it("can write a host-agent provider MCP config when requested", async () => {
+    const targetDir = await tempDir();
+
+    const result = await writeBrainCreatorMcpConfig({ targetDir, provider: "host-agent" });
+
+    const config = JSON.parse(await readFile(result.path, "utf8"));
+    expect(config.mcpServers["brain-creator"].env).toEqual({
+      BRAIN_CREATOR_WORKSPACE: ".",
+      BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
+      BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+    });
+  });
 });
 
 async function tempDir() {

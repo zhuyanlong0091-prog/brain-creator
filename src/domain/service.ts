@@ -4,6 +4,7 @@ import { id } from "../shared/id.js";
 import type {
   ActionStep,
   AgentRun,
+  AgentTask,
   ApiFlow,
   ApiRequest,
   AssetSearchResult,
@@ -212,6 +213,25 @@ type CreateBugReportInput = {
   evidencePaths: string[];
   chainRunId?: string;
   gapIds: string[];
+};
+
+type CreateAgentTaskInput = {
+  id: string;
+  systemId: string;
+  agent: AgentTask["agent"];
+  inputSummary: string;
+  args: string[];
+  outputPaths: string[];
+  promptPath: string;
+  contextPath: string;
+};
+
+type SubmitAgentTaskInput = {
+  taskId: string;
+  status: "succeeded" | "failed";
+  stdout: string;
+  stderr: string;
+  outputPaths?: string[];
 };
 
 const actionTerms = ["Create Order", "Submit", "Search", "Create", "Save", "Delete"];
@@ -1028,6 +1048,64 @@ export class BrainCreatorService {
   recordAgentRun(run: AgentRun): void {
     this.repository.agentRuns.push(run);
     this.repository.persist();
+  }
+
+  createAgentTask(input: CreateAgentTaskInput): AgentTask {
+    const now = timestamp();
+    const task: AgentTask = {
+      id: input.id,
+      systemId: input.systemId,
+      agent: input.agent,
+      status: "pending",
+      inputSummary: input.inputSummary,
+      args: input.args,
+      outputPaths: input.outputPaths,
+      promptPath: input.promptPath,
+      contextPath: input.contextPath,
+      submitTool: "bc_submit_agent_output",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.agentTasks.push(task);
+    this.repository.persist();
+    return task;
+  }
+
+  submitAgentTask(input: SubmitAgentTaskInput): { task: AgentTask; agentRun: AgentRun } {
+    const task = this.repository.agentTasks.find((item) => item.id === input.taskId);
+    if (!task) {
+      throw new Error("Agent task not found");
+    }
+    if (task.status !== "pending") {
+      throw new Error("Agent task already submitted");
+    }
+    const now = timestamp();
+    const logs = [input.stdout.trim(), input.stderr.trim()].filter(Boolean);
+    const agentRun: AgentRun = {
+      id: id("agent"),
+      systemId: task.systemId,
+      agent: task.agent,
+      status: input.status === "succeeded" ? "succeeded" : "failed",
+      inputSummary: task.inputSummary,
+      outputPaths: input.outputPaths ?? task.outputPaths,
+      duration: 0,
+      logs,
+      error: input.status === "failed" ? input.stderr || input.stdout || "Host agent task failed" : undefined,
+      createdAt: now
+    };
+    task.status = input.status === "succeeded" ? "submitted" : "failed";
+    task.submittedAt = now;
+    task.updatedAt = now;
+    task.agentRunId = agentRun.id;
+    task.stdout = input.stdout;
+    task.stderr = input.stderr;
+    this.repository.agentRuns.push(agentRun);
+    this.repository.persist();
+    return { task, agentRun };
+  }
+
+  listAgentTasks(systemId: string): AgentTask[] {
+    return this.repository.agentTasks.filter((task) => task.systemId === systemId);
   }
 
   getAgentRun(runId: string): AgentRun {
