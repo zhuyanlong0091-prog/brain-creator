@@ -224,6 +224,7 @@ type CreateAgentTaskInput = {
   outputPaths: string[];
   promptPath: string;
   contextPath: string;
+  chainContext?: AgentTask["chainContext"];
 };
 
 type SubmitAgentTaskInput = {
@@ -1062,6 +1063,7 @@ export class BrainCreatorService {
       outputPaths: input.outputPaths,
       promptPath: input.promptPath,
       contextPath: input.contextPath,
+      chainContext: input.chainContext,
       submitTool: "bc_submit_agent_output",
       createdAt: now,
       updatedAt: now
@@ -1613,7 +1615,8 @@ export class BrainCreatorService {
   ): TestArtifact[] {
     const byPath = new Map<string, TestArtifact>();
     const add = (artifact: TestArtifact) => {
-      if (!byPath.has(artifact.path)) {
+      const existing = byPath.get(artifact.path);
+      if (!existing || (!existing.testCaseId && artifact.testCaseId)) {
         byPath.set(artifact.path, artifact);
       }
     };
