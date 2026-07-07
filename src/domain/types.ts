@@ -270,6 +270,7 @@ export type AgentTask = {
     testCaseId: string;
     specPath: string;
     testPath: string;
+    generateRunId?: string;
   };
   suiteContext?: {
     suiteId: string;
