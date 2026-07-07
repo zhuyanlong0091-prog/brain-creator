@@ -593,6 +593,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     const result = await executeDocumentCase(context, {
       systemId,
       sourceId: caseSource.id,
+      suiteId: suite.id,
       documentCase,
       maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
       createBugOnFailure: true
@@ -661,6 +662,7 @@ async function executeDocumentCase(
   input: {
     systemId: string;
     sourceId: string;
+    suiteId?: string;
     documentCase: DocumentCase;
     maxHealAttempts?: number;
     createBugOnFailure?: boolean;
@@ -678,7 +680,15 @@ async function executeDocumentCase(
   try {
     const result = await runApprovedChain(context, {
       caseId: testCase.id,
-      maxHealAttempts: input.maxHealAttempts
+      maxHealAttempts: input.maxHealAttempts,
+      suiteContext: input.suiteId
+        ? {
+            suiteId: input.suiteId,
+            sourceId: input.sourceId,
+            caseNo: input.documentCase.caseNo,
+            title: input.documentCase.title
+          }
+        : undefined
     });
     if (!("chainRun" in result)) {
       return {
@@ -1050,7 +1060,8 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
         testCaseId: testCase.id,
         specPath,
         testPath
-      }
+      },
+      suiteContext: suiteContextArg(input)
     });
     return {
       ...taskPackage,
@@ -1222,6 +1233,7 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
   const outputPaths = stringArrayArg(input, "outputPaths");
   const inputSummary = stringArg(input, "inputSummary");
   const chainContext = chainContextArg(input);
+  const suiteContext = suiteContextArg(input);
   const task = context.service.createAgentTask({
     id: taskId,
     systemId,
@@ -1231,7 +1243,8 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
     outputPaths,
     promptPath,
     contextPath,
-    chainContext
+    chainContext,
+    suiteContext
   });
   await mkdir(taskDir, { recursive: true });
   await writeFile(promptPath, hostAgentPrompt({ systemId, agent, inputSummary, args, outputPaths }), "utf8");
@@ -1247,6 +1260,7 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
         args,
         outputPaths,
         chainContext,
+        suiteContext,
         workDir: context.workDir,
         submitTool: "bc_submit_agent_output"
       },
@@ -1305,7 +1319,42 @@ function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string
     completedAt: new Date().toISOString()
   };
   context.service.recordChainRun(chainRun);
-  return { ...result, chainRun };
+  const suiteRun = result.task.suiteContext
+    ? context.service.recordCaseSuiteRun({
+        systemId: result.task.systemId,
+        suiteId: result.task.suiteContext.suiteId,
+        sourceId: result.task.suiteContext.sourceId,
+        status: status === "succeeded" ? "completed" : "blocked",
+        total: 1,
+        passed: status === "succeeded" ? 1 : 0,
+        failed: 0,
+        blocked: status === "succeeded" ? 0 : 1,
+        caseResults: [
+          {
+            caseNo: result.task.suiteContext.caseNo,
+            title: result.task.suiteContext.title,
+            status: status === "succeeded" ? "passed" : "blocked",
+            testCaseId: chainContext.testCaseId,
+            chainRunId: chainRun.id,
+            gapIds: gaps.map((gap) => gap.id),
+            error: status === "failed" ? result.agentRun.error : undefined
+          }
+        ],
+        artifactPaths: [chainContext.specPath, chainContext.testPath],
+        bugReportIds: [],
+        gapIds: gaps.map((gap) => gap.id),
+        completedAt: new Date().toISOString()
+      })
+    : undefined;
+  if (suiteRun) {
+    const suite = context.service.getCaseSuite(suiteRun.suiteId);
+    const passed = passedCaseNosForSuite(context, suiteRun.systemId, suiteRun.suiteId);
+    context.service.updateCaseSuiteStatus(
+      suiteRun.suiteId,
+      suite.selectedCaseNos.every((caseNo) => passed.has(caseNo)) ? "completed" : "failed"
+    );
+  }
+  return suiteRun ? { ...result, chainRun, suiteRun } : { ...result, chainRun };
 }
 
 function hostAgentPrompt(input: {
@@ -2176,6 +2225,30 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
     throw new Error("chainContext requires testCaseId, specPath, and testPath");
   }
   return { testCaseId, specPath, testPath };
+}
+
+function suiteContextArg(input: Record<string, unknown>): AgentTask["suiteContext"] | undefined {
+  const value = input.suiteContext;
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object") {
+    throw new Error("suiteContext must be an object");
+  }
+  const candidate = value as Record<string, unknown>;
+  const suiteId = candidate.suiteId;
+  const sourceId = candidate.sourceId;
+  const caseNo = candidate.caseNo;
+  const title = candidate.title;
+  if (
+    typeof suiteId !== "string" ||
+    typeof sourceId !== "string" ||
+    typeof caseNo !== "string" ||
+    typeof title !== "string"
+  ) {
+    throw new Error("suiteContext requires suiteId, sourceId, caseNo, and title");
+  }
+  return { suiteId, sourceId, caseNo, title };
 }
 
 function runModeArg(input: Record<string, unknown>, key: string) {
