@@ -17,6 +17,7 @@ import {
   preflightAgentBridge,
   runAgent,
   runChain,
+  spawnCommand,
   type AgentBridge,
   type AgentBridgeWithMetadata,
   type CommandRunner
@@ -236,7 +237,7 @@ export async function handleBrainCreatorTool(
       case "bc_prepare_agent_task":
         return textResult(await prepareAgentTask(context, input));
       case "bc_submit_agent_output":
-        return textResult(submitAgentOutput(context, input));
+        return textResult(await submitAgentOutput(context, input));
       case "bc_list_agent_runs":
         return textResult(context.service.listAgentRuns(stringArg(input, "systemId")));
       case "bc_run_chain":
@@ -1280,7 +1281,7 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
   };
 }
 
-function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const result = context.service.submitAgentTask({
     taskId: stringArg(input, "taskId"),
     status: agentOutputStatusArg(input, "status"),
@@ -1292,7 +1293,47 @@ function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string
   if (!chainContext) {
     return result;
   }
-  const status = result.agentRun.status === "succeeded" ? "succeeded" : "failed";
+  const testResult =
+    result.agentRun.status === "succeeded" &&
+    (result.task.agent === "generator" || result.task.agent === "healer")
+      ? await runSubmittedTest(context, chainContext.testPath)
+      : undefined;
+  if (result.task.agent === "generator" && testResult && testResult.exitCode !== 0) {
+    const chainRun: ChainRun = {
+      id: id("chain"),
+      systemId: result.task.systemId,
+      testCaseId: chainContext.testCaseId,
+      status: "partial",
+      generateRunId: result.agentRun.id,
+      specPath: chainContext.specPath,
+      testPath: chainContext.testPath,
+      gaps: [],
+      createdAt: result.agentRun.createdAt,
+      completedAt: new Date().toISOString()
+    };
+    context.service.recordChainRun(chainRun);
+    const failureOutput = testResult.stderr || testResult.stdout || "Generated test failed";
+    const healerTaskPackage = await prepareAgentTask(context, {
+      systemId: result.task.systemId,
+      agent: "healer",
+      inputSummary: `Heal ${result.task.inputSummary}: ${failureOutput}`,
+      args: ["--test", chainContext.testPath, "--error", failureOutput],
+      outputPaths: [chainContext.testPath],
+      chainContext: { ...chainContext, generateRunId: result.agentRun.id },
+      suiteContext: result.task.suiteContext
+    });
+    return {
+      ...result,
+      ...healerTaskPackage,
+      stage: "healer",
+      chainRun,
+      testResult
+    };
+  }
+  const status =
+    result.agentRun.status === "succeeded" && (!testResult || testResult.exitCode === 0)
+      ? "succeeded"
+      : "failed";
   const gaps =
     status === "failed"
       ? [
@@ -1300,7 +1341,11 @@ function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string
             projectId: result.task.systemId,
             sourceType: "host-agent-task",
             sourceId: result.task.id,
-            reason: result.agentRun.error ?? "Host agent task failed",
+            reason:
+              result.agentRun.error ??
+              testResult?.stderr ??
+              testResult?.stdout ??
+              "Host agent task failed",
             severity: "high",
             owner: "qa"
           })
@@ -1311,7 +1356,8 @@ function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string
     systemId: result.task.systemId,
     testCaseId: chainContext.testCaseId,
     status,
-    generateRunId: result.agentRun.id,
+    generateRunId: result.task.agent === "healer" ? chainContext.generateRunId : result.agentRun.id,
+    healRunId: result.task.agent === "healer" ? result.agentRun.id : undefined,
     specPath: chainContext.specPath,
     testPath: chainContext.testPath,
     gaps,
@@ -1354,7 +1400,15 @@ function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string
       suite.selectedCaseNos.every((caseNo) => passed.has(caseNo)) ? "completed" : "failed"
     );
   }
-  return suiteRun ? { ...result, chainRun, suiteRun } : { ...result, chainRun };
+  return suiteRun ? { ...result, chainRun, suiteRun, testResult } : { ...result, chainRun, testResult };
+}
+
+async function runSubmittedTest(context: BrainCreatorMcpContext, testPath: string) {
+  const runner = context.runner ?? spawnCommand;
+  const testRunPath = relative(context.workDir, testPath).replace(/\\/g, "/");
+  return runner("npx", ["playwright", "test", testRunPath], {
+    cwd: context.workDir
+  });
 }
 
 function hostAgentPrompt(input: {
@@ -2221,10 +2275,14 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   const testCaseId = candidate.testCaseId;
   const specPath = candidate.specPath;
   const testPath = candidate.testPath;
+  const generateRunId = candidate.generateRunId;
   if (typeof testCaseId !== "string" || typeof specPath !== "string" || typeof testPath !== "string") {
     throw new Error("chainContext requires testCaseId, specPath, and testPath");
   }
-  return { testCaseId, specPath, testPath };
+  if (generateRunId !== undefined && typeof generateRunId !== "string") {
+    throw new Error("chainContext generateRunId must be a string when provided");
+  }
+  return { testCaseId, specPath, testPath, generateRunId };
 }
 
 function suiteContextArg(input: Record<string, unknown>): AgentTask["suiteContext"] | undefined {

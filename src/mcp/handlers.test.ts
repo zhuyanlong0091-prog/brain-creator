@@ -558,6 +558,7 @@ describe("handleBrainCreatorTool", () => {
         dataFilePath: join(workDir, "assets.json"),
         workDir
       });
+      context.runner = async () => ({ exitCode: 0, stdout: "playwright passed", stderr: "" });
       const system = dataOf(
         await handleBrainCreatorTool(context, "bc_create_system", {
           name: "Orders Console",
@@ -622,6 +623,7 @@ describe("handleBrainCreatorTool", () => {
         dataFilePath: join(workDir, "assets.json"),
         workDir
       });
+      context.runner = async () => ({ exitCode: 0, stdout: "playwright passed", stderr: "" });
       const system = dataOf(
         await handleBrainCreatorTool(context, "bc_create_system", {
           name: "Orders Console",
@@ -693,6 +695,279 @@ describe("handleBrainCreatorTool", () => {
     } finally {
       restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
     }
+  });
+
+  it("runs Playwright after a host-agent generator task is submitted", async () => {
+    const workDir = await tempDir();
+    const hostBridge = Object.assign(
+      async () => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: "host-agent handoff"
+      }),
+      {
+        provider: "host-agent",
+        preflight: async () => ({ ok: true })
+      }
+    );
+    const calls: string[][] = [];
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: hostBridge,
+      runner: async (command, args) => {
+        calls.push([command, ...args]);
+        return { exitCode: 0, stdout: "playwright passed", stderr: "" };
+      }
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Generate host-agent checkout test",
+      scenarios: [
+        {
+          id: "scenario_1",
+          title: "Checkout",
+          priority: "critical",
+          steps: [{ action: "assert", target: "Order total", expected: "visible" }]
+        }
+      ],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+    const taskPackage = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_chain", {
+        caseId: testCase.id
+      })
+    );
+    await writeFile(taskPackage.testPath, "import { test, expect } from '../seed';\n", "utf8");
+
+    const submitted = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: taskPackage.task.id,
+        status: "succeeded",
+        stdout: "generated test",
+        stderr: "",
+        outputPaths: [taskPackage.testPath]
+      })
+    );
+
+    expect(calls).toEqual([
+      ["npx", "playwright", "test", `tests/generated/${testCase.id}.spec.ts`]
+    ]);
+    expect(submitted.testResult).toEqual(
+      expect.objectContaining({ exitCode: 0, stdout: "playwright passed" })
+    );
+    expect(submitted.chainRun).toEqual(
+      expect.objectContaining({ status: "succeeded", testCaseId: testCase.id })
+    );
+  });
+
+  it("returns a healer task when Playwright fails after a host-agent generator submit", async () => {
+    const workDir = await tempDir();
+    const hostBridge = Object.assign(
+      async () => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: "host-agent handoff"
+      }),
+      {
+        provider: "host-agent",
+        preflight: async () => ({ ok: true })
+      }
+    );
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: hostBridge,
+      runner: async () => ({ exitCode: 1, stdout: "", stderr: "expected amount missing" })
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Generate host-agent checkout test",
+      scenarios: [
+        {
+          id: "scenario_1",
+          title: "Checkout",
+          priority: "critical",
+          steps: [{ action: "assert", target: "Order total", expected: "visible" }]
+        }
+      ],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+    const taskPackage = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_chain", {
+        caseId: testCase.id
+      })
+    );
+    await writeFile(taskPackage.testPath, "import { test, expect } from '../seed';\n", "utf8");
+
+    const submitted = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: taskPackage.task.id,
+        status: "succeeded",
+        stdout: "generated test",
+        stderr: "",
+        outputPaths: [taskPackage.testPath]
+      })
+    );
+
+    expect(submitted.status).toBe("needs_agent_execution");
+    expect(submitted.stage).toBe("healer");
+    expect(submitted.task).toEqual(
+      expect.objectContaining({
+        agent: "healer",
+        systemId: system.id,
+        status: "pending"
+      })
+    );
+    expect(submitted.chainRun).toEqual(
+      expect.objectContaining({
+        status: "partial",
+        testCaseId: testCase.id,
+        generateRunId: submitted.agentRun.id,
+        gaps: []
+      })
+    );
+    expect(await readFile(submitted.promptPath, "utf8")).toContain("expected amount missing");
+    expect(context.service.listAgentTasks(system.id)).toEqual([
+      expect.objectContaining({ id: taskPackage.task.id, status: "submitted" }),
+      expect.objectContaining({ id: submitted.task.id, agent: "healer", status: "pending" })
+    ]);
+  });
+
+  it("reruns Playwright and records a healed chain when a host-agent healer task is submitted", async () => {
+    const workDir = await tempDir();
+    const hostBridge = Object.assign(
+      async () => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: "host-agent handoff"
+      }),
+      {
+        provider: "host-agent",
+        preflight: async () => ({ ok: true })
+      }
+    );
+    const calls: string[][] = [];
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: hostBridge,
+      runner: async (command, args) => {
+        calls.push([command, ...args]);
+        return calls.length === 1
+          ? { exitCode: 1, stdout: "", stderr: "expected amount missing" }
+          : { exitCode: 0, stdout: "healed test passed", stderr: "" };
+      }
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Generate host-agent checkout test",
+      scenarios: [
+        {
+          id: "scenario_1",
+          title: "Checkout",
+          priority: "critical",
+          steps: [{ action: "assert", target: "Order total", expected: "visible" }]
+        }
+      ],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+    const taskPackage = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_chain", {
+        caseId: testCase.id
+      })
+    );
+    await writeFile(taskPackage.testPath, "import { test, expect } from '../seed';\n", "utf8");
+    const needsHealing = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: taskPackage.task.id,
+        status: "succeeded",
+        stdout: "generated test",
+        stderr: "",
+        outputPaths: [taskPackage.testPath]
+      })
+    );
+
+    const healed = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: needsHealing.task.id,
+        status: "succeeded",
+        stdout: "healed test",
+        stderr: "",
+        outputPaths: [taskPackage.testPath]
+      })
+    );
+
+    expect(calls).toEqual([
+      ["npx", "playwright", "test", `tests/generated/${testCase.id}.spec.ts`],
+      ["npx", "playwright", "test", `tests/generated/${testCase.id}.spec.ts`]
+    ]);
+    expect(healed.testResult).toEqual(
+      expect.objectContaining({ exitCode: 0, stdout: "healed test passed" })
+    );
+    expect(healed.chainRun).toEqual(
+      expect.objectContaining({
+        status: "succeeded",
+        testCaseId: testCase.id,
+        generateRunId: needsHealing.chainRun.generateRunId,
+        healRunId: healed.agentRun.id
+      })
+    );
+    expect(context.service.getTestCase(testCase.id).status).toBe("passed");
   });
 
   it("rejects artifact reads outside the workspace even when the path is recorded", async () => {
@@ -2354,6 +2629,7 @@ describe("handleBrainCreatorTool", () => {
         dataFilePath: join(workDir, "assets.json"),
         workDir
       });
+      context.runner = async () => ({ exitCode: 0, stdout: "playwright passed", stderr: "" });
       const source = join(workDir, "cases.xlsx");
       await writeFile(source, createXlsxFixture());
       const system = dataOf(
