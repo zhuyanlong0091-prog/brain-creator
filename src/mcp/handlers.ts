@@ -1339,13 +1339,10 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       ? [
           context.service.reportGap({
             projectId: result.task.systemId,
-            sourceType: "host-agent-task",
+            sourceType:
+              result.task.agent === "healer" ? "host-agent-healer" : "host-agent-generator",
             sourceId: result.task.id,
-            reason:
-              result.agentRun.error ??
-              testResult?.stderr ??
-              testResult?.stdout ??
-              "Host agent task failed",
+            reason: hostAgentFailureReason(result.task.agent, result.agentRun.error, testResult),
             severity: "high",
             owner: "qa"
           })
@@ -1370,20 +1367,23 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         systemId: result.task.systemId,
         suiteId: result.task.suiteContext.suiteId,
         sourceId: result.task.suiteContext.sourceId,
-        status: status === "succeeded" ? "completed" : "blocked",
+        status: suiteRunStatus(status, result.task.agent),
         total: 1,
         passed: status === "succeeded" ? 1 : 0,
-        failed: 0,
-        blocked: status === "succeeded" ? 0 : 1,
+        failed: status === "failed" && result.task.agent === "healer" ? 1 : 0,
+        blocked: status === "failed" && result.task.agent !== "healer" ? 1 : 0,
         caseResults: [
           {
             caseNo: result.task.suiteContext.caseNo,
             title: result.task.suiteContext.title,
-            status: status === "succeeded" ? "passed" : "blocked",
+            status: suiteCaseResultStatus(status, result.task.agent),
             testCaseId: chainContext.testCaseId,
             chainRunId: chainRun.id,
             gapIds: gaps.map((gap) => gap.id),
-            error: status === "failed" ? result.agentRun.error : undefined
+            error:
+              status === "failed"
+                ? hostAgentFailureReason(result.task.agent, result.agentRun.error, testResult)
+                : undefined
           }
         ],
         artifactPaths: [chainContext.specPath, chainContext.testPath],
@@ -1401,6 +1401,38 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     );
   }
   return suiteRun ? { ...result, chainRun, suiteRun, testResult } : { ...result, chainRun, testResult };
+}
+
+function suiteRunStatus(status: ChainRun["status"], agent: AgentRun["agent"]): CaseSuiteRun["status"] {
+  if (status === "succeeded") {
+    return "completed";
+  }
+  return agent === "healer" ? "failed" : "blocked";
+}
+
+function suiteCaseResultStatus(
+  status: ChainRun["status"],
+  agent: AgentRun["agent"]
+): CaseSuiteCaseResult["status"] {
+  if (status === "succeeded") {
+    return "passed";
+  }
+  return agent === "healer" ? "failed" : "blocked";
+}
+
+function hostAgentFailureReason(
+  agent: AgentRun["agent"],
+  agentError: string | undefined,
+  testResult: Awaited<ReturnType<typeof runSubmittedTest>> | undefined
+) {
+  const detail = agentError ?? testResult?.stderr ?? testResult?.stdout ?? "Host agent task failed";
+  if (agent === "healer") {
+    return `Playwright still failing after healer: ${detail}`;
+  }
+  if (agent === "generator" && testResult) {
+    return `Playwright failed after generator: ${detail}`;
+  }
+  return detail;
 }
 
 async function runSubmittedTest(context: BrainCreatorMcpContext, testPath: string) {
