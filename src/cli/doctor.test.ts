@@ -77,12 +77,44 @@ describe("Brain Creator doctor", () => {
     });
 
     expect(report.ok).toBe(true);
+    expect(report.agentBridge).toEqual(
+      expect.objectContaining({
+        provider: "codex",
+        recommendedAction: expect.stringContaining("Codex subprocess bridge")
+      })
+    );
     expect(report.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "Agent bridge provider", status: "pass", message: expect.stringContaining("codex") }),
         expect.objectContaining({ name: "Agent bridge args", status: "pass" })
       ])
     );
+    expect(formatDoctorReport(report)).toContain("Recommended action: Run confirmed workflows through the Codex subprocess bridge.");
+  });
+
+  it("reports Claude provider guidance without leaking raw args", () => {
+    const report = buildDoctorReport({
+      cwd: resolve("business-project"),
+      env: {
+        BRAIN_CREATOR_AGENT_PROVIDER: "claude",
+        BRAIN_CREATOR_CLAUDE_COMMAND: "claude",
+        BRAIN_CREATOR_CLAUDE_ARGS: "[\"--print\",\"--api-key\",\"secret-value\"]",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      },
+      commandExists: (command) => command === "claude",
+      fileExists: () => true
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.agentBridge).toEqual(
+      expect.objectContaining({
+        provider: "claude",
+        recommendedAction: expect.stringContaining("Claude subprocess bridge")
+      })
+    );
+    const formatted = formatDoctorReport(report);
+    expect(formatted).toContain("Recommended action: Run confirmed workflows through the Claude subprocess bridge.");
+    expect(formatted).not.toContain("secret-value");
   });
 
   it("auto-detects Codex when provider is auto and codex is available", () => {
@@ -104,6 +136,44 @@ describe("Brain Creator doctor", () => {
     );
   });
 
+  it("resolves explicit auto provider commands to the concrete provider", () => {
+    const codexReport = buildDoctorReport({
+      cwd: resolve("business-project"),
+      env: {
+        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
+        BRAIN_CREATOR_CODEX_COMMAND: "codex",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      },
+      commandExists: (command) => command === "codex",
+      fileExists: () => true
+    });
+    const claudeReport = buildDoctorReport({
+      cwd: resolve("business-project"),
+      env: {
+        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
+        BRAIN_CREATOR_CLAUDE_COMMAND: "claude",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      },
+      commandExists: (command) => command === "claude",
+      fileExists: () => true
+    });
+
+    expect(codexReport.agentBridge).toEqual(
+      expect.objectContaining({
+        provider: "codex",
+        command: "codex",
+        recommendedAction: expect.stringContaining("Codex subprocess bridge")
+      })
+    );
+    expect(claudeReport.agentBridge).toEqual(
+      expect.objectContaining({
+        provider: "claude",
+        command: "claude",
+        recommendedAction: expect.stringContaining("Claude subprocess bridge")
+      })
+    );
+  });
+
   it("reports host-agent provider as ready without requiring a subprocess command", () => {
     const report = buildDoctorReport({
       cwd: resolve("business-project"),
@@ -116,12 +186,67 @@ describe("Brain Creator doctor", () => {
     });
 
     expect(report.ok).toBe(true);
+    expect(report.agentBridge).toEqual(
+      expect.objectContaining({
+        provider: "host-agent",
+        recommendedAction: expect.stringContaining("bc_prepare_agent_task")
+      })
+    );
     expect(report.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           name: "Agent bridge provider",
           status: "pass",
           message: expect.stringContaining("host-agent")
+        })
+      ])
+    );
+  });
+
+  it("reports disabled provider as preview-only", () => {
+    const report = buildDoctorReport({
+      cwd: resolve("business-project"),
+      env: {
+        BRAIN_CREATOR_AGENT_PROVIDER: "disabled",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      },
+      commandExists: () => false,
+      fileExists: () => true
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.agentBridge).toEqual(
+      expect.objectContaining({
+        provider: "disabled",
+        recommendedAction: expect.stringContaining("preview/status")
+      })
+    );
+  });
+
+  it("fails on invalid provider instead of falling back to auto", () => {
+    const report = buildDoctorReport({
+      cwd: resolve("business-project"),
+      env: {
+        BRAIN_CREATOR_AGENT_PROVIDER: "cursor",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      },
+      commandExists: (command) => command === "codex",
+      fileExists: () => true
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.agentBridge).toEqual(
+      expect.objectContaining({
+        provider: "invalid",
+        recommendedAction: expect.stringContaining("Set BRAIN_CREATOR_AGENT_PROVIDER")
+      })
+    );
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Agent bridge provider",
+          status: "fail",
+          message: expect.stringContaining("Unsupported agent bridge provider cursor")
         })
       ])
     );

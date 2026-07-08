@@ -96,6 +96,8 @@ Run the preflight before the first Brain Creator workflow:
 npx brain-creator-doctor
 ```
 
+Doctor prints the resolved provider and recommended action, so users can tell whether Brain Creator will use a Claude subprocess, Codex subprocess, host-agent task handoff, or preview-only disabled mode before running a confirmed workflow.
+
 If you prefer a global install, use:
 
 ```bash
