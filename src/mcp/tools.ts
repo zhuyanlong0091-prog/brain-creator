@@ -148,7 +148,19 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       systemName: z.string().optional(),
       environment: z.string().optional(),
       status: z.string().optional(),
-      id: z.string().optional()
+      id: z.string().optional(),
+      failureTypes: z
+        .array(
+          z.enum([
+            "assertion_failure",
+            "auth_failure",
+            "locator_failure",
+            "network_failure",
+            "execution_failure",
+            "unknown_failure"
+          ])
+        )
+        .default([])
     })
   },
   {
