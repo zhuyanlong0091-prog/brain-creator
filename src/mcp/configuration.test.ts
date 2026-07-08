@@ -127,6 +127,7 @@ describe("Brain Creator local integration files", () => {
         expect.stringContaining("Use Brain Creator"),
         expect.stringContaining("brain-creator-doctor"),
         expect.stringContaining("status"),
+        expect.stringContaining("/bc help"),
         expect.stringContaining("preview"),
         expect.stringContaining("continue"),
         expect.stringContaining("bugs"),
@@ -223,6 +224,7 @@ describe("Brain Creator local integration files", () => {
   it("documents the user entrypoint map in README and the Brain Creator skill", async () => {
     const readme = await readFile("README.md", "utf8");
     const skill = await readFile("skills/brain-creator/SKILL.md", "utf8");
+    const agentUsage = await readFile("docs/agent-usage.md", "utf8");
 
     expect(readme).toContain("### 用户入口到 Agent 工具映射");
     expect(readme).toContain("### User Entrypoint To Agent Tool Map");
@@ -247,6 +249,8 @@ describe("Brain Creator local integration files", () => {
       expect(readme).toContain(marker);
       expect(skill).toContain(marker);
     }
+    expect(agentUsage).toContain("/bc help");
+    expect(agentUsage).toContain("Brain Creator shortcuts");
   });
 
   it("registers the Brain Creator entrypoint as a Claude Code project skill", async () => {
