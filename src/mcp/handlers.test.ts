@@ -2464,6 +2464,22 @@ describe("handleBrainCreatorTool", () => {
         owner: "qa"
       })
     );
+    await handleBrainCreatorTool(context, "bc_report_gap", {
+      projectId: system.id,
+      sourceType: "external-preflight",
+      sourceId: "auth-gap",
+      reason: "403 Forbidden before login",
+      severity: "high",
+      owner: "qa"
+    });
+    await handleBrainCreatorTool(context, "bc_report_gap", {
+      projectId: system.id,
+      sourceType: "external-preflight",
+      sourceId: "network-gap",
+      reason: "net::ERR_CONNECTION_CLOSED",
+      severity: "high",
+      owner: "qa"
+    });
 
     const suiteReview = dataOf(
       await handleBrainCreatorTool(context, "bc_review", {
@@ -2504,7 +2520,10 @@ describe("handleBrainCreatorTool", () => {
           businessBugs: 1,
           evidenceGaps: 0,
           failedCases: 1,
-          blockedCases: 0
+          blockedCases: 0,
+          byType: {
+            assertion_failure: 1
+          }
         }
       })
     );
@@ -2513,6 +2532,7 @@ describe("handleBrainCreatorTool", () => {
     expect(suiteReview.reviewMarkdown).toContain("# Suite Run Review");
     expect(suiteReview.reviewMarkdown).toContain("- Status: failed");
     expect(suiteReview.reviewMarkdown).toContain("businessBugs");
+    expect(suiteReview.reviewMarkdown).toContain("assertion_failure");
     expect(suiteReview.reviewMarkdown).toContain("- Next action: review_bugs");
     expect(bugReview.reviewSummary).toEqual(
       expect.objectContaining({
@@ -2521,7 +2541,14 @@ describe("handleBrainCreatorTool", () => {
         nextAction: "run_bug_regression"
       })
     );
-    expect(bugReview.reviewSummary.metrics).toEqual(expect.objectContaining({ open: 1 }));
+    expect(bugReview.reviewSummary.metrics).toEqual(
+      expect.objectContaining({
+        open: 1,
+        byFailureType: {
+          assertion_failure: 1
+        }
+      })
+    );
     expect(bugReview.reviewSummary.evidencePaths).toEqual(run.suiteRun.artifactPaths);
     expect(bugReview.reviewMarkdown).toContain("# Bug Review");
     expect(bugReview.reviewMarkdown).toContain("- Status: action_required");
@@ -2533,10 +2560,22 @@ describe("handleBrainCreatorTool", () => {
         nextAction: "resolve_gaps"
       })
     );
-    expect(gapReview.reviewSummary.metrics).toEqual(expect.objectContaining({ open: 1 }));
+    expect(gapReview.reviewSummary.metrics).toEqual(
+      expect.objectContaining({
+        open: 3,
+        byFailureType: {
+          auth_failure: 1,
+          locator_failure: 1,
+          network_failure: 1
+        }
+      })
+    );
     expect(gapReview.reviewMarkdown).toContain("# Gap Review");
     expect(gapReview.reviewMarkdown).toContain("- Status: action_required");
     expect(gapReview.reviewMarkdown).toContain("- Next action: resolve_gaps");
+    expect(gapReview.reviewMarkdown).toContain("auth_failure");
+    expect(gapReview.reviewMarkdown).toContain("locator_failure");
+    expect(gapReview.reviewMarkdown).toContain("network_failure");
     expect(gapReview.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: gap.id })]));
   });
 
