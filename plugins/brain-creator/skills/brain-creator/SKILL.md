@@ -9,6 +9,8 @@ Use Brain Creator as an agent-native testing business brain through MCP tools. C
 
 Agent bridge policy: Brain Creator may run Planner / Generator / Healer through Claude Code subprocess, Codex subprocess, host-agent task handoff, or disabled preview-only mode. Prefer `bc_status` or `bc_session_resume` to inspect bridge state before confirmed execution. If bridge state is blocked, report the blocker or create a Gap instead of waiting on a long timeout. In host-agent mode, `bc_prepare_agent_task` and approved `bc_run_chain` calls return `status: "needs_agent_execution"` task packages. Read `input.prompt.md` and `input.context.json`, create the requested outputs as the current agent, then call `bc_submit_agent_output`; generator submissions run Playwright automatically. Passing tests record AgentRun, ChainRun, and generated artifact ownership; failing tests return a healer task package. Healer submissions rerun Playwright and complete the chain when the test passes. If healer output still fails, Brain Creator marks the chain failed. For document-suite tasks, successful submission also records a single-case suite run so later resume skips passed cases; unmet business expectations create BugReports, while environment, auth, locator, or execution blockers create Gaps.
 
+Codex plugin mode defaults to `host-agent`: do not start or wait for a Claude/Codex subprocess when Brain Creator returns `needs_agent_execution`; execute the returned task package as the current Codex agent and finish with `bc_submit_agent_output`.
+
 ## 入口路由（Entry Routing）
 
 用户通过两种方式使用 Brain Creator。每次用户消息到达时自动判断入口模式。
