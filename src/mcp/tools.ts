@@ -77,7 +77,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_command",
     title: "Brain Creator command",
     description:
-      "Minimal slash-command facade. Parses /bc status, /bc run <path> with optional --system/--env and --case/--module/--priority filters, /bc continue, /bc bugs, /bc gaps, and /bc regress bugs into existing facade tools.",
+      "Minimal slash-command facade. Parses /bc help, /bc status, /bc run <path> with optional --system/--env and --case/--module/--priority filters, /bc continue, /bc bugs, /bc gaps, and /bc regress bugs into existing facade tools.",
     inputSchema: z.object({
       systemId: z.string().optional(),
       systemName: z.string().optional(),

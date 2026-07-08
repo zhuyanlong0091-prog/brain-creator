@@ -1948,6 +1948,75 @@ describe("handleBrainCreatorTool", () => {
     );
   });
 
+  it("returns read-only /bc help without requiring a selected system", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+
+    const help = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        command: "/bc help"
+      })
+    );
+    const systems = dataOf(await handleBrainCreatorTool(context, "bc_list_systems", {}));
+
+    expect(help).toEqual(
+      expect.objectContaining({
+        command: "/bc help",
+        action: "help",
+        userMessage: expect.stringContaining("Brain Creator shortcuts")
+      })
+    );
+    expect(help.helpMarkdown).toContain("/bc status");
+    expect(help.helpMarkdown).toContain('/bc run "<path>"');
+    expect(help.helpMarkdown).toContain("/bc continue");
+    expect(help.helpMarkdown).toContain("/bc bugs");
+    expect(help.helpMarkdown).toContain("/bc gaps");
+    expect(help.helpMarkdown).toContain("/bc review suite");
+    expect(help.helpMarkdown).toContain("/bc regress bugs");
+    expect(help.helpMarkdown).toContain("--case");
+    expect(help.helpMarkdown).toContain("--module");
+    expect(help.helpMarkdown).toContain("--priority");
+    expect(help.helpMarkdown).toContain("--failure-type");
+    expect(help.shortcuts.map((shortcut: { command: string }) => shortcut.command)).toEqual(
+      expect.arrayContaining(["/bc status", "/bc continue", "/bc bugs", "/bc gaps"])
+    );
+    expect(systems).toEqual([]);
+  });
+
+  it("resolves optional system context for /bc help and rejects unsupported help flags", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "staging",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+
+    const help = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        command: "/bc help --system HRMS"
+      })
+    );
+    const invalid = await handleBrainCreatorTool(context, "bc_command", {
+      command: "/bc help --unknown"
+    });
+
+    expect(help.action).toBe("help");
+    expect(help.systemResolution).toEqual(
+      expect.objectContaining({ systemId: system.id, matchedBy: "name" })
+    );
+    expect(invalid.isError).toBe(true);
+    expect(errorOf(invalid)).toContain("Unsupported /bc help option: --unknown");
+  });
+
   it("resolves facade status and commands by system name when systemId is omitted", async () => {
     const context = createBrainCreatorMcpContext({
       dataFilePath: join(await tempDir(), "assets.json")
