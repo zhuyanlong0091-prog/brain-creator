@@ -2495,11 +2495,24 @@ describe("handleBrainCreatorTool", () => {
       })
     );
     expect(suiteReview.reviewSummary.metrics).toEqual(
-      expect.objectContaining({ totalCases: 1, failed: 1, bugReports: 1, gaps: 0 })
+      expect.objectContaining({
+        totalCases: 1,
+        failed: 1,
+        bugReports: 1,
+        gaps: 0,
+        failureClassification: {
+          businessBugs: 1,
+          evidenceGaps: 0,
+          failedCases: 1,
+          blockedCases: 0
+        }
+      })
     );
-    expect(suiteReview.reviewSummary.userMessage).toContain("1 failed");
+    expect(suiteReview.reviewSummary.userMessage).toContain("1 business bug");
+    expect(suiteReview.reviewSummary.userMessage).toContain("0 evidence gaps");
     expect(suiteReview.reviewMarkdown).toContain("# Suite Run Review");
     expect(suiteReview.reviewMarkdown).toContain("- Status: failed");
+    expect(suiteReview.reviewMarkdown).toContain("businessBugs");
     expect(suiteReview.reviewMarkdown).toContain("- Next action: review_bugs");
     expect(bugReview.reviewSummary).toEqual(
       expect.objectContaining({

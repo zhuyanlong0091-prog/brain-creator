@@ -1633,14 +1633,22 @@ function suiteRunReview(context: BrainCreatorMcpContext, systemId: string, id?: 
 
 function suiteRunSummary(runs: CaseSuiteRun[], bugReports: BugReport[], gaps: Gap[]) {
   const latest = runs.at(-1);
+  const failed = sumBy(runs, (run) => run.failed);
+  const blocked = sumBy(runs, (run) => run.blocked);
   return {
     totalRuns: runs.length,
     totalCases: sumBy(runs, (run) => run.total),
     passed: sumBy(runs, (run) => run.passed),
-    failed: sumBy(runs, (run) => run.failed),
-    blocked: sumBy(runs, (run) => run.blocked),
+    failed,
+    blocked,
     bugReports: bugReports.length,
     gaps: gaps.length,
+    failureClassification: {
+      businessBugs: bugReports.length,
+      evidenceGaps: gaps.length,
+      failedCases: failed,
+      blockedCases: blocked
+    },
     latestStatus: latest?.status,
     byStatus: countBy(runs, (run) => run.status)
   };
@@ -1720,7 +1728,9 @@ function suiteRunReviewSummary(review: ReturnType<typeof suiteRunReview>) {
     userMessage:
       `Suite review: ${review.summary.totalCases} cases, ` +
       `${review.summary.passed} passed, ${review.summary.failed} failed, ` +
-      `${review.summary.blocked} blocked.`
+      `${review.summary.blocked} blocked; ` +
+      `${review.summary.failureClassification.businessBugs} business bugs, ` +
+      `${review.summary.failureClassification.evidenceGaps} evidence gaps.`
   };
 }
 
