@@ -2501,6 +2501,37 @@ describe("handleBrainCreatorTool", () => {
         status: "open"
       })
     );
+    const assertionBugReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "bug",
+        systemId: system.id,
+        status: "open",
+        failureTypes: ["assertion_failure"]
+      })
+    );
+    const authBugReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "bug",
+        systemId: system.id,
+        status: "open",
+        failureTypes: ["auth_failure"]
+      })
+    );
+    const locatorGapReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "gap",
+        systemId: system.id,
+        status: "open",
+        failureTypes: ["locator_failure"]
+      })
+    );
+    const filteredSuiteReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "suite-run",
+        systemId: system.id,
+        failureTypes: ["assertion_failure"]
+      })
+    );
 
     expect(suiteReview.reviewSummary).toEqual(
       expect.objectContaining({
@@ -2577,6 +2608,28 @@ describe("handleBrainCreatorTool", () => {
     expect(gapReview.reviewMarkdown).toContain("locator_failure");
     expect(gapReview.reviewMarkdown).toContain("network_failure");
     expect(gapReview.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: gap.id })]));
+    expect(assertionBugReview.bugs).toEqual([
+      expect.objectContaining({ caseNo: "TC-009" })
+    ]);
+    expect(authBugReview.bugs).toEqual([]);
+    expect(authBugReview.reviewSummary.metrics).toEqual(
+      expect.objectContaining({ total: 0, byFailureType: {} })
+    );
+    expect(locatorGapReview.items).toEqual([
+      expect.objectContaining({ id: gap.id, reason: "Need stable selector evidence" })
+    ]);
+    expect(locatorGapReview.reviewSummary.metrics).toEqual(
+      expect.objectContaining({
+        open: 1,
+        byFailureType: { locator_failure: 1 }
+      })
+    );
+    expect(filteredSuiteReview.failedCases).toEqual([
+      expect.objectContaining({ caseNo: "TC-009", bugReportId: expect.any(String) })
+    ]);
+    expect(filteredSuiteReview.reviewSummary.metrics.failureClassification.byType).toEqual({
+      assertion_failure: 1
+    });
   });
 
   it("does not write document case results back without explicit write-back confirmation", async () => {

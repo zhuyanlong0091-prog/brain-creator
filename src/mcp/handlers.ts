@@ -881,11 +881,14 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
   const resolution = resolveSystemReference(context, input);
   const systemId = resolution.systemId;
   const target = reviewTargetArg(input, "target");
+  const failureTypes = failureTypeFilters(input);
   if (target === "bug") {
-    const bugs = context.service.listBugReports({
-      systemId,
-      status: bugStatusArg(input, "status")
-    });
+    const bugs = context.service
+      .listBugReports({
+        systemId,
+        status: bugStatusArg(input, "status")
+      })
+      .filter((bug) => matchesFailureTypes(classifyFailure(bug.actualResult), failureTypes));
     const regressionCandidates = bugRegressionCandidates(bugs);
     const summary = bugReviewSummary(bugs);
     const nextAction = bugs.some((bug) => bug.status === "open" || bug.status === "retest-failed")
@@ -904,7 +907,7 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
     };
   }
   if (target === "suite-run") {
-    const review = suiteRunReview(context, systemId, optionalStringArg(input, "id"));
+    const review = suiteRunReview(context, systemId, optionalStringArg(input, "id"), failureTypes);
     const reviewSummary = suiteRunReviewSummary(review);
     return {
       ...review,
@@ -920,10 +923,12 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
     };
   }
   if (target === "gap") {
-    const gaps = context.service.listGaps({
-      projectId: systemId,
-      status: gapStatusArg(input, "status")
-    });
+    const gaps = context.service
+      .listGaps({
+        projectId: systemId,
+        status: gapStatusArg(input, "status")
+      })
+      .filter((gap) => matchesFailureTypes(classifyFailure(gap.reason, gap.sourceType), failureTypes));
     const reviewSummary = gapReviewSummary(gaps);
     return {
       items: gaps,
@@ -1587,7 +1592,12 @@ async function artifactOverview(context: BrainCreatorMcpContext, input: Record<s
   };
 }
 
-function suiteRunReview(context: BrainCreatorMcpContext, systemId: string, id?: string) {
+function suiteRunReview(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  id?: string,
+  failureTypes = new Set<FailureType>()
+) {
   const runs = context.service
     .listCaseSuiteRuns(systemId)
     .filter((run) => id === undefined || run.id === id || run.suiteId === id);
@@ -1600,13 +1610,23 @@ function suiteRunReview(context: BrainCreatorMcpContext, systemId: string, id?: 
   );
   const bugReports = context.service
     .listBugReports({ systemId })
-    .filter((bug) => bugIds.has(bug.id));
+    .filter((bug) => bugIds.has(bug.id))
+    .filter((bug) => matchesFailureTypes(classifyFailure(bug.actualResult), failureTypes));
   const gaps = context.service
     .listGaps({ projectId: systemId })
-    .filter((gap) => gapIds.has(gap.id));
+    .filter((gap) => gapIds.has(gap.id))
+    .filter((gap) => matchesFailureTypes(classifyFailure(gap.reason, gap.sourceType), failureTypes));
+  const filteredBugIds = new Set(bugReports.map((bug) => bug.id));
+  const filteredGapIds = new Set(gaps.map((gap) => gap.id));
   const failedCases = runs.flatMap((run) =>
     run.caseResults
       .filter((caseResult) => caseResult.status !== "passed")
+      .filter(
+        (caseResult) =>
+          failureTypes.size === 0 ||
+          (caseResult.bugReportId !== undefined && filteredBugIds.has(caseResult.bugReportId)) ||
+          caseResult.gapIds.some((gapId) => filteredGapIds.has(gapId))
+      )
       .map((caseResult) => ({
         suiteRunId: run.id,
         suiteId: run.suiteId,
@@ -2225,6 +2245,29 @@ function classifyFailure(reason: string, sourceType = ""): FailureType {
 
 function failureTypeCounts(types: FailureType[]) {
   return countBy(types, (type) => type);
+}
+
+function failureTypeFilters(input: Record<string, unknown>) {
+  return new Set(stringArrayArg(input, "failureTypes").map((item) => failureTypeArg(item)));
+}
+
+function failureTypeArg(value: string): FailureType {
+  const valid: FailureType[] = [
+    "assertion_failure",
+    "auth_failure",
+    "locator_failure",
+    "network_failure",
+    "execution_failure",
+    "unknown_failure"
+  ];
+  if (!valid.includes(value as FailureType)) {
+    throw new Error(`failureTypes contains invalid value: ${value}`);
+  }
+  return value as FailureType;
+}
+
+function matchesFailureTypes(type: FailureType, filters: Set<FailureType>) {
+  return filters.size === 0 || filters.has(type);
 }
 
 function bugRegressionCandidates(bugs: BugReport[]) {
