@@ -1635,6 +1635,10 @@ function suiteRunSummary(runs: CaseSuiteRun[], bugReports: BugReport[], gaps: Ga
   const latest = runs.at(-1);
   const failed = sumBy(runs, (run) => run.failed);
   const blocked = sumBy(runs, (run) => run.blocked);
+  const byType = failureTypeCounts([
+    ...bugReports.map((bug) => classifyFailure(bug.actualResult)),
+    ...gaps.map((gap) => classifyFailure(gap.reason, gap.sourceType))
+  ]);
   return {
     totalRuns: runs.length,
     totalCases: sumBy(runs, (run) => run.total),
@@ -1647,7 +1651,8 @@ function suiteRunSummary(runs: CaseSuiteRun[], bugReports: BugReport[], gaps: Ga
       businessBugs: bugReports.length,
       evidenceGaps: gaps.length,
       failedCases: failed,
-      blockedCases: blocked
+      blockedCases: blocked,
+      byType
     },
     latestStatus: latest?.status,
     byStatus: countBy(runs, (run) => run.status)
@@ -1756,7 +1761,8 @@ function gapReviewSummary(gaps: Gap[]) {
     total: gaps.length,
     open: gaps.filter((gap) => gap.status === "open").length,
     resolved: gaps.filter((gap) => gap.status === "resolved").length,
-    bySeverity: countBy(gaps, (gap) => gap.severity)
+    bySeverity: countBy(gaps, (gap) => gap.severity),
+    byFailureType: failureTypeCounts(gaps.map((gap) => classifyFailure(gap.reason, gap.sourceType)))
   };
   return {
     title: "Gap Review",
@@ -2176,7 +2182,7 @@ function sumBy<T>(items: T[], getValue: (item: T) => number) {
   return items.reduce((total, item) => total + getValue(item), 0);
 }
 
-function bugReviewSummary(bugs: Array<{ status: string }>) {
+function bugReviewSummary(bugs: Array<{ status: string; actualResult: string }>) {
   const counts = countBy(bugs, (bug) => bug.status);
   return {
     total: bugs.length,
@@ -2184,8 +2190,41 @@ function bugReviewSummary(bugs: Array<{ status: string }>) {
     retestRunning: counts["retest-running"] ?? 0,
     retestPassed: counts["retest-passed"] ?? 0,
     retestFailed: counts["retest-failed"] ?? 0,
-    closed: counts.closed ?? 0
+    closed: counts.closed ?? 0,
+    byFailureType: failureTypeCounts(bugs.map((bug) => classifyFailure(bug.actualResult)))
   };
+}
+
+type FailureType =
+  | "assertion_failure"
+  | "auth_failure"
+  | "locator_failure"
+  | "network_failure"
+  | "execution_failure"
+  | "unknown_failure";
+
+function classifyFailure(reason: string, sourceType = ""): FailureType {
+  const text = `${sourceType} ${reason}`.toLowerCase();
+  if (/\b(auth|login|token|cookie|password|captcha|2fa|unauthorized|forbidden|403|401)\b/.test(text)) {
+    return "auth_failure";
+  }
+  if (/\b(selector|locator|element|dom|stable selector)\b/.test(text)) {
+    return "locator_failure";
+  }
+  if (/\b(network|net::|econn|timeout|timed out|dns|socket|connection|http 5\d\d)\b/.test(text)) {
+    return "network_failure";
+  }
+  if (/\b(expected|actual|assert|assertion|tobe|toequal|tocontain|not visible)\b/.test(text)) {
+    return "assertion_failure";
+  }
+  if (/\b(playwright|process|command|exit code|failed after|host-agent|generator|healer|suite failure)\b/.test(text)) {
+    return "execution_failure";
+  }
+  return "unknown_failure";
+}
+
+function failureTypeCounts(types: FailureType[]) {
+  return countBy(types, (type) => type);
 }
 
 function bugRegressionCandidates(bugs: BugReport[]) {
