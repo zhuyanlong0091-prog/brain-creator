@@ -63,6 +63,9 @@ describe("Brain Creator local integration files", () => {
     expect(packageJson.scripts["verify:package-contents"]).toContain(
       "scripts/verifyPackageContents.ts"
     );
+    expect(packageJson.scripts["verify:host-agent-chain"]).toContain(
+      "scripts/hostAgentChainSmoke.ts"
+    );
     expect(packageJson.scripts["release:check"]).toContain(
       "scripts/releaseReadiness.ts"
     );
