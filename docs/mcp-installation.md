@@ -40,6 +40,16 @@ npx brain-creator-write-mcp-config
 
 The command preserves existing MCP servers in `.mcp.json` and adds the `brain-creator` server. By default, it writes an MCP command that uses the project-local package through `npx`.
 
+If the target runtime is already known, choose it explicitly:
+
+```bash
+npx brain-creator-write-mcp-config --provider claude
+npx brain-creator-write-mcp-config --provider codex
+npx brain-creator-write-mcp-config --provider host-agent
+```
+
+Supported values are `auto`, `claude`, `codex`, `host-agent`, and `disabled`. Invalid provider names fail immediately.
+
 Then configure Claude Code or Codex MCP in the business project:
 
 ```json
@@ -117,7 +127,7 @@ The repo-local Codex plugin is available under `plugins/brain-creator` and is re
 It provides:
 
 - `.codex-plugin/plugin.json` for Codex `/plugin` discovery.
-- `.mcp.json` that registers the `brain-creator` MCP server with `npx brain-creator-mcp`.
+- `.mcp.json` that registers the `brain-creator` MCP server with `npx brain-creator-mcp` and defaults to `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`.
 - `skills/` containing the Brain Creator workflow entrypoint and supporting skill guidance.
 - Starter prompts for connecting a business system, generating a reviewed plan, and running doctor.
 

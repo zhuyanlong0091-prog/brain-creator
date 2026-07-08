@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeBrainCreatorMcpConfig } from "./writeMcpConfig.js";
+import { parseMcpProviderArg, runWriteMcpConfigCli, writeBrainCreatorMcpConfig } from "./writeMcpConfig.js";
 
 const tempDirs: string[] = [];
 
@@ -104,6 +104,26 @@ describe("writeBrainCreatorMcpConfig", () => {
       BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
       BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
     });
+  });
+
+  it("rejects an invalid provider instead of silently falling back to auto", async () => {
+    await expect(
+      writeBrainCreatorMcpConfig({ targetDir: await tempDir(), provider: "cursor" as never })
+    ).rejects.toThrow("Unsupported Brain Creator agent provider: cursor");
+    expect(() => parseMcpProviderArg("cursor")).toThrow("Unsupported Brain Creator agent provider: cursor");
+  });
+
+  it("prints a concise CLI error for an invalid provider", async () => {
+    const messages: string[] = [];
+
+    const exitCode = await runWriteMcpConfigCli(["--provider", "cursor"], {
+      cwd: await tempDir(),
+      log: () => undefined,
+      error: (message) => messages.push(message)
+    });
+
+    expect(exitCode).toBe(1);
+    expect(messages).toEqual(["Unsupported Brain Creator agent provider: cursor"]);
   });
 });
 

@@ -131,7 +131,7 @@ describe("Brain Creator local integration files", () => {
       args: ["brain-creator-mcp"],
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
-        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
+        BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });
