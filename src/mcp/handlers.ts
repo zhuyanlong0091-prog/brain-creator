@@ -1334,22 +1334,37 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     result.agentRun.status === "succeeded" && (!testResult || testResult.exitCode === 0)
       ? "succeeded"
       : "failed";
-  const gaps =
+  const failureReason =
     status === "failed"
+      ? hostAgentFailureReason(result.task.agent, result.agentRun.error, testResult)
+      : undefined;
+  const chainRunId = id("chain");
+  const artifactPaths = [chainContext.specPath, chainContext.testPath];
+  const bugReport =
+    status === "failed" && failureReason
+      ? await maybeCreateHostAgentBugReport(context, {
+          task: result.task,
+          chainRunId,
+          failureReason,
+          artifactPaths
+        })
+      : undefined;
+  const gaps =
+    status === "failed" && !bugReport && failureReason
       ? [
           context.service.reportGap({
             projectId: result.task.systemId,
             sourceType:
               result.task.agent === "healer" ? "host-agent-healer" : "host-agent-generator",
             sourceId: result.task.id,
-            reason: hostAgentFailureReason(result.task.agent, result.agentRun.error, testResult),
+            reason: failureReason,
             severity: "high",
             owner: "qa"
           })
         ]
       : [];
   const chainRun: ChainRun = {
-    id: id("chain"),
+    id: chainRunId,
     systemId: result.task.systemId,
     testCaseId: chainContext.testCaseId,
     status,
@@ -1379,15 +1394,13 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
             status: suiteCaseResultStatus(status, result.task.agent),
             testCaseId: chainContext.testCaseId,
             chainRunId: chainRun.id,
+            bugReportId: bugReport?.id,
             gapIds: gaps.map((gap) => gap.id),
-            error:
-              status === "failed"
-                ? hostAgentFailureReason(result.task.agent, result.agentRun.error, testResult)
-                : undefined
+            error: failureReason
           }
         ],
-        artifactPaths: [chainContext.specPath, chainContext.testPath],
-        bugReportIds: [],
+        artifactPaths,
+        bugReportIds: bugReport ? [bugReport.id] : [],
         gapIds: gaps.map((gap) => gap.id),
         completedAt: new Date().toISOString()
       })
@@ -1401,6 +1414,60 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     );
   }
   return suiteRun ? { ...result, chainRun, suiteRun, testResult } : { ...result, chainRun, testResult };
+}
+
+async function maybeCreateHostAgentBugReport(
+  context: BrainCreatorMcpContext,
+  input: {
+    task: AgentTask;
+    chainRunId: string;
+    failureReason: string;
+    artifactPaths: string[];
+  }
+) {
+  if (
+    input.task.agent !== "healer" ||
+    !input.task.suiteContext ||
+    !isDocumentExpectationFailure(input.failureReason)
+  ) {
+    return undefined;
+  }
+  const source = context.service
+    .listCaseSources(input.task.systemId)
+    .find((item) => item.id === input.task.suiteContext?.sourceId);
+  if (!source) {
+    return undefined;
+  }
+  let documentCase: DocumentCase | undefined;
+  try {
+    const parsed = await parseCaseSource(source.source);
+    documentCase = parsed.cases.find((item) => item.caseNo === input.task.suiteContext?.caseNo);
+  } catch {
+    return undefined;
+  }
+  if (!documentCase) {
+    return undefined;
+  }
+  return context.service.createBugReport({
+    systemId: input.task.systemId,
+    sourceId: source.id,
+    caseNo: documentCase.caseNo,
+    caseTitle: documentCase.title,
+    module: documentCase.module,
+    priority: documentCase.priority,
+    expectedResult: documentCase.expectedResult,
+    actualResult: input.failureReason,
+    reproductionSteps: reproductionSteps(documentCase),
+    evidencePaths: input.artifactPaths,
+    chainRunId: input.chainRunId,
+    gapIds: []
+  });
+}
+
+function isDocumentExpectationFailure(reason: string) {
+  return /\b(expected|actual|assert|assertion|toBe|toEqual|toContain|not visible)\b/i.test(
+    reason
+  );
 }
 
 function suiteRunStatus(status: ChainRun["status"], agent: AgentRun["agent"]): CaseSuiteRun["status"] {
