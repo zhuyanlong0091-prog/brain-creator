@@ -12,15 +12,24 @@ type BrainCreatorMcpServer = {
   env: Record<string, string>;
 };
 
+const supportedProviders = ["auto", "claude", "codex", "host-agent", "disabled"] as const;
+type BrainCreatorAgentProvider = (typeof supportedProviders)[number];
+
 export type WriteMcpConfigOptions = {
   targetDir?: string;
   commandMode?: "local" | "global";
-  provider?: "auto" | "claude" | "codex" | "host-agent" | "disabled";
+  provider?: BrainCreatorAgentProvider;
 };
 
 export type WriteMcpConfigResult = {
   path: string;
   status: "created" | "updated";
+};
+
+type WriteMcpConfigCliIo = {
+  cwd?: string;
+  log?: (message: string) => void;
+  error?: (message: string) => void;
 };
 
 function brainCreatorMcpEnv(provider: NonNullable<WriteMcpConfigOptions["provider"]>) {
@@ -69,7 +78,7 @@ export async function writeBrainCreatorMcpConfig(
 ): Promise<WriteMcpConfigResult> {
   const targetDir = resolve(options.targetDir ?? process.cwd());
   const commandMode = options.commandMode ?? "local";
-  const provider = options.provider ?? "auto";
+  const provider = parseMcpProviderArg(options.provider);
   const configPath = join(targetDir, ".mcp.json");
   const existing = await readExistingConfig(configPath);
   const status = existing ? "updated" : "created";
@@ -93,25 +102,36 @@ async function readExistingConfig(path: string): Promise<McpConfig | undefined> 
   return JSON.parse(raw) as McpConfig;
 }
 
-if (process.argv[1]?.endsWith("writeMcpConfig.js")) {
-  const targetArgIndex = process.argv.findIndex((arg) => arg === "--target");
-  const targetDir = targetArgIndex >= 0 ? process.argv[targetArgIndex + 1] : undefined;
-  const commandMode = process.argv.includes("--global") ? "global" : "local";
-  const providerArgIndex = process.argv.findIndex((arg) => arg === "--provider");
-  const provider = providerArgIndex >= 0 ? process.argv[providerArgIndex + 1] : undefined;
-  writeBrainCreatorMcpConfig({
-    targetDir,
-    commandMode,
-      provider:
-      provider === "claude" || provider === "codex" || provider === "host-agent" || provider === "disabled" || provider === "auto"
-        ? provider
-        : undefined
-  })
-    .then((result) => {
-      console.log(`Brain Creator MCP config ${result.status}: ${result.path}`);
-    })
-    .catch((error) => {
-      console.error(error);
-      process.exit(1);
+export function parseMcpProviderArg(value: string | undefined): BrainCreatorAgentProvider {
+  const provider = value ?? "auto";
+  if (supportedProviders.includes(provider as BrainCreatorAgentProvider)) {
+    return provider as BrainCreatorAgentProvider;
+  }
+  throw new Error(`Unsupported Brain Creator agent provider: ${provider}`);
+}
+
+export async function runWriteMcpConfigCli(args: string[], io: WriteMcpConfigCliIo = {}) {
+  try {
+    const targetArgIndex = args.findIndex((arg) => arg === "--target");
+    const targetDir = targetArgIndex >= 0 ? args[targetArgIndex + 1] : io.cwd;
+    const commandMode = args.includes("--global") ? "global" : "local";
+    const providerArgIndex = args.findIndex((arg) => arg === "--provider");
+    const provider = providerArgIndex >= 0 ? args[providerArgIndex + 1] : undefined;
+    const result = await writeBrainCreatorMcpConfig({
+      targetDir,
+      commandMode,
+      provider: parseMcpProviderArg(provider)
     });
+    (io.log ?? console.log)(`Brain Creator MCP config ${result.status}: ${result.path}`);
+    return 0;
+  } catch (error) {
+    (io.error ?? console.error)(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+}
+
+if (process.argv[1]?.endsWith("writeMcpConfig.js")) {
+  runWriteMcpConfigCli(process.argv.slice(2)).then((exitCode) => {
+    process.exit(exitCode);
+  });
 }

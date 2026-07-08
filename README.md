@@ -122,6 +122,16 @@ npx brain-creator-doctor
 - `npx brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，默认写入 `npx brain-creator-mcp` 和 `BRAIN_CREATOR_AGENT_PROVIDER=auto`，因此适配本地安装。
 - `npx brain-creator-doctor`：在真正使用前检查 workspace、agent bridge provider 和 agent 定义。
 
+如果你已经知道运行环境，可以在写入 MCP 配置时显式选择 provider：
+
+```bash
+npx brain-creator-write-mcp-config --provider claude
+npx brain-creator-write-mcp-config --provider codex
+npx brain-creator-write-mcp-config --provider host-agent
+```
+
+`--provider` 仅接受 `auto`、`claude`、`codex`、`host-agent`、`disabled`。拼写错误会直接失败，避免静默写成错误配置。
+
 如果你偏好全局安装，也可以执行：
 
 ```bash
@@ -169,7 +179,7 @@ npm publish --access public --otp=<当前 2FA 验证码>
 仓库已提供 repo-local Codex 插件：
 
 - `plugins/brain-creator/.codex-plugin/plugin.json`：插件展示、starter prompt 和能力描述。
-- `plugins/brain-creator/.mcp.json`：通过 `npx brain-creator-mcp` 注册 MCP server。
+- `plugins/brain-creator/.mcp.json`：通过 `npx brain-creator-mcp` 注册 MCP server，并默认使用 `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`，让当前 Codex Agent 执行任务包。
 - `plugins/brain-creator/skills/`：随插件提供 Brain Creator skill。
 - `.agents/plugins/marketplace.json`：将 `brain-creator` 作为本地 marketplace 插件暴露给 Codex。
 
@@ -362,7 +372,7 @@ See [docs/release-notes-2.0.2.md](docs/release-notes-2.0.2.md) for the 2.0.2 pat
 The repository now includes a repo-local Codex plugin:
 
 - `plugins/brain-creator/.codex-plugin/plugin.json`: plugin metadata, starter prompts, and capability text.
-- `plugins/brain-creator/.mcp.json`: registers the MCP server through `npx brain-creator-mcp`.
+- `plugins/brain-creator/.mcp.json`: registers the MCP server through `npx brain-creator-mcp` and defaults to `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`, so the current Codex agent executes task packages.
 - `plugins/brain-creator/skills/`: ships the Brain Creator skill with the plugin.
 - `.agents/plugins/marketplace.json`: exposes `brain-creator` as a local marketplace plugin for Codex.
 
@@ -391,6 +401,16 @@ These commands:
 - `npx brain-creator-install-assets`: installs the Brain Creator Skill and Playwright Planner / Generator / Healer agent definitions into the current business project.
 - `npx brain-creator-write-mcp-config`: creates or updates the business project's `.mcp.json`, preserving existing MCP servers and using `npx brain-creator-mcp` for local installs.
 - `npx brain-creator-doctor`: checks workspace, Claude bridge, and agent definitions before the first workflow.
+
+If you already know the runtime environment, choose the provider while writing MCP config:
+
+```bash
+npx brain-creator-write-mcp-config --provider claude
+npx brain-creator-write-mcp-config --provider codex
+npx brain-creator-write-mcp-config --provider host-agent
+```
+
+`--provider` only accepts `auto`, `claude`, `codex`, `host-agent`, and `disabled`. Typos fail instead of silently writing the wrong config.
 
 For a global install instead:
 
