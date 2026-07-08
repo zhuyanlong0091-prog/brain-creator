@@ -122,9 +122,16 @@ describe("Brain Creator local integration files", () => {
     expect(pluginManifest.interface.defaultPrompt).toEqual(
       expect.arrayContaining([
         expect.stringContaining("Use Brain Creator"),
-        expect.stringContaining("brain-creator-doctor")
+        expect.stringContaining("brain-creator-doctor"),
+        expect.stringContaining("status"),
+        expect.stringContaining("preview"),
+        expect.stringContaining("continue"),
+        expect.stringContaining("bugs"),
+        expect.stringContaining("gaps")
       ])
     );
+    expect(pluginManifest.interface.longDescription).toContain("host-agent");
+    expect(pluginManifest.interface.longDescription).toContain("bc_submit_agent_output");
 
     expect(pluginMcp.mcpServers["brain-creator"]).toEqual({
       command: "npx",
@@ -241,11 +248,16 @@ describe("Brain Creator local integration files", () => {
   it("registers the Brain Creator entrypoint as a Claude Code project skill", async () => {
     const canonical = await readFile("skills/brain-creator/SKILL.md", "utf8");
     const claudeSkill = await readFile(".claude/skills/brain-creator/SKILL.md", "utf8");
+    const pluginSkill = await readFile("plugins/brain-creator/skills/brain-creator/SKILL.md", "utf8");
 
     expect(claudeSkill).toBe(canonical);
+    expect(pluginSkill).toBe(canonical);
     expect(claudeSkill).toContain("One-Sentence");
     expect(claudeSkill).toContain("bc_status");
     expect(claudeSkill).toContain("bc_run");
+    expect(claudeSkill).toContain("Codex plugin");
+    expect(claudeSkill).toContain("needs_agent_execution");
+    expect(claudeSkill).toContain("bc_submit_agent_output");
   });
 
   it("includes facade and session resume tools in the MCP tool registry", async () => {
