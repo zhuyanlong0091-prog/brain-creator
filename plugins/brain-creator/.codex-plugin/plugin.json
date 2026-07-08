@@ -27,6 +27,7 @@
     "defaultPrompt": [
       "Use Brain Creator to connect this system.",
       "Use Brain Creator to check status for the current system.",
+      "Use Brain Creator to show /bc help shortcuts.",
       "Use Brain Creator to preview this test case document, then wait for my confirmation before execution.",
       "Use Brain Creator to continue the last unfinished suite.",
       "Use Brain Creator to review open bugs and gaps.",

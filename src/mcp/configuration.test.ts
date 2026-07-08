@@ -63,6 +63,12 @@ describe("Brain Creator local integration files", () => {
     expect(packageJson.scripts["verify:package-contents"]).toContain(
       "scripts/verifyPackageContents.ts"
     );
+    expect(packageJson.scripts["verify:host-agent-chain"]).toContain(
+      "scripts/hostAgentChainSmoke.ts"
+    );
+    expect(packageJson.scripts["verify:codex-native-entry"]).toContain(
+      "scripts/codexNativeEntrySmoke.ts"
+    );
     expect(packageJson.scripts["release:check"]).toContain(
       "scripts/releaseReadiness.ts"
     );
@@ -124,6 +130,7 @@ describe("Brain Creator local integration files", () => {
         expect.stringContaining("Use Brain Creator"),
         expect.stringContaining("brain-creator-doctor"),
         expect.stringContaining("status"),
+        expect.stringContaining("/bc help"),
         expect.stringContaining("preview"),
         expect.stringContaining("continue"),
         expect.stringContaining("bugs"),
@@ -132,6 +139,9 @@ describe("Brain Creator local integration files", () => {
     );
     expect(pluginManifest.interface.longDescription).toContain("host-agent");
     expect(pluginManifest.interface.longDescription).toContain("bc_submit_agent_output");
+    expect(pluginManifest.interface.defaultPrompt).toEqual(
+      expect.arrayContaining([expect.stringContaining("/bc help")])
+    );
 
     expect(pluginMcp.mcpServers["brain-creator"]).toEqual({
       command: "npx",
@@ -220,6 +230,7 @@ describe("Brain Creator local integration files", () => {
   it("documents the user entrypoint map in README and the Brain Creator skill", async () => {
     const readme = await readFile("README.md", "utf8");
     const skill = await readFile("skills/brain-creator/SKILL.md", "utf8");
+    const agentUsage = await readFile("docs/agent-usage.md", "utf8");
 
     expect(readme).toContain("### 用户入口到 Agent 工具映射");
     expect(readme).toContain("### User Entrypoint To Agent Tool Map");
@@ -244,6 +255,12 @@ describe("Brain Creator local integration files", () => {
       expect(readme).toContain(marker);
       expect(skill).toContain(marker);
     }
+    expect(agentUsage).toContain("/bc help");
+    expect(agentUsage).toContain("Brain Creator shortcuts");
+    expect(readme).toContain("verify:codex-native-entry");
+    expect(await readFile("docs/mcp-installation.md", "utf8")).toContain(
+      "verify:codex-native-entry"
+    );
   });
 
   it("registers the Brain Creator entrypoint as a Claude Code project skill", async () => {
