@@ -238,7 +238,8 @@ describe("Brain Creator local integration files", () => {
       "reviewMarkdown",
       "bc_review target=\"bug\"",
       "bc_review target=\"gap\"",
-      "bc_report_gap"
+      "bc_report_gap",
+      "/bc help"
     ]) {
       expect(readme).toContain(marker);
       expect(skill).toContain(marker);

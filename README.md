@@ -36,6 +36,7 @@ Brain Creator v2 现在采用三层入口：
 
 如果用户明确输入 `/bc ...`，Agent 可以调用 `bc_command` 作为最小命令解析入口。当前支持：
 
+- `/bc help`：查看 Brain Creator 快捷命令、筛选参数和推荐入口；不需要选择系统。
 - `/bc status`：查看当前系统状态。
 - `/bc status --system HRMS --env test`：按系统名和环境查看状态。
 - `/bc run "<path>"`：预览测试用例文档套件，不会直接执行；可追加 `--case TC-001,TC-002`、`--module 招聘需求`、`--priority P1`。
@@ -274,6 +275,7 @@ If the user does not know `systemId`, facade tools accept `systemName` / `enviro
 
 When the user explicitly types `/bc ...`, the agent can call `bc_command` as the minimal command parser. Supported commands:
 
+- `/bc help`: show Brain Creator shortcuts, filters, and recommended entrypoints without requiring a selected system.
 - `/bc status`: inspect the current system status.
 - `/bc status --system HRMS --env test`: inspect status by system name and environment.
 - `/bc run "<path>"`: preview a test case document suite without executing it; optional filters include `--case TC-001,TC-002`, `--module Recruiting`, and `--priority P1`.
