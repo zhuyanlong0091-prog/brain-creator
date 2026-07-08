@@ -7,6 +7,7 @@ import {
 } from "../shared/workspace.js";
 
 type DoctorEnv = Record<string, string | undefined>;
+type SupportedBridgeProvider = "auto" | "claude" | "codex" | "host-agent" | "disabled";
 
 export type DoctorCheck = {
   name: string;
@@ -15,10 +16,18 @@ export type DoctorCheck = {
   remediation?: string;
 };
 
+export type DoctorAgentBridge = {
+  provider: SupportedBridgeProvider | "invalid";
+  configuredProvider?: string;
+  command?: string;
+  recommendedAction: string;
+};
+
 export type DoctorReport = {
   ok: boolean;
   workspace: string;
   dataFile: string;
+  agentBridge: DoctorAgentBridge;
   checks: DoctorCheck[];
 };
 
@@ -34,6 +43,13 @@ const agentDefinitionFiles = [
   "playwright-test-generator.md",
   "playwright-test-healer.md"
 ];
+const supportedBridgeProviders: SupportedBridgeProvider[] = [
+  "auto",
+  "claude",
+  "codex",
+  "host-agent",
+  "disabled"
+];
 
 export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
   const cwd = options.cwd ?? process.cwd();
@@ -42,6 +58,7 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
   const fileExists = options.fileExists ?? existsSync;
   const workspace = resolveBrainCreatorWorkspace(cwd, env);
   const dataFile = resolveBrainCreatorDataFile(cwd, env);
+  const agentBridge = resolveDoctorAgentBridge(env, commandExists);
   const checks: DoctorCheck[] = [
     {
       name: "Workspace",
@@ -53,7 +70,7 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
       status: "pass",
       message: `Local assets file is ${dataFile}.`
     },
-    bridgeCommandCheck(env, commandExists),
+    bridgeCommandCheck(env, commandExists, agentBridge),
     bridgeArgsCheck(env),
     bridgeTimeoutCheck(env),
     agentDefinitionsCheck(cwd, fileExists)
@@ -63,6 +80,7 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
     ok: checks.every((check) => check.status !== "fail"),
     workspace,
     dataFile,
+    agentBridge,
     checks
   };
 }
@@ -72,6 +90,10 @@ export function formatDoctorReport(report: DoctorReport) {
     `Brain Creator doctor: ${report.ok ? "ready" : "action required"}`,
     `Workspace: ${report.workspace}`,
     `Data file: ${report.dataFile}`,
+    `Agent provider: ${report.agentBridge.provider}${
+      report.agentBridge.command ? ` (${report.agentBridge.command})` : ""
+    }`,
+    `Recommended action: ${report.agentBridge.recommendedAction}`,
     "",
     ...report.checks.flatMap((check) => [
       `${statusIcon(check.status)} ${check.name}: ${check.message}`,
@@ -83,12 +105,19 @@ export function formatDoctorReport(report: DoctorReport) {
 
 function bridgeCommandCheck(
   env: DoctorEnv,
-  commandExists: (command: string, env: DoctorEnv) => boolean
+  commandExists: (command: string, env: DoctorEnv) => boolean,
+  agentBridge: DoctorAgentBridge
 ): DoctorCheck {
-  const configuredProvider = bridgeProvider(env);
-  const detected = detectBridge(env, configuredProvider, commandExists);
-  const provider = detected.provider;
-  const command = detected.command;
+  const provider = agentBridge.provider;
+  const command = agentBridge.command;
+  if (provider === "invalid") {
+    return {
+      name: "Agent bridge provider",
+      status: "fail",
+      message: `Unsupported agent bridge provider ${agentBridge.configuredProvider}.`,
+      remediation: "Set BRAIN_CREATOR_AGENT_PROVIDER to auto, claude, codex, host-agent, or disabled."
+    };
+  }
   if (provider === "host-agent") {
     return {
       name: "Agent bridge provider",
@@ -179,12 +208,13 @@ function bridgeTimeoutCheck(env: DoctorEnv): DoctorCheck {
 
 function bridgeProvider(env: DoctorEnv) {
   if (
-    env.BRAIN_CREATOR_AGENT_PROVIDER === "claude" ||
-    env.BRAIN_CREATOR_AGENT_PROVIDER === "codex" ||
-    env.BRAIN_CREATOR_AGENT_PROVIDER === "host-agent" ||
-    env.BRAIN_CREATOR_AGENT_PROVIDER === "disabled"
+    env.BRAIN_CREATOR_AGENT_PROVIDER &&
+    supportedBridgeProviders.includes(env.BRAIN_CREATOR_AGENT_PROVIDER as SupportedBridgeProvider)
   ) {
-    return env.BRAIN_CREATOR_AGENT_PROVIDER;
+    return env.BRAIN_CREATOR_AGENT_PROVIDER as SupportedBridgeProvider;
+  }
+  if (env.BRAIN_CREATOR_AGENT_PROVIDER) {
+    return "invalid";
   }
   if (env.BRAIN_CREATOR_AGENT_COMMAND) {
     return "claude";
@@ -192,7 +222,7 @@ function bridgeProvider(env: DoctorEnv) {
   return env.BRAIN_CREATOR_AGENT_PROVIDER === "auto" ? "auto" : "auto";
 }
 
-function bridgeCommand(env: DoctorEnv, provider: string) {
+function bridgeCommand(env: DoctorEnv, provider: SupportedBridgeProvider | "invalid") {
   if (env.BRAIN_CREATOR_AGENT_COMMAND) {
     return env.BRAIN_CREATOR_AGENT_COMMAND;
   }
@@ -210,22 +240,62 @@ function bridgeCommand(env: DoctorEnv, provider: string) {
 
 function detectBridge(
   env: DoctorEnv,
-  provider: string,
+  provider: SupportedBridgeProvider | "invalid",
   commandExists: (command: string, env: DoctorEnv) => boolean
-) {
+): Pick<DoctorAgentBridge, "provider" | "command"> {
+  if (provider === "invalid") {
+    return { provider, command: undefined };
+  }
+  if (provider === "auto") {
+    const claudeCommand = env.BRAIN_CREATOR_CLAUDE_COMMAND;
+    if (claudeCommand && commandExists(claudeCommand, env)) {
+      return { provider: "claude", command: claudeCommand };
+    }
+    const codexCommand = env.BRAIN_CREATOR_CODEX_COMMAND ?? "codex";
+    if (commandExists(codexCommand, env)) {
+      return { provider: "codex", command: codexCommand };
+    }
+    return { provider, command: undefined };
+  }
   const explicit = bridgeCommand(env, provider);
   if (explicit) {
     return { provider, command: explicit };
   }
-  if (provider === "auto") {
-    if (commandExists("codex", env)) {
-      return { provider: "codex", command: "codex" };
-    }
-    if (commandExists("claude", env)) {
-      return { provider: "claude", command: "claude" };
-    }
-  }
   return { provider, command: undefined };
+}
+
+function resolveDoctorAgentBridge(
+  env: DoctorEnv,
+  commandExists: (command: string, env: DoctorEnv) => boolean
+): DoctorAgentBridge {
+  const configuredProvider = env.BRAIN_CREATOR_AGENT_PROVIDER;
+  const provider = bridgeProvider(env);
+  const detected = detectBridge(env, provider, commandExists);
+  return {
+    provider: detected.provider,
+    configuredProvider,
+    command: detected.command,
+    recommendedAction: recommendedBridgeAction(detected.provider)
+  };
+}
+
+function recommendedBridgeAction(provider: SupportedBridgeProvider | "invalid") {
+  if (provider === "claude") {
+    return "Run confirmed workflows through the Claude subprocess bridge.";
+  }
+  if (provider === "codex") {
+    return "Run confirmed workflows through the Codex subprocess bridge.";
+  }
+  if (provider === "host-agent") {
+    return "Use bc_prepare_agent_task, read input.prompt.md and input.context.json, write the requested outputs, then call bc_submit_agent_output.";
+  }
+  if (provider === "disabled") {
+    return "Use preview/status workflows only; real Planner/Generator/Healer execution is disabled.";
+  }
+  if (provider === "auto") {
+    return "Configure BRAIN_CREATOR_AGENT_PROVIDER or install Claude/Codex so Brain Creator can resolve an agent bridge.";
+  }
+  return "Set BRAIN_CREATOR_AGENT_PROVIDER to auto, claude, codex, host-agent, or disabled.";
 }
 
 function bridgeArgs(env: DoctorEnv, provider: string) {

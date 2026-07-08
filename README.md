@@ -120,7 +120,7 @@ npx brain-creator-doctor
 - `npm install --save-dev brain-creator`：把 Brain Creator 安装到当前业务项目。
 - `npx brain-creator-install-assets`：把 Brain Creator Skill 和 Playwright Planner / Generator / Healer agent 定义安装到当前业务项目。
 - `npx brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，默认写入 `npx brain-creator-mcp` 和 `BRAIN_CREATOR_AGENT_PROVIDER=auto`，因此适配本地安装。
-- `npx brain-creator-doctor`：在真正使用前检查 workspace、agent bridge provider 和 agent 定义。
+- `npx brain-creator-doctor`：在真正使用前检查 workspace、agent bridge provider 和 agent 定义，并输出当前 provider 的推荐执行路径。
 
 如果你已经知道运行环境，可以在写入 MCP 配置时显式选择 provider：
 
@@ -400,7 +400,7 @@ These commands:
 - `npm install --save-dev brain-creator`: installs Brain Creator into the current business project.
 - `npx brain-creator-install-assets`: installs the Brain Creator Skill and Playwright Planner / Generator / Healer agent definitions into the current business project.
 - `npx brain-creator-write-mcp-config`: creates or updates the business project's `.mcp.json`, preserving existing MCP servers and using `npx brain-creator-mcp` for local installs.
-- `npx brain-creator-doctor`: checks workspace, Claude bridge, and agent definitions before the first workflow.
+- `npx brain-creator-doctor`: checks workspace, agent bridge provider, and agent definitions before the first workflow, then prints the recommended execution path for the active provider.
 
 If you already know the runtime environment, choose the provider while writing MCP config:
 
