@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Brain Creator",
     "shortDescription": "Use Brain Creator as an agent-native testing brain.",
-    "longDescription": "Brain Creator registers the Brain Creator Skill and MCP server so Claude Code or Codex can connect business systems, manage auth and rules, generate reviewed test plans, run agent chains, and track gaps without starting from a Web UI.",
+    "longDescription": "Brain Creator registers the Brain Creator Skill and MCP server so Claude Code or Codex can connect business systems, manage auth and rules, generate reviewed test plans, run agent chains, and track gaps without starting from a Web UI. In Codex plugin mode it defaults to host-agent task handoff: when Brain Creator returns needs_agent_execution, the current Codex agent should execute the task package and finish with bc_submit_agent_output instead of waiting for a Claude or Codex subprocess.",
     "developerName": "Brain Creator",
     "category": "Productivity",
     "capabilities": [
@@ -26,7 +26,10 @@
     ],
     "defaultPrompt": [
       "Use Brain Creator to connect this system.",
-      "Use Brain Creator to generate a reviewed test plan.",
+      "Use Brain Creator to check status for the current system.",
+      "Use Brain Creator to preview this test case document, then wait for my confirmation before execution.",
+      "Use Brain Creator to continue the last unfinished suite.",
+      "Use Brain Creator to review open bugs and gaps.",
       "Run npx brain-creator-doctor, then start Brain Creator."
     ],
     "brandColor": "#0F766E"

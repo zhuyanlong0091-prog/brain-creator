@@ -183,6 +183,8 @@ npm publish --access public --otp=<当前 2FA 验证码>
 - `plugins/brain-creator/skills/`：随插件提供 Brain Creator skill。
 - `.agents/plugins/marketplace.json`：将 `brain-creator` 作为本地 marketplace 插件暴露给 Codex。
 
+插件 starter prompt 覆盖常用入口：检查系统状态、预览测试用例文档、继续未完成 suite、复盘 open bugs/gaps，以及运行 doctor。
+
 验证插件：
 
 ```bash
@@ -375,6 +377,8 @@ The repository now includes a repo-local Codex plugin:
 - `plugins/brain-creator/.mcp.json`: registers the MCP server through `npx brain-creator-mcp` and defaults to `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`, so the current Codex agent executes task packages.
 - `plugins/brain-creator/skills/`: ships the Brain Creator skill with the plugin.
 - `.agents/plugins/marketplace.json`: exposes `brain-creator` as a local marketplace plugin for Codex.
+
+The plugin starter prompts cover the common entrypoints: check system status, preview a test case document, continue an unfinished suite, review open bugs/gaps, and run doctor.
 
 Validate the plugin:
 
