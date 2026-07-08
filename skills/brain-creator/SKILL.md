@@ -35,7 +35,7 @@ Agent bridge policy: Brain Creator may run Planner / Generator / Healer through 
       → 主动提示用户当前系统状态，并给出下一步建议
 ```
 
-> **注意：** 自然语言仍是推荐入口。若用户明确输入 `/bc ...`，调用 `bc_command` 解析最小快捷命令：`/bc status`、`/bc run "<path>"`（可带 `--case`、`--module`、`--priority`）、`/bc continue`、`/bc bugs`、`/bc gaps`、`/bc regress bugs`（可带 `--bug`、`--module`、`--priority`）、`/bc review suite`。`bc_command` 会转发到对应 Facade 工具；不要让用户手动编排底层 `bc_*` 工具。
+> **注意：** 自然语言仍是推荐入口。若用户明确输入 `/bc ...`，调用 `bc_command` 解析最小快捷命令：`/bc status`、`/bc run "<path>"`（可带 `--case`、`--module`、`--priority`）、`/bc continue`、`/bc bugs`、`/bc gaps`、`/bc regress bugs`（可带 `--bug`、`--module`、`--priority`）、`/bc review suite`；复盘类命令可带 `--failure-type` / `--failure-types` 过滤失败分类。`bc_command` 会转发到对应 Facade 工具；不要让用户手动编排底层 `bc_*` 工具。
 
 ---
 
