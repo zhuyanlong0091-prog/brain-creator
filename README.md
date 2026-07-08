@@ -186,6 +186,14 @@ npm publish --access public --otp=<当前 2FA 验证码>
 
 插件 starter prompt 覆盖常用入口：检查系统状态、预览测试用例文档、继续未完成 suite、复盘 open bugs/gaps，以及运行 doctor。
 
+如果要一次性验证 Codex 原生入口是否健康，运行：
+
+```bash
+npm run verify:codex-native-entry
+```
+
+该检查会覆盖 repo-local plugin starter prompt、host-agent doctor 指引、`/bc help` 只读快捷入口，以及 host-agent 任务包提交链路。
+
 验证插件：
 
 ```bash
@@ -381,6 +389,14 @@ The repository now includes a repo-local Codex plugin:
 - `.agents/plugins/marketplace.json`: exposes `brain-creator` as a local marketplace plugin for Codex.
 
 The plugin starter prompts cover the common entrypoints: check system status, preview a test case document, continue an unfinished suite, review open bugs/gaps, and run doctor.
+
+To verify the Codex-native entrypoint in one command:
+
+```bash
+npm run verify:codex-native-entry
+```
+
+This check covers the repo-local plugin starter prompt, host-agent doctor guidance, read-only `/bc help`, and the host-agent task handoff chain.
 
 Validate the plugin:
 

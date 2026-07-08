@@ -140,6 +140,14 @@ To validate the local plugin:
 py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
 
+To validate the full Codex-native entry path from this repository:
+
+```bash
+npm run verify:codex-native-entry
+```
+
+This local smoke checks that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the host-agent handoff, `/bc help` is read-only, and an approved case can advance through `bc_run_chain` plus `bc_submit_agent_output`.
+
 When installed from the repo-local marketplace, Brain Creator still expects the npm package to be installed in the business project:
 
 ```bash
