@@ -66,6 +66,9 @@ describe("Brain Creator local integration files", () => {
     expect(packageJson.scripts["verify:host-agent-chain"]).toContain(
       "scripts/hostAgentChainSmoke.ts"
     );
+    expect(packageJson.scripts["verify:codex-native-entry"]).toContain(
+      "scripts/codexNativeEntrySmoke.ts"
+    );
     expect(packageJson.scripts["release:check"]).toContain(
       "scripts/releaseReadiness.ts"
     );
@@ -136,6 +139,9 @@ describe("Brain Creator local integration files", () => {
     );
     expect(pluginManifest.interface.longDescription).toContain("host-agent");
     expect(pluginManifest.interface.longDescription).toContain("bc_submit_agent_output");
+    expect(pluginManifest.interface.defaultPrompt).toEqual(
+      expect.arrayContaining([expect.stringContaining("/bc help")])
+    );
 
     expect(pluginMcp.mcpServers["brain-creator"]).toEqual({
       command: "npx",
@@ -251,6 +257,10 @@ describe("Brain Creator local integration files", () => {
     }
     expect(agentUsage).toContain("/bc help");
     expect(agentUsage).toContain("Brain Creator shortcuts");
+    expect(readme).toContain("verify:codex-native-entry");
+    expect(await readFile("docs/mcp-installation.md", "utf8")).toContain(
+      "verify:codex-native-entry"
+    );
   });
 
   it("registers the Brain Creator entrypoint as a Claude Code project skill", async () => {

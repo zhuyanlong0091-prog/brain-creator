@@ -31,6 +31,7 @@
     "verify:live-claude-skill-workflow": "node --loader ts-node/esm scripts/liveClaudeSkillWorkflowSmoke.ts",
     "verify:live-session-resume-workflow": "node --loader ts-node/esm scripts/liveSessionResumeWorkflowSmoke.ts",
     "verify:host-agent-chain": "node --loader ts-node/esm scripts/hostAgentChainSmoke.ts",
+    "verify:codex-native-entry": "node --loader ts-node/esm scripts/codexNativeEntrySmoke.ts",
     "verify:installed-mcp": "node --loader ts-node/esm scripts/verifyInstalledMcpSmoke.ts",
     "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts",
     "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
