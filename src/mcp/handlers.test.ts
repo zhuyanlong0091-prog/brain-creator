@@ -2889,6 +2889,128 @@ describe("handleBrainCreatorTool", () => {
     }
   });
 
+  it("creates a BugReport when a host-agent healer still fails a document expectation", async () => {
+    const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
+    process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
+    try {
+      const workDir = await tempDir();
+      const context = createBrainCreatorMcpContext({
+        dataFilePath: join(workDir, "assets.json"),
+        workDir
+      });
+      let runCount = 0;
+      context.runner = async () => {
+        runCount += 1;
+        return { exitCode: 1, stdout: "", stderr: "expected result was not visible" };
+      };
+      const source = join(workDir, "cases.xlsx");
+      await writeFile(
+        source,
+        createXlsxFixture([
+          [
+            "TC-001",
+            "Create recruitment request",
+            "Recruitment",
+            "User is signed in",
+            "1. Click New",
+            "Created successfully",
+            "",
+            "P0",
+            "Not run",
+            "",
+            ""
+          ]
+        ])
+      );
+      const system = dataOf(
+        await handleBrainCreatorTool(context, "bc_create_system", {
+          name: "HRMS",
+          environment: "test",
+          baseUrl: "https://hrms.example.test",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["https://hrms.example.test"]
+        })
+      );
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      });
+
+      const firstRun = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source,
+          confirm: true
+        })
+      );
+      const generatorTask = context.service.listAgentTasks(system.id)[0];
+      await writeFile(generatorTask.outputPaths[0], "import { test, expect } from '@playwright/test';\n", "utf8");
+      const needsHealing = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: generatorTask.id,
+          status: "succeeded",
+          stdout: "generated test",
+          stderr: "",
+          outputPaths: generatorTask.outputPaths
+        })
+      );
+      const healed = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: needsHealing.task.id,
+          status: "succeeded",
+          stdout: "healed test",
+          stderr: "",
+          outputPaths: generatorTask.outputPaths
+        })
+      );
+      const bugReview = dataOf(
+        await handleBrainCreatorTool(context, "bc_review", {
+          target: "bug",
+          systemId: system.id,
+          status: "open"
+        })
+      );
+
+      expect(firstRun.suiteRun).toEqual(expect.objectContaining({ blocked: 1 }));
+      expect(healed.suiteRun).toEqual(
+        expect.objectContaining({
+          suiteId: firstRun.suite.id,
+          status: "failed",
+          total: 1,
+          failed: 1,
+          blocked: 0,
+          bugReportIds: [bugReview.bugs[0].id],
+          gapIds: []
+        })
+      );
+      expect(healed.suiteRun.caseResults).toEqual([
+        expect.objectContaining({
+          caseNo: "TC-001",
+          status: "failed",
+          bugReportId: bugReview.bugs[0].id,
+          gapIds: [],
+          error: expect.stringContaining("expected result was not visible")
+        })
+      ]);
+      expect(bugReview.bugs).toEqual([
+        expect.objectContaining({
+          caseNo: "TC-001",
+          caseTitle: "Create recruitment request",
+          expectedResult: "Created successfully",
+          actualResult: expect.stringContaining("expected result was not visible"),
+          status: "open"
+        })
+      ]);
+      expect(context.service.listGaps({ projectId: system.id, status: "open" })).toEqual([]);
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
+    }
+  });
+
   it("continues the latest unfinished case source suite without repeating source details", async () => {
     const workDir = await tempDir();
     let runCount = 0;
