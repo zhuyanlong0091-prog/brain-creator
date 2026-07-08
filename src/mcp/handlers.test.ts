@@ -1887,6 +1887,24 @@ describe("handleBrainCreatorTool", () => {
         command: "/bc gaps"
       })
     );
+    const filteredGaps = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc gaps --failure-type locator_failure"
+      })
+    );
+    const filteredBugs = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc bugs --failure-type assertion_failure"
+      })
+    );
+    const filteredSuiteReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        systemId: system.id,
+        command: "/bc review suite --failure-type assertion_failure,network_failure"
+      })
+    );
 
     expect(filteredPreview.tool).toBe("bc_run");
     expect(filteredPreview.toolInput).toEqual(
@@ -1907,6 +1925,27 @@ describe("handleBrainCreatorTool", () => {
     expect(bugs.toolInput).toEqual(expect.objectContaining({ target: "bug", systemId: system.id }));
     expect(reviewBugs.toolInput).toEqual(expect.objectContaining({ target: "bug", systemId: system.id }));
     expect(gaps.toolInput).toEqual(expect.objectContaining({ target: "gap", systemId: system.id }));
+    expect(filteredGaps.toolInput).toEqual(
+      expect.objectContaining({
+        target: "gap",
+        systemId: system.id,
+        failureTypes: ["locator_failure"]
+      })
+    );
+    expect(filteredBugs.toolInput).toEqual(
+      expect.objectContaining({
+        target: "bug",
+        systemId: system.id,
+        failureTypes: ["assertion_failure"]
+      })
+    );
+    expect(filteredSuiteReview.toolInput).toEqual(
+      expect.objectContaining({
+        target: "suite-run",
+        systemId: system.id,
+        failureTypes: ["assertion_failure", "network_failure"]
+      })
+    );
   });
 
   it("resolves facade status and commands by system name when systemId is omitted", async () => {

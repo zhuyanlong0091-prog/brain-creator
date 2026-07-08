@@ -2790,19 +2790,21 @@ function parseBrainCreatorCommandTokens(tokens: string[], systemId: string): {
     };
   }
   if (action === "bugs") {
-    return { tool: "bc_review", toolInput: { target: "bug", systemId } };
-  }
-  if (action === "gaps") {
-    return { tool: "bc_review", toolInput: { target: "gap", systemId } };
-  }
-  if (action === "review" && tokens[2]) {
-    const target = commandReviewTarget(tokens[2]);
     return {
       tool: "bc_review",
-      toolInput: {
-        target,
-        systemId
-      }
+      toolInput: parseReviewCommandInput(["bug", ...tokens.slice(2)], systemId)
+    };
+  }
+  if (action === "gaps") {
+    return {
+      tool: "bc_review",
+      toolInput: parseReviewCommandInput(["gap", ...tokens.slice(2)], systemId)
+    };
+  }
+  if (action === "review" && tokens[2]) {
+    return {
+      tool: "bc_review",
+      toolInput: parseReviewCommandInput(tokens.slice(2), systemId)
     };
   }
   throw new Error(`Unsupported Brain Creator command: ${tokens.join(" ")}`);
@@ -2907,6 +2909,35 @@ function parseBugRegressionCommandInput(tokens: string[], systemId: string) {
       toolInput.priorities = parsedValues;
     } else {
       throw new Error(`Unsupported /bc regress bugs option: ${token}`);
+    }
+  }
+  return toolInput;
+}
+
+function parseReviewCommandInput(tokens: string[], systemId: string) {
+  const target = commandReviewTarget(tokens[0]);
+  const toolInput: Record<string, unknown> = {
+    target,
+    systemId
+  };
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token.startsWith("--")) {
+      throw new Error(`Unexpected /bc review argument: ${token}`);
+    }
+    const values: string[] = [];
+    while (tokens[index + 1] && !tokens[index + 1].startsWith("--")) {
+      values.push(tokens[index + 1]);
+      index += 1;
+    }
+    const parsedValues = splitCommandValues(values);
+    if (parsedValues.length === 0) {
+      throw new Error(`${token} requires a value`);
+    }
+    if (token === "--failure-type" || token === "--failure-types") {
+      toolInput.failureTypes = parsedValues;
+    } else {
+      throw new Error(`Unsupported /bc review option: ${token}`);
     }
   }
   return toolInput;
