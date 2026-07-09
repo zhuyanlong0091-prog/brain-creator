@@ -53,6 +53,19 @@ try {
     context.service.listSystemProfiles().length === 0,
     "/bc help must be read-only and must not create systems"
   );
+  const status = dataOf(
+    await handleBrainCreatorTool(context, "bc_command", {
+      command: "/bc status"
+    })
+  );
+  assert(
+    status.result.status === "no_systems",
+    "/bc status without a system should return connection guidance"
+  );
+  assert(
+    context.service.listSystemProfiles().length === 0,
+    "/bc status system selection must be read-only"
+  );
 } finally {
   await rm(workDir, { recursive: true, force: true });
 }
@@ -60,7 +73,9 @@ try {
 await import("./hostAgentChainSmoke.js");
 
 console.log("Codex-native entry smoke passed.");
-console.log("Validated plugin starter prompts, host-agent doctor guidance, /bc help, and host-agent chain handoff.");
+console.log(
+  "Validated plugin starter prompts, host-agent doctor guidance, /bc help, context-free /bc status, and host-agent chain handoff."
+);
 
 function dataOf(result: CallToolResult): any {
   if (result.isError) {

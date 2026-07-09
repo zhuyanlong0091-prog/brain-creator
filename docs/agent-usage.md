@@ -28,6 +28,8 @@ Use Brain Creator to show /bc help shortcuts.
 
 The agent should call `bc_command` with `/bc help` and return the Brain Creator shortcuts, filters, and recommended entrypoints without creating or changing any system assets.
 
+When `/bc status` has no selected system, present the returned compact system picker or connection guidance. Do not expose the raw candidate-id list as an error.
+
 ## Installation Modes
 
 Use source checkout mode when you are developing Brain Creator itself. In this mode, clone the repository, run `npm install`, then use `npm run dev:mcp`.

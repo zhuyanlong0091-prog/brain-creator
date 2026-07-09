@@ -315,6 +315,25 @@ async function commandFacade(context: BrainCreatorMcpContext, input: Record<stri
       ...(resolution ? { systemResolution: resolution } : {})
     };
   }
+  if (
+    isBrainCreatorStatusCommand(commandInput.tokens) &&
+    !hasCommandSystemIdentity(input, commandInput.systemReference)
+  ) {
+    const toolInput = {
+      ...(optionalStringArg(input, "environment") || commandInput.systemReference.environment
+        ? {
+            environment:
+              optionalStringArg(input, "environment") ?? commandInput.systemReference.environment
+          }
+        : {})
+    };
+    return {
+      command,
+      tool: "bc_status",
+      toolInput,
+      result: await statusFacade(context, toolInput)
+    };
+  }
   const resolution = resolveSystemReference(context, input, commandInput.systemReference);
   const parsed = parseBrainCreatorCommandTokens(commandInput.tokens, resolution.systemId);
   const result =
@@ -336,6 +355,14 @@ function isBrainCreatorHelpCommand(tokens: string[]) {
   return tokens[0]?.toLowerCase() === "/bc" && tokens[1]?.toLowerCase() === "help";
 }
 
+function isBrainCreatorStatusCommand(tokens: string[]) {
+  return (
+    tokens.length === 2 &&
+    tokens[0]?.toLowerCase() === "/bc" &&
+    tokens[1]?.toLowerCase() === "status"
+  );
+}
+
 function validateHelpCommandTokens(tokens: string[]) {
   for (const token of tokens.slice(2)) {
     if (token.startsWith("--")) {
@@ -355,6 +382,17 @@ function hasCommandSystemContext(
       optionalStringArg(input, "environment") ||
       systemReference.systemName ||
       systemReference.environment
+  );
+}
+
+function hasCommandSystemIdentity(
+  input: Record<string, unknown>,
+  systemReference: { systemName?: string; environment?: string }
+) {
+  return Boolean(
+    optionalStringArg(input, "systemId") ||
+      optionalStringArg(input, "systemName") ||
+      systemReference.systemName
   );
 }
 
@@ -451,7 +489,23 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
 }
 
 async function statusFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
-  const resolution = resolveSystemReference(context, input);
+  const systemIdInput = optionalStringArg(input, "systemId");
+  const systemNameInput = optionalStringArg(input, "systemName");
+  const environment = optionalStringArg(input, "environment");
+  const candidates =
+    systemIdInput || systemNameInput
+      ? []
+      : context.service
+          .listSystemProfiles()
+          .filter((system) => system.status !== "cancelled")
+          .filter((system) => !environment || system.environment === environment);
+  if (!systemIdInput && !systemNameInput && candidates.length !== 1) {
+    return statusSystemSelection(candidates, environment);
+  }
+  const resolution = resolveSystemReference(
+    context,
+    candidates.length === 1 ? { ...input, systemId: candidates[0].id } : input
+  );
   const systemId = resolution.systemId;
   const snapshot = await sessionResume(context, { systemId });
   const caseSources = context.service.listCaseSources(systemId);
@@ -509,6 +563,80 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       unfinishedSuites: unfinishedSuites.length
     }),
     toolGuidance: statusToolGuidance(nextAction)
+  };
+}
+
+function statusSystemSelection(
+  systems: Array<{ id: string; name: string; environment: string }>,
+  environment?: string
+) {
+  const grouped = new Map<
+    string,
+    { name: string; environment: string; systemIds: string[] }
+  >();
+  for (const system of systems) {
+    const key = `${normalizeSystemLookup(system.name)}\u0000${normalizeSystemLookup(system.environment)}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.systemIds.push(system.id);
+      continue;
+    }
+    grouped.set(key, {
+      name: system.name,
+      environment: system.environment,
+      systemIds: [system.id]
+    });
+  }
+  const systemOptions = [...grouped.values()]
+    .map((option) => ({
+      ...option,
+      instanceCount: option.systemIds.length
+    }))
+    .sort(
+      (left, right) =>
+        left.name.localeCompare(right.name) ||
+        left.environment.localeCompare(right.environment)
+    );
+  const noSystems = systemOptions.length === 0;
+  const selectionMarkdown = noSystems
+    ? [
+        "# Select a Brain Creator system",
+        "",
+        environment
+          ? `No active systems were found in environment "${environment}".`
+          : "No active systems are configured.",
+        "Ask Brain Creator to connect a business system first."
+      ].join("\n")
+    : [
+        "# Select a Brain Creator system",
+        "",
+        "Choose a system context before continuing:",
+        "",
+        ...systemOptions.flatMap((option) => [
+          `- ${option.name} (${option.environment}) - ${option.instanceCount} ${
+            option.instanceCount === 1 ? "instance" : "instances"
+          }`,
+          option.instanceCount === 1
+            ? `  Command: \`/bc status --system "${option.name}" --env "${option.environment}"\``
+            : "  Ask the Agent to choose a specific instance."
+        ])
+      ].join("\n");
+  return {
+    status: noSystems ? "no_systems" : "needs_system_selection",
+    userMessage: noSystems
+      ? "Connect a business system before using Brain Creator status."
+      : "Choose a business system before continuing.",
+    environment,
+    systemOptions,
+    selectionMarkdown,
+    nextAction: noSystems ? "configure_system" : "select_system",
+    quickCommands: systemOptions
+      .filter((option) => option.instanceCount === 1)
+      .map((option) => ({
+        command: `/bc status --system "${option.name}" --env "${option.environment}"`,
+        description: `Inspect ${option.name} in ${option.environment}.`
+      })),
+    toolGuidance: statusToolGuidance(noSystems ? "configure_system" : "select_system")
   };
 }
 
@@ -2157,6 +2285,9 @@ function statusToolGuidance(nextAction: string) {
 function nextFacadeToolForAction(action: string) {
   if (action === "configure_bridge") {
     return "brain-creator-doctor";
+  }
+  if (action === "configure_system") {
+    return "bc_configure";
   }
   if (action === "review_gaps" || action === "review_bugs") {
     return "bc_review";

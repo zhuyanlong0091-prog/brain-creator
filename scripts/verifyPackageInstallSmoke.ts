@@ -91,6 +91,16 @@ try {
       })
     );
     assert(help.action === "help", "Installed MCP /bc help did not return help");
+    const status = dataOf(
+      await client.callTool({
+        name: "bc_command",
+        arguments: { command: "/bc status" }
+      })
+    );
+    assert(
+      status.result.status === "no_systems",
+      "Installed MCP /bc status did not return system connection guidance"
+    );
 
     const system = dataOf(
       await client.callTool({
