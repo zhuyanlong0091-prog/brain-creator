@@ -116,6 +116,8 @@ npm run verify:package-contents
 npm run verify:package-install
 ```
 
+`verify:package-install` uses the packed artifact in a temporary business project. It starts the installed MCP server over stdio, calls `/bc help`, prepares a `host-agent` task, submits its output, and verifies the persisted AgentRun without changing the source repository data file.
+
 After MCP is connected, start in Claude Code or Codex with:
 
 ```text
@@ -131,13 +133,24 @@ It provides:
 - `.codex-plugin/plugin.json` for Codex `/plugin` discovery.
 - `.mcp.json` that registers the `brain-creator` MCP server with `npx brain-creator-mcp` and defaults to `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`.
 - `skills/` containing the Brain Creator workflow entrypoint and supporting skill guidance.
-- Starter prompts for connecting a business system, generating a reviewed plan, and running doctor.
+- Three Codex-compatible starter prompts: shortcut help plus status, system connection, and test-document preview.
+- Remaining suite, bug/gap, and doctor workflows are discoverable through `/bc help`.
+
+Read-only status, asset, and review tools declare MCP `readOnlyHint` annotations. Write operations still require host approval, and the Skill instructs the Agent not to retry a cancelled facade operation through lower-level tools.
 
 To validate the local plugin:
 
 ```bash
 py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
 ```
+
+To validate the full Codex-native entry path from this repository:
+
+```bash
+npm run verify:codex-native-entry
+```
+
+This local smoke checks that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the host-agent handoff, `/bc help` is read-only, and an approved case can advance through `bc_run_chain` plus `bc_submit_agent_output`.
 
 When installed from the repo-local marketplace, Brain Creator still expects the npm package to be installed in the business project:
 

@@ -20,6 +20,16 @@ Brain Creator is the testing brain for an agent. Claude Code / Codex is the conv
 
 Start with a natural request such as `Use Brain Creator to connect this system`. The agent should load the Brain Creator skill internally and choose MCP tools for you; use `Skill("brain-creator")` only as an explicit troubleshooting fallback when automatic matching fails.
 
+If you do not know what to ask next, say:
+
+```text
+Use Brain Creator to show /bc help shortcuts.
+```
+
+The agent should call `bc_command` with `/bc help` and return the Brain Creator shortcuts, filters, and recommended entrypoints without creating or changing any system assets.
+
+When `/bc status` has no selected system, present the returned compact system picker or connection guidance. Do not expose the raw candidate-id list as an error.
+
 ## Installation Modes
 
 Use source checkout mode when you are developing Brain Creator itself. In this mode, clone the repository, run `npm install`, then use `npm run dev:mcp`.
@@ -224,6 +234,10 @@ Use Brain Creator to show the current system overview, latest generated specs/te
 
 ```text
 Use Brain Creator to check the order-admin system status and tell me what to do next.
+```
+
+```text
+Use Brain Creator to show /bc help shortcuts.
 ```
 
 ```text

@@ -1735,6 +1735,111 @@ describe("handleBrainCreatorTool", () => {
     expect(JSON.stringify(status)).not.toContain("secret-token");
   });
 
+  it("returns a compact system picker when bc_status has no system context", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+    const firstHrms = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms-one.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms-one.example.test"]
+      })
+    );
+    const secondHrms = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "test",
+        baseUrl: "https://hrms-two.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms-two.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "CRM Console",
+      environment: "staging",
+      baseUrl: "https://crm.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://crm.example.test"]
+    });
+
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {}));
+
+    expect(status.status).toBe("needs_system_selection");
+    expect(status.systemOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "HRMS",
+          environment: "test",
+          instanceCount: 2,
+          systemIds: [firstHrms.id, secondHrms.id]
+        }),
+        expect.objectContaining({
+          name: "CRM Console",
+          environment: "staging",
+          instanceCount: 1
+        })
+      ])
+    );
+    expect(status.selectionMarkdown).toContain("HRMS (test) - 2 instances");
+    expect(status.selectionMarkdown).toContain("Ask the Agent to choose a specific instance");
+    expect(status.selectionMarkdown).toContain(
+      '/bc status --system "CRM Console" --env "staging"'
+    );
+    expect(status.selectionMarkdown).not.toContain(firstHrms.id);
+    expect(status.selectionMarkdown).not.toContain(secondHrms.id);
+    expect(status.nextAction).toBe("select_system");
+  });
+
+  it("routes context-free /bc status to the system picker", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+    await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "HRMS",
+      environment: "test",
+      baseUrl: "https://hrms.example.test",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://hrms.example.test"]
+    });
+    await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "CRM Console",
+      environment: "staging",
+      baseUrl: "https://crm.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://crm.example.test"]
+    });
+
+    const command = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        command: "/bc status"
+      })
+    );
+
+    expect(command.tool).toBe("bc_status");
+    expect(command.result.status).toBe("needs_system_selection");
+    expect(command.result.systemOptions).toHaveLength(2);
+  });
+
+  it("guides system configuration when context-free status has no systems", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        command: "/bc status"
+      })
+    );
+
+    expect(status.result.status).toBe("no_systems");
+    expect(status.result.nextAction).toBe("configure_system");
+    expect(status.result.toolGuidance.nextFacadeTool).toBe("bc_configure");
+    expect(context.service.listSystemProfiles()).toHaveLength(0);
+  });
+
   it("parses minimal /bc commands into facade tool executions", async () => {
     const workDir = await tempDir();
     let runCount = 0;
@@ -1946,6 +2051,75 @@ describe("handleBrainCreatorTool", () => {
         failureTypes: ["assertion_failure", "network_failure"]
       })
     );
+  });
+
+  it("returns read-only /bc help without requiring a selected system", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+
+    const help = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        command: "/bc help"
+      })
+    );
+    const systems = dataOf(await handleBrainCreatorTool(context, "bc_list_systems", {}));
+
+    expect(help).toEqual(
+      expect.objectContaining({
+        command: "/bc help",
+        action: "help",
+        userMessage: expect.stringContaining("Brain Creator shortcuts")
+      })
+    );
+    expect(help.helpMarkdown).toContain("/bc status");
+    expect(help.helpMarkdown).toContain('/bc run "<path>"');
+    expect(help.helpMarkdown).toContain("/bc continue");
+    expect(help.helpMarkdown).toContain("/bc bugs");
+    expect(help.helpMarkdown).toContain("/bc gaps");
+    expect(help.helpMarkdown).toContain("/bc review suite");
+    expect(help.helpMarkdown).toContain("/bc regress bugs");
+    expect(help.helpMarkdown).toContain("--case");
+    expect(help.helpMarkdown).toContain("--module");
+    expect(help.helpMarkdown).toContain("--priority");
+    expect(help.helpMarkdown).toContain("--failure-type");
+    expect(help.shortcuts.map((shortcut: { command: string }) => shortcut.command)).toEqual(
+      expect.arrayContaining(["/bc status", "/bc continue", "/bc bugs", "/bc gaps"])
+    );
+    expect(systems).toEqual([]);
+  });
+
+  it("resolves optional system context for /bc help and rejects unsupported help flags", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "HRMS",
+        environment: "staging",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+
+    const help = dataOf(
+      await handleBrainCreatorTool(context, "bc_command", {
+        command: "/bc help --system HRMS"
+      })
+    );
+    const invalid = await handleBrainCreatorTool(context, "bc_command", {
+      command: "/bc help --unknown"
+    });
+
+    expect(help.action).toBe("help");
+    expect(help.systemResolution).toEqual(
+      expect.objectContaining({ systemId: system.id, matchedBy: "name" })
+    );
+    expect(invalid.isError).toBe(true);
+    expect(errorOf(invalid)).toContain("Unsupported /bc help option: --unknown");
   });
 
   it("resolves facade status and commands by system name when systemId is omitted", async () => {

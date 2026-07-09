@@ -9,6 +9,8 @@ Use Brain Creator as an agent-native testing business brain through MCP tools. C
 
 Agent bridge policy: Brain Creator may run Planner / Generator / Healer through Claude Code subprocess, Codex subprocess, host-agent task handoff, or disabled preview-only mode. Prefer `bc_status` or `bc_session_resume` to inspect bridge state before confirmed execution. If bridge state is blocked, report the blocker or create a Gap instead of waiting on a long timeout. In host-agent mode, `bc_prepare_agent_task` and approved `bc_run_chain` calls return `status: "needs_agent_execution"` task packages. Read `input.prompt.md` and `input.context.json`, create the requested outputs as the current agent, then call `bc_submit_agent_output`; generator submissions run Playwright automatically. Passing tests record AgentRun, ChainRun, and generated artifact ownership; failing tests return a healer task package. Healer submissions rerun Playwright and complete the chain when the test passes. If healer output still fails, Brain Creator marks the chain failed. For document-suite tasks, successful submission also records a single-case suite run so later resume skips passed cases; unmet business expectations create BugReports, while environment, auth, locator, or execution blockers create Gaps.
 
+Codex plugin mode defaults to `host-agent`: do not start or wait for a Claude/Codex subprocess when Brain Creator returns `needs_agent_execution`; execute the returned task package as the current Codex agent and finish with `bc_submit_agent_output`.
+
 ## 入口路由（Entry Routing）
 
 用户通过两种方式使用 Brain Creator。每次用户消息到达时自动判断入口模式。
@@ -35,13 +37,15 @@ Agent bridge policy: Brain Creator may run Planner / Generator / Healer through 
       → 主动提示用户当前系统状态，并给出下一步建议
 ```
 
-> **注意：** 自然语言仍是推荐入口。若用户明确输入 `/bc ...`，调用 `bc_command` 解析最小快捷命令：`/bc status`、`/bc run "<path>"`（可带 `--case`、`--module`、`--priority`）、`/bc continue`、`/bc bugs`、`/bc gaps`、`/bc regress bugs`（可带 `--bug`、`--module`、`--priority`）、`/bc review suite`；复盘类命令可带 `--failure-type` / `--failure-types` 过滤失败分类。`bc_command` 会转发到对应 Facade 工具；不要让用户手动编排底层 `bc_*` 工具。
+> **注意：** 自然语言仍是推荐入口。若用户明确输入 `/bc ...`，调用 `bc_command` 解析最小快捷命令：`/bc help`、`/bc status`、`/bc run "<path>"`（可带 `--case`、`--module`、`--priority`）、`/bc continue`、`/bc bugs`、`/bc gaps`、`/bc regress bugs`（可带 `--bug`、`--module`、`--priority`）、`/bc review suite`；复盘类命令可带 `--failure-type` / `--failure-types` 过滤失败分类。`bc_command` 会转发到对应 Facade 工具；不要让用户手动编排底层 `bc_*` 工具。
 
 ---
 
 ## Facade-First Tool Policy
 
 Default to the high-level facade tools. The fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and fallback, but the user should not have to orchestrate them. `bc_status` returns `toolGuidance`; follow it before reaching for internal tools.
+
+Do not retry a cancelled or denied facade call through an equivalent fine-grained tool. Report that the host did not authorize the operation, confirm that no change was made, and let the user approve or retry the original facade action.
 
 ## User Entrypoint Map
 
@@ -104,7 +108,7 @@ Do not create or prioritize a Web UI. If the user asks for an entrypoint, treat 
 Use the Brain Creator system tools to create and inspect reusable business system contexts.
 
 1. Call `bc_list_systems` before assuming a system already exists.
-2. Call `bc_create_system` when a user wants to connect a Web system and provides a system name, environment, base URL, default locale, and URL allowlist.
+2. Call `bc_configure target=system` once when a user wants to connect a Web system and provides a system name, environment, base URL, default locale, and URL allowlist.
 3. Call `bc_system_overview` to summarize onboarding completeness and asset counts.
 4. Call `bc_archive_system` only when the user confirms a system should be retained for history but no longer used.
 

@@ -63,9 +63,25 @@ describe("Brain Creator local integration files", () => {
     expect(packageJson.scripts["verify:package-contents"]).toContain(
       "scripts/verifyPackageContents.ts"
     );
+    expect(packageJson.scripts["verify:host-agent-chain"]).toContain(
+      "scripts/hostAgentChainSmoke.ts"
+    );
+    expect(packageJson.scripts["verify:codex-native-entry"]).toContain(
+      "scripts/codexNativeEntrySmoke.ts"
+    );
     expect(packageJson.scripts["release:check"]).toContain(
       "scripts/releaseReadiness.ts"
     );
+  });
+
+  it("verifies the installed package over stdio with the host-agent workflow", async () => {
+    const smoke = await readFile("scripts/verifyPackageInstallSmoke.ts", "utf8");
+
+    expect(smoke).toContain("StdioClientTransport");
+    expect(smoke).toContain('BRAIN_CREATOR_AGENT_PROVIDER: "host-agent"');
+    expect(smoke).toContain('command: "/bc help"');
+    expect(smoke).toContain('"bc_prepare_agent_task"');
+    expect(smoke).toContain('"bc_submit_agent_output"');
   });
 
   it("defines explicit npm publish exclusions instead of relying on gitignore", async () => {
@@ -119,12 +135,14 @@ describe("Brain Creator local integration files", () => {
     expect(pluginManifest.mcpServers).toBe("./.mcp.json");
     expect(pluginManifest.interface.displayName).toBe("Brain Creator");
     expect(pluginManifest.interface.category).toBe("Productivity");
-    expect(pluginManifest.interface.defaultPrompt).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("Use Brain Creator"),
-        expect.stringContaining("brain-creator-doctor")
-      ])
-    );
+    expect(pluginManifest.interface.defaultPrompt).toEqual([
+      "Use Brain Creator to show /bc help shortcuts and current system status.",
+      "Use Brain Creator to connect this system.",
+      "Use Brain Creator to preview this test case document, then wait for my confirmation before execution."
+    ]);
+    expect(pluginManifest.interface.defaultPrompt).toHaveLength(3);
+    expect(pluginManifest.interface.longDescription).toContain("host-agent");
+    expect(pluginManifest.interface.longDescription).toContain("bc_submit_agent_output");
 
     expect(pluginMcp.mcpServers["brain-creator"]).toEqual({
       command: "npx",
@@ -176,7 +194,6 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("case-source-suite");
     expect(content).toContain("confirm: false");
     expect(content).toContain("confirm: true");
-    expect(content).toContain("bc_create_system");
     expect(content).toContain("bc_create_auth");
     expect(content).toContain("bc_add_term");
     expect(content).toContain("bc_add_rule");
@@ -198,7 +215,8 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("bc_run mode=case-source-suite confirm=true");
     expect(content).toContain("bc_review");
     expect(content).toContain("bc_list_systems");
-    expect(content).toContain("bc_create_system");
+    expect(content).toContain("Do not retry a cancelled or denied facade call");
+    expect(content).not.toContain("Call `bc_create_system`");
     expect(content).toContain("bc_create_auth_checkpoint");
     expect(content).toContain("bc_batch_confirm_terms");
     expect(content).toContain("bc_delete_rule");
@@ -213,6 +231,7 @@ describe("Brain Creator local integration files", () => {
   it("documents the user entrypoint map in README and the Brain Creator skill", async () => {
     const readme = await readFile("README.md", "utf8");
     const skill = await readFile("skills/brain-creator/SKILL.md", "utf8");
+    const agentUsage = await readFile("docs/agent-usage.md", "utf8");
 
     expect(readme).toContain("### 用户入口到 Agent 工具映射");
     expect(readme).toContain("### User Entrypoint To Agent Tool Map");
@@ -231,21 +250,33 @@ describe("Brain Creator local integration files", () => {
       "reviewMarkdown",
       "bc_review target=\"bug\"",
       "bc_review target=\"gap\"",
-      "bc_report_gap"
+      "bc_report_gap",
+      "/bc help"
     ]) {
       expect(readme).toContain(marker);
       expect(skill).toContain(marker);
     }
+    expect(agentUsage).toContain("/bc help");
+    expect(agentUsage).toContain("Brain Creator shortcuts");
+    expect(readme).toContain("verify:codex-native-entry");
+    expect(await readFile("docs/mcp-installation.md", "utf8")).toContain(
+      "verify:codex-native-entry"
+    );
   });
 
   it("registers the Brain Creator entrypoint as a Claude Code project skill", async () => {
     const canonical = await readFile("skills/brain-creator/SKILL.md", "utf8");
     const claudeSkill = await readFile(".claude/skills/brain-creator/SKILL.md", "utf8");
+    const pluginSkill = await readFile("plugins/brain-creator/skills/brain-creator/SKILL.md", "utf8");
 
     expect(claudeSkill).toBe(canonical);
+    expect(pluginSkill).toBe(canonical);
     expect(claudeSkill).toContain("One-Sentence");
     expect(claudeSkill).toContain("bc_status");
     expect(claudeSkill).toContain("bc_run");
+    expect(claudeSkill).toContain("Codex plugin");
+    expect(claudeSkill).toContain("needs_agent_execution");
+    expect(claudeSkill).toContain("bc_submit_agent_output");
   });
 
   it("includes facade and session resume tools in the MCP tool registry", async () => {

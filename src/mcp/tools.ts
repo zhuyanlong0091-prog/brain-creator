@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 
 export type BrainCreatorToolName =
   | "bc_command"
@@ -67,17 +67,47 @@ type RegisterableMcpServer = {
       title?: string;
       description?: string;
       inputSchema?: z.ZodObject<z.ZodRawShape>;
+      annotations?: ToolAnnotations;
     },
     handler: (input: Record<string, unknown>) => Promise<CallToolResult>
   ) => unknown;
 };
+
+const READ_ONLY_TOOL_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true
+};
+
+const READ_ONLY_TOOL_NAMES = new Set<BrainCreatorToolName>([
+  "bc_intent_preview",
+  "bc_status",
+  "bc_review",
+  "bc_list_systems",
+  "bc_session_resume",
+  "bc_system_overview",
+  "bc_list_auth",
+  "bc_list_auth_checkpoints",
+  "bc_list_terms",
+  "bc_list_rules",
+  "bc_list_agent_runs",
+  "bc_list_chain_runs",
+  "bc_list_specs",
+  "bc_list_tests",
+  "bc_read_spec",
+  "bc_read_test",
+  "bc_artifact_overview",
+  "bc_list_cases",
+  "bc_list_gaps",
+  "bc_search_assets"
+]);
 
 export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
   {
     name: "bc_command",
     title: "Brain Creator command",
     description:
-      "Minimal slash-command facade. Parses /bc status, /bc run <path> with optional --system/--env and --case/--module/--priority filters, /bc continue, /bc bugs, /bc gaps, and /bc regress bugs into existing facade tools.",
+      "Minimal slash-command facade. Parses /bc help, /bc status, /bc run <path> with optional --system/--env and --case/--module/--priority filters, /bc continue, /bc bugs, /bc gaps, and /bc regress bugs into existing facade tools.",
     inputSchema: z.object({
       systemId: z.string().optional(),
       systemName: z.string().optional(),
@@ -601,7 +631,10 @@ export function registerBrainCreatorTools(
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: tool.inputSchema
+        inputSchema: tool.inputSchema,
+        annotations: READ_ONLY_TOOL_NAMES.has(tool.name)
+          ? READ_ONLY_TOOL_ANNOTATIONS
+          : undefined
       },
       (input) => handler(tool.name, input)
     );

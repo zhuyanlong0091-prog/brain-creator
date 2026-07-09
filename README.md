@@ -36,6 +36,8 @@ Brain Creator v2 现在采用三层入口：
 
 如果用户明确输入 `/bc ...`，Agent 可以调用 `bc_command` 作为最小命令解析入口。当前支持：
 
+- `/bc help`：查看 Brain Creator 快捷命令、筛选参数和推荐入口；不需要选择系统。
+- `/bc status`：查看当前系统状态；未选择系统时返回紧凑的系统选择器或接入引导，不再输出冗长错误列表。
 - `/bc status`：查看当前系统状态。
 - `/bc status --system HRMS --env test`：按系统名和环境查看状态。
 - `/bc run "<path>"`：预览测试用例文档套件，不会直接执行；可追加 `--case TC-001,TC-002`、`--module 招聘需求`、`--priority P1`。
@@ -153,6 +155,8 @@ brain-creator-doctor
 npm run verify:package-install
 ```
 
+该检查会打包并安装 Brain Creator 到临时业务项目，通过 stdio 启动安装后的 MCP server，验证 `/bc help`，并完成一次 `host-agent` 任务准备、提交与 AgentRun 持久化。
+
 ### 发布前检查
 
 正式发布 npm 包前，先确认包内容只包含运行所需文件，不包含本地资产、缓存、测试结果或源码工作目录：
@@ -182,6 +186,18 @@ npm publish --access public --otp=<当前 2FA 验证码>
 - `plugins/brain-creator/.mcp.json`：通过 `npx brain-creator-mcp` 注册 MCP server，并默认使用 `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`，让当前 Codex Agent 执行任务包。
 - `plugins/brain-creator/skills/`：随插件提供 Brain Creator skill。
 - `.agents/plugins/marketplace.json`：将 `brain-creator` 作为本地 marketplace 插件暴露给 Codex。
+
+Codex 最多接受 3 条 starter prompt。Brain Creator 保留“快捷帮助与状态”“接入系统”“预览测试文档”三个主入口；继续 suite、复盘 bug/gap 和 doctor 指引通过 `/bc help` 发现。
+
+状态、资产与复盘类 MCP 工具带有标准 `readOnlyHint`，Codex 可在不申请写权限的情况下完成查询。创建、配置和执行仍保留 host 审批；如果调用被取消或拒绝，Agent 不会换用底层工具重复尝试。
+
+如果要一次性验证 Codex 原生入口是否健康，运行：
+
+```bash
+npm run verify:codex-native-entry
+```
+
+该检查会覆盖 repo-local plugin starter prompt、host-agent doctor 指引、`/bc help` 只读快捷入口，以及 host-agent 任务包提交链路。
 
 验证插件：
 
@@ -272,6 +288,8 @@ If the user does not know `systemId`, facade tools accept `systemName` / `enviro
 
 When the user explicitly types `/bc ...`, the agent can call `bc_command` as the minimal command parser. Supported commands:
 
+- `/bc help`: show Brain Creator shortcuts, filters, and recommended entrypoints without requiring a selected system.
+- `/bc status`: show current system readiness; without a selected system it returns a compact system picker or connection guidance instead of a long error list.
 - `/bc status`: inspect the current system status.
 - `/bc status --system HRMS --env test`: inspect status by system name and environment.
 - `/bc run "<path>"`: preview a test case document suite without executing it; optional filters include `--case TC-001,TC-002`, `--module Recruiting`, and `--priority P1`.
@@ -346,6 +364,8 @@ Package installation smoke:
 npm run verify:package-install
 ```
 
+This check packs and installs Brain Creator into a temporary business project, starts the installed MCP server over stdio, verifies `/bc help`, and completes one `host-agent` task prepare/submit cycle with a persisted AgentRun.
+
 ### Release Readiness
 
 Before publishing an npm package, verify that the package contains only runtime files and excludes local assets, caches, test results, and source workspace data:
@@ -375,6 +395,18 @@ The repository now includes a repo-local Codex plugin:
 - `plugins/brain-creator/.mcp.json`: registers the MCP server through `npx brain-creator-mcp` and defaults to `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`, so the current Codex agent executes task packages.
 - `plugins/brain-creator/skills/`: ships the Brain Creator skill with the plugin.
 - `.agents/plugins/marketplace.json`: exposes `brain-creator` as a local marketplace plugin for Codex.
+
+Codex accepts at most three starter prompts. Brain Creator keeps the three primary journeys: shortcut help plus status, system connection, and test-document preview. Suite continuation, bug/gap review, and doctor guidance remain discoverable through `/bc help`.
+
+Status, asset, and review MCP tools carry standard `readOnlyHint` annotations so Codex can inspect them without requesting write access. Creation, configuration, and execution retain host approval; when a call is cancelled or denied, the Agent does not retry through a lower-level tool.
+
+To verify the Codex-native entrypoint in one command:
+
+```bash
+npm run verify:codex-native-entry
+```
+
+This check covers the repo-local plugin starter prompt, host-agent doctor guidance, read-only `/bc help`, and the host-agent task handoff chain.
 
 Validate the plugin:
 

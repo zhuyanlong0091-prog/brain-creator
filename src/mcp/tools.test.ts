@@ -71,4 +71,56 @@ describe("BRAIN_CREATOR_TOOLS", () => {
 
     expect(registered).toEqual(BRAIN_CREATOR_TOOLS.map((tool) => tool.name));
   });
+
+  it("registers facade inspection tools as read-only", () => {
+    const registered = new Map<string, Record<string, unknown>>();
+    const fakeServer = {
+      registerTool(name: string, config: Record<string, unknown>) {
+        registered.set(name, config);
+      }
+    };
+
+    registerBrainCreatorTools(fakeServer, async () => ({
+      content: [{ type: "text", text: "{}" }]
+    }));
+
+    for (const name of ["bc_intent_preview", "bc_status", "bc_review"]) {
+      expect(registered.get(name)?.annotations).toEqual({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true
+      });
+    }
+    expect(registered.get("bc_run")?.annotations).toBeUndefined();
+    expect(registered.get("bc_configure")?.annotations).toBeUndefined();
+    expect(
+      [...registered.entries()]
+        .filter(([, config]) => {
+          const annotations = config.annotations as { readOnlyHint?: boolean } | undefined;
+          return annotations?.readOnlyHint;
+        })
+        .map(([name]) => name)
+    ).toEqual([
+      "bc_intent_preview",
+      "bc_status",
+      "bc_review",
+      "bc_list_systems",
+      "bc_session_resume",
+      "bc_system_overview",
+      "bc_list_auth",
+      "bc_list_auth_checkpoints",
+      "bc_list_terms",
+      "bc_list_rules",
+      "bc_list_agent_runs",
+      "bc_list_chain_runs",
+      "bc_list_specs",
+      "bc_list_tests",
+      "bc_read_spec",
+      "bc_read_test",
+      "bc_artifact_overview",
+      "bc_list_cases",
+      "bc_list_gaps",
+      "bc_search_assets"
+    ]);
+  });
 });

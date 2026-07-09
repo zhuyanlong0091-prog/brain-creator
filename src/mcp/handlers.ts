@@ -301,6 +301,39 @@ export async function handleBrainCreatorTool(
 async function commandFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const command = stringArg(input, "command");
   const commandInput = commandWithSystemReference(command);
+  if (isBrainCreatorHelpCommand(commandInput.tokens)) {
+    validateHelpCommandTokens(commandInput.tokens);
+    const resolution = hasCommandSystemContext(input, commandInput.systemReference)
+      ? resolveSystemReference(context, input, commandInput.systemReference)
+      : undefined;
+    return {
+      command,
+      action: "help",
+      userMessage: "Brain Creator shortcuts are available through /bc commands.",
+      helpMarkdown: brainCreatorCommandHelpMarkdown(),
+      shortcuts: brainCreatorCommandShortcuts(),
+      ...(resolution ? { systemResolution: resolution } : {})
+    };
+  }
+  if (
+    isBrainCreatorStatusCommand(commandInput.tokens) &&
+    !hasCommandSystemIdentity(input, commandInput.systemReference)
+  ) {
+    const toolInput = {
+      ...(optionalStringArg(input, "environment") || commandInput.systemReference.environment
+        ? {
+            environment:
+              optionalStringArg(input, "environment") ?? commandInput.systemReference.environment
+          }
+        : {})
+    };
+    return {
+      command,
+      tool: "bc_status",
+      toolInput,
+      result: await statusFacade(context, toolInput)
+    };
+  }
   const resolution = resolveSystemReference(context, input, commandInput.systemReference);
   const parsed = parseBrainCreatorCommandTokens(commandInput.tokens, resolution.systemId);
   const result =
@@ -316,6 +349,51 @@ async function commandFacade(context: BrainCreatorMcpContext, input: Record<stri
     systemResolution: resolution,
     result
   };
+}
+
+function isBrainCreatorHelpCommand(tokens: string[]) {
+  return tokens[0]?.toLowerCase() === "/bc" && tokens[1]?.toLowerCase() === "help";
+}
+
+function isBrainCreatorStatusCommand(tokens: string[]) {
+  return (
+    tokens.length === 2 &&
+    tokens[0]?.toLowerCase() === "/bc" &&
+    tokens[1]?.toLowerCase() === "status"
+  );
+}
+
+function validateHelpCommandTokens(tokens: string[]) {
+  for (const token of tokens.slice(2)) {
+    if (token.startsWith("--")) {
+      throw new Error(`Unsupported /bc help option: ${token}`);
+    }
+    throw new Error(`Unexpected /bc help argument: ${token}`);
+  }
+}
+
+function hasCommandSystemContext(
+  input: Record<string, unknown>,
+  systemReference: { systemName?: string; environment?: string }
+) {
+  return Boolean(
+    optionalStringArg(input, "systemId") ||
+      optionalStringArg(input, "systemName") ||
+      optionalStringArg(input, "environment") ||
+      systemReference.systemName ||
+      systemReference.environment
+  );
+}
+
+function hasCommandSystemIdentity(
+  input: Record<string, unknown>,
+  systemReference: { systemName?: string; environment?: string }
+) {
+  return Boolean(
+    optionalStringArg(input, "systemId") ||
+      optionalStringArg(input, "systemName") ||
+      systemReference.systemName
+  );
 }
 
 function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
@@ -411,7 +489,23 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
 }
 
 async function statusFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
-  const resolution = resolveSystemReference(context, input);
+  const systemIdInput = optionalStringArg(input, "systemId");
+  const systemNameInput = optionalStringArg(input, "systemName");
+  const environment = optionalStringArg(input, "environment");
+  const candidates =
+    systemIdInput || systemNameInput
+      ? []
+      : context.service
+          .listSystemProfiles()
+          .filter((system) => system.status !== "cancelled")
+          .filter((system) => !environment || system.environment === environment);
+  if (!systemIdInput && !systemNameInput && candidates.length !== 1) {
+    return statusSystemSelection(candidates, environment);
+  }
+  const resolution = resolveSystemReference(
+    context,
+    candidates.length === 1 ? { ...input, systemId: candidates[0].id } : input
+  );
   const systemId = resolution.systemId;
   const snapshot = await sessionResume(context, { systemId });
   const caseSources = context.service.listCaseSources(systemId);
@@ -469,6 +563,80 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       unfinishedSuites: unfinishedSuites.length
     }),
     toolGuidance: statusToolGuidance(nextAction)
+  };
+}
+
+function statusSystemSelection(
+  systems: Array<{ id: string; name: string; environment: string }>,
+  environment?: string
+) {
+  const grouped = new Map<
+    string,
+    { name: string; environment: string; systemIds: string[] }
+  >();
+  for (const system of systems) {
+    const key = `${normalizeSystemLookup(system.name)}\u0000${normalizeSystemLookup(system.environment)}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.systemIds.push(system.id);
+      continue;
+    }
+    grouped.set(key, {
+      name: system.name,
+      environment: system.environment,
+      systemIds: [system.id]
+    });
+  }
+  const systemOptions = [...grouped.values()]
+    .map((option) => ({
+      ...option,
+      instanceCount: option.systemIds.length
+    }))
+    .sort(
+      (left, right) =>
+        left.name.localeCompare(right.name) ||
+        left.environment.localeCompare(right.environment)
+    );
+  const noSystems = systemOptions.length === 0;
+  const selectionMarkdown = noSystems
+    ? [
+        "# Select a Brain Creator system",
+        "",
+        environment
+          ? `No active systems were found in environment "${environment}".`
+          : "No active systems are configured.",
+        "Ask Brain Creator to connect a business system first."
+      ].join("\n")
+    : [
+        "# Select a Brain Creator system",
+        "",
+        "Choose a system context before continuing:",
+        "",
+        ...systemOptions.flatMap((option) => [
+          `- ${option.name} (${option.environment}) - ${option.instanceCount} ${
+            option.instanceCount === 1 ? "instance" : "instances"
+          }`,
+          option.instanceCount === 1
+            ? `  Command: \`/bc status --system "${option.name}" --env "${option.environment}"\``
+            : "  Ask the Agent to choose a specific instance."
+        ])
+      ].join("\n");
+  return {
+    status: noSystems ? "no_systems" : "needs_system_selection",
+    userMessage: noSystems
+      ? "Connect a business system before using Brain Creator status."
+      : "Choose a business system before continuing.",
+    environment,
+    systemOptions,
+    selectionMarkdown,
+    nextAction: noSystems ? "configure_system" : "select_system",
+    quickCommands: systemOptions
+      .filter((option) => option.instanceCount === 1)
+      .map((option) => ({
+        command: `/bc status --system "${option.name}" --env "${option.environment}"`,
+        description: `Inspect ${option.name} in ${option.environment}.`
+      })),
+    toolGuidance: statusToolGuidance(noSystems ? "configure_system" : "select_system")
   };
 }
 
@@ -2118,6 +2286,9 @@ function nextFacadeToolForAction(action: string) {
   if (action === "configure_bridge") {
     return "brain-creator-doctor";
   }
+  if (action === "configure_system") {
+    return "bc_configure";
+  }
   if (action === "review_gaps" || action === "review_bugs") {
     return "bc_review";
   }
@@ -2152,6 +2323,58 @@ function nextCommandForAction(action: string) {
     return "confirm and run";
   }
   return "/bc status";
+}
+
+function brainCreatorCommandShortcuts() {
+  return [
+    {
+      command: "/bc status",
+      description: "Show current system readiness, auth, suites, bugs, gaps, artifacts, and next action."
+    },
+    {
+      command: `/bc run "<path>"`,
+      description: "Preview a test case document suite. Add --case, --module, or --priority filters when needed."
+    },
+    {
+      command: "/bc continue",
+      description: "Continue the latest unfinished suite for the selected system."
+    },
+    {
+      command: "/bc bugs",
+      description: "Review open BugReports. Add --failure-type to focus on one failure class."
+    },
+    {
+      command: "/bc gaps",
+      description: "Review open Gaps. Add --failure-type to focus on one failure class."
+    },
+    {
+      command: "/bc review suite",
+      description: "Review the latest suite run. Add --failure-type for focused failure analysis."
+    },
+    {
+      command: "/bc regress bugs",
+      description: "Run regression for open bugs. Add --bug, --module, or --priority filters when needed."
+    }
+  ];
+}
+
+function brainCreatorCommandHelpMarkdown() {
+  return [
+    "# Brain Creator shortcuts",
+    "",
+    "Use natural language first. When you want a compact command, use these `/bc` shortcuts:",
+    "",
+    ...brainCreatorCommandShortcuts().map(
+      (shortcut) => `- \`${shortcut.command}\`: ${shortcut.description}`
+    ),
+    "",
+    "Useful filters:",
+    "- `--system <name>` / `--env <environment>` choose a system context.",
+    "- `--case TC-001,TC-002` limits document suite preview or execution to case numbers.",
+    "- `--module Recruiting` limits document suite preview, execution, or bug regression to modules.",
+    "- `--priority P0` limits document suite preview, execution, or bug regression to priorities.",
+    "- `--failure-type assertion_failure` filters bug, gap, or suite review by failure classification."
+  ].join("\n");
 }
 
 function nextStepForAction(action: string) {
