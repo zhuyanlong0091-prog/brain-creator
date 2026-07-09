@@ -133,8 +133,10 @@ It provides:
 - `.codex-plugin/plugin.json` for Codex `/plugin` discovery.
 - `.mcp.json` that registers the `brain-creator` MCP server with `npx brain-creator-mcp` and defaults to `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`.
 - `skills/` containing the Brain Creator workflow entrypoint and supporting skill guidance.
-- Starter prompts for connecting a business system, generating a reviewed plan, and running doctor.
-- Starter prompts for checking status, previewing a test case document, continuing an unfinished suite, and reviewing open bugs/gaps.
+- Three Codex-compatible starter prompts: shortcut help plus status, system connection, and test-document preview.
+- Remaining suite, bug/gap, and doctor workflows are discoverable through `/bc help`.
+
+Read-only status, asset, and review tools declare MCP `readOnlyHint` annotations. Write operations still require host approval, and the Skill instructs the Agent not to retry a cancelled facade operation through lower-level tools.
 
 To validate the local plugin:
 

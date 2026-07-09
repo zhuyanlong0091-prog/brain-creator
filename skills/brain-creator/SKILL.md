@@ -45,6 +45,8 @@ Codex plugin mode defaults to `host-agent`: do not start or wait for a Claude/Co
 
 Default to the high-level facade tools. The fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and fallback, but the user should not have to orchestrate them. `bc_status` returns `toolGuidance`; follow it before reaching for internal tools.
 
+Do not retry a cancelled or denied facade call through an equivalent fine-grained tool. Report that the host did not authorize the operation, confirm that no change was made, and let the user approve or retry the original facade action.
+
 ## User Entrypoint Map
 
 | User intent | Default tool path | Confirmation boundary | Reply focus |
@@ -106,7 +108,7 @@ Do not create or prioritize a Web UI. If the user asks for an entrypoint, treat 
 Use the Brain Creator system tools to create and inspect reusable business system contexts.
 
 1. Call `bc_list_systems` before assuming a system already exists.
-2. Call `bc_create_system` when a user wants to connect a Web system and provides a system name, environment, base URL, default locale, and URL allowlist.
+2. Call `bc_configure target=system` once when a user wants to connect a Web system and provides a system name, environment, base URL, default locale, and URL allowlist.
 3. Call `bc_system_overview` to summarize onboarding completeness and asset counts.
 4. Call `bc_archive_system` only when the user confirms a system should be retained for history but no longer used.
 

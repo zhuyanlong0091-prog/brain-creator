@@ -83,6 +83,16 @@ try {
     ]) {
       assert(tools.tools.some((tool) => tool.name === name), `Installed MCP is missing ${name}`);
     }
+    for (const name of ["bc_status", "bc_list_systems", "bc_review"]) {
+      assert(
+        tools.tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint === true,
+        `Installed MCP must mark ${name} read-only`
+      );
+    }
+    assert(
+      tools.tools.find((tool) => tool.name === "bc_run")?.annotations?.readOnlyHint !== true,
+      "Installed MCP must not mark bc_run read-only"
+    );
 
     const help = dataOf(
       await client.callTool({

@@ -16,6 +16,10 @@ assert(
   "Codex plugin starter prompts must expose /bc help"
 );
 assert(
+  pluginManifest.interface.defaultPrompt.length <= 3,
+  "Codex plugin must not exceed the three starter prompt runtime limit"
+);
+assert(
   pluginMcp.mcpServers["brain-creator"].env.BRAIN_CREATOR_AGENT_PROVIDER === "host-agent",
   "Codex plugin MCP config must default to host-agent"
 );

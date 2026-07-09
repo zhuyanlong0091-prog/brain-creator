@@ -135,23 +135,14 @@ describe("Brain Creator local integration files", () => {
     expect(pluginManifest.mcpServers).toBe("./.mcp.json");
     expect(pluginManifest.interface.displayName).toBe("Brain Creator");
     expect(pluginManifest.interface.category).toBe("Productivity");
-    expect(pluginManifest.interface.defaultPrompt).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("Use Brain Creator"),
-        expect.stringContaining("brain-creator-doctor"),
-        expect.stringContaining("status"),
-        expect.stringContaining("/bc help"),
-        expect.stringContaining("preview"),
-        expect.stringContaining("continue"),
-        expect.stringContaining("bugs"),
-        expect.stringContaining("gaps")
-      ])
-    );
+    expect(pluginManifest.interface.defaultPrompt).toEqual([
+      "Use Brain Creator to show /bc help shortcuts and current system status.",
+      "Use Brain Creator to connect this system.",
+      "Use Brain Creator to preview this test case document, then wait for my confirmation before execution."
+    ]);
+    expect(pluginManifest.interface.defaultPrompt).toHaveLength(3);
     expect(pluginManifest.interface.longDescription).toContain("host-agent");
     expect(pluginManifest.interface.longDescription).toContain("bc_submit_agent_output");
-    expect(pluginManifest.interface.defaultPrompt).toEqual(
-      expect.arrayContaining([expect.stringContaining("/bc help")])
-    );
 
     expect(pluginMcp.mcpServers["brain-creator"]).toEqual({
       command: "npx",
@@ -203,7 +194,6 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("case-source-suite");
     expect(content).toContain("confirm: false");
     expect(content).toContain("confirm: true");
-    expect(content).toContain("bc_create_system");
     expect(content).toContain("bc_create_auth");
     expect(content).toContain("bc_add_term");
     expect(content).toContain("bc_add_rule");
@@ -225,7 +215,8 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("bc_run mode=case-source-suite confirm=true");
     expect(content).toContain("bc_review");
     expect(content).toContain("bc_list_systems");
-    expect(content).toContain("bc_create_system");
+    expect(content).toContain("Do not retry a cancelled or denied facade call");
+    expect(content).not.toContain("Call `bc_create_system`");
     expect(content).toContain("bc_create_auth_checkpoint");
     expect(content).toContain("bc_batch_confirm_terms");
     expect(content).toContain("bc_delete_rule");

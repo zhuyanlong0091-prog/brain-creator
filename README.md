@@ -187,7 +187,9 @@ npm publish --access public --otp=<当前 2FA 验证码>
 - `plugins/brain-creator/skills/`：随插件提供 Brain Creator skill。
 - `.agents/plugins/marketplace.json`：将 `brain-creator` 作为本地 marketplace 插件暴露给 Codex。
 
-插件 starter prompt 覆盖常用入口：检查系统状态、预览测试用例文档、继续未完成 suite、复盘 open bugs/gaps，以及运行 doctor。
+Codex 最多接受 3 条 starter prompt。Brain Creator 保留“快捷帮助与状态”“接入系统”“预览测试文档”三个主入口；继续 suite、复盘 bug/gap 和 doctor 指引通过 `/bc help` 发现。
+
+状态、资产与复盘类 MCP 工具带有标准 `readOnlyHint`，Codex 可在不申请写权限的情况下完成查询。创建、配置和执行仍保留 host 审批；如果调用被取消或拒绝，Agent 不会换用底层工具重复尝试。
 
 如果要一次性验证 Codex 原生入口是否健康，运行：
 
@@ -394,7 +396,9 @@ The repository now includes a repo-local Codex plugin:
 - `plugins/brain-creator/skills/`: ships the Brain Creator skill with the plugin.
 - `.agents/plugins/marketplace.json`: exposes `brain-creator` as a local marketplace plugin for Codex.
 
-The plugin starter prompts cover the common entrypoints: check system status, preview a test case document, continue an unfinished suite, review open bugs/gaps, and run doctor.
+Codex accepts at most three starter prompts. Brain Creator keeps the three primary journeys: shortcut help plus status, system connection, and test-document preview. Suite continuation, bug/gap review, and doctor guidance remain discoverable through `/bc help`.
+
+Status, asset, and review MCP tools carry standard `readOnlyHint` annotations so Codex can inspect them without requesting write access. Creation, configuration, and execution retain host approval; when a call is cancelled or denied, the Agent does not retry through a lower-level tool.
 
 To verify the Codex-native entrypoint in one command:
 
