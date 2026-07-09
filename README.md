@@ -154,6 +154,8 @@ brain-creator-doctor
 npm run verify:package-install
 ```
 
+该检查会打包并安装 Brain Creator 到临时业务项目，通过 stdio 启动安装后的 MCP server，验证 `/bc help`，并完成一次 `host-agent` 任务准备、提交与 AgentRun 持久化。
+
 ### 发布前检查
 
 正式发布 npm 包前，先确认包内容只包含运行所需文件，不包含本地资产、缓存、测试结果或源码工作目录：
@@ -357,6 +359,8 @@ Package installation smoke:
 ```bash
 npm run verify:package-install
 ```
+
+This check packs and installs Brain Creator into a temporary business project, starts the installed MCP server over stdio, verifies `/bc help`, and completes one `host-agent` task prepare/submit cycle with a persisted AgentRun.
 
 ### Release Readiness
 

@@ -116,6 +116,8 @@ npm run verify:package-contents
 npm run verify:package-install
 ```
 
+`verify:package-install` uses the packed artifact in a temporary business project. It starts the installed MCP server over stdio, calls `/bc help`, prepares a `host-agent` task, submits its output, and verifies the persisted AgentRun without changing the source repository data file.
+
 After MCP is connected, start in Claude Code or Codex with:
 
 ```text

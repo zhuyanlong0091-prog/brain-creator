@@ -74,6 +74,16 @@ describe("Brain Creator local integration files", () => {
     );
   });
 
+  it("verifies the installed package over stdio with the host-agent workflow", async () => {
+    const smoke = await readFile("scripts/verifyPackageInstallSmoke.ts", "utf8");
+
+    expect(smoke).toContain("StdioClientTransport");
+    expect(smoke).toContain('BRAIN_CREATOR_AGENT_PROVIDER: "host-agent"');
+    expect(smoke).toContain('command: "/bc help"');
+    expect(smoke).toContain('"bc_prepare_agent_task"');
+    expect(smoke).toContain('"bc_submit_agent_output"');
+  });
+
   it("defines explicit npm publish exclusions instead of relying on gitignore", async () => {
     const npmIgnore = await readFile(".npmignore", "utf8");
 
