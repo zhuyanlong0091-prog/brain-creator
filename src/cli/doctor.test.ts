@@ -33,6 +33,7 @@ describe("Brain Creator doctor", () => {
       ])
     );
     expect(formatDoctorReport(report)).toContain("Brain Creator doctor: ready");
+    expect(formatDoctorReport(report)).toContain("npx brain-creator-install-codex-plugin");
   });
 
   it("returns actionable failures before users reach plan or chain execution", () => {

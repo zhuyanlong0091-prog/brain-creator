@@ -20,6 +20,8 @@ Run package gates:
 ```bash
 npm run verify:package-contents
 npm run verify:package-install
+npm run verify:codex-native-entry
+npm run verify:codex-plugin-install
 ```
 
 ## Required Before npm publish
@@ -30,6 +32,8 @@ npm run verify:package-install
 - Run `npm run release:check` and confirm it reports ready.
 - Run `npm run verify:package-contents`.
 - Run `npm run verify:package-install`.
+- Run `npm run verify:codex-native-entry`.
+- Run `npm run verify:codex-plugin-install`.
 - Run the full project verification suite.
 - If npm requires two-factor authentication, publish with a current OTP:
 
@@ -52,6 +56,8 @@ Validate it before sharing:
 
 ```bash
 py <plugin-creator-skill>/scripts/validate_plugin.py plugins/brain-creator
+npm run verify:codex-plugin-install
+npm run verify:codex-native-entry
 ```
 
 This is a repo-local plugin publish path. A broader public marketplace submission would still need the target marketplace process and permissions.

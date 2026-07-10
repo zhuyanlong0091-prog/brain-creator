@@ -33,7 +33,8 @@ const requiredBins = [
   "brain-creator-mcp",
   "brain-creator-doctor",
   "brain-creator-install-assets",
-  "brain-creator-write-mcp-config"
+  "brain-creator-write-mcp-config",
+  "brain-creator-install-codex-plugin"
 ];
 
 const requiredFiles = [
@@ -41,6 +42,8 @@ const requiredFiles = [
   "skills/",
   ".claude/agents/",
   "plugin/",
+  "plugins/brain-creator/",
+  ".agents/plugins/marketplace.json",
   "README.md"
 ];
 
@@ -55,7 +58,9 @@ export function buildReleaseReadinessReport(
     binCheck(input.packageJson),
     filesCheck(input.packageJson),
     scriptCheck(input.packageJson, "verify:package-contents"),
-    scriptCheck(input.packageJson, "verify:package-install")
+    scriptCheck(input.packageJson, "verify:package-install"),
+    scriptCheck(input.packageJson, "verify:codex-native-entry"),
+    scriptCheck(input.packageJson, "verify:codex-plugin-install")
   ];
 
   return {

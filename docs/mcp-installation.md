@@ -40,6 +40,14 @@ npx brain-creator-write-mcp-config
 
 The command preserves existing MCP servers in `.mcp.json` and adds the `brain-creator` server. By default, it writes an MCP command that uses the project-local package through `npx`.
 
+Install the Codex plugin from the installed package:
+
+```bash
+npx brain-creator-install-codex-plugin
+```
+
+The command registers the package root as a Codex marketplace source and installs `brain-creator@personal`. It is equivalent to running `codex plugin marketplace add node_modules/brain-creator` followed by `codex plugin add brain-creator@personal`.
+
 If the target runtime is already known, choose it explicitly:
 
 ```bash
@@ -104,6 +112,7 @@ If you prefer a global install, use:
 npm install -g brain-creator
 brain-creator-install-assets
 brain-creator-write-mcp-config --global
+brain-creator-install-codex-plugin
 brain-creator-doctor
 ```
 
@@ -138,6 +147,26 @@ It provides:
 
 Read-only status, asset, and review tools declare MCP `readOnlyHint` annotations. Write operations still require host approval, and the Skill instructs the Agent not to retry a cancelled facade operation through lower-level tools.
 
+Install the repo-local plugin from the repository root. The marketplace source is the repository root because Codex discovers `.agents/plugins/marketplace.json` under it:
+
+```bash
+cd /path/to/brain-creator-mvp
+codex plugin marketplace add .
+codex plugin add brain-creator@personal
+codex plugin list
+```
+
+After installing Brain Creator from npm in a business project, use the installed package root as the marketplace source:
+
+```bash
+cd /path/to/business-project
+npm install --save-dev brain-creator
+npx brain-creator-install-codex-plugin
+codex plugin list
+```
+
+Do not pass `plugins/`, `plugins/brain-creator`, or `.agents/plugins/marketplace.json` directly. They are useful implementation paths, but they are not the marketplace root accepted by `codex plugin marketplace add`.
+
 To validate the local plugin:
 
 ```bash
@@ -150,7 +179,11 @@ To validate the full Codex-native entry path from this repository:
 npm run verify:codex-native-entry
 ```
 
-This local smoke checks that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the host-agent handoff, `/bc help` is read-only, and an approved case can advance through `bc_run_chain` plus `bc_submit_agent_output`.
+This local smoke checks that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the host-agent handoff, `/bc help` is read-only, an approved case can advance through `bc_run_chain` plus `bc_submit_agent_output`, and the Codex plugin can be installed from both the source checkout and a packed npm install. To check only the Codex plugin marketplace installation path:
+
+```bash
+npm run verify:codex-plugin-install
+```
 
 When installed from the repo-local marketplace, Brain Creator still expects the npm package to be installed in the business project:
 
@@ -159,6 +192,7 @@ npx brain-creator-mcp
 npx brain-creator-doctor
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config
+npx brain-creator-install-codex-plugin
 ```
 
 If those commands are not available yet, use MCP CLI connection mode first, or install the package tarball produced by `npm pack`.

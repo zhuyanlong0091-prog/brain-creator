@@ -38,7 +38,8 @@ describe("Brain Creator local integration files", () => {
       "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
       "brain-creator-doctor": "dist/cli/doctor.js",
       "brain-creator-install-assets": "dist/cli/installAssets.js",
-      "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
+      "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js",
+      "brain-creator-install-codex-plugin": "dist/cli/installCodexPlugin.js"
     });
     expect(packageJson.files).toEqual(
       expect.arrayContaining([
@@ -68,6 +69,9 @@ describe("Brain Creator local integration files", () => {
     );
     expect(packageJson.scripts["verify:codex-native-entry"]).toContain(
       "scripts/codexNativeEntrySmoke.ts"
+    );
+    expect(packageJson.scripts["verify:codex-plugin-install"]).toContain(
+      "scripts/codexPluginInstallSmoke.ts"
     );
     expect(packageJson.scripts["release:check"]).toContain(
       "scripts/releaseReadiness.ts"

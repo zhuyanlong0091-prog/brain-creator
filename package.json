@@ -7,13 +7,16 @@
     "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
     "brain-creator-doctor": "dist/cli/doctor.js",
     "brain-creator-install-assets": "dist/cli/installAssets.js",
-    "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
+    "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js",
+    "brain-creator-install-codex-plugin": "dist/cli/installCodexPlugin.js"
   },
   "files": [
     "dist/",
     "skills/",
     ".claude/agents/",
     "plugin/",
+    "plugins/brain-creator/",
+    ".agents/plugins/marketplace.json",
     "docs/mcp-installation.md",
     "README.md"
   ],
@@ -32,6 +35,7 @@
     "verify:live-session-resume-workflow": "node --loader ts-node/esm scripts/liveSessionResumeWorkflowSmoke.ts",
     "verify:host-agent-chain": "node --loader ts-node/esm scripts/hostAgentChainSmoke.ts",
     "verify:codex-native-entry": "node --loader ts-node/esm scripts/codexNativeEntrySmoke.ts",
+    "verify:codex-plugin-install": "node --loader ts-node/esm scripts/codexPluginInstallSmoke.ts",
     "verify:installed-mcp": "node --loader ts-node/esm scripts/verifyInstalledMcpSmoke.ts",
     "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts",
     "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
