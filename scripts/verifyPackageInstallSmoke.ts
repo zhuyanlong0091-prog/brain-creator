@@ -27,6 +27,16 @@ try {
   const binDir = join(businessDir, "node_modules", ".bin");
   await run(join(binDir, "brain-creator-install-assets.cmd"), [], businessDir);
   await run(join(binDir, "brain-creator-write-mcp-config.cmd"), [], businessDir);
+  const codexPluginHelp = await run(
+    join(binDir, "brain-creator-install-codex-plugin.cmd"),
+    ["--help"],
+    businessDir
+  );
+  assert(
+    codexPluginHelp.stdout.includes("brain-creator-install-codex-plugin") &&
+      codexPluginHelp.stdout.includes("--package-root"),
+    "installed Codex plugin installer help is missing expected usage text"
+  );
 
   const skill = await readFile(
     join(businessDir, ".claude", "skills", "brain-creator", "SKILL.md"),
