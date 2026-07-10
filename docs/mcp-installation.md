@@ -161,7 +161,11 @@ To validate the full Codex-native entry path from this repository:
 npm run verify:codex-native-entry
 ```
 
-This local smoke checks that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the host-agent handoff, `/bc help` is read-only, and an approved case can advance through `bc_run_chain` plus `bc_submit_agent_output`.
+This local smoke checks that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the host-agent handoff, `/bc help` is read-only, an approved case can advance through `bc_run_chain` plus `bc_submit_agent_output`, and the repo-local marketplace plugin can be installed. To check only the Codex plugin marketplace installation path:
+
+```bash
+npm run verify:codex-plugin-install
+```
 
 When installed from the repo-local marketplace, Brain Creator still expects the npm package to be installed in the business project:
 

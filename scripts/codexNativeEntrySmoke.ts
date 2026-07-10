@@ -75,10 +75,11 @@ try {
 }
 
 await import("./hostAgentChainSmoke.js");
+await import("./codexPluginInstallSmoke.js");
 
 console.log("Codex-native entry smoke passed.");
 console.log(
-  "Validated plugin starter prompts, host-agent doctor guidance, /bc help, context-free /bc status, and host-agent chain handoff."
+  "Validated plugin starter prompts, host-agent doctor guidance, /bc help, context-free /bc status, host-agent chain handoff, and repo-local plugin installation."
 );
 
 function dataOf(result: CallToolResult): any {

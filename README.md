@@ -416,7 +416,11 @@ To verify the Codex-native entrypoint in one command:
 npm run verify:codex-native-entry
 ```
 
-This check covers the repo-local plugin starter prompt, host-agent doctor guidance, read-only `/bc help`, and the host-agent task handoff chain.
+This check covers the repo-local plugin starter prompt, host-agent doctor guidance, read-only `/bc help`, the host-agent task handoff chain, and repo-local plugin installation. To verify only the Codex plugin marketplace installation path, run:
+
+```bash
+npm run verify:codex-plugin-install
+```
 
 Validate the plugin:
 
