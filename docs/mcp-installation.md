@@ -40,6 +40,14 @@ npx brain-creator-write-mcp-config
 
 The command preserves existing MCP servers in `.mcp.json` and adds the `brain-creator` server. By default, it writes an MCP command that uses the project-local package through `npx`.
 
+Install the Codex plugin from the installed package:
+
+```bash
+npx brain-creator-install-codex-plugin
+```
+
+The command registers the package root as a Codex marketplace source and installs `brain-creator@personal`. It is equivalent to running `codex plugin marketplace add node_modules/brain-creator` followed by `codex plugin add brain-creator@personal`.
+
 If the target runtime is already known, choose it explicitly:
 
 ```bash
@@ -104,6 +112,7 @@ If you prefer a global install, use:
 npm install -g brain-creator
 brain-creator-install-assets
 brain-creator-write-mcp-config --global
+brain-creator-install-codex-plugin
 brain-creator-doctor
 ```
 
@@ -152,8 +161,7 @@ After installing Brain Creator from npm in a business project, use the installed
 ```bash
 cd /path/to/business-project
 npm install --save-dev brain-creator
-codex plugin marketplace add node_modules/brain-creator
-codex plugin add brain-creator@personal
+npx brain-creator-install-codex-plugin
 codex plugin list
 ```
 
@@ -184,6 +192,7 @@ npx brain-creator-mcp
 npx brain-creator-doctor
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config
+npx brain-creator-install-codex-plugin
 ```
 
 If those commands are not available yet, use MCP CLI connection mode first, or install the package tarball produced by `npm pack`.

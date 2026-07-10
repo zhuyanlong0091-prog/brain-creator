@@ -33,7 +33,8 @@ const requiredBins = [
   "brain-creator-mcp",
   "brain-creator-doctor",
   "brain-creator-install-assets",
-  "brain-creator-write-mcp-config"
+  "brain-creator-write-mcp-config",
+  "brain-creator-install-codex-plugin"
 ];
 
 const requiredFiles = [

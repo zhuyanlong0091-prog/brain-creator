@@ -114,6 +114,7 @@ Windows PowerShell 中请使用 `$env:` 设置同样的环境变量后再启动 
 npm install --save-dev brain-creator
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config
+npx brain-creator-install-codex-plugin
 npx brain-creator-doctor
 ```
 
@@ -122,6 +123,7 @@ npx brain-creator-doctor
 - `npm install --save-dev brain-creator`：把 Brain Creator 安装到当前业务项目。
 - `npx brain-creator-install-assets`：把 Brain Creator Skill 和 Playwright Planner / Generator / Healer agent 定义安装到当前业务项目。
 - `npx brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，默认写入 `npx brain-creator-mcp` 和 `BRAIN_CREATOR_AGENT_PROVIDER=auto`，因此适配本地安装。
+- `npx brain-creator-install-codex-plugin`：把已安装的 npm 包注册为 Codex plugin marketplace，并安装 `brain-creator@personal`。
 - `npx brain-creator-doctor`：在真正使用前检查 workspace、agent bridge provider 和 agent 定义，并输出当前 provider 的推荐执行路径。
 
 如果你已经知道运行环境，可以在写入 MCP 配置时显式选择 provider：
@@ -140,6 +142,7 @@ npx brain-creator-write-mcp-config --provider host-agent
 npm install -g brain-creator
 brain-creator-install-assets
 brain-creator-write-mcp-config --global
+brain-creator-install-codex-plugin
 brain-creator-doctor
 ```
 
@@ -353,6 +356,7 @@ Before a real agent workflow, run:
 npm install --save-dev brain-creator
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config
+npx brain-creator-install-codex-plugin
 npx brain-creator-doctor
 ```
 
@@ -413,8 +417,7 @@ After installing Brain Creator from npm inside a business project, use the insta
 ```bash
 cd /path/to/business-project
 npm install --save-dev brain-creator
-codex plugin marketplace add node_modules/brain-creator
-codex plugin add brain-creator@personal
+npx brain-creator-install-codex-plugin
 ```
 
 Do not pass `plugins/`, `plugins/brain-creator`, or `.agents/plugins/marketplace.json` directly. Those paths are not marketplace roots for the Codex CLI.
@@ -447,6 +450,7 @@ After Brain Creator is available from npm, go to the business project directory 
 npm install --save-dev brain-creator
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config
+npx brain-creator-install-codex-plugin
 npx brain-creator-doctor
 ```
 
@@ -455,6 +459,7 @@ These commands:
 - `npm install --save-dev brain-creator`: installs Brain Creator into the current business project.
 - `npx brain-creator-install-assets`: installs the Brain Creator Skill and Playwright Planner / Generator / Healer agent definitions into the current business project.
 - `npx brain-creator-write-mcp-config`: creates or updates the business project's `.mcp.json`, preserving existing MCP servers and using `npx brain-creator-mcp` for local installs.
+- `npx brain-creator-install-codex-plugin`: registers the installed package as a Codex plugin marketplace and installs `brain-creator@personal`.
 - `npx brain-creator-doctor`: checks workspace, agent bridge provider, and agent definitions before the first workflow, then prints the recommended execution path for the active provider.
 
 If you already know the runtime environment, choose the provider while writing MCP config:
@@ -473,6 +478,7 @@ For a global install instead:
 npm install -g brain-creator
 brain-creator-install-assets
 brain-creator-write-mcp-config --global
+brain-creator-install-codex-plugin
 brain-creator-doctor
 ```
 

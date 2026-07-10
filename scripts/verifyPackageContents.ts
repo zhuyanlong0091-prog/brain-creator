@@ -5,6 +5,7 @@ const requiredPaths = [
   "dist/cli/brainCreatorMcp.js",
   "dist/cli/doctor.js",
   "dist/cli/installAssets.js",
+  "dist/cli/installCodexPlugin.js",
   "dist/cli/writeMcpConfig.js",
   "skills/brain-creator/SKILL.md",
   ".claude/agents/playwright-test-planner.md",

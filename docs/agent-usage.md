@@ -34,7 +34,7 @@ When `/bc status` has no selected system, present the returned compact system pi
 
 Use source checkout mode when you are developing Brain Creator itself. In this mode, clone the repository, run `npm install`, then use `npm run dev:mcp`.
 
-Use MCP CLI connection mode when you want to use Brain Creator from a business project. The recommended setup is project-local: run `npm install --save-dev brain-creator`, then `npx brain-creator-install-assets`, `npx brain-creator-write-mcp-config`, and `npx brain-creator-doctor` once in the business project. The generated MCP config connects the server with `npx brain-creator-mcp`, so the local package is used.
+Use MCP CLI connection mode when you want to use Brain Creator from a business project. The recommended setup is project-local: run `npm install --save-dev brain-creator`, then `npx brain-creator-install-assets`, `npx brain-creator-write-mcp-config`, `npx brain-creator-install-codex-plugin`, and `npx brain-creator-doctor` once in the business project. The generated MCP config connects the server with `npx brain-creator-mcp`, and the Codex plugin installer registers the local package as a plugin marketplace.
 
 Use repo-local plugin installation mode when you want Brain Creator to appear through Codex `/plugin`. The repository provides `plugins/brain-creator/.codex-plugin/plugin.json`, `plugins/brain-creator/.mcp.json`, bundled Brain Creator skills, and `.agents/plugins/marketplace.json` for local marketplace discovery. This mode registers the Skill and MCP server metadata, while the executable commands still need to be available through a local package install or a future npm publish.
 

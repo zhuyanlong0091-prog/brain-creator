@@ -23,6 +23,14 @@ const publishableScripts = {
   "verify:codex-plugin-install": "node --loader ts-node/esm scripts/codexPluginInstallSmoke.ts"
 };
 
+const publishableBins = {
+  "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
+  "brain-creator-doctor": "dist/cli/doctor.js",
+  "brain-creator-install-assets": "dist/cli/installAssets.js",
+  "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js",
+  "brain-creator-install-codex-plugin": "dist/cli/installCodexPlugin.js"
+};
+
 describe("release readiness report", () => {
   it("reports blockers for the current safe non-publishable package state", () => {
     const report = buildReleaseReadinessReport({
@@ -72,12 +80,7 @@ describe("release readiness report", () => {
         version: "2.0.1",
         private: false,
         license: "MIT",
-        bin: {
-          "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
-          "brain-creator-doctor": "dist/cli/doctor.js",
-          "brain-creator-install-assets": "dist/cli/installAssets.js",
-          "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
-        },
+        bin: publishableBins,
         files: publishableFiles,
         scripts: publishableScripts
       },
@@ -97,12 +100,7 @@ describe("release readiness report", () => {
         version: "2.0.1",
         private: false,
         license: "MIT",
-        bin: {
-          "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
-          "brain-creator-doctor": "dist/cli/doctor.js",
-          "brain-creator-install-assets": "dist/cli/installAssets.js",
-          "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
-        },
+        bin: publishableBins,
         files: publishableFiles,
         scripts: publishableScripts
       },
@@ -121,12 +119,7 @@ describe("release readiness report", () => {
         version: "2.0.2",
         private: false,
         license: "MIT",
-        bin: {
-          "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
-          "brain-creator-doctor": "dist/cli/doctor.js",
-          "brain-creator-install-assets": "dist/cli/installAssets.js",
-          "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
-        },
+        bin: publishableBins,
         files: publishableFiles,
         scripts: {
           "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
@@ -159,12 +152,7 @@ describe("release readiness report", () => {
         version: "2.0.2",
         private: false,
         license: "MIT",
-        bin: {
-          "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
-          "brain-creator-doctor": "dist/cli/doctor.js",
-          "brain-creator-install-assets": "dist/cli/installAssets.js",
-          "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
-        },
+        bin: publishableBins,
         files: legacyPackageFiles,
         scripts: publishableScripts
       },

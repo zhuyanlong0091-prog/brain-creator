@@ -11,12 +11,16 @@ const keepArtifacts = process.env.BRAIN_CREATOR_KEEP_LIVE_ARTIFACTS === "1";
 try {
   await verifyPluginInstallFromMarketplaceRoot("source checkout", repoRoot);
 
-  const packageRoot = await installPackedPackage();
-  await verifyPluginInstallFromMarketplaceRoot("packed npm install", packageRoot);
+  const installed = await installPackedPackage();
+  await verifyPluginInstallFromInstalledBin(
+    "packed npm install",
+    installed.packageRoot,
+    installed.binPath
+  );
 
   console.log("Codex plugin install smoke passed.");
   console.log(`Source marketplace root: ${repoRoot}`);
-  console.log(`Package marketplace root: ${packageRoot}`);
+  console.log(`Package marketplace root: ${installed.packageRoot}`);
 } finally {
   if (!keepArtifacts) {
     await rm(smokeRoot, { recursive: true, force: true });
@@ -32,7 +36,17 @@ async function installPackedPackage() {
   const tarballName = join(packageDir, await findTarball(packageDir));
   await writeFile(join(businessDir, "package.json"), "{\"type\":\"module\"}", "utf8");
   await run("npm", ["install", tarballName], businessDir);
-  return join(businessDir, "node_modules", "brain-creator");
+  return {
+    packageRoot: join(businessDir, "node_modules", "brain-creator"),
+    binPath: join(
+      businessDir,
+      "node_modules",
+      ".bin",
+      process.platform === "win32"
+        ? "brain-creator-install-codex-plugin.cmd"
+        : "brain-creator-install-codex-plugin"
+    )
+  };
 }
 
 async function verifyPluginInstallFromMarketplaceRoot(label: string, marketplaceRoot: string) {
@@ -64,6 +78,32 @@ async function verifyPluginInstallFromMarketplaceRoot(label: string, marketplace
   assert(
     install.stdout.includes(`"version": "${packageJson.version}"`),
     `Codex installed an unexpected plugin version from ${label}:\n${install.stdout}`
+  );
+
+  const list = await run("codex", ["plugin", "list"], repoRoot, env);
+  assert(
+    list.stdout.includes("brain-creator@personal") && list.stdout.includes("installed, enabled"),
+    `Codex plugin list did not show brain-creator installed and enabled from ${label}:\n${list.stdout}\n${list.stderr}`
+  );
+  assert(
+    list.stdout.includes("plugins\\brain-creator") || list.stdout.includes("plugins/brain-creator"),
+    `Codex plugin list did not point at the Brain Creator plugin path from ${label}:\n${list.stdout}`
+  );
+}
+
+async function verifyPluginInstallFromInstalledBin(
+  label: string,
+  marketplaceRoot: string,
+  binPath: string
+) {
+  const codexHome = join(smokeRoot, `codex-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`);
+  await mkdir(codexHome, { recursive: true });
+  const env = { CODEX_HOME: codexHome };
+
+  const install = await run(binPath, ["--package-root", marketplaceRoot], marketplaceRoot, env);
+  assert(
+    install.stdout.includes("Brain Creator Codex plugin installed"),
+    `Installed Brain Creator plugin bin did not report success from ${label}:\n${install.stdout}\n${install.stderr}`
   );
 
   const list = await run("codex", ["plugin", "list"], repoRoot, env);
