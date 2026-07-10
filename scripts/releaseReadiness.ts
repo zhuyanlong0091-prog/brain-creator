@@ -41,6 +41,8 @@ const requiredFiles = [
   "skills/",
   ".claude/agents/",
   "plugin/",
+  "plugins/brain-creator/",
+  ".agents/plugins/marketplace.json",
   "README.md"
 ];
 

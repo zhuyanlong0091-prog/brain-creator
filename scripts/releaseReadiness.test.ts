@@ -4,6 +4,25 @@ import {
   formatReleaseReadinessReport
 } from "./releaseReadiness.js";
 
+const publishableFiles = [
+  "dist/",
+  "skills/",
+  ".claude/agents/",
+  "plugin/",
+  "plugins/brain-creator/",
+  ".agents/plugins/marketplace.json",
+  "README.md"
+];
+
+const legacyPackageFiles = ["dist/", "skills/", ".claude/agents/", "plugin/", "README.md"];
+
+const publishableScripts = {
+  "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
+  "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts",
+  "verify:codex-native-entry": "node --loader ts-node/esm scripts/codexNativeEntrySmoke.ts",
+  "verify:codex-plugin-install": "node --loader ts-node/esm scripts/codexPluginInstallSmoke.ts"
+};
+
 describe("release readiness report", () => {
   it("reports blockers for the current safe non-publishable package state", () => {
     const report = buildReleaseReadinessReport({
@@ -14,7 +33,7 @@ describe("release readiness report", () => {
         bin: {
           "brain-creator-mcp": "dist/cli/brainCreatorMcp.js"
         },
-        files: ["dist/", "skills/", ".claude/agents/", "plugin/", "README.md"],
+        files: legacyPackageFiles,
         scripts: {
           "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
           "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts"
@@ -59,13 +78,8 @@ describe("release readiness report", () => {
           "brain-creator-install-assets": "dist/cli/installAssets.js",
           "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
         },
-        files: ["dist/", "skills/", ".claude/agents/", "plugin/", "README.md"],
-        scripts: {
-          "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
-          "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts",
-          "verify:codex-native-entry": "node --loader ts-node/esm scripts/codexNativeEntrySmoke.ts",
-          "verify:codex-plugin-install": "node --loader ts-node/esm scripts/codexPluginInstallSmoke.ts"
-        }
+        files: publishableFiles,
+        scripts: publishableScripts
       },
       npmAuth: "authenticated",
       packageNameStatus: "available"
@@ -89,13 +103,8 @@ describe("release readiness report", () => {
           "brain-creator-install-assets": "dist/cli/installAssets.js",
           "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
         },
-        files: ["dist/", "skills/", ".claude/agents/", "plugin/", "README.md"],
-        scripts: {
-          "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
-          "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts",
-          "verify:codex-native-entry": "node --loader ts-node/esm scripts/codexNativeEntrySmoke.ts",
-          "verify:codex-plugin-install": "node --loader ts-node/esm scripts/codexPluginInstallSmoke.ts"
-        }
+        files: publishableFiles,
+        scripts: publishableScripts
       },
       npmAuth: "authenticated",
       packageNameStatus: "published"
@@ -118,7 +127,7 @@ describe("release readiness report", () => {
           "brain-creator-install-assets": "dist/cli/installAssets.js",
           "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
         },
-        files: ["dist/", "skills/", ".claude/agents/", "plugin/", "README.md"],
+        files: publishableFiles,
         scripts: {
           "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
           "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts"
@@ -138,6 +147,43 @@ describe("release readiness report", () => {
         expect.objectContaining({
           name: "verify:codex-plugin-install",
           status: "blocker"
+        })
+      ])
+    );
+  });
+
+  it("blocks publish readiness when Codex plugin package files are missing", () => {
+    const report = buildReleaseReadinessReport({
+      packageJson: {
+        name: "brain-creator",
+        version: "2.0.2",
+        private: false,
+        license: "MIT",
+        bin: {
+          "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
+          "brain-creator-doctor": "dist/cli/doctor.js",
+          "brain-creator-install-assets": "dist/cli/installAssets.js",
+          "brain-creator-write-mcp-config": "dist/cli/writeMcpConfig.js"
+        },
+        files: legacyPackageFiles,
+        scripts: publishableScripts
+      },
+      npmAuth: "authenticated",
+      packageNameStatus: "published"
+    });
+
+    expect(report.ready).toBe(false);
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "package files",
+          status: "blocker",
+          message: expect.stringContaining("plugins/brain-creator/")
+        }),
+        expect.objectContaining({
+          name: "package files",
+          status: "blocker",
+          message: expect.stringContaining(".agents/plugins/marketplace.json")
         })
       ])
     );

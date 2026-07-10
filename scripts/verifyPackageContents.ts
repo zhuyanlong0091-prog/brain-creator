@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 
 const requiredPaths = [
   "dist/cli/brainCreatorMcp.js",
@@ -12,6 +13,10 @@ const requiredPaths = [
   "docs/mcp-installation.md",
   "LICENSE",
   "plugin/manifest.json",
+  "plugins/brain-creator/.codex-plugin/plugin.json",
+  "plugins/brain-creator/.mcp.json",
+  "plugins/brain-creator/skills/brain-creator/SKILL.md",
+  ".agents/plugins/marketplace.json",
   "README.md",
   "package.json"
 ];
@@ -40,6 +45,15 @@ const forbidden = paths.filter((path) =>
   forbiddenPrefixes.some((prefix) => path === prefix.slice(0, -1) || path.startsWith(prefix))
 );
 assert(forbidden.length === 0, `Package includes forbidden paths: ${forbidden.join(", ")}`);
+
+const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+const pluginJson = JSON.parse(
+  await readFile("plugins/brain-creator/.codex-plugin/plugin.json", "utf8")
+);
+assert(
+  pluginJson.license === packageJson.license,
+  `Codex plugin license ${pluginJson.license} does not match package license ${packageJson.license}`
+);
 
 console.log("Package contents verification passed.");
 console.log(`Entries: ${paths.length}`);

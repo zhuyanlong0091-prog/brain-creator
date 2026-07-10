@@ -147,6 +147,16 @@ codex plugin add brain-creator@personal
 codex plugin list
 ```
 
+After installing Brain Creator from npm in a business project, use the installed package root as the marketplace source:
+
+```bash
+cd /path/to/business-project
+npm install --save-dev brain-creator
+codex plugin marketplace add node_modules/brain-creator
+codex plugin add brain-creator@personal
+codex plugin list
+```
+
 Do not pass `plugins/`, `plugins/brain-creator`, or `.agents/plugins/marketplace.json` directly. They are useful implementation paths, but they are not the marketplace root accepted by `codex plugin marketplace add`.
 
 To validate the local plugin:
@@ -161,7 +171,7 @@ To validate the full Codex-native entry path from this repository:
 npm run verify:codex-native-entry
 ```
 
-This local smoke checks that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the host-agent handoff, `/bc help` is read-only, an approved case can advance through `bc_run_chain` plus `bc_submit_agent_output`, and the repo-local marketplace plugin can be installed. To check only the Codex plugin marketplace installation path:
+This local smoke checks that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the host-agent handoff, `/bc help` is read-only, an approved case can advance through `bc_run_chain` plus `bc_submit_agent_output`, and the Codex plugin can be installed from both the source checkout and a packed npm install. To check only the Codex plugin marketplace installation path:
 
 ```bash
 npm run verify:codex-plugin-install
