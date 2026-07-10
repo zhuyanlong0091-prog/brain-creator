@@ -55,7 +55,9 @@ export function buildReleaseReadinessReport(
     binCheck(input.packageJson),
     filesCheck(input.packageJson),
     scriptCheck(input.packageJson, "verify:package-contents"),
-    scriptCheck(input.packageJson, "verify:package-install")
+    scriptCheck(input.packageJson, "verify:package-install"),
+    scriptCheck(input.packageJson, "verify:codex-native-entry"),
+    scriptCheck(input.packageJson, "verify:codex-plugin-install")
   ];
 
   return {
