@@ -46,6 +46,10 @@ export async function installBrainCreatorCodexPlugin(
 
 export async function runInstallCodexPluginCli(args: string[], io: InstallCodexPluginCliIo = {}) {
   try {
+    if (args.includes("--help") || args.includes("-h")) {
+      (io.log ?? console.log)(installCodexPluginHelp());
+      return 0;
+    }
     const packageRootArgIndex = args.findIndex((arg) => arg === "--package-root");
     const packageRoot =
       packageRootArgIndex >= 0 ? args[packageRootArgIndex + 1] : io.packageRoot;
@@ -61,6 +65,18 @@ export async function runInstallCodexPluginCli(args: string[], io: InstallCodexP
     (io.error ?? console.error)(error instanceof Error ? error.message : String(error));
     return 1;
   }
+}
+
+export function installCodexPluginHelp() {
+  return [
+    "Usage: brain-creator-install-codex-plugin [--package-root <path>]",
+    "",
+    "Registers Brain Creator as a Codex plugin marketplace and installs brain-creator@personal.",
+    "",
+    "Options:",
+    "  --package-root <path>  Package root to register. Defaults to this installed package.",
+    "  -h, --help             Show this help."
+  ].join("\n");
 }
 
 function resolvePackageRoot() {

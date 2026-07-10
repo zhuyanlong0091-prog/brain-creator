@@ -47,4 +47,22 @@ describe("install Codex plugin CLI", () => {
     expect(exitCode).toBe(1);
     expect(errors.join("\n")).toContain("codex not found");
   });
+
+  it("prints help without running Codex commands", async () => {
+    const logs: string[] = [];
+    const calls: string[] = [];
+
+    const exitCode = await runInstallCodexPluginCli(["--help"], {
+      log: (message) => logs.push(message),
+      runCommand: async (command) => {
+        calls.push(command);
+        return { stdout: "", stderr: "" };
+      }
+    });
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([]);
+    expect(logs.join("\n")).toContain("brain-creator-install-codex-plugin");
+    expect(logs.join("\n")).toContain("--package-root");
+  });
 });
