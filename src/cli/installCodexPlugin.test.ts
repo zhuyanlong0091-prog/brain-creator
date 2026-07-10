@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
 import {
   installBrainCreatorCodexPlugin,
   runInstallCodexPluginCli
@@ -7,26 +8,27 @@ import {
 describe("install Codex plugin CLI", () => {
   it("registers the package root as a Codex marketplace and installs Brain Creator", async () => {
     const calls: Array<{ command: string; args: string[]; cwd: string }> = [];
+    const packageRoot = resolve("tmp", "business-project", "node_modules", "brain-creator");
 
     const result = await installBrainCreatorCodexPlugin({
-      packageRoot: "C:/project/node_modules/brain-creator",
+      packageRoot,
       runCommand: async (command, args, cwd) => {
         calls.push({ command, args, cwd });
         return { stdout: "ok", stderr: "" };
       }
     });
 
-    expect(result.marketplaceRoot).toBe("C:\\project\\node_modules\\brain-creator");
+    expect(result.marketplaceRoot).toBe(packageRoot);
     expect(calls).toEqual([
       {
         command: "codex",
-        args: ["plugin", "marketplace", "add", "C:\\project\\node_modules\\brain-creator"],
-        cwd: "C:\\project\\node_modules\\brain-creator"
+        args: ["plugin", "marketplace", "add", packageRoot],
+        cwd: packageRoot
       },
       {
         command: "codex",
         args: ["plugin", "add", "brain-creator@personal"],
-        cwd: "C:\\project\\node_modules\\brain-creator"
+        cwd: packageRoot
       }
     ]);
   });
