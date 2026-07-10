@@ -138,6 +138,17 @@ It provides:
 
 Read-only status, asset, and review tools declare MCP `readOnlyHint` annotations. Write operations still require host approval, and the Skill instructs the Agent not to retry a cancelled facade operation through lower-level tools.
 
+Install the repo-local plugin from the repository root. The marketplace source is the repository root because Codex discovers `.agents/plugins/marketplace.json` under it:
+
+```bash
+cd /path/to/brain-creator-mvp
+codex plugin marketplace add .
+codex plugin add brain-creator@personal
+codex plugin list
+```
+
+Do not pass `plugins/`, `plugins/brain-creator`, or `.agents/plugins/marketplace.json` directly. They are useful implementation paths, but they are not the marketplace root accepted by `codex plugin marketplace add`.
+
 To validate the local plugin:
 
 ```bash

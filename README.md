@@ -400,6 +400,16 @@ Codex accepts at most three starter prompts. Brain Creator keeps the three prima
 
 Status, asset, and review MCP tools carry standard `readOnlyHint` annotations so Codex can inspect them without requesting write access. Creation, configuration, and execution retain host approval; when a call is cancelled or denied, the Agent does not retry through a lower-level tool.
 
+Install the repo-local plugin from the repository root. Pass the repository root to `marketplace add`; Codex reads `.agents/plugins/marketplace.json` from there:
+
+```bash
+cd /path/to/brain-creator-mvp
+codex plugin marketplace add .
+codex plugin add brain-creator@personal
+```
+
+Do not pass `plugins/`, `plugins/brain-creator`, or `.agents/plugins/marketplace.json` directly. Those paths are not marketplace roots for the Codex CLI.
+
 To verify the Codex-native entrypoint in one command:
 
 ```bash
