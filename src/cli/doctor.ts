@@ -94,6 +94,7 @@ export function formatDoctorReport(report: DoctorReport) {
       report.agentBridge.command ? ` (${report.agentBridge.command})` : ""
     }`,
     `Recommended action: ${report.agentBridge.recommendedAction}`,
+    "Codex plugin setup: run npx brain-creator-install-codex-plugin in the business project.",
     "",
     ...report.checks.flatMap((check) => [
       `${statusIcon(check.status)} ${check.name}: ${check.message}`,
