@@ -73,6 +73,7 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
     bridgeCommandCheck(env, commandExists, agentBridge),
     bridgeArgsCheck(env),
     bridgeTimeoutCheck(env),
+    playwrightBrowserCheck(env, fileExists),
     agentDefinitionsCheck(cwd, fileExists)
   ];
 
@@ -123,7 +124,7 @@ function bridgeCommandCheck(
     return {
       name: "Agent bridge provider",
       status: "pass",
-      message: "host-agent provider is ready; use bc_prepare_agent_task and bc_submit_agent_output.",
+      message: "host-agent provider is ready for Planner, Generator, and Healer tasks without a Claude or Codex subprocess."
     };
   }
   if (provider === "disabled") {
@@ -204,6 +205,44 @@ function bridgeTimeoutCheck(env: DoctorEnv): DoctorCheck {
     name: "Agent bridge timeout",
     status: "pass",
     message: `Agent bridge timeout is ${timeout}ms.`
+  };
+}
+
+function playwrightBrowserCheck(
+  env: DoctorEnv,
+  fileExists: (path: string) => boolean
+): DoctorCheck {
+  const configured = env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+  const candidates = [
+    configured,
+    process.platform === "win32"
+      ? `${env.PROGRAMFILES ?? process.env.PROGRAMFILES ?? "C:\\Program Files"}\\Google\\Chrome\\Application\\chrome.exe`
+      : undefined,
+    process.platform === "win32"
+      ? `${env["PROGRAMFILES(X86)"] ?? process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)"}\\Microsoft\\Edge\\Application\\msedge.exe`
+      : undefined,
+    process.platform === "darwin"
+      ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      : undefined,
+    process.platform === "linux" ? "/usr/bin/google-chrome" : undefined,
+    process.platform === "linux" ? "/usr/bin/chromium" : undefined
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const available = candidates.find(fileExists);
+  if (available) {
+    return {
+      name: "Playwright browser",
+      status: "pass",
+      message: `A Chromium-compatible browser is available at ${available}.`
+    };
+  }
+  return {
+    name: "Playwright browser",
+    status: "warn",
+    message: configured
+      ? `PLAYWRIGHT_CHROMIUM_EXECUTABLE does not exist: ${configured}.`
+      : "No system Chrome/Edge browser was detected for real Playwright execution.",
+    remediation:
+      "Run npx playwright install chromium or set PLAYWRIGHT_CHROMIUM_EXECUTABLE to an installed Chrome/Edge executable."
   };
 }
 
@@ -288,7 +327,7 @@ function recommendedBridgeAction(provider: SupportedBridgeProvider | "invalid") 
     return "Run confirmed workflows through the Codex subprocess bridge.";
   }
   if (provider === "host-agent") {
-    return "Use bc_prepare_agent_task, read input.prompt.md and input.context.json, write the requested outputs, then call bc_submit_agent_output.";
+    return "When Planner, Generator, or Healer returns needs_agent_execution, execute that task in the current agent, write the requested outputs, then call bc_submit_agent_output.";
   }
   if (provider === "disabled") {
     return "Use preview/status workflows only; real Planner/Generator/Healer execution is disabled.";

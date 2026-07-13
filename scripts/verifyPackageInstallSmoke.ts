@@ -43,6 +43,12 @@ try {
     "utf8"
   );
   assert(skill.includes("bc_run_chain"), "installed Brain Creator skill is missing workflow guidance");
+  assert(
+    (await readFile(join(businessDir, "playwright.config.ts"), "utf8")).includes(
+      "PLAYWRIGHT_CHROMIUM_EXECUTABLE"
+    ),
+    "installed business project is missing the portable Playwright config"
+  );
   const mcpConfig = JSON.parse(await readFile(join(businessDir, ".mcp.json"), "utf8"));
   assert(
     mcpConfig.mcpServers?.["brain-creator"]?.command === "npx",

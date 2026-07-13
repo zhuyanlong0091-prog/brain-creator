@@ -18,7 +18,7 @@ describe("Brain Creator local integration files", () => {
       command: "brain-creator-mcp",
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
-        BRAIN_CREATOR_AGENT_PROVIDER: "auto",
+        BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
     });
@@ -47,6 +47,7 @@ describe("Brain Creator local integration files", () => {
         "skills/",
         ".claude/agents/",
         "plugin/",
+        "playwright.config.ts",
         "docs/mcp-installation.md",
         "README.md"
       ])
@@ -66,6 +67,9 @@ describe("Brain Creator local integration files", () => {
     );
     expect(packageJson.scripts["verify:host-agent-chain"]).toContain(
       "scripts/hostAgentChainSmoke.ts"
+    );
+    expect(packageJson.scripts["verify:host-agent-document-suite"]).toContain(
+      "scripts/hostAgentDocumentSuiteSmoke.ts"
     );
     expect(packageJson.scripts["verify:codex-native-entry"]).toContain(
       "scripts/codexNativeEntrySmoke.ts"
@@ -335,6 +339,8 @@ describe("Brain Creator local integration files", () => {
     const config = await readFile("playwright.config.ts", "utf8");
 
     expect(config).toContain("PLAYWRIGHT_CHROMIUM_EXECUTABLE");
+    expect(config).toContain("Google\\\\Chrome");
+    expect(config).toContain("Microsoft\\\\Edge");
     expect(config).not.toContain("C:\\Users\\");
   });
 

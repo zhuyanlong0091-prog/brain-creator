@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeBrainCreatorMcpConfig } from "./writeMcpConfig.js";
 
 type CommandResult = {
   stdout: string;
@@ -16,16 +17,19 @@ type CommandRunner = (
 
 export type InstallCodexPluginOptions = {
   packageRoot?: string;
+  workspaceDir?: string;
   codexCommand?: string;
   runCommand?: CommandRunner;
 };
 
 export type InstallCodexPluginResult = {
   marketplaceRoot: string;
+  mcpConfigPath: string;
 };
 
 type InstallCodexPluginCliIo = {
   packageRoot?: string;
+  cwd?: string;
   log?: (message: string) => void;
   error?: (message: string) => void;
   runCommand?: CommandRunner;
@@ -40,8 +44,12 @@ export async function installBrainCreatorCodexPlugin(
 
   await run(command, ["plugin", "marketplace", "add", marketplaceRoot], marketplaceRoot);
   await run(command, ["plugin", "add", "brain-creator@personal"], marketplaceRoot);
+  const mcpConfig = await writeBrainCreatorMcpConfig({
+    targetDir: options.workspaceDir ?? process.cwd(),
+    provider: "host-agent"
+  });
 
-  return { marketplaceRoot };
+  return { marketplaceRoot, mcpConfigPath: mcpConfig.path };
 }
 
 export async function runInstallCodexPluginCli(args: string[], io: InstallCodexPluginCliIo = {}) {
@@ -55,11 +63,13 @@ export async function runInstallCodexPluginCli(args: string[], io: InstallCodexP
       packageRootArgIndex >= 0 ? args[packageRootArgIndex + 1] : io.packageRoot;
     const result = await installBrainCreatorCodexPlugin({
       packageRoot,
+      workspaceDir: io.cwd ?? process.cwd(),
       runCommand: io.runCommand
     });
     (io.log ?? console.log)(
       `Brain Creator Codex plugin installed from ${result.marketplaceRoot}`
     );
+    (io.log ?? console.log)(`Brain Creator host-agent MCP config: ${result.mcpConfigPath}`);
     return 0;
   } catch (error) {
     (io.error ?? console.error)(error instanceof Error ? error.message : String(error));
@@ -71,7 +81,7 @@ export function installCodexPluginHelp() {
   return [
     "Usage: brain-creator-install-codex-plugin [--package-root <path>]",
     "",
-    "Registers Brain Creator as a Codex plugin marketplace and installs brain-creator@personal.",
+    "Registers Brain Creator as a Codex plugin marketplace, installs brain-creator@personal, and configures the current workspace for host-agent execution.",
     "",
     "Options:",
     "  --package-root <path>  Package root to register. Defaults to this installed package.",

@@ -15,7 +15,8 @@ try {
   await verifyPluginInstallFromInstalledBin(
     "packed npm install",
     installed.packageRoot,
-    installed.binPath
+    installed.binPath,
+    installed.businessDir
   );
 
   console.log("Codex plugin install smoke passed.");
@@ -23,7 +24,12 @@ try {
   console.log(`Package marketplace root: ${installed.packageRoot}`);
 } finally {
   if (!keepArtifacts) {
-    await rm(smokeRoot, { recursive: true, force: true });
+    await rm(smokeRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: process.platform === "win32" ? 10 : 0,
+      retryDelay: 200
+    });
   }
 }
 
@@ -37,6 +43,7 @@ async function installPackedPackage() {
   await writeFile(join(businessDir, "package.json"), "{\"type\":\"module\"}", "utf8");
   await run("npm", ["install", tarballName], businessDir);
   return {
+    businessDir,
     packageRoot: join(businessDir, "node_modules", "brain-creator"),
     binPath: join(
       businessDir,
@@ -94,13 +101,14 @@ async function verifyPluginInstallFromMarketplaceRoot(label: string, marketplace
 async function verifyPluginInstallFromInstalledBin(
   label: string,
   marketplaceRoot: string,
-  binPath: string
+  binPath: string,
+  businessDir: string
 ) {
   const codexHome = join(smokeRoot, `codex-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`);
   await mkdir(codexHome, { recursive: true });
   const env = { CODEX_HOME: codexHome };
 
-  const install = await run(binPath, ["--package-root", marketplaceRoot], marketplaceRoot, env);
+  const install = await run(binPath, ["--package-root", marketplaceRoot], businessDir, env);
   assert(
     install.stdout.includes("Brain Creator Codex plugin installed"),
     `Installed Brain Creator plugin bin did not report success from ${label}:\n${install.stdout}\n${install.stderr}`
@@ -114,6 +122,11 @@ async function verifyPluginInstallFromInstalledBin(
   assert(
     list.stdout.includes("plugins\\brain-creator") || list.stdout.includes("plugins/brain-creator"),
     `Codex plugin list did not point at the Brain Creator plugin path from ${label}:\n${list.stdout}`
+  );
+  const mcpConfig = JSON.parse(await readFile(join(businessDir, ".mcp.json"), "utf8"));
+  assert(
+    mcpConfig.mcpServers?.["brain-creator"]?.env?.BRAIN_CREATOR_AGENT_PROVIDER === "host-agent",
+    "Installed Codex plugin command did not configure the business project for host-agent execution"
   );
 }
 

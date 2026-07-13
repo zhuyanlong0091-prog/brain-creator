@@ -17,6 +17,7 @@ describe("installBrainCreatorAssets", () => {
 
     expect(result.installed).toEqual(
       expect.arrayContaining([
+        join(targetDir, "playwright.config.ts"),
         join(targetDir, ".claude", "skills", "brain-creator", "SKILL.md"),
         join(targetDir, ".claude", "agents", "playwright-test-planner.md"),
         join(targetDir, ".claude", "agents", "playwright-test-generator.md"),
@@ -26,6 +27,9 @@ describe("installBrainCreatorAssets", () => {
     await expect(
       readFile(join(targetDir, ".claude", "skills", "brain-creator", "SKILL.md"), "utf8")
     ).resolves.toContain("bc_run_chain");
+    await expect(readFile(join(targetDir, "playwright.config.ts"), "utf8")).resolves.toContain(
+      "PLAYWRIGHT_CHROMIUM_EXECUTABLE"
+    );
   });
 
   it("does not overwrite existing business project assets unless force is enabled", async () => {

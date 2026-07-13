@@ -18,6 +18,10 @@ export type InstallAssetsResult = {
 
 const assetPairs = [
   {
+    source: "playwright.config.ts",
+    target: "playwright.config.ts"
+  },
+  {
     source: "skills/brain-creator/SKILL.md",
     target: ".claude/skills/brain-creator/SKILL.md"
   },
