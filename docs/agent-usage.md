@@ -213,6 +213,8 @@ Expected agent behavior:
 5. If submission returns another `needs_agent_execution` task, continue with that task. Stop only at `completed`, `failed`, or `blocked`.
 6. Use `bc_review` to report SuiteRun, ChainRun, BugReport, Gap, and evidence paths.
 
+The default safety policy stops a document suite at the first case-level environment, authentication, locator, or evidence Gap. When the user explicitly confirms that independent cases should still be attempted, pass `continueOnBlocked: true` to both the preview and confirmed `bc_run` calls. The host agent must continue consuming returned task packages, preserve each Gap, and report a final `blocked` suite if any case remained blocked. This policy does not bypass suite-level auth/bridge preflight or source write-back confirmation.
+
 `waiting-for-agent` is an active handoff state. It does not mean Brain Creator is missing an AgentBridge, and it must not be reported as a Gap. Generator submission invokes real Playwright automatically; a failing run returns a bounded Healer task.
 
 ## Session Resume: The New-Session Entry Point

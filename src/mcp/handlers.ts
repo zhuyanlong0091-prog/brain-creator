@@ -710,6 +710,9 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       source: caseSource,
       summary: previewSummary(parsed, selectedCases),
       selection: selectionSummary(parsed.cases, selectedCases, filters),
+      executionPolicy: {
+        continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked")
+      },
       bridge,
       requiresConfirmation: true,
       nextAction: "Ask the user to confirm before running the full suite."
@@ -783,8 +786,12 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         sourceId: caseSource.id,
         totalCases: selectedCases.length,
         selectedCaseNos: selectedCases.map((documentCase) => documentCase.caseNo),
+        continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked"),
         status: "approved"
       });
+  if (optionalBooleanArg(input, "continueOnBlocked") && suite.continueOnBlocked !== true) {
+    context.service.enableCaseSuiteContinueOnBlocked(suite.id);
+  }
   const alreadyPassed = passedCaseNosForSuite(context, systemId, suite.id);
   const casesToRun = parsed.cases.filter(
     (documentCase) =>
@@ -1782,7 +1789,11 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         testResult
       };
     }
-    if (suiteRun.status === "blocked" || (suiteRun.gapIds.length > 0 && suiteRun.bugReportIds.length === 0)) {
+    if (
+      suite.continueOnBlocked !== true &&
+      (suiteRun.status === "blocked" ||
+        (suiteRun.gapIds.length > 0 && suiteRun.bugReportIds.length === 0))
+    ) {
       const blockedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "blocked");
       return {
         ...result,
@@ -1809,10 +1820,11 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         ...nextTask
       };
     }
-    const failedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "failed");
+    const finalStatus = hostAgentSuiteFailureStatus(context, suite);
+    const failedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, finalStatus);
     return {
       ...result,
-      status: "failed",
+      status: finalStatus,
       chainRun,
       suiteRun,
       suite: failedSuite,
@@ -2558,6 +2570,18 @@ function attemptedCaseNosForSuite(
     }
   }
   return attempted;
+}
+
+function hostAgentSuiteFailureStatus(
+  context: BrainCreatorMcpContext,
+  suite: CaseSuite
+): "blocked" | "failed" {
+  const runs = context.service
+    .listCaseSuiteRuns(suite.systemId)
+    .filter((run) => run.suiteId === suite.id);
+  return runs.some((run) => run.status === "blocked" || run.blocked > 0)
+    ? "blocked"
+    : "failed";
 }
 
 function facadeNextAction(state: {

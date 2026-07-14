@@ -3592,6 +3592,130 @@ describe("handleBrainCreatorTool", () => {
     }
   });
 
+  it("continues after a blocked host-agent case only when the suite explicitly allows it", async () => {
+    const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
+    process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
+    try {
+      const workDir = await tempDir();
+      const context = createBrainCreatorMcpContext({
+        dataFilePath: join(workDir, "assets.json"),
+        workDir
+      });
+      let runCount = 0;
+      context.runner = async () => {
+        runCount += 1;
+        return runCount <= 2
+          ? {
+              exitCode: 1,
+              stdout: "missing environment configuration: required fixture data is unavailable",
+              stderr: ""
+            }
+          : { exitCode: 0, stdout: "playwright passed", stderr: "" };
+      };
+      const source = join(workDir, "cases.xlsx");
+      await writeFile(source, createXlsxFixture());
+      const system = dataOf(
+        await handleBrainCreatorTool(context, "bc_create_system", {
+          name: "HRMS",
+          environment: "test",
+          baseUrl: "https://hrms.example.test",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["https://hrms.example.test"]
+        })
+      );
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      });
+
+      const firstRun = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source,
+          confirm: true
+        })
+      );
+      const optedInRun = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source,
+          suiteId: firstRun.suite.id,
+          confirm: true,
+          continueOnBlocked: true
+        })
+      );
+      expect(optedInRun.task.id).toBe(firstRun.task.id);
+      await writeFile(
+        optedInRun.task.outputPaths[0],
+        "import { test, expect } from '../seed';\n",
+        "utf8"
+      );
+      const needsHealing = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: optedInRun.task.id,
+          status: "succeeded",
+          stdout: "TC-001 generated",
+          stderr: "",
+          outputPaths: optedInRun.task.outputPaths
+        })
+      );
+      const nextCase = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: needsHealing.task.id,
+          status: "succeeded",
+          stdout: "TC-001 cannot be healed without environment data",
+          stderr: "",
+          outputPaths: needsHealing.task.outputPaths
+        })
+      );
+
+      expect(nextCase).toEqual(
+        expect.objectContaining({
+          status: "needs_agent_execution",
+          stage: "generator",
+          currentCase: expect.objectContaining({ caseNo: "TC-002", status: "waiting-for-agent" }),
+          suiteRun: expect.objectContaining({ status: "blocked", blocked: 1 })
+        })
+      );
+      await writeFile(
+        nextCase.task.outputPaths[0],
+        "import { test, expect } from '../seed';\n",
+        "utf8"
+      );
+      const completed = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: nextCase.task.id,
+          status: "succeeded",
+          stdout: "TC-002 generated",
+          stderr: "",
+          outputPaths: nextCase.task.outputPaths
+        })
+      );
+
+      expect(completed).toEqual(
+        expect.objectContaining({
+          status: "blocked",
+          suite: expect.objectContaining({ id: firstRun.suite.id, status: "blocked" }),
+          suiteRun: expect.objectContaining({ status: "completed", passed: 1, blocked: 0 })
+        })
+      );
+      expect(context.service.getCaseSuite(firstRun.suite.id)).toEqual(
+        expect.objectContaining({ continueOnBlocked: true })
+      );
+      expect(context.service.listCaseSuiteRuns(system.id)).toEqual([
+        expect.objectContaining({ status: "blocked", blocked: 1 }),
+        expect.objectContaining({ status: "completed", passed: 1 })
+      ]);
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
+    }
+  });
+
   it("creates a BugReport when a host-agent healer still fails a document expectation", async () => {
     const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
     process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";

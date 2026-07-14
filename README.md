@@ -53,6 +53,8 @@ Brain Creator v2 现在采用三层入口：
 
 Codex 插件默认使用 `host-agent`。确认执行后，Brain Creator 每次返回一条 `needs_agent_execution` 的 Generator/Healer 任务，当前 Codex Agent 直接生成或修复测试并调用 `bc_submit_agent_output`；提交成功后会自动运行 Playwright，并在还有用例时直接返回下一条任务。Agent 必须持续执行到 `completed`、`failed` 或 `blocked`。`waiting-for-agent` 表示等待当前 Agent 工作，不表示缺少 Claude bridge。
 
+默认情况下，单条用例产生环境、鉴权、定位或证据 Gap 时，套件会立即进入 `blocked`，避免批量制造同源失败。只有用户明确要求“即使个别用例阻塞也继续尝试全部用例”时，Agent 才应在预览和确认执行中传入 `continueOnBlocked: true`。此时 Brain Creator 会保留当前 Gap 并继续下一条尚未尝试的用例，全部尝试结束后仍以 `blocked` 汇总；该选项不会绕过套件级鉴权/Bridge 预检，也不会自动关闭 Gap。
+
 当前文档来源支持：
 
 - 本地 `.xlsx` 文件。
@@ -312,6 +314,8 @@ When the user explicitly types `/bc ...`, the agent can call `bc_command` as the
 For a test case document, the agent should call `bc_run mode=case-source-suite confirm=false` first. Only after explicit user confirmation should it call the same mode with `confirm=true` to execute the suite run. The default is the full document; if the user says "only run TC-001/TC-002", "only run the recruiting module", or "only run P0", map that request to `caseNos`, `modules`, and `priorities`. Multiple filters are intersected.
 
 The Codex plugin defaults to `host-agent`. After confirmation, Brain Creator returns one `needs_agent_execution` Generator/Healer task at a time. The current Codex agent creates or repairs the test and calls `bc_submit_agent_output`; Brain Creator then runs Playwright and returns the next case task when work remains. Continue until `completed`, `failed`, or `blocked`. `waiting-for-agent` means the current agent has work to do, not that a Claude bridge is missing.
+
+By default, an environment, authentication, locator, or evidence Gap blocks the suite immediately so one shared prerequisite does not create a batch of duplicate failures. Only when the user explicitly asks to keep attempting every case despite individual blockers should the agent pass `continueOnBlocked: true` in both preview and confirmed execution. Brain Creator then preserves the Gap and moves to the next unattempted case; after all cases are attempted, the suite still summarizes as `blocked`. This option does not bypass suite-level auth/bridge preflight and never resolves Gaps automatically.
 
 Supported document sources:
 
