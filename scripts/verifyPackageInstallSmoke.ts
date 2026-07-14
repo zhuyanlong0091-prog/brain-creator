@@ -200,7 +200,7 @@ try {
   console.log(`Package: ${tarballName}`);
 } finally {
   if (!keepArtifacts) {
-    await rm(smokeRoot, { recursive: true, force: true });
+    await rm(smokeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }
 

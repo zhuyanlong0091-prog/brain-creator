@@ -9,6 +9,10 @@ import { buildAgentPrompt } from "../agent/promptBuilder.js";
 import { checkBusinessRules } from "../agent/qualityGate.js";
 import { extractCandidateTerms } from "../agent/termExtractor.js";
 import { createConfiguredAgentBridge } from "../agent/bridgeProvider.js";
+import {
+  verifyStoredBrowserAuth,
+  type AuthStateVerifier
+} from "../agent/authStateVerifier.js";
 import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
@@ -52,6 +56,7 @@ export type BrainCreatorMcpContext = {
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
+  authStateVerifier: AuthStateVerifier;
 };
 
 type HostAgentTaskPackage = {
@@ -69,6 +74,7 @@ type CreateContextInput = {
   workDir?: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
+  authStateVerifier?: AuthStateVerifier;
 };
 
 export function createBrainCreatorMcpContext(
@@ -85,7 +91,8 @@ export function createBrainCreatorMcpContext(
     agentBridge:
       input.agentBridge ??
       (input.runner ? commandRunnerAgentBridge(input.runner) : createConfiguredAgentBridge()),
-    runner: input.runner
+    runner: input.runner,
+    authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth
   };
 }
 
@@ -710,6 +717,9 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       source: caseSource,
       summary: previewSummary(parsed, selectedCases),
       selection: selectionSummary(parsed.cases, selectedCases, filters),
+      executionPolicy: {
+        continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked")
+      },
       bridge,
       requiresConfirmation: true,
       nextAction: "Ask the user to confirm before running the full suite."
@@ -763,6 +773,46 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     };
   }
 
+  const authState = await verifyCaseSourceSuiteAuthState(context, systemId);
+  if (authState?.status === "expired") {
+    const authProfile = findAuthProfile(context, systemId);
+    const authCheckpoint = context.service.createAuthCheckpoint({
+      systemId,
+      authProfileId: authProfile.id,
+      reason: authState.reason ?? "Stored browser authentication has expired.",
+      resumeInstruction:
+        "Complete login in an isolated browser, save refreshed storage state, verify it in a fresh context, then resume the suite."
+    });
+    const gap = context.service.reportGap({
+      projectId: systemId,
+      sourceType: "case-source-suite-auth",
+      sourceId: caseSource.id,
+      reason: authState.reason ?? "Stored browser authentication has expired.",
+      severity: "high",
+      owner: "qa"
+    });
+    return {
+      mode: "case-source-suite",
+      status: "blocked",
+      source: caseSource,
+      authState,
+      authCheckpoint,
+      gap,
+      bridge
+    };
+  }
+  if (authState?.status === "unavailable") {
+    const gap = context.service.reportGap({
+      projectId: systemId,
+      sourceType: "case-source-suite-auth",
+      sourceId: caseSource.id,
+      reason: authState.reason ?? "Stored browser authentication could not be verified.",
+      severity: "high",
+      owner: "qa"
+    });
+    return { mode: "case-source-suite", status: "blocked", source: caseSource, authState, gap, bridge };
+  }
+
   if (!bridge.ok) {
     const gap = context.service.reportGap({
       projectId: systemId,
@@ -783,8 +833,12 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         sourceId: caseSource.id,
         totalCases: selectedCases.length,
         selectedCaseNos: selectedCases.map((documentCase) => documentCase.caseNo),
+        continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked"),
         status: "approved"
       });
+  if (optionalBooleanArg(input, "continueOnBlocked") && suite.continueOnBlocked !== true) {
+    context.service.enableCaseSuiteContinueOnBlocked(suite.id);
+  }
   const alreadyPassed = passedCaseNosForSuite(context, systemId, suite.id);
   const casesToRun = parsed.cases.filter(
     (documentCase) =>
@@ -1782,7 +1836,11 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         testResult
       };
     }
-    if (suiteRun.status === "blocked" || (suiteRun.gapIds.length > 0 && suiteRun.bugReportIds.length === 0)) {
+    if (
+      suite.continueOnBlocked !== true &&
+      (suiteRun.status === "blocked" ||
+        (suiteRun.gapIds.length > 0 && suiteRun.bugReportIds.length === 0))
+    ) {
       const blockedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "blocked");
       return {
         ...result,
@@ -1809,10 +1867,11 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         ...nextTask
       };
     }
-    const failedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "failed");
+    const finalStatus = hostAgentSuiteFailureStatus(context, suite);
+    const failedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, finalStatus);
     return {
       ...result,
-      status: "failed",
+      status: finalStatus,
       chainRun,
       suiteRun,
       suite: failedSuite,
@@ -2560,6 +2619,18 @@ function attemptedCaseNosForSuite(
   return attempted;
 }
 
+function hostAgentSuiteFailureStatus(
+  context: BrainCreatorMcpContext,
+  suite: CaseSuite
+): "blocked" | "failed" {
+  const runs = context.service
+    .listCaseSuiteRuns(suite.systemId)
+    .filter((run) => run.suiteId === suite.id);
+  return runs.some((run) => run.status === "blocked" || run.blocked > 0)
+    ? "blocked"
+    : "failed";
+}
+
 function facadeNextAction(state: {
   bridgeOk: boolean;
   awaitingAuthCheckpoints: number;
@@ -2998,6 +3069,31 @@ async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestAr
     snippet: content.slice(0, 500),
     bytes: Buffer.byteLength(content, "utf8")
   };
+}
+
+async function verifyCaseSourceSuiteAuthState(
+  context: BrainCreatorMcpContext,
+  systemId: string
+) {
+  const profile = findAuthProfile(context, systemId);
+  if (profile.loginMethod !== "script") {
+    return undefined;
+  }
+  const storageStatePath = context.service.getCaptureAuth(profile.id)?.secrets.storageStatePath;
+  if (!storageStatePath) {
+    return undefined;
+  }
+  const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+  if (!system) {
+    throw new Error("Business system not found");
+  }
+  return context.authStateVerifier({
+    storageStatePath: isAbsolute(storageStatePath)
+      ? resolve(storageStatePath)
+      : resolve(context.workDir, storageStatePath),
+    targetUrl: system.baseUrl,
+    allowedUrls: system.urlAllowlist
+  });
 }
 
 function findAuthProfile(context: BrainCreatorMcpContext, systemId: string): AuthProfile {

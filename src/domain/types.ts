@@ -368,6 +368,7 @@ export type CaseSuite = {
     | "cancelled";
   totalCases: number;
   selectedCaseNos: string[];
+  continueOnBlocked?: boolean;
   createdAt: string;
   updatedAt: string;
 };

@@ -194,6 +194,7 @@ type CreateCaseSuiteInput = {
   sourceId: string;
   totalCases: number;
   selectedCaseNos: string[];
+  continueOnBlocked?: boolean;
   status?: CaseSuite["status"];
 };
 
@@ -318,6 +319,7 @@ export class BrainCreatorService {
       status: input.status ?? "draft",
       totalCases: input.totalCases,
       selectedCaseNos: input.selectedCaseNos,
+      continueOnBlocked: input.continueOnBlocked ?? false,
       createdAt: now,
       updatedAt: now
     };
@@ -329,6 +331,14 @@ export class BrainCreatorService {
   updateCaseSuiteStatus(suiteId: string, status: CaseSuite["status"]): CaseSuite {
     const suite = this.getCaseSuite(suiteId);
     suite.status = status;
+    suite.updatedAt = timestamp();
+    this.repository.persist();
+    return suite;
+  }
+
+  enableCaseSuiteContinueOnBlocked(suiteId: string): CaseSuite {
+    const suite = this.getCaseSuite(suiteId);
+    suite.continueOnBlocked = true;
     suite.updatedAt = timestamp();
     this.repository.persist();
     return suite;
