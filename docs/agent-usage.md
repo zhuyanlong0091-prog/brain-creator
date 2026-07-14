@@ -181,15 +181,18 @@ Behind the scenes, this uses `bc_artifact_overview`, `bc_list_specs`, `bc_list_t
 
 ### 9. Stop And Resume A Protected Login
 
-If a login requires password, recovery, CAPTCHA, or 2FA, the agent should call `bc_create_auth_checkpoint` and wait while you complete the protected step manually. The checkpoint stores only the reason and resume instruction, never the secret value.
+If a login requires password, recovery, CAPTCHA, or 2FA, the agent should call `bc_create_auth_checkpoint` and use an isolated headed browser for the protected step. The checkpoint stores only the reason and resume instruction, never the secret value. After the application page is reached, the agent saves storage state under `.brain-creator/auth/<systemId>/storage-state.json`, configures a `script` AuthProfile with an encrypted workspace-relative `storageStatePath`, and verifies the state in a fresh read-only Playwright context before completing the checkpoint.
+
+Passwords and verification codes must never be placed in shell arguments, generated tests, logs, gaps, or reports. Storage state and browser profiles are sensitive local runtime data; they remain under `.brain-creator/` and are excluded from Git and npm packages.
 
 If you close the login page or stop the attempt, the agent should call `bc_cancel_plan`. Brain Creator records the test case as cancelled and creates a `user-interruption` Gap.
 
 To continue later:
 
-1. Complete or cancel the pending auth checkpoint.
-2. Call `bc_resume_plan` to return the cancelled case to draft.
-3. Review and approve the plan again before running the chain.
+1. Restore or repeat the isolated browser login and save a fresh storage state.
+2. Prove the saved state in a new read-only browser context, then complete or cancel the pending auth checkpoint.
+3. Call `bc_resume_plan` to return the cancelled case to draft.
+4. Review and approve the plan again before running the chain.
 
 Use `bc_report_gap` for external preflight failures such as blocked network access, unreachable target pages, or missing evidence outside a chain run.
 
@@ -206,7 +209,7 @@ Expected agent behavior:
 1. Call `bc_run mode=case-source-suite confirm=false` and show the case count, filters, risks, and bridge status.
 2. Wait for explicit confirmation.
 3. Call the same facade with `confirm=true`.
-4. In host-agent mode, execute the returned Generator/Healer task in the current Codex or Claude Code session, write the requested test, and call `bc_submit_agent_output`.
+4. In host-agent mode, execute the returned Generator/Healer task in the current Codex or Claude Code session. Import `test` and `expect` from the task's `--seed` file so authenticated browser setup is preserved, write the requested test, and call `bc_submit_agent_output`.
 5. If submission returns another `needs_agent_execution` task, continue with that task. Stop only at `completed`, `failed`, or `blocked`.
 6. Use `bc_review` to report SuiteRun, ChainRun, BugReport, Gap, and evidence paths.
 

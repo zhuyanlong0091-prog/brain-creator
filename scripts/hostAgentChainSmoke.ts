@@ -1,5 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createConfiguredAgentBridge } from "../src/agent/bridgeProvider.js";
@@ -83,11 +83,17 @@ try {
   assert(taskPackage.submitTool === "bc_submit_agent_output", "Expected bc_submit_agent_output submit tool");
   assert(context.service.listChainRuns(system.id).length === 0, "Chain run should not exist before agent submission");
   assert((await readFile(taskPackage.promptPath, "utf8")).includes("bc_submit_agent_output"), "Prompt missing submit instructions");
+  assert((await readFile(taskPackage.promptPath, "utf8")).includes("--seed"), "Prompt missing authenticated seed instructions");
+
+  const seedImport = relative(
+    dirname(taskPackage.testPath),
+    taskPackage.seedPath.replace(/\.ts$/, "")
+  ).replace(/\\/g, "/");
 
   await writeFile(
     taskPackage.testPath,
     [
-      "import { test, expect } from '@playwright/test';",
+      `import { test, expect } from ${JSON.stringify(seedImport.startsWith(".") ? seedImport : `./${seedImport}`)};`,
       "",
       "test('host-agent checkout smoke', async ({ page }) => {",
       "  await page.goto('https://host-agent.example.test');",

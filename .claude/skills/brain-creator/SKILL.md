@@ -54,7 +54,7 @@ Do not retry a cancelled or denied facade call through an equivalent fine-graine
 | Check current system state | `bc_status` | None | Prefer `statusMarkdown`; summarize system, auth, suites, bugs, gaps, artifacts, and next action. |
 | Connect a new system | `bc_configure target=system` | Confirm name, environment, base URL, and allowlist before creation. | Return system id and setup recommendations. |
 | Configure auth | `bc_configure target=auth` | Never echo secrets; keep sensitive values only in the tool input. | Return redacted auth state and verification result. |
-| Wait for manual login, CAPTCHA, recovery, or 2FA | `bc_configure target=checkpoint` | Continue only after the user says the checkpoint is complete. | Explain why execution is waiting and how to resume. |
+| Wait for manual login, CAPTCHA, recovery, or 2FA | `bc_configure target=checkpoint` plus the host browser capability | Continue only after the protected page is reached and a fresh browser proves the saved state works. | Explain why execution is waiting, save local storage state, and report only readiness metadata. |
 | Preview ambiguous operational wording | `bc_intent_preview` | Preview only; do not execute. | Show the suggested facade call, parameters, and risks. |
 | Preview a test document suite | `bc_run mode=case-source-suite confirm=false` | Required before execution. | Show counts, module and priority stats, sample cases, bridge state, and risks. |
 | Execute a confirmed test document suite | `bc_run mode=case-source-suite confirm=true` | Requires prior preview; Excel write-back also requires explicit write-back confirmation. | Report suite results, BugReports, Gaps, and evidence paths. |
@@ -126,8 +126,11 @@ Use the auth tools to store credentials without exposing secrets in later conver
 4. Call `bc_generate_seed` only when a local Playwright seed fixture is needed for Planner or Generator execution.
 5. Do not repeat raw token, cookie, or password values after the tool call.
 6. Call `bc_create_auth_checkpoint` when the user must manually complete password, recovery, CAPTCHA, or 2FA.
-7. Call `bc_complete_auth_checkpoint` after the user confirms the protected step is complete, or `bc_cancel_auth_checkpoint` when they stop.
-8. Call `bc_archive_auth` when an auth profile should be retained for history but no longer used.
+7. Use an isolated headed browser profile for the manual step. Never type credentials into shell arguments, logs, plans, gaps, or generated tests. After the protected application page is reached, save Playwright storage state under `.brain-creator/auth/<systemId>/storage-state.json`.
+8. Create or update a `script` AuthProfile whose encrypted `storageStatePath` points to that workspace-relative file, then verify the profile. The storage-state file is local runtime data and must stay ignored by Git and npm packaging.
+9. Before completing the checkpoint, open a fresh Playwright context with the saved state and perform a read-only assertion that the application is authenticated and has not returned to the login page.
+10. Call `bc_complete_auth_checkpoint` only after that fresh-context probe passes, or `bc_cancel_auth_checkpoint` when the user stops.
+11. Call `bc_archive_auth` when an older auth profile should be retained for history but no longer selected.
 
 Supported `loginMethod` values are `password`, `cookie`, `token`, and `script`. Returned auth profiles redact all secrets. Auth checkpoints contain reasons and resume instructions only; never put credentials or verification codes in them.
 
@@ -179,7 +182,7 @@ Use run tools only after a test case is approved.
 
 1. Confirm the test case has `status: "approved"`.
 2. Call `bc_run_chain` with the approved `caseId`.
-3. If `bc_run_chain` returns `status: "needs_agent_execution"` in host-agent mode, execute the returned task package yourself, write the requested output file, then call `bc_submit_agent_output`. Do not wait for a Claude or Codex subprocess. A generator submission automatically runs Playwright; if it returns a healer task, execute that task and submit it so Brain Creator can rerun the test and finish the chain.
+3. If `bc_run_chain` returns `status: "needs_agent_execution"` in host-agent mode, execute the returned task package yourself, write the requested output file, then call `bc_submit_agent_output`. Do not wait for a Claude or Codex subprocess. For Generator and Healer tasks, read the `--seed` argument and import `test` / `expect` from that seed instead of directly from `@playwright/test`; the seed owns authenticated browser setup. A generator submission automatically runs Playwright; if it returns a healer task, execute that task and submit it so Brain Creator can rerun the test and finish the chain.
 4. Call `bc_list_chain_runs` when you need execution history for the selected system.
 5. Report ChainRun status, generated spec path, generated test path, healer attempts, and any gaps.
 
@@ -212,4 +215,5 @@ Asset search is for review and traceability. It is not a substitute for user app
 - Use `bc_run_agent` only for diagnostics; the normal user workflow is `bc_generate_plan` to `bc_approve_plan` to `bc_run_chain`.
 - Treat generated artifacts as local workspace assets. Use `bc_read_spec` and `bc_read_test` only for paths returned by Brain Creator list tools.
 - Never store passwords, recovery codes, CAPTCHA answers, or 2FA values in auth checkpoints, gaps, plans, or artifacts.
+- Never mark an auth checkpoint complete merely because an AuthProfile record exists. Require a saved workspace-scoped storage state and a fresh, read-only authenticated browser probe for manual `script` authentication.
 - **工具透明度（Tool Transparency）：** 默认不主动列出工具名，用自然语言描述行为。但当用户追问操作细节、调试失败、做 Eval 或审计时，必须说明调用了哪些 MCP 工具、产出了哪些资产和 Gap。Brain Creator 应当可控、可审计、可复盘。

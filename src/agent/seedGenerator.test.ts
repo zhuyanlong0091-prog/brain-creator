@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -43,6 +43,70 @@ describe("generateSeedFile", () => {
     expect(content).toContain("secret-token");
     expect(content).toContain("https://shop.example.test");
   });
+
+  it("loads a workspace-scoped storage state for script authentication", async () => {
+    const workDir = await tempDir();
+    const outputDir = join(workDir, "tests");
+    const storageStatePath = join(workDir, ".brain-creator", "auth", "system_1", "storage-state.json");
+    await mkdir(join(storageStatePath, ".."), { recursive: true });
+    await writeFile(storageStatePath, JSON.stringify({ cookies: [], origins: [] }), "utf8");
+
+    const result = await generateSeedFile({
+      workDir,
+      outputDir,
+      system: systemProfile(),
+      authProfile: authProfileWithStorageState(
+        ".brain-creator/auth/system_1/storage-state.json"
+      )
+    });
+
+    const content = await readFile(result.seedPath, "utf8");
+    expect(result).toMatchObject({
+      loginMethod: "script",
+      secretKeys: ["storageStatePath"],
+      authState: "storage-state"
+    });
+    expect(content).toContain("browser.newContext");
+    expect(content).toContain("storageState");
+    expect(content).toContain(storageStatePath.replace(/\\/g, "\\\\"));
+  });
+
+  it("rejects storage state paths outside the workspace", async () => {
+    const workDir = await tempDir();
+
+    await expect(
+      generateSeedFile({
+        workDir,
+        outputDir: join(workDir, "tests"),
+        system: systemProfile(),
+        authProfile: authProfileWithStorageState("../outside/storage-state.json")
+      })
+    ).rejects.toThrow("Auth storage state must stay inside the Brain Creator workspace");
+  });
+
+  it("rejects storage state paths that escape through a symlink", async () => {
+    const workDir = await tempDir();
+    const outsideDir = await tempDir();
+    const linkedDir = join(workDir, ".brain-creator", "auth", "system_1");
+    await mkdir(join(linkedDir, ".."), { recursive: true });
+    await writeFile(
+      join(outsideDir, "storage-state.json"),
+      JSON.stringify({ cookies: [], origins: [] }),
+      "utf8"
+    );
+    await symlink(outsideDir, linkedDir, process.platform === "win32" ? "junction" : "dir");
+
+    await expect(
+      generateSeedFile({
+        workDir,
+        outputDir: join(workDir, "tests"),
+        system: systemProfile(),
+        authProfile: authProfileWithStorageState(
+          ".brain-creator/auth/system_1/storage-state.json"
+        )
+      })
+    ).rejects.toThrow("Auth storage state must stay inside the Brain Creator workspace");
+  });
 });
 
 async function tempDir() {
@@ -59,6 +123,20 @@ function systemProfile(): SystemProfile {
     baseUrl: "https://shop.example.test",
     defaultLocale: "zh-CN",
     urlAllowlist: ["https://shop.example.test"],
+    status: "succeeded",
+    createdAt: "2026-05-29T00:00:00.000Z",
+    updatedAt: "2026-05-29T00:00:00.000Z"
+  };
+}
+
+function authProfileWithStorageState(storageStatePath: string): AuthProfile {
+  return {
+    id: "auth_1",
+    projectId: "system_1",
+    env: "staging",
+    role: "qa-admin",
+    loginMethod: "script",
+    encryptedSecrets: encryptSecrets({ storageStatePath }),
     status: "succeeded",
     createdAt: "2026-05-29T00:00:00.000Z",
     updatedAt: "2026-05-29T00:00:00.000Z"

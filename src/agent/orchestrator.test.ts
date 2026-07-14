@@ -266,6 +266,9 @@ describe("runChain", () => {
       expect.arrayContaining(["playwright", "agent", "healer"]),
       ["playwright", "test", "tests/generated/case_1.spec.ts"]
     ]);
+    expect(commands[2]).toEqual(
+      expect.arrayContaining(["--seed", expect.stringContaining("seed-system_1.spec.ts")])
+    );
     expect(result.chainRun.status).toBe("succeeded");
     expect(result.chainRun.healRunId).toEqual(expect.stringMatching(/^agent_/));
     expect(result.healerRuns).toHaveLength(1);

@@ -28,6 +28,7 @@ const forbiddenPrefixes = [
   ".brain-creator-test/",
   ".obsidian/",
   ".playwright-mcp/",
+  ".playwright-cli/",
   ".gstack/",
   "test-results/",
   "node_modules/",

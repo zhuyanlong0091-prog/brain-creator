@@ -68,7 +68,7 @@ Codex 插件默认使用 `host-agent`。确认执行后，Brain Creator 每次�
 | “当前 HRMS 状态怎么样？” | `bc_status` | 不需要确认 | 系统、鉴权、suite、Bug、Gap、产物摘要、下一步建议和 `statusMarkdown`。 |
 | “我想接入一个新系统” | `bc_configure target=system` | 创建前确认系统名称、环境和 URL 范围 | 新系统 ID、环境、默认语言和后续鉴权/建模建议。 |
 | “配置这个系统的 token/cookie/password” | `bc_configure target=auth` | 不在聊天中回显密钥；敏感值只进工具输入 | 脱敏后的鉴权配置和验证状态。 |
-| “需要我手动登录/验证码/2FA” | `bc_configure target=checkpoint` | 等用户明确完成后再继续 | checkpoint 原因、恢复方式和等待状态。 |
+| “需要我手动登录/验证码/2FA” | `bc_configure target=checkpoint` + 隔离浏览器 | 登录后保存本地 storage state，并由新浏览器只读复验后再继续 | checkpoint、脱敏认证状态和恢复方式。 |
 | “帮我判断这句话该怎么执行” | `bc_intent_preview` | 只预览，不执行 | 建议使用的 Facade、参数和风险提示。 |
 | “执行这个 Excel/Markdown 用例文档” | `bc_run mode=case-source-suite confirm=false` | 必须先预览，等待用户确认 | 用例总数、模块/优先级统计、样例用例、风险和 bridge 状态。 |
 | “确认执行刚才的用例文档” | `bc_run mode=case-source-suite confirm=true` | 只能在预览后执行；写回 Excel 还需额外确认 | suite run 结果、BugReport、Gap 和证据路径。 |
@@ -105,6 +105,8 @@ BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
 
 `host-agent` 模式不会启动 Claude/Codex 子进程。Agent 可直接调用 `bc_prepare_agent_task`，读取返回的 `input.prompt.md` / `input.context.json`，完成输出文件后调用 `bc_submit_agent_output`。如果用户已经批准用例并调用 `bc_run_chain`，Brain Creator 会自动写出 spec/seed，并返回 `status: "needs_agent_execution"` 的 generator 任务包；此时不要等待子进程，当前 Agent 应完成任务包后再调用 `bc_submit_agent_output`。提交成功后，Brain Creator 会自动运行 Playwright；测试通过时记录 AgentRun、ChainRun 和测试产物归属，测试失败时返回 healer 任务包。healer 提交后会再次运行 Playwright，成功则完成链路；仍失败时会将链路标记为 failed。如果任务来自测试用例文档 suite，Brain Creator 会记录单用例 suite run，后续 resume 会跳过已通过用例；业务预期未满足会生成 BugReport，环境、鉴权、定位或执行阻塞会生成 Gap。
+
+需要人工登录时，Agent 应使用隔离的 headed 浏览器完成受保护步骤，把 Playwright storage state 保存到 `.brain-creator/auth/<systemId>/storage-state.json`，并通过 `script` AuthProfile 的加密 `storageStatePath` 引用它。完成 checkpoint 前，必须用一个全新的 Playwright context 做只读登录态复验。Generator/Healer 必须从任务的 `--seed` 文件导入 `test` 和 `expect`，不能直接从 `@playwright/test` 导入，否则会绕过认证 fixture。storage state、浏览器 profile 和 CLI 快照均属于本地敏感运行数据，不进入 Git 或 npm 包。
 
 Windows PowerShell 中请使用 `$env:` 设置同样的环境变量后再启动 MCP 客户端。
 
@@ -203,7 +205,7 @@ npm run verify:codex-native-entry
 npm run verify:host-agent-document-suite
 ```
 
-这些检查会覆盖 repo-local plugin starter prompt、host-agent doctor 指引、`/bc help` 只读快捷入口、任务包提交链路，以及“文档预览 → 用户确认 → 两条用例顺序执行 → 真实 Chromium 断言 → SuiteRun/ChainRun 落库”的完整闭环。
+这些检查会覆盖 repo-local plugin starter prompt、host-agent doctor 指引、`/bc help` 只读快捷入口、任务包提交链路，以及“文档预览 → 用户确认 → storage state 认证 → 两条用例顺序执行 → 真实 Chromium 断言 → SuiteRun/ChainRun 落库”的完整闭环。
 
 验证插件：
 
@@ -326,7 +328,7 @@ If a suite run fails midway, the user can simply say "continue the unfinished su
 | "What is the current HRMS status?" | `bc_status` | No confirmation required | System, auth, suite, bug, gap, artifact summary, next action, and `statusMarkdown`. |
 | "Connect a new business system" | `bc_configure target=system` | Confirm system name, environment, and URL scope before creation | New system id, environment, default locale, and setup suggestions. |
 | "Configure token/cookie/password auth" | `bc_configure target=auth` | Do not echo secrets in chat; sensitive values only enter tool input | Redacted auth profile and verification state. |
-| "I need to complete login/CAPTCHA/2FA manually" | `bc_configure target=checkpoint` | Wait for explicit user completion before continuing | Checkpoint reason, resume instructions, and waiting state. |
+| "I need to complete login/CAPTCHA/2FA manually" | `bc_configure target=checkpoint` plus an isolated browser | Save local storage state and verify it in a fresh read-only browser before continuing | Checkpoint, redacted auth readiness, and resume instructions. |
 | "Help me decide how to run this request" | `bc_intent_preview` | Preview only; no execution | Suggested facade, parameters, and risks. |
 | "Execute this Excel/Markdown test case document" | `bc_run mode=case-source-suite confirm=false` | Must preview and wait for user confirmation | Case count, module/priority stats, sample cases, risks, and bridge status. |
 | "Confirm and run that document" | `bc_run mode=case-source-suite confirm=true` | Only after preview; Excel write-back requires a separate explicit confirmation | Suite run result, BugReports, Gaps, and evidence paths. |
@@ -434,7 +436,7 @@ npm run verify:codex-native-entry
 npm run verify:host-agent-document-suite
 ```
 
-These checks cover the repo-local plugin starter prompt, host-agent doctor guidance, read-only `/bc help`, task handoff, plugin installation, and a full document preview → confirmation → two ordered cases → real Chromium assertions → persisted SuiteRun/ChainRun flow. To verify only the Codex plugin marketplace installation path, run:
+These checks cover the repo-local plugin starter prompt, host-agent doctor guidance, read-only `/bc help`, task handoff, plugin installation, and a full document preview → confirmation → storage-state authentication → two ordered cases → real Chromium assertions → persisted SuiteRun/ChainRun flow. To verify only the Codex plugin marketplace installation path, run:
 
 ```bash
 npm run verify:codex-plugin-install
@@ -510,6 +512,8 @@ BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
 
 Host-agent mode does not start a Claude or Codex subprocess. `bc_generate_plan` may return a Planner task package; after the current agent writes the spec, `bc_submit_agent_output` returns `plan_ready`. An approved case or confirmed document suite returns a Generator task with `status: "needs_agent_execution"`; the current agent writes the requested test and submits it. Brain Creator runs Playwright automatically, returns a Healer task on test failure, and returns the next document case task after a successful suite case. The agent continues until a terminal suite status. Passing tests record linked AgentRun, ChainRun, SuiteRun, and artifact ownership; unmet business expectations create BugReports, while environment, auth, locator, or execution blockers create Gaps.
+
+For manual authentication, the agent should use an isolated headed browser, save Playwright storage state under `.brain-creator/auth/<systemId>/storage-state.json`, and reference that workspace-relative file from an encrypted `storageStatePath` in a `script` AuthProfile. Before completing the checkpoint, it must prove the state in a fresh read-only Playwright context. Generator and Healer tasks must import `test` and `expect` from the task's `--seed` file rather than directly from `@playwright/test`, because the seed owns authenticated browser setup. Storage state, browser profiles, and CLI snapshots are sensitive local runtime data and are excluded from Git and npm packages.
 
 On Windows PowerShell, set the same values with `$env:` before launching the MCP client.
 

@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import AdmZip from "adm-zip";
@@ -186,6 +186,54 @@ describe("handleBrainCreatorTool", () => {
     );
     expect(JSON.stringify(seed)).not.toContain("secret-token");
     expect(seedContent).toContain("secret-token");
+  });
+
+  it("prefers the latest verified auth profile when generating a seed", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Protected HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "legacy",
+      loginMethod: "token",
+      secrets: { token: "stale-token" }
+    });
+    const storageDir = join(workDir, ".brain-creator", "auth", system.id);
+    const storageStatePath = join(storageDir, "storage-state.json");
+    await mkdir(storageDir, { recursive: true });
+    await writeFile(storageStatePath, JSON.stringify({ cookies: [], origins: [] }), "utf8");
+    const verified = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "script",
+        secrets: {
+          storageStatePath: `.brain-creator/auth/${system.id}/storage-state.json`
+        }
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_verify_auth", { id: verified.id });
+
+    const seed = dataOf(
+      await handleBrainCreatorTool(context, "bc_generate_seed", { systemId: system.id })
+    );
+
+    expect(seed).toEqual(
+      expect.objectContaining({ loginMethod: "script", authState: "storage-state" })
+    );
   });
 
   it("generates a draft plan and stores an approved test case", async () => {
@@ -984,7 +1032,9 @@ describe("handleBrainCreatorTool", () => {
       expect.objectContaining({
         agent: "healer",
         systemId: system.id,
-        status: "pending"
+        status: "pending",
+        args: expect.arrayContaining(["--seed", taskPackage.seedPath]),
+        chainContext: expect.objectContaining({ seedPath: taskPackage.seedPath })
       })
     );
     expect(submitted.chainRun).toEqual(
@@ -2150,6 +2200,61 @@ describe("handleBrainCreatorTool", () => {
     );
   });
 
+  it("reports an awaiting auth checkpoint as a blocked facade state", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json"),
+      agentBridge: Object.assign(
+        async () => ({ exitCode: 1, stdout: "", stderr: "bridge unavailable" }),
+        {
+          provider: "disabled",
+          preflight: async () => ({ ok: false, error: "bridge unavailable" })
+        }
+      )
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_configure", {
+        target: "system",
+        name: "Protected HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    const auth = dataOf(
+      await handleBrainCreatorTool(context, "bc_configure", {
+        target: "auth",
+        systemId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "script",
+        secrets: {}
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_configure", {
+      target: "checkpoint",
+      systemId: system.id,
+      authProfileId: auth.id,
+      reason: "Manual login required",
+      resumeInstruction: "Complete login in the isolated browser"
+    });
+
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", { systemId: system.id })
+    );
+
+    expect(status.facadeNextAction).toBe("complete_auth_checkpoint");
+    expect(status.userSummary).toEqual(
+      expect.objectContaining({
+        readiness: "blocked",
+        nextAction: "complete_auth_checkpoint",
+        nextStep: "Complete the pending manual authentication checkpoint."
+      })
+    );
+    expect(status.userSummary.counts.awaitingAuthCheckpoints).toBe(1);
+    expect(status.statusMarkdown).toContain("- Awaiting auth checkpoints: 1");
+  });
+
   it("parses /bc run filters and review aliases", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
@@ -2608,6 +2713,63 @@ describe("handleBrainCreatorTool", () => {
     expect(preview.summary.total).toBe(2);
     expect(preview.summary.priorityStats).toEqual({ P0: 1, P1: 1 });
     expect(preview.requiresConfirmation).toBe(true);
+    expect(context.service.listCaseSuiteRuns(system.id)).toEqual([]);
+  });
+
+  it("blocks a confirmed document suite while manual authentication is pending", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(
+        async () => ({ exitCode: 1, stdout: "", stderr: "bridge unavailable" }),
+        {
+          provider: "disabled",
+          preflight: async () => ({ ok: false, error: "bridge unavailable" })
+        }
+      ),
+      runner: async () => {
+        throw new Error("runner must not execute while authentication is pending");
+      }
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Protected HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    const auth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "script",
+        secrets: {}
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth_checkpoint", {
+      systemId: system.id,
+      authProfileId: auth.id,
+      reason: "Manual login required",
+      resumeInstruction: "Complete login before running the suite"
+    });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true
+      })
+    );
+
+    expect(result.status).toBe("blocked");
+    expect(result.gap.reason).toContain("Manual authentication checkpoint");
     expect(context.service.listCaseSuiteRuns(system.id)).toEqual([]);
   });
 

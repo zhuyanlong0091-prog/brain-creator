@@ -187,24 +187,32 @@ function rowToDocumentCase(
     caseNo,
     title,
     module: value(row, headerMap, "所属模块"),
-    precondition: value(row, headerMap, "前置条件"),
+    precondition: normalizeCellText(value(row, headerMap, "前置条件")),
     steps: splitSteps(value(row, headerMap, "操作步骤")),
-    expectedResult: value(row, headerMap, "预期结果"),
-    actualResult: value(row, headerMap, "实际结果") || undefined,
+    expectedResult: normalizeCellText(value(row, headerMap, "预期结果")),
+    actualResult: normalizeCellText(value(row, headerMap, "实际结果")) || undefined,
     priority: value(row, headerMap, "优先级"),
     status: value(row, headerMap, "用例状态") || undefined,
     bugId: value(row, headerMap, "BugID") || undefined,
-    remark: value(row, headerMap, "备注") || undefined,
+    remark: normalizeCellText(value(row, headerMap, "备注")) || undefined,
     sourceRow
   };
 }
 
 function splitSteps(value: string) {
-  return value
-    .replace(/<br\s*\/?>/gi, "\n")
+  return normalizeCellText(value)
     .split(/\r?\n/)
     .map((item) => item.replace(/^\s*\d+[.、)]\s*/, "").trim())
     .filter(Boolean);
+}
+
+function normalizeCellText(value: string) {
+  return value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/&#(?:10|x0*a);/gi, "\n")
+    .replace(/&#(?:13|x0*d);/gi, "")
+    .replace(/\r\n?/g, "\n")
+    .trim();
 }
 
 function parseMarkdownTableRow(line: string) {

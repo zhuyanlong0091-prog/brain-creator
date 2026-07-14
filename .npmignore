@@ -17,6 +17,7 @@ playwright-report/
 .gstack/
 .obsidian/
 .playwright-mcp/
+.playwright-cli/
 specs/
 
 # Local archives and transient package outputs.

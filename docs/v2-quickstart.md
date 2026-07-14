@@ -82,7 +82,7 @@ Use `bc_verify_auth` after creating a profile.
 
 Use `bc_generate_seed` with `systemId` and optional `authProfileId` to write the local Playwright seed fixture. The tool returns only metadata such as `seedPath`, `loginMethod`, and `secretKeys`. Local generated seed files may contain secrets and should not be copied into chat or committed if they contain real credentials.
 
-For protected steps that require the user to enter a password, recovery answer, CAPTCHA, or 2FA value, use `bc_create_auth_checkpoint`. Complete or cancel the checkpoint without storing the secret value. Use `bc_archive_auth` when a profile should remain in history but no longer be active.
+For protected steps that require the user to enter a password, recovery answer, CAPTCHA, or 2FA value, use `bc_create_auth_checkpoint` and complete the protected step in an isolated headed browser. Save Playwright storage state under `.brain-creator/auth/<systemId>/storage-state.json`, reference the workspace-relative path from an encrypted `storageStatePath` in a `script` AuthProfile, and verify it in a fresh read-only browser context before completing the checkpoint. Never place passwords or codes in generated tests, logs, or shell arguments. Use `bc_archive_auth` when a profile should remain in history but no longer be active.
 
 ### 3. Add Glossary Terms
 
