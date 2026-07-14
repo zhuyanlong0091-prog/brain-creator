@@ -3488,7 +3488,7 @@ describe("handleBrainCreatorTool", () => {
     }
   });
 
-  it("blocks the suite with a Gap when a host-agent healer still has an execution failure", async () => {
+  it("blocks the suite with a Gap when a host-agent healer finds missing environment configuration", async () => {
     const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
     process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
     try {
@@ -3500,7 +3500,13 @@ describe("handleBrainCreatorTool", () => {
       let runCount = 0;
       context.runner = async () => {
         runCount += 1;
-        return { exitCode: 1, stdout: "", stderr: `suite failure ${runCount}` };
+        return {
+          exitCode: 1,
+          stdout:
+            `process definition key is not configured (attempt ${runCount})\n` +
+            "Expected: 200\nReceived: 500",
+          stderr: ""
+        };
       };
       const source = join(workDir, "cases.xlsx");
       await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "未执行", "", ""]]));
@@ -3549,6 +3555,9 @@ describe("handleBrainCreatorTool", () => {
           outputPaths: generatorTask.outputPaths
         })
       );
+      const status = dataOf(
+        await handleBrainCreatorTool(context, "bc_status", { systemId: system.id })
+      );
 
       expect(firstRun).toEqual(
         expect.objectContaining({
@@ -3569,13 +3578,15 @@ describe("handleBrainCreatorTool", () => {
         expect.objectContaining({
           caseNo: "TC-001",
           status: "blocked",
-          error: expect.stringContaining("suite failure 2"),
+          error: expect.stringContaining("process definition key is not configured"),
           gapIds: [healed.chainRun.gaps[0].id]
         })
       ]);
       expect(context.service.listCaseSuites(system.id)[0]).toEqual(
         expect.objectContaining({ id: firstRun.suite.id, status: "blocked" })
       );
+      expect(status.facadeNextAction).toBe("review_gaps");
+      expect(status.userSummary.nextStep).toBe("Review open gaps before claiming the system is ready.");
     } finally {
       restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
     }

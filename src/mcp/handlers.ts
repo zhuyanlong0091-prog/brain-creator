@@ -1950,7 +1950,16 @@ async function maybeCreateHostAgentBugReport(
 }
 
 function isDocumentExpectationFailure(reason: string) {
+  if (isEnvironmentConfigurationFailure(reason)) {
+    return false;
+  }
   return /\b(expected|actual|assert|assertion|toBe|toEqual|toContain|not visible)\b/i.test(
+    reason
+  );
+}
+
+function isEnvironmentConfigurationFailure(reason: string) {
+  return /\b(?:process definition key(?: is)? not configured|missing (?:environment )?configuration|configuration missing)\b|未配置流程定义|环境配置缺失/i.test(
     reason
   );
 }
@@ -1960,7 +1969,9 @@ function hostAgentFailureReason(
   agentError: string | undefined,
   testResult: Awaited<ReturnType<typeof runSubmittedTest>> | undefined
 ) {
-  const detail = agentError ?? testResult?.stderr ?? testResult?.stdout ?? "Host agent task failed";
+  const detail = [agentError, testResult?.stderr, testResult?.stdout].find(
+    (value): value is string => Boolean(value?.trim())
+  ) ?? "Host agent task failed";
   if (agent === "healer") {
     return `Playwright still failing after healer: ${detail}`;
   }
@@ -2564,11 +2575,11 @@ function facadeNextAction(state: {
   if (!state.bridgeOk) {
     return "configure_bridge";
   }
-  if (state.unfinishedSuites > 0) {
-    return "continue_case_source_suite";
-  }
   if (state.openGaps > 0) {
     return "review_gaps";
+  }
+  if (state.unfinishedSuites > 0) {
+    return "continue_case_source_suite";
   }
   if (state.openBugs > 0) {
     return "review_bugs";
