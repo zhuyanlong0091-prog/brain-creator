@@ -275,6 +275,7 @@ export type AgentTask = {
   chainContext?: {
     testCaseId: string;
     specPath: string;
+    seedPath?: string;
     testPath: string;
     generateRunId?: string;
     maxHealAttempts?: number;

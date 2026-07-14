@@ -96,7 +96,9 @@ For a Codex plugin style workflow that should not start another subprocess, use 
 }
 ```
 
-In host-agent mode, `bc_generate_plan`, approved chains, and confirmed document suites may return `needs_agent_execution`. The current Agent reads `input.prompt.md` and `input.context.json`, creates the requested Planner/Generator/Healer output, then calls `bc_submit_agent_output`. Planner submission returns `plan_ready`; Generator submission runs Playwright; document suites return one task at a time until `completed`, `failed`, or `blocked`. Treat `waiting-for-agent` as work for the current Agent, not as a missing bridge.
+In host-agent mode, `bc_generate_plan`, approved chains, and confirmed document suites may return `needs_agent_execution`. The current Agent reads `input.prompt.md` and `input.context.json`, creates the requested Planner/Generator/Healer output, then calls `bc_submit_agent_output`. Generator and Healer outputs import `test` and `expect` from the task's `--seed` file so any storage-state authentication is preserved. Planner submission returns `plan_ready`; Generator submission runs Playwright; document suites return one task at a time until `completed`, `failed`, or `blocked`. Treat `waiting-for-agent` as work for the current Agent, not as a missing bridge.
+
+Manual browser authentication uses workspace-local runtime evidence: save Playwright storage state under `.brain-creator/auth/<systemId>/storage-state.json`, reference it through an encrypted `storageStatePath` in a `script` AuthProfile, and prove it in a fresh read-only browser context before completing the auth checkpoint. `.brain-creator/` and `.playwright-cli/` must remain ignored and must not be copied into package artifacts.
 
 Run the preflight before the first Brain Creator workflow:
 
@@ -180,7 +182,7 @@ npm run verify:codex-native-entry
 npm run verify:host-agent-document-suite
 ```
 
-These local smokes check that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the handoff, an approved case can advance through `bc_submit_agent_output`, and a confirmed two-case document suite executes in order against a real local page with Chromium while persisting SuiteRun and ChainRun evidence. To check only the Codex plugin marketplace installation path:
+These local smokes check that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the handoff, an approved case can advance through `bc_submit_agent_output`, and a confirmed two-case document suite loads storage-state authentication before executing in order against a protected real local page with Chromium while persisting SuiteRun and ChainRun evidence. To check only the Codex plugin marketplace installation path:
 
 ```bash
 npm run verify:codex-plugin-install

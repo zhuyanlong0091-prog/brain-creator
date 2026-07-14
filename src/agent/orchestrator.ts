@@ -205,6 +205,7 @@ export async function generatePlanDraft(input: GeneratePlanDraftInput) {
     authProfiles: [safeAuthSummary(input.authProfile)]
   });
   const seed = await generateSeedFile({
+    workDir: input.workDir,
     outputDir: seedDir,
     system: input.system,
     authProfile: input.authProfile
@@ -263,6 +264,7 @@ export async function runChain(input: RunChainInput) {
   await writeFile(specPath, formatScenariosAsMarkdown(input.testCase.scenarios), "utf8");
 
   const seed = await generateSeedFile({
+    workDir: input.workDir,
     outputDir: join(input.workDir, "tests"),
     system: input.system,
     authProfile: input.authProfile
@@ -300,7 +302,14 @@ export async function runChain(input: RunChainInput) {
       systemId: input.system.id,
       agent: "healer",
       inputSummary: `Heal ${input.testCase.requirement}`,
-      args: ["--test", testPath, "--error", testResult.stderr || testResult.stdout],
+      args: [
+        "--test",
+        testPath,
+        "--seed",
+        seed.seedPath,
+        "--error",
+        testResult.stderr || testResult.stdout
+      ],
       outputPaths: [testPath],
       cwd: input.workDir,
       agentBridge: input.agentBridge

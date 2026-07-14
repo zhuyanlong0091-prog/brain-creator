@@ -78,6 +78,38 @@ describe("parseCaseSource", () => {
     );
   });
 
+  it("splits Excel entity-encoded line breaks into ordered steps", async () => {
+    const dir = await tempDir();
+    const source = join(dir, "entity-steps.xlsx");
+    await writeFile(
+      source,
+      createXlsx([
+        ["用例编号", "用例标题", "所属模块", "前置条件", "操作步骤", "预期结果", "优先级"],
+        [
+          "TC-ENTITY-001",
+          "查询状态",
+          "招聘需求-查询条件",
+          "用户已登录",
+          "1. 打开列表&#10;2. 选择状态&#10;3. 点击查询&#10;4. 清空条件",
+          "1. 结果符合筛选条件&#10;2. 清空后恢复默认列表",
+          "P1"
+        ]
+      ])
+    );
+
+    const parsed = await parseCaseSource(source);
+
+    expect(parsed.cases[0].steps).toEqual([
+      "打开列表",
+      "选择状态",
+      "点击查询",
+      "清空条件"
+    ]);
+    expect(parsed.cases[0].expectedResult).toBe(
+      "1. 结果符合筛选条件\n2. 清空后恢复默认列表"
+    );
+  });
+
   it("keeps markdown overview files as non-executable previews", async () => {
     const dir = await tempDir();
     const source = join(dir, "招聘需求及offer流程适配_V2.0_测试用例概览.md");

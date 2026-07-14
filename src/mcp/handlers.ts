@@ -527,8 +527,12 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const bugs = context.service.listBugReports({ systemId });
   const openBugs = bugs.filter((bug) => bug.status === "open" || bug.status === "retest-failed");
   const unfinishedSuites = unfinishedCaseSuites(context, systemId);
+  const awaitingAuthCheckpoints = snapshot.auth.checkpoints.filter(
+    (checkpoint) => checkpoint.status === "awaiting-user"
+  );
   const nextAction = facadeNextAction({
     bridgeOk: snapshot.bridge.ok,
+    awaitingAuthCheckpoints: awaitingAuthCheckpoints.length,
     openBugs: openBugs.length,
     openGaps: snapshot.openGaps.length,
     approvedCases: snapshot.cases.byStatus.approved,
@@ -539,6 +543,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     systemName: snapshot.system.name,
     bridgeOk: snapshot.bridge.ok,
     authProfiles: snapshot.auth.profiles.length,
+    awaitingAuthCheckpoints: awaitingAuthCheckpoints.length,
     openBugs: openBugs.length,
     openGaps: snapshot.openGaps.length,
     unfinishedSuites: unfinishedSuites.length,
@@ -726,24 +731,44 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     return { mode: "case-source-suite", status: "blocked", source: caseSource, gap, bridge };
   }
 
-  if (!bridge.ok) {
-    const gap = context.service.reportGap({
-      projectId: systemId,
-      sourceType: "case-source-suite",
-      sourceId: caseSource.id,
-      reason: `Agent bridge unavailable: ${bridge.error}`,
-      severity: "high",
-      owner: "qa"
-    });
-    return { mode: "case-source-suite", status: "blocked", source: caseSource, gap, bridge };
-  }
-
   if (context.service.listAuthProfiles(systemId).length === 0) {
     const gap = context.service.reportGap({
       projectId: systemId,
       sourceType: "case-source-suite",
       sourceId: caseSource.id,
       reason: "Auth profile is required before executing a document case suite.",
+      severity: "high",
+      owner: "qa"
+    });
+    return { mode: "case-source-suite", status: "blocked", source: caseSource, gap, bridge };
+  }
+
+  const awaitingAuthCheckpoints = context.service.listAuthCheckpoints(systemId, "awaiting-user");
+  if (awaitingAuthCheckpoints.length > 0) {
+    const gap = context.service.reportGap({
+      projectId: systemId,
+      sourceType: "case-source-suite",
+      sourceId: caseSource.id,
+      reason: "Manual authentication checkpoint must be completed before executing a document case suite.",
+      severity: "high",
+      owner: "qa"
+    });
+    return {
+      mode: "case-source-suite",
+      status: "blocked",
+      source: caseSource,
+      gap,
+      bridge,
+      authCheckpoints: awaitingAuthCheckpoints
+    };
+  }
+
+  if (!bridge.ok) {
+    const gap = context.service.reportGap({
+      projectId: systemId,
+      sourceType: "case-source-suite",
+      sourceId: caseSource.id,
+      reason: `Agent bridge unavailable: ${bridge.error}`,
       severity: "high",
       owner: "qa"
     });
@@ -1262,6 +1287,7 @@ async function generatePlan(context: BrainCreatorMcpContext, input: Record<strin
       authProfiles: [authProfile]
     });
     const seed = await generateSeedFile({
+      workDir: context.workDir,
       outputDir: join(context.workDir, "tests"),
       system,
       authProfile
@@ -1332,6 +1358,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     await mkdir(generatedDir, { recursive: true });
     await writeFile(specPath, formatScenariosAsMarkdown(testCase.scenarios), "utf8");
     const seed = await generateSeedFile({
+      workDir: context.workDir,
       outputDir: join(context.workDir, "tests"),
       system,
       authProfile
@@ -1345,6 +1372,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
       chainContext: {
         testCaseId: testCase.id,
         specPath,
+        seedPath: seed.seedPath,
         testPath,
         maxHealAttempts: optionalNumberArg(input, "maxHealAttempts") ?? 1,
         healAttempts: 0
@@ -1420,6 +1448,7 @@ async function sessionResume(context: BrainCreatorMcpContext, input: Record<stri
 
   const nextAction = computeNextAction({
     hasAuth: authProfiles.length > 0,
+    hasAwaitingAuth: authCheckpoints.some((checkpoint) => checkpoint.status === "awaiting-user"),
     hasRules: rules.length > 0,
     hasApprovedCases: caseCounts.approved > 0,
     hasFailedCases: caseCounts.failed > 0,
@@ -1446,6 +1475,7 @@ async function sessionResume(context: BrainCreatorMcpContext, input: Record<stri
 
 function computeNextAction(state: {
   hasAuth: boolean;
+  hasAwaitingAuth: boolean;
   hasRules: boolean;
   hasApprovedCases: boolean;
   hasFailedCases: boolean;
@@ -1454,6 +1484,9 @@ function computeNextAction(state: {
 }): string {
   if (!state.hasAuth) {
     return "complete_onboarding: 配置鉴权 (bc_create_auth)";
+  }
+  if (state.hasAwaitingAuth) {
+    return "complete_auth_checkpoint: complete the pending manual authentication step";
   }
   if (!state.bridgeOk) {
     return "configure_bridge: 设置 BRAIN_CREATOR_AGENT_COMMAND 环境变量以启用 Planner/Generator/Healer";
@@ -1480,6 +1513,7 @@ async function generateSeed(context: BrainCreatorMcpContext, input: Record<strin
     ? findAuthProfileById(context, systemId, optionalStringArg(input, "authProfileId")!)
     : findAuthProfile(context, systemId);
   return generateSeedFile({
+    workDir: context.workDir,
     outputDir: optionalStringArg(input, "outputDir") ?? join(context.workDir, "tests"),
     system,
     authProfile
@@ -1635,7 +1669,13 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       systemId: result.task.systemId,
       agent: "healer",
       inputSummary: `Heal ${result.task.inputSummary}: ${failureOutput}`,
-      args: ["--test", chainContext.testPath, "--error", failureOutput],
+      args: [
+        "--test",
+        chainContext.testPath,
+        ...(chainContext.seedPath ? ["--seed", chainContext.seedPath] : []),
+        "--error",
+        failureOutput
+      ],
       outputPaths: [chainContext.testPath],
       chainContext: {
         ...chainContext,
@@ -1965,6 +2005,11 @@ function hostAgentPrompt(input: {
     "- Do not ask the user for permission or clarification during this task.",
     "- Keep secrets out of stdout and summaries.",
     "- Write every requested output file exactly where specified.",
+    ...(input.agent === "generator" || input.agent === "healer"
+      ? [
+          "- When Arguments include --seed, import test and expect from that seed instead of @playwright/test; the seed owns authenticated browser setup."
+        ]
+      : []),
     "",
     "Arguments:",
     input.args.length > 0 ? input.args.join(" ") : "(none)",
@@ -2506,12 +2551,16 @@ function attemptedCaseNosForSuite(
 
 function facadeNextAction(state: {
   bridgeOk: boolean;
+  awaitingAuthCheckpoints: number;
   openBugs: number;
   openGaps: number;
   approvedCases: number;
   caseSources: number;
   unfinishedSuites: number;
 }) {
+  if (state.awaitingAuthCheckpoints > 0) {
+    return "complete_auth_checkpoint";
+  }
   if (!state.bridgeOk) {
     return "configure_bridge";
   }
@@ -2537,6 +2586,7 @@ function statusUserSummary(state: {
   systemName: string;
   bridgeOk: boolean;
   authProfiles: number;
+  awaitingAuthCheckpoints: number;
   openBugs: number;
   openGaps: number;
   unfinishedSuites: number;
@@ -2544,12 +2594,13 @@ function statusUserSummary(state: {
 }) {
   return {
     systemName: state.systemName,
-    readiness: state.bridgeOk ? "ready" : "blocked",
+    readiness: state.bridgeOk && state.awaitingAuthCheckpoints === 0 ? "ready" : "blocked",
     nextAction: state.nextAction,
     nextCommand: nextCommandForAction(state.nextAction),
     nextStep: nextStepForAction(state.nextAction),
     counts: {
       authProfiles: state.authProfiles,
+      awaitingAuthCheckpoints: state.awaitingAuthCheckpoints,
       openBugs: state.openBugs,
       openGaps: state.openGaps,
       unfinishedSuites: state.unfinishedSuites
@@ -2563,6 +2614,7 @@ function statusMarkdown(summary: ReturnType<typeof statusUserSummary>) {
     "",
     `- Readiness: ${summary.readiness}`,
     `- Auth profiles: ${summary.counts.authProfiles}`,
+    `- Awaiting auth checkpoints: ${summary.counts.awaitingAuthCheckpoints}`,
     `- Open bugs: ${summary.counts.openBugs}`,
     `- Open gaps: ${summary.counts.openGaps}`,
     `- Unfinished suites: ${summary.counts.unfinishedSuites}`,
@@ -2613,6 +2665,9 @@ function nextFacadeToolForAction(action: string) {
   if (action === "configure_system") {
     return "bc_configure";
   }
+  if (action === "complete_auth_checkpoint") {
+    return "bc_configure";
+  }
   if (action === "review_gaps" || action === "review_bugs") {
     return "bc_review";
   }
@@ -2630,6 +2685,9 @@ function nextFacadeToolForAction(action: string) {
 function nextCommandForAction(action: string) {
   if (action === "configure_bridge") {
     return "brain-creator-doctor";
+  }
+  if (action === "complete_auth_checkpoint") {
+    return "complete authentication";
   }
   if (action === "continue_case_source_suite") {
     return "/bc continue";
@@ -2704,6 +2762,9 @@ function brainCreatorCommandHelpMarkdown() {
 function nextStepForAction(action: string) {
   if (action === "configure_bridge") {
     return "Configure the Brain Creator agent bridge before running generation or suites.";
+  }
+  if (action === "complete_auth_checkpoint") {
+    return "Complete the pending manual authentication checkpoint.";
   }
   if (action === "continue_case_source_suite") {
     return "Continue the latest unfinished test case suite.";
@@ -2929,13 +2990,29 @@ async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestAr
 }
 
 function findAuthProfile(context: BrainCreatorMcpContext, systemId: string): AuthProfile {
-  const profile = context.repository.authProfiles.find(
-    (item) => item.projectId === systemId && item.status !== "cancelled"
-  );
+  const profile = context.repository.authProfiles
+    .filter((item) => item.projectId === systemId && item.status !== "cancelled")
+    .sort((left, right) => {
+      const statusDifference = authProfileStatusRank(right) - authProfileStatusRank(left);
+      return statusDifference || right.updatedAt.localeCompare(left.updatedAt);
+    })[0];
   if (!profile) {
     throw new Error("Auth profile not found");
   }
   return profile;
+}
+
+function authProfileStatusRank(profile: AuthProfile) {
+  if (profile.status === "succeeded") {
+    return 3;
+  }
+  if (profile.status === "running") {
+    return 2;
+  }
+  if (profile.status === "pending") {
+    return 1;
+  }
+  return 0;
 }
 
 function findAuthProfileById(
@@ -3036,6 +3113,7 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   const candidate = value as Record<string, unknown>;
   const testCaseId = candidate.testCaseId;
   const specPath = candidate.specPath;
+  const seedPath = candidate.seedPath;
   const testPath = candidate.testPath;
   const generateRunId = candidate.generateRunId;
   const maxHealAttempts = candidate.maxHealAttempts;
@@ -3046,13 +3124,16 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   if (generateRunId !== undefined && typeof generateRunId !== "string") {
     throw new Error("chainContext generateRunId must be a string when provided");
   }
+  if (seedPath !== undefined && typeof seedPath !== "string") {
+    throw new Error("chainContext seedPath must be a string when provided");
+  }
   if (maxHealAttempts !== undefined && (typeof maxHealAttempts !== "number" || maxHealAttempts < 0)) {
     throw new Error("chainContext maxHealAttempts must be a non-negative number when provided");
   }
   if (healAttempts !== undefined && (typeof healAttempts !== "number" || healAttempts < 0)) {
     throw new Error("chainContext healAttempts must be a non-negative number when provided");
   }
-  return { testCaseId, specPath, testPath, generateRunId, maxHealAttempts, healAttempts };
+  return { testCaseId, specPath, seedPath, testPath, generateRunId, maxHealAttempts, healAttempts };
 }
 
 function suiteContextArg(input: Record<string, unknown>): AgentTask["suiteContext"] | undefined {

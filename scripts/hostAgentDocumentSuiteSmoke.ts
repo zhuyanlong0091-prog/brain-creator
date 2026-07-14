@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createConfiguredAgentBridge } from "../src/agent/bridgeProvider.js";
@@ -10,7 +10,13 @@ import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "../src/mcp
 
 const temporaryDir = await mkdtemp(join(tmpdir(), "brain-host-agent-suite-"));
 const generatedPaths = new Set<string>();
-const server = createServer((_request, response) => {
+let authStateDir: string | undefined;
+const server = createServer((request, response) => {
+  if (!request.headers.cookie?.includes("fixture_session=ready")) {
+    response.writeHead(401, { "content-type": "text/html; charset=utf-8" });
+    response.end("<!doctype html><html><body><h1>Login required</h1></body></html>");
+    return;
+  }
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   response.end(`<!doctype html>
 <html lang="en">
@@ -79,13 +85,37 @@ try {
       urlAllowlist: [baseUrl]
     })
   );
+  authStateDir = join(process.cwd(), ".brain-creator", "auth", system.id);
+  const storageStatePath = join(authStateDir, "storage-state.json");
+  await mkdir(authStateDir, { recursive: true });
+  await writeFile(
+    storageStatePath,
+    JSON.stringify({
+      cookies: [
+        {
+          name: "fixture_session",
+          value: "ready",
+          domain: "127.0.0.1",
+          path: "/",
+          expires: -1,
+          httpOnly: true,
+          secure: false,
+          sameSite: "Lax"
+        }
+      ],
+      origins: []
+    }),
+    "utf8"
+  );
   await handleBrainCreatorTool(context, "bc_configure", {
     target: "auth",
     systemId: system.id,
     env: "local",
     role: "qa-agent",
-    loginMethod: "token",
-    secrets: { token: "fixture-token" }
+    loginMethod: "script",
+    secrets: {
+      storageStatePath: relative(process.cwd(), storageStatePath).replace(/\\/g, "/")
+    }
   });
 
   const preview = dataOf(
@@ -118,7 +148,11 @@ try {
     collectGeneratedPaths(handoff);
     const prompt = await readFile(handoff.promptPath, "utf8");
     assert(prompt.includes("bc_submit_agent_output"), "Host-agent prompt is missing submit instructions");
-    await writeGeneratedTest(handoff.testPath, handoff.currentCase.caseNo, baseUrl);
+    await writeGeneratedTest(
+      handoff.testPath,
+      handoff.seedPath,
+      handoff.currentCase.caseNo
+    );
     executedCases.push(handoff.currentCase.caseNo);
     handoff = dataOf(
       await handleBrainCreatorTool(context, "bc_submit_agent_output", {
@@ -154,10 +188,13 @@ try {
       await rm(path, { recursive: true, force: true });
     }
   }
+  if (authStateDir) {
+    await rm(authStateDir, { recursive: true, force: true });
+  }
   await rm(temporaryDir, { recursive: true, force: true });
 }
 
-async function writeGeneratedTest(testPath: string, caseNo: string, targetUrl: string) {
+async function writeGeneratedTest(testPath: string, seedPath: string, caseNo: string) {
   const steps =
     caseNo === "TC-001"
       ? [
@@ -172,10 +209,9 @@ async function writeGeneratedTest(testPath: string, caseNo: string, targetUrl: s
   await writeFile(
     testPath,
     [
-      "import { test, expect } from '@playwright/test';",
+      `import { test, expect } from ${JSON.stringify(importSpecifier(testPath, seedPath))};`,
       "",
       `test('${caseNo} from document suite', async ({ page }) => {`,
-      `  await page.goto(${JSON.stringify(targetUrl)});`,
       "  await expect(page.getByRole('heading', { name: 'Recruitment Console' })).toBeVisible();",
       ...steps,
       "});",
@@ -183,6 +219,12 @@ async function writeGeneratedTest(testPath: string, caseNo: string, targetUrl: s
     ].join("\n"),
     "utf8"
   );
+}
+
+function importSpecifier(testPath: string, seedPath: string) {
+  const withoutExtension = seedPath.replace(/\.ts$/, "");
+  const specifier = relative(dirname(testPath), withoutExtension).replace(/\\/g, "/");
+  return specifier.startsWith(".") ? specifier : `./${specifier}`;
 }
 
 function collectGeneratedPaths(handoff: Record<string, any>) {

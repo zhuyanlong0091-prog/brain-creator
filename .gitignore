@@ -8,6 +8,7 @@ playwright-report/
 .gstack/
 .obsidian/
 .playwright-mcp/
+.playwright-cli/
 .claude/settings.local.json
 /specs/
 /tests/seed-*.spec.ts
