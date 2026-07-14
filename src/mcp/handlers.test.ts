@@ -252,6 +252,136 @@ describe("handleBrainCreatorTool", () => {
     expect(approved.status).toBe("approved");
   });
 
+  it("hands planner work to the current host agent and creates the draft after submission", async () => {
+    const workDir = await tempDir();
+    const hostBridge = Object.assign(
+      async () => ({ exitCode: 1, stdout: "", stderr: "host-agent handoff" }),
+      {
+        provider: "host-agent",
+        preflight: async () => ({ ok: true })
+      }
+    );
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: hostBridge
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "staging",
+      role: "qa-admin",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+
+    const taskPackage = dataOf(
+      await handleBrainCreatorTool(context, "bc_generate_plan", {
+        systemId: system.id,
+        requirement: "Validate the checkout total"
+      })
+    );
+
+    expect(taskPackage.status).toBe("needs_agent_execution");
+    expect(taskPackage.stage).toBe("planner");
+    expect(taskPackage.task).toEqual(
+      expect.objectContaining({ agent: "planner", status: "pending", systemId: system.id })
+    );
+    expect(context.service.listTestCases(system.id)).toEqual([]);
+
+    await writeFile(
+      taskPackage.specPath,
+      [
+        "## Scenario: Validate checkout total",
+        "Priority: critical",
+        "- navigate: Checkout",
+        "- assert: Order total => Matches item total"
+      ].join("\n"),
+      "utf8"
+    );
+    const submitted = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: taskPackage.task.id,
+        status: "succeeded",
+        stdout: "planner completed",
+        stderr: "",
+        outputPaths: [taskPackage.specPath]
+      })
+    );
+
+    expect(submitted.status).toBe("plan_ready");
+    expect(submitted.testCase).toEqual(
+      expect.objectContaining({
+        systemId: system.id,
+        requirement: "Validate the checkout total",
+        status: "draft"
+      })
+    );
+    expect(submitted.testCase.scenarios).toEqual([
+      expect.objectContaining({ title: "Validate checkout total", priority: "critical" })
+    ]);
+  });
+
+  it("creates a Gap when a successful host-agent planner submission has no spec output", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(async () => ({ exitCode: 1, stdout: "", stderr: "handoff" }), {
+        provider: "host-agent",
+        preflight: async () => ({ ok: true })
+      })
+    });
+    const system = context.service.createSystemProfile({
+      name: "Missing Planner Output",
+      environment: "local",
+      baseUrl: "https://planner.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://planner.example.test"]
+    });
+    context.service.createAuthProfile({
+      projectId: system.id,
+      env: "local",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret" }
+    });
+    const taskPackage = dataOf(
+      await handleBrainCreatorTool(context, "bc_generate_plan", {
+        systemId: system.id,
+        requirement: "Generate a plan without writing its output"
+      })
+    );
+
+    const submitted = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: taskPackage.task.id,
+        status: "succeeded",
+        stdout: "planner claimed success",
+        stderr: "",
+        outputPaths: [taskPackage.specPath]
+      })
+    );
+
+    expect(submitted.status).toBe("blocked");
+    expect(submitted.gap).toEqual(
+      expect.objectContaining({
+        sourceType: "host-agent-planner",
+        sourceId: taskPackage.task.id,
+        reason: expect.stringContaining("did not create")
+      })
+    );
+    expect(context.service.listTestCases(system.id)).toEqual([]);
+  });
+
   it("updates a draft test plan through MCP before approval", async () => {
     const context = createBrainCreatorMcpContext({ dataFilePath: join(await tempDir(), "assets.json") });
     const system = dataOf(
@@ -779,7 +909,7 @@ describe("handleBrainCreatorTool", () => {
     );
   });
 
-  it("returns a healer task when Playwright fails after a host-agent generator submit", async () => {
+  it("returns a healer task when the Playwright process throws after a host-agent generator submit", async () => {
     const workDir = await tempDir();
     const hostBridge = Object.assign(
       async () => ({
@@ -796,7 +926,9 @@ describe("handleBrainCreatorTool", () => {
       dataFilePath: join(workDir, "assets.json"),
       workDir,
       agentBridge: hostBridge,
-      runner: async () => ({ exitCode: 1, stdout: "", stderr: "expected amount missing" })
+      runner: async () => {
+        throw new Error("playwright process unavailable");
+      }
     });
     const system = dataOf(
       await handleBrainCreatorTool(context, "bc_create_system", {
@@ -863,10 +995,78 @@ describe("handleBrainCreatorTool", () => {
         gaps: []
       })
     );
-    expect(await readFile(submitted.promptPath, "utf8")).toContain("expected amount missing");
+    expect(submitted.testResult).toEqual(
+      expect.objectContaining({ exitCode: 1, stderr: "playwright process unavailable" })
+    );
+    expect(await readFile(submitted.promptPath, "utf8")).toContain("playwright process unavailable");
     expect(context.service.listAgentTasks(system.id)).toEqual([
       expect.objectContaining({ id: taskPackage.task.id, status: "submitted" }),
       expect.objectContaining({ id: submitted.task.id, agent: "healer", status: "pending" })
+    ]);
+  });
+
+  it("does not create a host-agent healer task when maxHealAttempts is zero", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(async () => ({ exitCode: 1, stdout: "", stderr: "handoff" }), {
+        provider: "host-agent",
+        preflight: async () => ({ ok: true })
+      }),
+      runner: async () => ({ exitCode: 1, stdout: "", stderr: "assertion failed" })
+    });
+    const system = context.service.createSystemProfile({
+      name: "No Heal System",
+      environment: "local",
+      baseUrl: "https://no-heal.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://no-heal.example.test"]
+    });
+    context.service.createAuthProfile({
+      projectId: system.id,
+      env: "local",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Do not heal this failure",
+      scenarios: [
+        {
+          id: "scenario_no_heal",
+          title: "No heal",
+          priority: "medium",
+          steps: [{ action: "assert", target: "Result", expected: "visible" }]
+        }
+      ],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+    const taskPackage = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_chain", {
+        caseId: testCase.id,
+        maxHealAttempts: 0
+      })
+    );
+    await writeFile(taskPackage.testPath, "import { test } from '@playwright/test';\n", "utf8");
+
+    const submitted = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: taskPackage.task.id,
+        status: "succeeded",
+        stdout: "generated",
+        stderr: "",
+        outputPaths: [taskPackage.testPath]
+      })
+    );
+
+    expect(submitted.chainRun.status).toBe("failed");
+    expect(submitted.chainRun.gaps).toHaveLength(1);
+    expect(context.service.listAgentTasks(system.id)).toEqual([
+      expect.objectContaining({ id: taskPackage.task.id, status: "submitted" })
     ]);
   });
 
@@ -3034,7 +3234,7 @@ describe("handleBrainCreatorTool", () => {
     expect(runCount).toBe(3);
   });
 
-  it("resumes a host-agent case source suite after submitted tasks mark cases as passed", async () => {
+  it("continues a host-agent case source suite one task at a time until completion", async () => {
     const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
     process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
     try {
@@ -3071,9 +3271,9 @@ describe("handleBrainCreatorTool", () => {
           confirm: true
         })
       );
-      const firstTask = context.service.listAgentTasks(system.id)[0];
+      const firstTask = firstRun.task;
       await writeFile(firstTask.outputPaths[0], "import { test, expect } from '../seed';\n", "utf8");
-      const submitted = dataOf(
+      const firstSubmitted = dataOf(
         await handleBrainCreatorTool(context, "bc_submit_agent_output", {
           taskId: firstTask.id,
           status: "succeeded",
@@ -3082,44 +3282,51 @@ describe("handleBrainCreatorTool", () => {
           outputPaths: firstTask.outputPaths
         })
       );
-      const resumed = dataOf(
-        await handleBrainCreatorTool(context, "bc_run", {
-          mode: "case-source-suite",
-          systemId: system.id,
-          source,
-          suiteId: firstRun.suite.id,
-          confirm: true
+      await writeFile(
+        firstSubmitted.task.outputPaths[0],
+        "import { test, expect } from '../seed';\n",
+        "utf8"
+      );
+      const completed = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: firstSubmitted.task.id,
+          status: "succeeded",
+          stdout: "TC-002 generated",
+          stderr: "",
+          outputPaths: firstSubmitted.task.outputPaths
         })
       );
 
-      expect(firstRun.suiteRun).toEqual(
-        expect.objectContaining({ total: 2, blocked: 2 })
-      );
-      expect(submitted.suiteRun).toEqual(
+      expect(firstRun).toEqual(
         expect.objectContaining({
-          suiteId: firstRun.suite.id,
-          total: 1,
-          passed: 1,
-          blocked: 0
+          status: "needs_agent_execution",
+          stage: "generator",
+          currentCase: expect.objectContaining({ caseNo: "TC-001", status: "waiting-for-agent" }),
+          suite: expect.objectContaining({ status: "waiting-for-agent" })
         })
       );
-      expect(resumed.suite.id).toBe(firstRun.suite.id);
-      expect(resumed.progress).toEqual(
+      expect(firstSubmitted).toEqual(
         expect.objectContaining({
-          alreadyPassed: 1,
-          remaining: 1,
-          remainingCaseNos: ["TC-002"]
+          status: "needs_agent_execution",
+          stage: "generator",
+          currentCase: expect.objectContaining({ caseNo: "TC-002", status: "waiting-for-agent" }),
+          suiteRun: expect.objectContaining({ total: 1, passed: 1, blocked: 0 })
         })
       );
-      expect(resumed.suiteRun.caseResults).toEqual([
-        expect.objectContaining({ caseNo: "TC-002", status: "blocked" })
-      ]);
+      expect(completed).toEqual(
+        expect.objectContaining({
+          status: "completed",
+          suite: expect.objectContaining({ id: firstRun.suite.id, status: "completed" }),
+          suiteRun: expect.objectContaining({ total: 1, passed: 1, blocked: 0 })
+        })
+      );
+      expect(context.service.listCaseSuiteRuns(system.id)).toHaveLength(2);
     } finally {
       restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
     }
   });
 
-  it("records a failed suite case when a host-agent healer task still fails", async () => {
+  it("blocks the suite with a Gap when a host-agent healer still has an execution failure", async () => {
     const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
     process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
     try {
@@ -3181,26 +3388,31 @@ describe("handleBrainCreatorTool", () => {
         })
       );
 
-      expect(firstRun.suiteRun).toEqual(expect.objectContaining({ blocked: 1 }));
+      expect(firstRun).toEqual(
+        expect.objectContaining({
+          status: "needs_agent_execution",
+          currentCase: expect.objectContaining({ caseNo: "TC-001", status: "waiting-for-agent" })
+        })
+      );
       expect(healed.suiteRun).toEqual(
         expect.objectContaining({
           suiteId: firstRun.suite.id,
-          status: "failed",
+          status: "blocked",
           total: 1,
-          failed: 1,
-          blocked: 0
+          failed: 0,
+          blocked: 1
         })
       );
       expect(healed.suiteRun.caseResults).toEqual([
         expect.objectContaining({
           caseNo: "TC-001",
-          status: "failed",
+          status: "blocked",
           error: expect.stringContaining("suite failure 2"),
           gapIds: [healed.chainRun.gaps[0].id]
         })
       ]);
       expect(context.service.listCaseSuites(system.id)[0]).toEqual(
-        expect.objectContaining({ id: firstRun.suite.id, status: "failed" })
+        expect.objectContaining({ id: firstRun.suite.id, status: "blocked" })
       );
     } finally {
       restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
@@ -3293,7 +3505,12 @@ describe("handleBrainCreatorTool", () => {
         })
       );
 
-      expect(firstRun.suiteRun).toEqual(expect.objectContaining({ blocked: 1 }));
+      expect(firstRun).toEqual(
+        expect.objectContaining({
+          status: "needs_agent_execution",
+          currentCase: expect.objectContaining({ caseNo: "TC-001", status: "waiting-for-agent" })
+        })
+      );
       expect(healed.suiteRun).toEqual(
         expect.objectContaining({
           suiteId: firstRun.suite.id,

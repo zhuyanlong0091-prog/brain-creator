@@ -26,7 +26,7 @@ Install Brain Creator into the business project:
 npm install --save-dev brain-creator
 ```
 
-Install the Brain Creator Skill and Playwright agent definitions into the business project:
+Install the Brain Creator Skill, Playwright agent definitions, and a portable Playwright config when the project does not already have one:
 
 ```bash
 npx brain-creator-install-assets
@@ -46,7 +46,7 @@ Install the Codex plugin from the installed package:
 npx brain-creator-install-codex-plugin
 ```
 
-The command registers the package root as a Codex marketplace source and installs `brain-creator@personal`. It is equivalent to running `codex plugin marketplace add node_modules/brain-creator` followed by `codex plugin add brain-creator@personal`.
+The command registers the package root as a Codex marketplace source, installs `brain-creator@personal`, and writes the current workspace `.mcp.json` with `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`. The plugin commands are equivalent to `codex plugin marketplace add node_modules/brain-creator` followed by `codex plugin add brain-creator@personal`; the MCP rewrite prevents Codex from accidentally selecting a local Claude subprocess.
 
 If the target runtime is already known, choose it explicitly:
 
@@ -96,7 +96,7 @@ For a Codex plugin style workflow that should not start another subprocess, use 
 }
 ```
 
-In host-agent mode the agent should call `bc_prepare_agent_task`, read the returned `input.prompt.md` and `input.context.json`, create the requested outputs, then call `bc_submit_agent_output`.
+In host-agent mode, `bc_generate_plan`, approved chains, and confirmed document suites may return `needs_agent_execution`. The current Agent reads `input.prompt.md` and `input.context.json`, creates the requested Planner/Generator/Healer output, then calls `bc_submit_agent_output`. Planner submission returns `plan_ready`; Generator submission runs Playwright; document suites return one task at a time until `completed`, `failed`, or `blocked`. Treat `waiting-for-agent` as work for the current Agent, not as a missing bridge.
 
 Run the preflight before the first Brain Creator workflow:
 
@@ -104,7 +104,7 @@ Run the preflight before the first Brain Creator workflow:
 npx brain-creator-doctor
 ```
 
-Doctor prints the resolved provider and recommended action, so users can tell whether Brain Creator will use a Claude subprocess, Codex subprocess, host-agent task handoff, or preview-only disabled mode before running a confirmed workflow.
+Doctor prints the resolved provider, real browser availability, and recommended action, so users can tell whether Brain Creator will use a Claude subprocess, Codex subprocess, host-agent task handoff, or preview-only disabled mode before running a confirmed workflow. If neither a Playwright browser nor system Chrome/Edge is available, install Chromium or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` before running a suite.
 
 If you prefer a global install, use:
 
@@ -177,9 +177,10 @@ To validate the full Codex-native entry path from this repository:
 
 ```bash
 npm run verify:codex-native-entry
+npm run verify:host-agent-document-suite
 ```
 
-This local smoke checks that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the host-agent handoff, `/bc help` is read-only, an approved case can advance through `bc_run_chain` plus `bc_submit_agent_output`, and the Codex plugin can be installed from both the source checkout and a packed npm install. To check only the Codex plugin marketplace installation path:
+These local smokes check that the Codex plugin exposes `/bc help`, defaults to `host-agent`, doctor explains the handoff, an approved case can advance through `bc_submit_agent_output`, and a confirmed two-case document suite executes in order against a real local page with Chromium while persisting SuiteRun and ChainRun evidence. To check only the Codex plugin marketplace installation path:
 
 ```bash
 npm run verify:codex-plugin-install

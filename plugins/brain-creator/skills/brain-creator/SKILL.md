@@ -7,7 +7,7 @@ description: 当用户要求使用 Brain Creator 时触发：接入业务系统�
 
 Use Brain Creator as an agent-native testing business brain through MCP tools. Claude Code or Codex is the user interface; Brain Creator supplies system context, auth handling, business language, planning, generated artifacts, chain execution, and gap tracking.
 
-Agent bridge policy: Brain Creator may run Planner / Generator / Healer through Claude Code subprocess, Codex subprocess, host-agent task handoff, or disabled preview-only mode. Prefer `bc_status` or `bc_session_resume` to inspect bridge state before confirmed execution. If bridge state is blocked, report the blocker or create a Gap instead of waiting on a long timeout. In host-agent mode, `bc_prepare_agent_task` and approved `bc_run_chain` calls return `status: "needs_agent_execution"` task packages. Read `input.prompt.md` and `input.context.json`, create the requested outputs as the current agent, then call `bc_submit_agent_output`; generator submissions run Playwright automatically. Passing tests record AgentRun, ChainRun, and generated artifact ownership; failing tests return a healer task package. Healer submissions rerun Playwright and complete the chain when the test passes. If healer output still fails, Brain Creator marks the chain failed. For document-suite tasks, successful submission also records a single-case suite run so later resume skips passed cases; unmet business expectations create BugReports, while environment, auth, locator, or execution blockers create Gaps.
+Agent bridge policy: Brain Creator may run Planner / Generator / Healer through Claude Code subprocess, Codex subprocess, host-agent task handoff, or disabled preview-only mode. Prefer `bc_status` or `bc_session_resume` to inspect bridge state before confirmed execution. If bridge state is blocked, report the blocker or create a Gap instead of waiting on a long timeout. In host-agent mode, `bc_generate_plan`, `bc_prepare_agent_task`, approved `bc_run_chain`, and confirmed document suites may return `status: "needs_agent_execution"` task packages. Read `input.prompt.md` and `input.context.json`, create the requested outputs as the current agent, then call `bc_submit_agent_output`. Planner submission returns `plan_ready`; generator submission runs Playwright automatically; a failed Playwright run returns a healer task package. Healer submission reruns Playwright and completes or blocks the chain. A document suite returns one task at a time, and each successful submission returns the next task until the suite reaches `completed`, `failed`, or `blocked`. Treat `waiting-for-agent` as actionable work for the current agent, never as a missing bridge. Passing tests record AgentRun, ChainRun, SuiteRun, and generated artifact ownership; unmet business expectations create BugReports, while environment, auth, locator, or execution blockers create Gaps.
 
 Codex plugin mode defaults to `host-agent`: do not start or wait for a Claude/Codex subprocess when Brain Creator returns `needs_agent_execution`; execute the returned task package as the current Codex agent and finish with `bc_submit_agent_output`.
 
@@ -75,6 +75,8 @@ Do not retry a cancelled or denied facade call through an equivalent fine-graine
 5. Use internal tools such as `bc_generate_plan`, `bc_run_chain`, `bc_list_gaps`, or `bc_read_spec` only when a facade lacks the needed detail or the user is debugging/auditing.
 
 When the user provides a test case document path, first call `bc_run` with `mode: "case-source-suite"` and `confirm: false`. Present the preview summary, risks, bridge status, and sample cases. Only after explicit user confirmation call the same mode with `confirm: true`.
+
+In host-agent mode, `confirm: true` returns the first case task with `status: "needs_agent_execution"` and suite status `waiting-for-agent`. Execute it in the current Agent and call `bc_submit_agent_output`. If that submission returns another task package, repeat immediately for the next Generator or Healer task. Stop only at `completed`, `failed`, or `blocked`, then use `bc_review` for the user-facing result. Do not ask the user to configure a Claude subprocess and do not classify `waiting-for-agent` as a Gap.
 
 Document source details:
 - Supported inputs are local `.xlsx`, executable `.md` tables, `obsidian:<path>`, `claudian:<path>`, and `[[path]]`.
@@ -162,11 +164,12 @@ Use planning tools to generate structured scenarios before code generation.
 1. Confirm the target system id.
 2. Ensure auth and business rules exist.
 3. Call `bc_generate_plan` with `systemId` and the user's requirement.
-4. Present the draft scenarios, new term candidates, and rule check results to the user.
-5. Call `bc_update_plan` if the user wants to edit scenarios before approval.
-6. Call `bc_approve_plan` only after the user confirms the test intent.
-7. Call `bc_cancel_plan` when the user stops or closes a protected flow.
-8. Call `bc_resume_plan` only after awaiting manual auth checkpoints are completed or cancelled.
+4. If `bc_generate_plan` returns `status: "needs_agent_execution"`, execute the Planner task in the current agent, write the requested spec, and call `bc_submit_agent_output`. Continue only when the submission returns `status: "plan_ready"`.
+5. Present the draft scenarios, new term candidates, and rule check results to the user.
+6. Call `bc_update_plan` if the user wants to edit scenarios before approval.
+7. Call `bc_approve_plan` only after the user confirms the test intent.
+8. Call `bc_cancel_plan` when the user stops or closes a protected flow.
+9. Call `bc_resume_plan` only after awaiting manual auth checkpoints are completed or cancelled.
 
 Planning must not generate test code directly. The user should confirm the structured plan first. Approved plans are execution contracts and should not be changed silently.
 

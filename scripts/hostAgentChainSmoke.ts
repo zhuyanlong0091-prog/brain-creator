@@ -39,21 +39,35 @@ try {
     secrets: { token: "redacted-smoke-token" }
   });
 
-  const draftCase = context.service.createTestCase({
-    systemId: system.id,
-    requirement: "Verify host-agent task handoff can generate and submit a deterministic test.",
-    scenarios: [
-      {
-        id: "scenario_1",
-        title: "Host-agent checkout smoke",
-        priority: "critical",
-        steps: [{ action: "assert", target: "Host Agent Smoke", expected: "visible" }]
-      }
-    ],
-    newTerms: [],
-    ruleCheckResult: { passed: true, checks: [] }
-  });
-  const testCase = context.service.approveTestCase(draftCase.id);
+  const plannerTask = dataOf(
+    await handleBrainCreatorTool(context, "bc_generate_plan", {
+      systemId: system.id,
+      requirement: "Verify host-agent task handoff can generate and submit a deterministic test."
+    })
+  );
+  assert(plannerTask.status === "needs_agent_execution", "Planner did not return a host-agent task");
+  assert(plannerTask.stage === "planner", "Expected planner stage");
+  await writeFile(
+    plannerTask.specPath,
+    [
+      "## Scenario: Host-agent checkout smoke",
+      "Priority: critical",
+      "- navigate: Host Agent Smoke",
+      "- assert: Host Agent Smoke => visible"
+    ].join("\n"),
+    "utf8"
+  );
+  const planned = dataOf(
+    await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+      taskId: plannerTask.task.id,
+      status: "succeeded",
+      stdout: "host agent wrote planner spec",
+      stderr: "",
+      outputPaths: [plannerTask.specPath]
+    })
+  );
+  assert(planned.status === "plan_ready", "Planner submission did not create a draft plan");
+  const testCase = context.service.approveTestCase(planned.testCase.id);
   testCaseId = testCase.id;
 
   const taskPackage = dataOf(
@@ -104,6 +118,7 @@ try {
   console.log("Host-agent chain smoke passed.");
   console.log(`System: ${system.id}`);
   console.log(`Case: ${testCase.id}`);
+  console.log(`Planner task: ${plannerTask.task.id}`);
   console.log(`Task: ${taskPackage.task.id}`);
   console.log(`Spec: ${submitted.chainRun.specPath}`);
   console.log(`Test: ${submitted.chainRun.testPath}`);

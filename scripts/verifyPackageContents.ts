@@ -18,6 +18,7 @@ const requiredPaths = [
   "plugins/brain-creator/.mcp.json",
   "plugins/brain-creator/skills/brain-creator/SKILL.md",
   ".agents/plugins/marketplace.json",
+  "playwright.config.ts",
   "README.md",
   "package.json"
 ];

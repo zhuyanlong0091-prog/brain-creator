@@ -29,6 +29,7 @@ describe("Brain Creator doctor", () => {
       expect.arrayContaining([
         expect.objectContaining({ name: "Agent bridge provider", status: "pass" }),
         expect.objectContaining({ name: "Agent bridge args", status: "pass" }),
+        expect.objectContaining({ name: "Playwright browser", status: "warn" }),
         expect.objectContaining({ name: "Playwright agent definitions", status: "pass" })
       ])
     );
@@ -57,6 +58,11 @@ describe("Brain Creator doctor", () => {
           name: "Playwright agent definitions",
           status: "fail",
           remediation: expect.stringContaining("npx playwright init-agents")
+        }),
+        expect.objectContaining({
+          name: "Playwright browser",
+          status: "warn",
+          remediation: expect.stringContaining("playwright install chromium")
         })
       ])
     );
@@ -190,7 +196,7 @@ describe("Brain Creator doctor", () => {
     expect(report.agentBridge).toEqual(
       expect.objectContaining({
         provider: "host-agent",
-        recommendedAction: expect.stringContaining("bc_prepare_agent_task")
+        recommendedAction: expect.stringContaining("Planner, Generator, or Healer")
       })
     );
     expect(report.checks).toEqual(
@@ -198,7 +204,11 @@ describe("Brain Creator doctor", () => {
         expect.objectContaining({
           name: "Agent bridge provider",
           status: "pass",
-          message: expect.stringContaining("host-agent")
+          message: expect.stringContaining("without a Claude or Codex subprocess")
+        }),
+        expect.objectContaining({
+          name: "Playwright browser",
+          status: "pass"
         })
       ])
     );

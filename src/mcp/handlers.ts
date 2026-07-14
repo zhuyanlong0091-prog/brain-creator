@@ -1,10 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
-import { formatScenariosAsMarkdown } from "../agent/caseFormatter.js";
+import { formatScenariosAsMarkdown, parseSpecMarkdown } from "../agent/caseFormatter.js";
 import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
 import { generateSeedFile } from "../agent/seedGenerator.js";
+import { buildAgentPrompt } from "../agent/promptBuilder.js";
+import { checkBusinessRules } from "../agent/qualityGate.js";
+import { extractCandidateTerms } from "../agent/termExtractor.js";
 import { createConfiguredAgentBridge } from "../agent/bridgeProvider.js";
 import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
@@ -49,6 +52,16 @@ export type BrainCreatorMcpContext = {
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
+};
+
+type HostAgentTaskPackage = {
+  status: "needs_agent_execution";
+  task: AgentTask;
+  promptPath: string;
+  contextPath: string;
+  outputPaths: string[];
+  submitTool: "bc_submit_agent_output";
+  nextAction: string;
 };
 
 type CreateContextInput = {
@@ -752,6 +765,68 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     (documentCase) =>
       suite.selectedCaseNos.includes(documentCase.caseNo) && !alreadyPassed.has(documentCase.caseNo)
   );
+  if (context.agentBridge?.provider === "host-agent") {
+    const pendingTask = context.service
+      .listAgentTasks(systemId)
+      .find(
+        (task) =>
+          task.status === "pending" &&
+          task.suiteContext?.suiteId === suite.id
+      );
+    if (pendingTask?.suiteContext) {
+      const currentCase = parsed.cases.find(
+        (documentCase) => documentCase.caseNo === pendingTask.suiteContext?.caseNo
+      );
+      const waitingSuite = context.service.updateCaseSuiteStatus(suite.id, "waiting-for-agent");
+      return {
+        ...taskPackageFromStoredTask(pendingTask),
+        mode: "case-source-suite",
+        stage: pendingTask.agent,
+        source: caseSource,
+        suite: waitingSuite,
+        currentCase: {
+          caseNo: pendingTask.suiteContext.caseNo,
+          title: pendingTask.suiteContext.title,
+          status: "waiting-for-agent",
+          testCaseId: pendingTask.chainContext?.testCaseId,
+          gapIds: []
+        },
+        progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, []),
+        documentCase: currentCase
+      };
+    }
+    const documentCase = casesToRun[0];
+    if (!documentCase) {
+      const completedSuite = context.service.updateCaseSuiteStatus(suite.id, "completed");
+      return {
+        mode: "case-source-suite",
+        status: "completed",
+        source: caseSource,
+        suite: completedSuite,
+        progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, [])
+      };
+    }
+    const result = await executeDocumentCase(context, {
+      systemId,
+      sourceId: caseSource.id,
+      suiteId: suite.id,
+      documentCase,
+      maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
+      createBugOnFailure: true
+    });
+    if (result.taskPackage) {
+      const waitingSuite = context.service.updateCaseSuiteStatus(suite.id, "waiting-for-agent");
+      return {
+        ...result.taskPackage,
+        mode: "case-source-suite",
+        stage: result.taskPackage.task.agent,
+        source: caseSource,
+        suite: waitingSuite,
+        currentCase: result.caseResult,
+        progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, [result.caseResult])
+      };
+    }
+  }
   context.service.updateCaseSuiteStatus(suite.id, "running");
   const caseResults: CaseSuiteCaseResult[] = [];
   const artifactPaths: string[] = [];
@@ -840,6 +915,7 @@ async function executeDocumentCase(
   caseResult: CaseSuiteCaseResult;
   artifactPaths?: string[];
   bugReportId?: string;
+  taskPackage?: HostAgentTaskPackage;
 }> {
   const testCase = context.service.createTestCaseFromDocumentCase({
     systemId: input.systemId,
@@ -864,13 +940,13 @@ async function executeDocumentCase(
         caseResult: {
           caseNo: input.documentCase.caseNo,
           title: input.documentCase.title,
-          status: "blocked",
+          status: "waiting-for-agent",
           testCaseId: testCase.id,
           gapIds: [],
-          error:
-            "Host-agent task package is waiting for the current agent to generate the requested test output."
+          error: "Waiting for the current host agent to generate the requested test output."
         },
-        artifactPaths: [result.specPath, result.testPath]
+        artifactPaths: [result.specPath, result.testPath],
+        taskPackage: result
       };
     }
     const artifactPaths = [result.chainRun.specPath, result.chainRun.testPath].filter(
@@ -1176,6 +1252,42 @@ async function generatePlan(context: BrainCreatorMcpContext, input: Record<strin
   const authProfile = findAuthProfile(context, systemId);
   const specPath =
     optionalStringArg(input, "specPath") ?? join(context.workDir, "specs", `${systemId}-plan.md`);
+  if (context.agentBridge?.provider === "host-agent") {
+    const prompt = await buildAgentPrompt({
+      outputDir: join(context.workDir, "specs", "_context"),
+      system,
+      requirement,
+      glossaryTerms: context.service.listGlossaryTerms({ projectId: systemId, query: "" }),
+      businessRules: context.service.listBusinessRules(systemId),
+      authProfiles: [authProfile]
+    });
+    const seed = await generateSeedFile({
+      outputDir: join(context.workDir, "tests"),
+      system,
+      authProfile
+    });
+    await mkdir(dirname(specPath), { recursive: true });
+    const taskPackage = await prepareAgentTask(context, {
+      systemId,
+      agent: "planner",
+      inputSummary: requirement,
+      args: ["--prompt", prompt.promptPath, "--seed", seed.seedPath, "--output", specPath],
+      outputPaths: [specPath],
+      planContext: {
+        requirement,
+        specPath,
+        promptPath: prompt.promptPath,
+        seedPath: seed.seedPath
+      }
+    });
+    return {
+      ...taskPackage,
+      stage: "planner",
+      promptPath: prompt.promptPath,
+      seedPath: seed.seedPath,
+      specPath
+    };
+  }
   const result = await generatePlanDraft({
     workDir: context.workDir,
     system,
@@ -1233,7 +1345,9 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
       chainContext: {
         testCaseId: testCase.id,
         specPath,
-        testPath
+        testPath,
+        maxHealAttempts: optionalNumberArg(input, "maxHealAttempts") ?? 1,
+        healAttempts: 0
       },
       suiteContext: suiteContextArg(input)
     });
@@ -1392,7 +1506,10 @@ async function runSingleAgent(context: BrainCreatorMcpContext, input: Record<str
   return agentRun;
 }
 
-async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+async function prepareAgentTask(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>
+): Promise<HostAgentTaskPackage> {
   const systemId = stringArg(input, "systemId");
   const system = context.repository.systemProfiles.find((item) => item.id === systemId);
   if (!system) {
@@ -1406,6 +1523,7 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
   const args = stringArrayArg(input, "args");
   const outputPaths = stringArrayArg(input, "outputPaths");
   const inputSummary = stringArg(input, "inputSummary");
+  const planContext = planContextArg(input);
   const chainContext = chainContextArg(input);
   const suiteContext = suiteContextArg(input);
   const task = context.service.createAgentTask({
@@ -1417,6 +1535,7 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
     outputPaths,
     promptPath,
     contextPath,
+    planContext,
     chainContext,
     suiteContext
   });
@@ -1433,6 +1552,7 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
         inputSummary,
         args,
         outputPaths,
+        planContext,
         chainContext,
         suiteContext,
         workDir: context.workDir,
@@ -1454,6 +1574,19 @@ async function prepareAgentTask(context: BrainCreatorMcpContext, input: Record<s
   };
 }
 
+function taskPackageFromStoredTask(task: AgentTask): HostAgentTaskPackage {
+  return {
+    status: "needs_agent_execution",
+    task,
+    promptPath: task.promptPath,
+    contextPath: task.contextPath,
+    outputPaths: task.outputPaths,
+    submitTool: task.submitTool,
+    nextAction:
+      "The host agent should read the prompt/context, create requested outputs, then call bc_submit_agent_output."
+  };
+}
+
 async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const result = context.service.submitAgentTask({
     taskId: stringArg(input, "taskId"),
@@ -1462,6 +1595,9 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     stderr: optionalStringArg(input, "stderr") ?? "",
     outputPaths: optionalStringArrayArg(input, "outputPaths")
   });
+  if (result.task.planContext) {
+    return finalizeHostAgentPlan(context, result);
+  }
   const { chainContext } = result.task;
   if (!chainContext) {
     return result;
@@ -1471,13 +1607,22 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     (result.task.agent === "generator" || result.task.agent === "healer")
       ? await runSubmittedTest(context, chainContext.testPath)
       : undefined;
-  if (result.task.agent === "generator" && testResult && testResult.exitCode !== 0) {
+  const healAttempts = chainContext.healAttempts ?? 0;
+  const maxHealAttempts = chainContext.maxHealAttempts ?? 1;
+  if (
+    (result.task.agent === "generator" || result.task.agent === "healer") &&
+    testResult &&
+    testResult.exitCode !== 0 &&
+    healAttempts < maxHealAttempts
+  ) {
     const chainRun: ChainRun = {
       id: id("chain"),
       systemId: result.task.systemId,
       testCaseId: chainContext.testCaseId,
       status: "partial",
-      generateRunId: result.agentRun.id,
+      generateRunId:
+        result.task.agent === "generator" ? result.agentRun.id : chainContext.generateRunId,
+      healRunId: result.task.agent === "healer" ? result.agentRun.id : undefined,
       specPath: chainContext.specPath,
       testPath: chainContext.testPath,
       gaps: [],
@@ -1492,7 +1637,12 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       inputSummary: `Heal ${result.task.inputSummary}: ${failureOutput}`,
       args: ["--test", chainContext.testPath, "--error", failureOutput],
       outputPaths: [chainContext.testPath],
-      chainContext: { ...chainContext, generateRunId: result.agentRun.id },
+      chainContext: {
+        ...chainContext,
+        generateRunId:
+          result.task.agent === "generator" ? result.agentRun.id : chainContext.generateRunId,
+        healAttempts: healAttempts + 1
+      },
       suiteContext: result.task.suiteContext
     });
     return {
@@ -1555,16 +1705,16 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         systemId: result.task.systemId,
         suiteId: result.task.suiteContext.suiteId,
         sourceId: result.task.suiteContext.sourceId,
-        status: suiteRunStatus(status, result.task.agent),
+        status: status === "succeeded" ? "completed" : bugReport ? "failed" : "blocked",
         total: 1,
         passed: status === "succeeded" ? 1 : 0,
-        failed: status === "failed" && result.task.agent === "healer" ? 1 : 0,
-        blocked: status === "failed" && result.task.agent !== "healer" ? 1 : 0,
+        failed: status === "failed" && bugReport ? 1 : 0,
+        blocked: status === "failed" && !bugReport ? 1 : 0,
         caseResults: [
           {
             caseNo: result.task.suiteContext.caseNo,
             title: result.task.suiteContext.title,
-            status: suiteCaseResultStatus(status, result.task.agent),
+            status: status === "succeeded" ? "passed" : bugReport ? "failed" : "blocked",
             testCaseId: chainContext.testCaseId,
             chainRunId: chainRun.id,
             bugReportId: bugReport?.id,
@@ -1581,12 +1731,135 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
   if (suiteRun) {
     const suite = context.service.getCaseSuite(suiteRun.suiteId);
     const passed = passedCaseNosForSuite(context, suiteRun.systemId, suiteRun.suiteId);
-    context.service.updateCaseSuiteStatus(
+    if (suite.selectedCaseNos.every((caseNo) => passed.has(caseNo))) {
+      const completedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "completed");
+      return {
+        ...result,
+        status: "completed",
+        chainRun,
+        suiteRun,
+        suite: completedSuite,
+        testResult
+      };
+    }
+    if (suiteRun.status === "blocked" || (suiteRun.gapIds.length > 0 && suiteRun.bugReportIds.length === 0)) {
+      const blockedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "blocked");
+      return {
+        ...result,
+        status: "blocked",
+        chainRun,
+        suiteRun,
+        suite: blockedSuite,
+        testResult
+      };
+    }
+    const nextTask = await prepareNextHostAgentSuiteTask(
+      context,
       suiteRun.suiteId,
-      suite.selectedCaseNos.every((caseNo) => passed.has(caseNo)) ? "completed" : "failed"
+      result.task.chainContext?.maxHealAttempts
     );
+    if (nextTask) {
+      return {
+        ...result,
+        submittedTask: result.task,
+        submittedAgentRun: result.agentRun,
+        chainRun,
+        suiteRun,
+        testResult,
+        ...nextTask
+      };
+    }
+    const failedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "failed");
+    return {
+      ...result,
+      status: "failed",
+      chainRun,
+      suiteRun,
+      suite: failedSuite,
+      testResult
+    };
   }
-  return suiteRun ? { ...result, chainRun, suiteRun, testResult } : { ...result, chainRun, testResult };
+  return { ...result, chainRun, testResult };
+}
+
+async function finalizeHostAgentPlan(
+  context: BrainCreatorMcpContext,
+  result: { task: AgentTask; agentRun: AgentRun }
+) {
+  const planContext = result.task.planContext;
+  if (!planContext) {
+    return result;
+  }
+  if (result.agentRun.status !== "succeeded") {
+    const gap = context.service.reportGap({
+      projectId: result.task.systemId,
+      sourceType: "host-agent-planner",
+      sourceId: result.task.id,
+      reason: result.agentRun.error ?? "Host-agent planner failed",
+      severity: "high",
+      owner: "qa"
+    });
+    return { ...result, status: "blocked", stage: "planner", gap };
+  }
+
+  let specContent: string;
+  try {
+    specContent = await readFile(planContext.specPath, "utf8");
+  } catch (error) {
+    const gap = context.service.reportGap({
+      projectId: result.task.systemId,
+      sourceType: "host-agent-planner",
+      sourceId: result.task.id,
+      reason: `Planner did not create the requested spec output: ${error instanceof Error ? error.message : String(error)}`,
+      severity: "high",
+      owner: "qa"
+    });
+    return { ...result, status: "blocked", stage: "planner", gap };
+  }
+  const scenarios = parseSpecMarkdown(specContent);
+  if (scenarios.length === 0) {
+    const gap = context.service.reportGap({
+      projectId: result.task.systemId,
+      sourceType: "host-agent-planner",
+      sourceId: result.task.id,
+      reason: "Planner output did not contain any executable scenarios.",
+      severity: "high",
+      owner: "qa"
+    });
+    return { ...result, status: "blocked", stage: "planner", gap };
+  }
+
+  const glossaryTerms = context.service.listGlossaryTerms({
+    projectId: result.task.systemId,
+    query: ""
+  });
+  const businessRules = context.service.listBusinessRules(result.task.systemId);
+  const ruleCheckResult = checkBusinessRules({ specContent, rules: businessRules });
+  const newTerms = extractCandidateTerms({
+    systemId: result.task.systemId,
+    specContent,
+    existingTerms: glossaryTerms,
+    pageScope: "/"
+  });
+  const testCase = context.service.createTestCase({
+    systemId: result.task.systemId,
+    requirement: planContext.requirement,
+    scenarios,
+    newTerms,
+    ruleCheckResult
+  });
+  return {
+    ...result,
+    status: "plan_ready",
+    stage: "planner",
+    specPath: planContext.specPath,
+    promptPath: planContext.promptPath,
+    seedPath: planContext.seedPath,
+    scenarios,
+    newTerms,
+    ruleCheckResult,
+    testCase
+  };
 }
 
 async function maybeCreateHostAgentBugReport(
@@ -1599,7 +1872,6 @@ async function maybeCreateHostAgentBugReport(
   }
 ) {
   if (
-    input.task.agent !== "healer" ||
     !input.task.suiteContext ||
     !isDocumentExpectationFailure(input.failureReason)
   ) {
@@ -1643,23 +1915,6 @@ function isDocumentExpectationFailure(reason: string) {
   );
 }
 
-function suiteRunStatus(status: ChainRun["status"], agent: AgentRun["agent"]): CaseSuiteRun["status"] {
-  if (status === "succeeded") {
-    return "completed";
-  }
-  return agent === "healer" ? "failed" : "blocked";
-}
-
-function suiteCaseResultStatus(
-  status: ChainRun["status"],
-  agent: AgentRun["agent"]
-): CaseSuiteCaseResult["status"] {
-  if (status === "succeeded") {
-    return "passed";
-  }
-  return agent === "healer" ? "failed" : "blocked";
-}
-
 function hostAgentFailureReason(
   agent: AgentRun["agent"],
   agentError: string | undefined,
@@ -1678,9 +1933,17 @@ function hostAgentFailureReason(
 async function runSubmittedTest(context: BrainCreatorMcpContext, testPath: string) {
   const runner = context.runner ?? spawnCommand;
   const testRunPath = relative(context.workDir, testPath).replace(/\\/g, "/");
-  return runner("npx", ["playwright", "test", testRunPath], {
-    cwd: context.workDir
-  });
+  try {
+    return await runner("npx", ["playwright", "test", testRunPath], {
+      cwd: context.workDir
+    });
+  } catch (error) {
+    return {
+      exitCode: 1,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 function hostAgentPrompt(input: {
@@ -2119,6 +2382,51 @@ function caseSuiteProgress(
   };
 }
 
+async function prepareNextHostAgentSuiteTask(
+  context: BrainCreatorMcpContext,
+  suiteId: string,
+  maxHealAttempts?: number
+) {
+  const suite = context.service.getCaseSuite(suiteId);
+  const source = context.service
+    .listCaseSources(suite.systemId)
+    .find((candidate) => candidate.id === suite.sourceId);
+  if (!source) {
+    throw new Error("Case source not found for host-agent suite continuation");
+  }
+  const parsed = await parseCaseSource(source.source);
+  const attempted = attemptedCaseNosForSuite(context, suite.systemId, suite.id);
+  const documentCase = parsed.cases.find(
+    (candidate) =>
+      suite.selectedCaseNos.includes(candidate.caseNo) && !attempted.has(candidate.caseNo)
+  );
+  if (!documentCase) {
+    return undefined;
+  }
+  const result = await executeDocumentCase(context, {
+    systemId: suite.systemId,
+    sourceId: source.id,
+    suiteId: suite.id,
+    documentCase,
+    maxHealAttempts,
+    createBugOnFailure: true
+  });
+  if (!result.taskPackage) {
+    return undefined;
+  }
+  const waitingSuite = context.service.updateCaseSuiteStatus(suite.id, "waiting-for-agent");
+  const passed = passedCaseNosForSuite(context, suite.systemId, suite.id);
+  return {
+    ...result.taskPackage,
+    mode: "case-source-suite",
+    stage: result.taskPackage.task.agent,
+    source,
+    suite: waitingSuite,
+    currentCase: result.caseResult,
+    progress: caseSuiteProgress(suite.selectedCaseNos, passed, [result.caseResult])
+  };
+}
+
 function unfinishedCaseSuites(context: BrainCreatorMcpContext, systemId: string) {
   const sourcesById = new Map(context.service.listCaseSources(systemId).map((source) => [source.id, source]));
   return context.service
@@ -2178,6 +2486,22 @@ function passedCaseNosForSuite(context: BrainCreatorMcpContext, systemId: string
     }
   }
   return passed;
+}
+
+function attemptedCaseNosForSuite(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  suiteId: string
+) {
+  const attempted = new Set<string>();
+  for (const run of context.service
+    .listCaseSuiteRuns(systemId)
+    .filter((item) => item.suiteId === suiteId)) {
+    for (const result of run.caseResults) {
+      attempted.add(result.caseNo);
+    }
+  }
+  return attempted;
 }
 
 function facadeNextAction(state: {
@@ -2677,6 +3001,30 @@ function optionalBooleanArg(input: Record<string, unknown>, key: string): boolea
   return input[key] === true;
 }
 
+function planContextArg(input: Record<string, unknown>): AgentTask["planContext"] | undefined {
+  const value = input.planContext;
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object") {
+    throw new Error("planContext must be an object");
+  }
+  const candidate = value as Record<string, unknown>;
+  const requirement = candidate.requirement;
+  const specPath = candidate.specPath;
+  const promptPath = candidate.promptPath;
+  const seedPath = candidate.seedPath;
+  if (
+    typeof requirement !== "string" ||
+    typeof specPath !== "string" ||
+    typeof promptPath !== "string" ||
+    typeof seedPath !== "string"
+  ) {
+    throw new Error("planContext requires requirement, specPath, promptPath, and seedPath");
+  }
+  return { requirement, specPath, promptPath, seedPath };
+}
+
 function chainContextArg(input: Record<string, unknown>): AgentTask["chainContext"] | undefined {
   const value = input.chainContext;
   if (value === undefined) {
@@ -2690,13 +3038,21 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   const specPath = candidate.specPath;
   const testPath = candidate.testPath;
   const generateRunId = candidate.generateRunId;
+  const maxHealAttempts = candidate.maxHealAttempts;
+  const healAttempts = candidate.healAttempts;
   if (typeof testCaseId !== "string" || typeof specPath !== "string" || typeof testPath !== "string") {
     throw new Error("chainContext requires testCaseId, specPath, and testPath");
   }
   if (generateRunId !== undefined && typeof generateRunId !== "string") {
     throw new Error("chainContext generateRunId must be a string when provided");
   }
-  return { testCaseId, specPath, testPath, generateRunId };
+  if (maxHealAttempts !== undefined && (typeof maxHealAttempts !== "number" || maxHealAttempts < 0)) {
+    throw new Error("chainContext maxHealAttempts must be a non-negative number when provided");
+  }
+  if (healAttempts !== undefined && (typeof healAttempts !== "number" || healAttempts < 0)) {
+    throw new Error("chainContext healAttempts must be a non-negative number when provided");
+  }
+  return { testCaseId, specPath, testPath, generateRunId, maxHealAttempts, healAttempts };
 }
 
 function suiteContextArg(input: Record<string, unknown>): AgentTask["suiteContext"] | undefined {

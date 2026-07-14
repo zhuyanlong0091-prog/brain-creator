@@ -266,11 +266,19 @@ export type AgentTask = {
   outputPaths: string[];
   promptPath: string;
   contextPath: string;
+  planContext?: {
+    requirement: string;
+    specPath: string;
+    promptPath: string;
+    seedPath: string;
+  };
   chainContext?: {
     testCaseId: string;
     specPath: string;
     testPath: string;
     generateRunId?: string;
+    maxHealAttempts?: number;
+    healAttempts?: number;
   };
   suiteContext?: {
     suiteId: string;
@@ -348,7 +356,15 @@ export type CaseSuite = {
   id: string;
   systemId: string;
   sourceId: string;
-  status: "draft" | "approved" | "running" | "completed" | "failed" | "cancelled";
+  status:
+    | "draft"
+    | "approved"
+    | "running"
+    | "waiting-for-agent"
+    | "blocked"
+    | "completed"
+    | "failed"
+    | "cancelled";
   totalCases: number;
   selectedCaseNos: string[];
   createdAt: string;
@@ -376,7 +392,7 @@ export type CaseSuiteRun = {
 export type CaseSuiteCaseResult = {
   caseNo: string;
   title: string;
-  status: "passed" | "failed" | "blocked";
+  status: "passed" | "failed" | "blocked" | "waiting-for-agent";
   testCaseId?: string;
   chainRunId?: string;
   bugReportId?: string;

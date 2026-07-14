@@ -1,17 +1,27 @@
-import { describe, expect, it } from "vitest";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   installBrainCreatorCodexPlugin,
   runInstallCodexPluginCli
 } from "./installCodexPlugin.js";
 
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
 describe("install Codex plugin CLI", () => {
   it("registers the package root as a Codex marketplace and installs Brain Creator", async () => {
     const calls: Array<{ command: string; args: string[]; cwd: string }> = [];
-    const packageRoot = resolve("tmp", "business-project", "node_modules", "brain-creator");
+    const workspaceDir = await tempDir();
+    const packageRoot = resolve(workspaceDir, "node_modules", "brain-creator");
 
     const result = await installBrainCreatorCodexPlugin({
       packageRoot,
+      workspaceDir,
       runCommand: async (command, args, cwd) => {
         calls.push({ command, args, cwd });
         return { stdout: "ok", stderr: "" };
@@ -19,6 +29,11 @@ describe("install Codex plugin CLI", () => {
     });
 
     expect(result.marketplaceRoot).toBe(packageRoot);
+    expect(result.mcpConfigPath).toBe(join(workspaceDir, ".mcp.json"));
+    const mcpConfig = JSON.parse(await readFile(result.mcpConfigPath, "utf8"));
+    expect(mcpConfig.mcpServers["brain-creator"].env.BRAIN_CREATOR_AGENT_PROVIDER).toBe(
+      "host-agent"
+    );
     expect(calls).toEqual([
       {
         command: "codex",
@@ -66,3 +81,9 @@ describe("install Codex plugin CLI", () => {
     expect(logs.join("\n")).toContain("--package-root");
   });
 });
+
+async function tempDir() {
+  const dir = await mkdtemp(join(tmpdir(), "brain-codex-plugin-install-"));
+  tempDirs.push(dir);
+  return dir;
+}

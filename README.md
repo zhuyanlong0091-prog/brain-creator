@@ -51,6 +51,8 @@ Brain Creator v2 现在采用三层入口：
 
 执行测试用例文档时，Agent 应先调用 `bc_run mode=case-source-suite confirm=false` 返回预览；只有用户明确确认后，才调用 `confirm=true` 执行 suite run。默认是全量执行；如果用户说“只跑 TC-001/TC-002”“只跑招聘需求模块”或“只跑 P0”，Agent 应映射为 `caseNos`、`modules`、`priorities` 筛选条件。多个筛选条件同时出现时取交集。
 
+Codex 插件默认使用 `host-agent`。确认执行后，Brain Creator 每次返回一条 `needs_agent_execution` 的 Generator/Healer 任务，当前 Codex Agent 直接生成或修复测试并调用 `bc_submit_agent_output`；提交成功后会自动运行 Playwright，并在还有用例时直接返回下一条任务。Agent 必须持续执行到 `completed`、`failed` 或 `blocked`。`waiting-for-agent` 表示等待当前 Agent 工作，不表示缺少 Claude bridge。
+
 当前文档来源支持：
 
 - 本地 `.xlsx` 文件。
@@ -121,10 +123,10 @@ npx brain-creator-doctor
 这几步分别完成：
 
 - `npm install --save-dev brain-creator`：把 Brain Creator 安装到当前业务项目。
-- `npx brain-creator-install-assets`：把 Brain Creator Skill 和 Playwright Planner / Generator / Healer agent 定义安装到当前业务项目。
+- `npx brain-creator-install-assets`：把 Brain Creator Skill 和 Playwright Planner / Generator / Healer agent 定义安装到当前业务项目；项目没有 Playwright 配置时，同时补充可移植的 `playwright.config.ts`。
 - `npx brain-creator-write-mcp-config`：创建或更新当前业务项目的 `.mcp.json`，默认写入 `npx brain-creator-mcp` 和 `BRAIN_CREATOR_AGENT_PROVIDER=auto`，因此适配本地安装。
-- `npx brain-creator-install-codex-plugin`：把已安装的 npm 包注册为 Codex plugin marketplace，并安装 `brain-creator@personal`。
-- `npx brain-creator-doctor`：在真正使用前检查 workspace、agent bridge provider 和 agent 定义，并输出当前 provider 的推荐执行路径。
+- `npx brain-creator-install-codex-plugin`：把已安装的 npm 包注册为 Codex plugin marketplace，安装 `brain-creator@personal`，并把当前项目 `.mcp.json` 配置为 `host-agent`，避免 Codex 误启动 Claude 子进程。
+- `npx brain-creator-doctor`：在真正使用前检查 workspace、agent bridge provider、真实浏览器和 agent 定义，并输出当前 provider 的推荐执行路径。
 
 如果你已经知道运行环境，可以在写入 MCP 配置时显式选择 provider：
 
@@ -198,9 +200,10 @@ Codex 最多接受 3 条 starter prompt。Brain Creator 保留“快捷帮助与
 
 ```bash
 npm run verify:codex-native-entry
+npm run verify:host-agent-document-suite
 ```
 
-该检查会覆盖 repo-local plugin starter prompt、host-agent doctor 指引、`/bc help` 只读快捷入口，以及 host-agent 任务包提交链路。
+这些检查会覆盖 repo-local plugin starter prompt、host-agent doctor 指引、`/bc help` 只读快捷入口、任务包提交链路，以及“文档预览 → 用户确认 → 两条用例顺序执行 → 真实 Chromium 断言 → SuiteRun/ChainRun 落库”的完整闭环。
 
 验证插件：
 
@@ -305,6 +308,8 @@ When the user explicitly types `/bc ...`, the agent can call `bc_command` as the
 `/bc` is a convenience entrypoint, not a required one. Natural language remains the recommended user entrypoint.
 
 For a test case document, the agent should call `bc_run mode=case-source-suite confirm=false` first. Only after explicit user confirmation should it call the same mode with `confirm=true` to execute the suite run. The default is the full document; if the user says "only run TC-001/TC-002", "only run the recruiting module", or "only run P0", map that request to `caseNos`, `modules`, and `priorities`. Multiple filters are intersected.
+
+The Codex plugin defaults to `host-agent`. After confirmation, Brain Creator returns one `needs_agent_execution` Generator/Healer task at a time. The current Codex agent creates or repairs the test and calls `bc_submit_agent_output`; Brain Creator then runs Playwright and returns the next case task when work remains. Continue until `completed`, `failed`, or `blocked`. `waiting-for-agent` means the current agent has work to do, not that a Claude bridge is missing.
 
 Supported document sources:
 
@@ -426,9 +431,10 @@ To verify the Codex-native entrypoint in one command:
 
 ```bash
 npm run verify:codex-native-entry
+npm run verify:host-agent-document-suite
 ```
 
-This check covers the repo-local plugin starter prompt, host-agent doctor guidance, read-only `/bc help`, the host-agent task handoff chain, and Codex plugin installation from both the source checkout and a packed npm install. To verify only the Codex plugin marketplace installation path, run:
+These checks cover the repo-local plugin starter prompt, host-agent doctor guidance, read-only `/bc help`, task handoff, plugin installation, and a full document preview → confirmation → two ordered cases → real Chromium assertions → persisted SuiteRun/ChainRun flow. To verify only the Codex plugin marketplace installation path, run:
 
 ```bash
 npm run verify:codex-plugin-install
@@ -457,10 +463,10 @@ npx brain-creator-doctor
 These commands:
 
 - `npm install --save-dev brain-creator`: installs Brain Creator into the current business project.
-- `npx brain-creator-install-assets`: installs the Brain Creator Skill and Playwright Planner / Generator / Healer agent definitions into the current business project.
+- `npx brain-creator-install-assets`: installs the Brain Creator Skill and Playwright Planner / Generator / Healer agent definitions, plus a portable `playwright.config.ts` when the project does not already have one.
 - `npx brain-creator-write-mcp-config`: creates or updates the business project's `.mcp.json`, preserving existing MCP servers and using `npx brain-creator-mcp` for local installs.
-- `npx brain-creator-install-codex-plugin`: registers the installed package as a Codex plugin marketplace and installs `brain-creator@personal`.
-- `npx brain-creator-doctor`: checks workspace, agent bridge provider, and agent definitions before the first workflow, then prints the recommended execution path for the active provider.
+- `npx brain-creator-install-codex-plugin`: registers the installed package as a Codex plugin marketplace, installs `brain-creator@personal`, and writes the current project's `.mcp.json` with `host-agent` so Codex does not accidentally start a Claude subprocess.
+- `npx brain-creator-doctor`: checks workspace, agent bridge provider, real browser availability, and agent definitions before the first workflow, then prints the recommended execution path for the active provider.
 
 If you already know the runtime environment, choose the provider while writing MCP config:
 
@@ -503,7 +509,7 @@ BRAIN_CREATOR_CODEX_ARGS='["exec","--json","--ephemeral","--sandbox","workspace-
 BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
 ```
 
-Host-agent mode does not start a Claude or Codex subprocess. The agent may call `bc_prepare_agent_task`, read the returned `input.prompt.md` and `input.context.json`, create the requested outputs, then call `bc_submit_agent_output`. When an approved case is run through `bc_run_chain`, Brain Creator writes the spec/seed files and returns a generator task package with `status: "needs_agent_execution"`; the current agent should execute that package instead of waiting for a subprocess. After a successful generator submission, Brain Creator runs Playwright automatically. Passing tests record the linked AgentRun, ChainRun, and generated test artifact ownership; failing tests return a healer task package. A successful healer submission reruns Playwright and completes the chain; a still-failing healer submission marks the chain failed. If the task came from a document suite, Brain Creator also records a single-case suite run so later resume skips passed cases; unmet business expectations create BugReports, while environment, auth, locator, or execution blockers create Gaps.
+Host-agent mode does not start a Claude or Codex subprocess. `bc_generate_plan` may return a Planner task package; after the current agent writes the spec, `bc_submit_agent_output` returns `plan_ready`. An approved case or confirmed document suite returns a Generator task with `status: "needs_agent_execution"`; the current agent writes the requested test and submits it. Brain Creator runs Playwright automatically, returns a Healer task on test failure, and returns the next document case task after a successful suite case. The agent continues until a terminal suite status. Passing tests record linked AgentRun, ChainRun, SuiteRun, and artifact ownership; unmet business expectations create BugReports, while environment, auth, locator, or execution blockers create Gaps.
 
 On Windows PowerShell, set the same values with `$env:` before launching the MCP client.
 

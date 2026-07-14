@@ -34,7 +34,7 @@ When `/bc status` has no selected system, present the returned compact system pi
 
 Use source checkout mode when you are developing Brain Creator itself. In this mode, clone the repository, run `npm install`, then use `npm run dev:mcp`.
 
-Use MCP CLI connection mode when you want to use Brain Creator from a business project. The recommended setup is project-local: run `npm install --save-dev brain-creator`, then `npx brain-creator-install-assets`, `npx brain-creator-write-mcp-config`, `npx brain-creator-install-codex-plugin`, and `npx brain-creator-doctor` once in the business project. The generated MCP config connects the server with `npx brain-creator-mcp`, and the Codex plugin installer registers the local package as a plugin marketplace.
+Use MCP CLI connection mode when you want to use Brain Creator from a business project. The recommended setup is project-local: run `npm install --save-dev brain-creator`, then `npx brain-creator-install-assets`, `npx brain-creator-write-mcp-config`, `npx brain-creator-install-codex-plugin`, and `npx brain-creator-doctor` once in the business project. The assets installer adds the Skill, agent definitions, and a Playwright config only when one is missing. The Codex plugin installer registers the local package and rewrites the current workspace MCP entry to `host-agent`, so Codex does not need a Claude subprocess.
 
 Use repo-local plugin installation mode when you want Brain Creator to appear through Codex `/plugin`. The repository provides `plugins/brain-creator/.codex-plugin/plugin.json`, `plugins/brain-creator/.mcp.json`, bundled Brain Creator skills, and `.agents/plugins/marketplace.json` for local marketplace discovery. This mode registers the Skill and MCP server metadata, while the executable commands still need to be available through a local package install or a future npm publish.
 
@@ -127,7 +127,7 @@ Expected agent behavior:
 - show rule coverage and new glossary candidates
 - wait for approval before code generation
 
-Behind the scenes, this uses `bc_generate_plan`. This is the moment where the agent should help you review intent, not rush into code.
+Behind the scenes, this uses `bc_generate_plan`. In host-agent mode it returns a Planner task with `needs_agent_execution`; the current agent writes the requested spec and calls `bc_submit_agent_output`, which returns `plan_ready`. This is the moment where the agent should help you review intent, not rush into code.
 
 ### 6. Approve Or Adjust The Plan
 
@@ -192,6 +192,25 @@ To continue later:
 3. Review and approve the plan again before running the chain.
 
 Use `bc_report_gap` for external preflight failures such as blocked network access, unreachable target pages, or missing evidence outside a chain run.
+
+### 10. Execute A Test Case Document
+
+Say:
+
+```text
+Use Brain Creator to execute this test case document: <path-to-cases.xlsx-or-md>
+```
+
+Expected agent behavior:
+
+1. Call `bc_run mode=case-source-suite confirm=false` and show the case count, filters, risks, and bridge status.
+2. Wait for explicit confirmation.
+3. Call the same facade with `confirm=true`.
+4. In host-agent mode, execute the returned Generator/Healer task in the current Codex or Claude Code session, write the requested test, and call `bc_submit_agent_output`.
+5. If submission returns another `needs_agent_execution` task, continue with that task. Stop only at `completed`, `failed`, or `blocked`.
+6. Use `bc_review` to report SuiteRun, ChainRun, BugReport, Gap, and evidence paths.
+
+`waiting-for-agent` is an active handoff state. It does not mean Brain Creator is missing an AgentBridge, and it must not be reported as a Gap. Generator submission invokes real Playwright automatically; a failing run returns a bounded Healer task.
 
 ## Session Resume: The New-Session Entry Point
 
