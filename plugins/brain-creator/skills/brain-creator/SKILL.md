@@ -78,6 +78,8 @@ When the user provides a test case document path, first call `bc_run` with `mode
 
 In host-agent mode, `confirm: true` returns the first case task with `status: "needs_agent_execution"` and suite status `waiting-for-agent`. Execute it in the current Agent and call `bc_submit_agent_output`. If that submission returns another task package, repeat immediately for the next Generator or Healer task. Stop only at `completed`, `failed`, or `blocked`, then use `bc_review` for the user-facing result. Do not ask the user to configure a Claude subprocess and do not classify `waiting-for-agent` as a Gap.
 
+For `script + storageStatePath` authentication, confirmed document suites run a read-only browser auth preflight before creating a Generator task. If the storage state is missing or redirects to a login page, Brain Creator returns `blocked` with an AuthCheckpoint and Gap. Guide the user through the protected login step, save and verify refreshed storage state in a fresh browser, complete the checkpoint, then resume the suite. Do not submit a Generator or Healer task while this checkpoint is awaiting the user.
+
 Document suites stop on the first environment, auth, locator, or evidence Gap by default. If and only if the user explicitly asks to continue attempting all cases despite individual blockers, pass `continueOnBlocked: true` in the preview and confirmed `bc_run` calls. Continue processing returned task packages while preserving every Gap. The final suite remains `blocked` when any case was blocked. This policy never bypasses suite-level auth/bridge preflight and never authorizes Excel write-back.
 
 Document source details:

@@ -2773,6 +2773,70 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.listCaseSuiteRuns(system.id)).toEqual([]);
   });
 
+  it("creates an auth checkpoint before generation when stored browser auth has expired", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(
+        async () => ({ exitCode: 0, stdout: "host agent", stderr: "" }),
+        {
+          provider: "host-agent" as const,
+          preflight: async () => ({ ok: true })
+        }
+      ),
+      authStateVerifier: async () => ({
+        status: "expired",
+        finalUrl: "https://sso.example.test/login",
+        reason: "Stored browser authentication redirected to a login page."
+      })
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Protected HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    const auth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "script",
+        secrets: { storageStatePath: ".brain-creator/auth/system/storage-state.json" }
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_verify_auth", { id: auth.id });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true
+      })
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        authState: expect.objectContaining({ status: "expired" }),
+        authCheckpoint: expect.objectContaining({ status: "awaiting-user" }),
+        gap: expect.objectContaining({
+          sourceType: "case-source-suite-auth",
+          reason: expect.stringContaining("redirected to a login page")
+        })
+      })
+    );
+    expect(context.service.listAgentTasks(system.id)).toEqual([]);
+    expect(context.service.listCaseSuites(system.id)).toEqual([]);
+  });
+
   it("filters document case suites by case number, module, and priority", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
