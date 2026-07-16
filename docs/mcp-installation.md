@@ -40,6 +40,8 @@ npx brain-creator-write-mcp-config
 
 The command preserves existing MCP servers in `.mcp.json` and adds the `brain-creator` server. By default, it writes an MCP command that uses the project-local package through `npx`.
 
+New configs set `BRAIN_CREATOR_TOOL_PROFILE=facade`, so the Agent sees only the high-level preparation, status, configuration, execution, review, and host-task submission tools. Set the profile to `full` only for compatibility, audit, or debugging.
+
 Install the Codex plugin from the installed package:
 
 ```bash
@@ -68,6 +70,7 @@ Then configure Claude Code or Codex MCP in the business project:
       "args": ["brain-creator-mcp"],
       "env": {
         "BRAIN_CREATOR_WORKSPACE": ".",
+        "BRAIN_CREATOR_TOOL_PROFILE": "facade",
         "BRAIN_CREATOR_AGENT_PROVIDER": "auto",
         "BRAIN_CREATOR_AGENT_TIMEOUT_MS": "120000"
       }
@@ -91,6 +94,7 @@ For a Codex plugin style workflow that should not start another subprocess, use 
 
 ```json
 {
+  "BRAIN_CREATOR_TOOL_PROFILE": "facade",
   "BRAIN_CREATOR_AGENT_PROVIDER": "host-agent",
   "BRAIN_CREATOR_AGENT_TIMEOUT_MS": "120000"
 }
@@ -107,6 +111,10 @@ npx brain-creator-doctor
 ```
 
 Doctor prints the resolved provider, real browser availability, and recommended action, so users can tell whether Brain Creator will use a Claude subprocess, Codex subprocess, host-agent task handoff, or preview-only disabled mode before running a confirmed workflow. If neither a Playwright browser nor system Chrome/Edge is available, install Chromium or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` before running a suite.
+
+Doctor also reports the resolved knowledge directory, tool profile, and Feishu connector readiness. A partial Feishu credential configuration fails immediately.
+
+Requirement knowledge defaults to `.brain-creator/knowledge`. To use an external Obsidian vault, set `BRAIN_CREATOR_KNOWLEDGE_DIR`. For direct Feishu Wiki/Doc reading, set both `BRAIN_CREATOR_FEISHU_APP_ID` and `BRAIN_CREATOR_FEISHU_APP_SECRET`; otherwise Brain Creator requests a host Agent content package.
 
 If you prefer a global install, use:
 
@@ -132,7 +140,7 @@ npm run verify:package-install
 After MCP is connected, start in Claude Code or Codex with:
 
 ```text
-Use Brain Creator to connect this business system, generate a test plan, wait for my approval, then run the chain.
+Use Brain Creator to analyze this requirement document or Feishu link, generate test design and data, and wait for my approval.
 ```
 
 ## repo-local plugin installation mode

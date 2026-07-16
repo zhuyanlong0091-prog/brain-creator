@@ -10,10 +10,20 @@ const pluginManifest = JSON.parse(
   await readFile("plugins/brain-creator/.codex-plugin/plugin.json", "utf8")
 );
 const pluginMcp = JSON.parse(await readFile("plugins/brain-creator/.mcp.json", "utf8"));
+const pluginSkill = await readFile("plugins/brain-creator/skills/brain-creator/SKILL.md", "utf8");
 
+const starterPrompts = pluginManifest.interface.defaultPrompt as string[];
 assert(
-  pluginManifest.interface.defaultPrompt.some((prompt: string) => prompt.includes("/bc help")),
-  "Codex plugin starter prompts must expose /bc help"
+  starterPrompts.some((prompt) => /requirement document or link/i.test(prompt)),
+  "Codex plugin starter prompts must expose requirement analysis"
+);
+assert(
+  starterPrompts.some((prompt) => /approved requirement baseline/i.test(prompt)),
+  "Codex plugin starter prompts must expose system binding"
+);
+assert(
+  starterPrompts.some((prompt) => /test case document/i.test(prompt)),
+  "Codex plugin starter prompts must retain test-document compatibility"
 );
 assert(
   pluginManifest.interface.defaultPrompt.length <= 3,
@@ -23,6 +33,7 @@ assert(
   pluginMcp.mcpServers["brain-creator"].env.BRAIN_CREATOR_AGENT_PROVIDER === "host-agent",
   "Codex plugin MCP config must default to host-agent"
 );
+assert(pluginSkill.includes("/bc help"), "Brain Creator Skill must retain /bc help discovery");
 
 const doctor = buildDoctorReport({
   env: {
@@ -79,7 +90,7 @@ await import("./codexPluginInstallSmoke.js");
 
 console.log("Codex-native entry smoke passed.");
 console.log(
-  "Validated plugin starter prompts, host-agent doctor guidance, /bc help, context-free /bc status, host-agent chain handoff, and repo-local plugin installation."
+  "Validated requirement-first starter prompts, host-agent doctor guidance, /bc help compatibility, context-free /bc status, host-agent chain handoff, and repo-local plugin installation."
 );
 
 function dataOf(result: CallToolResult): any {

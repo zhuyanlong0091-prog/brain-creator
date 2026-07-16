@@ -9,6 +9,8 @@ describe("Brain Creator doctor", () => {
       cwd,
       env: {
         BRAIN_CREATOR_WORKSPACE: "business-project",
+        BRAIN_CREATOR_KNOWLEDGE_DIR: "business-project/knowledge",
+        BRAIN_CREATOR_TOOL_PROFILE: "facade",
         BRAIN_CREATOR_AGENT_COMMAND: "claude",
         BRAIN_CREATOR_AGENT_ARGS: "[\"--print\",\"--permission-mode\",\"acceptEdits\"]",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
@@ -25,6 +27,8 @@ describe("Brain Creator doctor", () => {
     expect(report.ok).toBe(true);
     expect(report.workspace).toBe(cwd);
     expect(report.dataFile).toBe(join(cwd, ".brain-creator", "local-assets.json"));
+    expect(report.knowledgeDir).toBe(resolve("business-project/knowledge"));
+    expect(report.toolProfile).toBe("facade");
     expect(report.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "Agent bridge provider", status: "pass" }),
@@ -35,6 +39,30 @@ describe("Brain Creator doctor", () => {
     );
     expect(formatDoctorReport(report)).toContain("Brain Creator doctor: ready");
     expect(formatDoctorReport(report)).toContain("npx brain-creator-install-codex-plugin");
+  });
+
+  it("fails fast for invalid tool profiles and partial Feishu credentials", () => {
+    const report = buildDoctorReport({
+      cwd: resolve("business-project"),
+      env: {
+        BRAIN_CREATOR_TOOL_PROFILE: "small",
+        BRAIN_CREATOR_FEISHU_APP_ID: "app-id",
+        BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      },
+      commandExists: () => false,
+      fileExists: () => true
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.connectors.feishu).toBe("invalid");
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "MCP tool profile", status: "fail" }),
+        expect.objectContaining({ name: "Feishu connector", status: "fail" })
+      ])
+    );
+    expect(formatDoctorReport(report)).not.toContain("app-id");
   });
 
   it("returns actionable failures before users reach plan or chain execution", () => {

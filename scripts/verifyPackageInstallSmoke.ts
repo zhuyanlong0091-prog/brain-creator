@@ -59,9 +59,14 @@ try {
       JSON.stringify(["brain-creator-mcp"]),
     "installed business project MCP config should use local npx Brain Creator"
   );
+  assert(
+    mcpConfig.mcpServers?.["brain-creator"]?.env?.BRAIN_CREATOR_TOOL_PROFILE === "facade",
+    "installed business project MCP config should default to the facade tool profile"
+  );
 
   await run(join(binDir, "brain-creator-doctor.cmd"), [], businessDir, {
     BRAIN_CREATOR_WORKSPACE: businessDir,
+    BRAIN_CREATOR_TOOL_PROFILE: "facade",
     BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
     BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
   });
@@ -82,6 +87,7 @@ try {
     cwd: businessDir,
     env: childEnv({
       BRAIN_CREATOR_WORKSPACE: businessDir,
+      BRAIN_CREATOR_TOOL_PROFILE: "facade",
       BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
       BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
     }),
@@ -90,16 +96,21 @@ try {
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    for (const name of [
+    const facadeTools = [
+      "bc_prepare",
       "bc_command",
-      "bc_create_system",
-      "bc_prepare_agent_task",
-      "bc_submit_agent_output",
-      "bc_list_agent_runs"
-    ]) {
+      "bc_intent_preview",
+      "bc_status",
+      "bc_run",
+      "bc_review",
+      "bc_configure",
+      "bc_submit_agent_output"
+    ];
+    for (const name of facadeTools) {
       assert(tools.tools.some((tool) => tool.name === name), `Installed MCP is missing ${name}`);
     }
-    for (const name of ["bc_status", "bc_list_systems", "bc_review"]) {
+    assert(tools.tools.length === facadeTools.length, "Installed MCP exposed tools outside the facade profile");
+    for (const name of ["bc_intent_preview", "bc_status", "bc_review"]) {
       assert(
         tools.tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint === true,
         `Installed MCP must mark ${name} read-only`
@@ -128,63 +139,49 @@ try {
       "Installed MCP /bc status did not return system connection guidance"
     );
 
-    const system = dataOf(
+    const knowledgeProject = dataOf(
       await client.callTool({
-        name: "bc_create_system",
+        name: "bc_configure",
         arguments: {
-          name: "Installed Codex Host Agent",
-          environment: "package-smoke",
-          baseUrl: "https://installed-host-agent.example.test",
-          defaultLocale: "en-US",
-          urlAllowlist: ["https://installed-host-agent.example.test"]
+          target: "knowledge-project",
+          name: "Installed Requirement",
+          key: "installed-requirement",
+          defaultLocale: "en-US"
         }
       })
+    );
+    const requirementPath = join(businessDir, "requirement.md");
+    await writeFile(
+      requirementPath,
+      "# Installed Requirement\n\nUsers create requests and managers approve them.",
+      "utf8"
     );
     const prepared = dataOf(
       await client.callTool({
-        name: "bc_prepare_agent_task",
+        name: "bc_prepare",
         arguments: {
-          systemId: system.id,
-          agent: "planner",
-          inputSummary: "Verify the installed MCP can hand work to the current Codex agent.",
-          args: [],
-          outputPaths: []
+          action: "ingest-requirement",
+          knowledgeProjectId: knowledgeProject.id,
+          source: requirementPath
         }
       })
     );
-    assert(prepared.status === "needs_agent_execution", "Installed MCP did not prepare a host-agent task");
+    assert(prepared.status === "draft-created", "Installed MCP did not ingest a requirement source");
     assert(
-      prepared.submitTool === "bc_submit_agent_output",
-      "Installed MCP did not return the host-agent submit tool"
+      prepared.requirementSet.status === "draft",
+      "Installed MCP did not persist a draft requirement baseline"
     );
-    assert(
-      (await readFile(prepared.promptPath, "utf8")).includes("bc_submit_agent_output"),
-      "Installed MCP task prompt is missing submission guidance"
-    );
-
-    const submitted = dataOf(
+    const knowledgeStatus = dataOf(
       await client.callTool({
-        name: "bc_submit_agent_output",
+        name: "bc_status",
         arguments: {
-          taskId: prepared.task.id,
-          status: "succeeded",
-          stdout: "installed host agent completed planner task",
-          stderr: "",
-          outputPaths: []
+          knowledgeProjectId: knowledgeProject.id
         }
       })
     );
-    assert(submitted.agentRun.status === "succeeded", "Installed MCP did not record agent output");
-
-    const agentRuns = dataOf(
-      await client.callTool({
-        name: "bc_list_agent_runs",
-        arguments: { systemId: system.id }
-      })
-    );
     assert(
-      agentRuns.some((run: { id: string }) => run.id === submitted.agentRun.id),
-      "Installed MCP did not persist the submitted AgentRun"
+      knowledgeStatus.knowledge.requirementSets.total === 1,
+      "Installed MCP knowledge status did not restore the requirement baseline"
     );
   } finally {
     await client.close();

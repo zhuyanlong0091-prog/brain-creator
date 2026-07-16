@@ -35,6 +35,7 @@ type WriteMcpConfigCliIo = {
 function brainCreatorMcpEnv(provider: NonNullable<WriteMcpConfigOptions["provider"]>) {
   const base = {
     BRAIN_CREATOR_WORKSPACE: ".",
+    BRAIN_CREATOR_TOOL_PROFILE: "facade",
     BRAIN_CREATOR_AGENT_PROVIDER: provider,
     BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
   };

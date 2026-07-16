@@ -1,224 +1,171 @@
 ---
 name: brain-creator
-description: 当用户要求使用 Brain Creator 时触发：接入业务系统、配置鉴权、管理术语/业务规则、生成测试计划、运行智能体原生测试、查看产物或处理 Gap。When the user asks to use Brain Creator, connect a business system, configure auth, manage glossary or business rules, generate reviewed test plans, run agent-native tests, inspect artifacts, or handle gaps.
+description: Use Brain Creator when a user provides a requirement document, Feishu link, Web requirement, test-case document, or asks to prepare, approve, execute, or review agent-native tests. 当用户要求分析需求、沉淀业务知识、设计测试、执行测试或复盘证据时使用。
 ---
 
 # Brain Creator
 
-Use Brain Creator as an agent-native testing business brain through MCP tools. Claude Code or Codex is the user interface; Brain Creator supplies system context, auth handling, business language, planning, generated artifacts, chain execution, and gap tracking.
+Brain Creator is a requirement-driven, agent-native testing business brain for Claude Code and Codex. The host Agent is the user interface. Do not create or prioritize a Web UI.
 
-Agent bridge policy: Brain Creator may run Planner / Generator / Healer through Claude Code subprocess, Codex subprocess, host-agent task handoff, or disabled preview-only mode. Prefer `bc_status` or `bc_session_resume` to inspect bridge state before confirmed execution. If bridge state is blocked, report the blocker or create a Gap instead of waiting on a long timeout. In host-agent mode, `bc_generate_plan`, `bc_prepare_agent_task`, approved `bc_run_chain`, and confirmed document suites may return `status: "needs_agent_execution"` task packages. Read `input.prompt.md` and `input.context.json`, create the requested outputs as the current agent, then call `bc_submit_agent_output`. Planner submission returns `plan_ready`; generator submission runs Playwright automatically; a failed Playwright run returns a healer task package. Healer submission reruns Playwright and completes or blocks the chain. A document suite returns one task at a time, and each successful submission returns the next task until the suite reaches `completed`, `failed`, or `blocked`. Treat `waiting-for-agent` as actionable work for the current agent, never as a missing bridge. Passing tests record AgentRun, ChainRun, SuiteRun, and generated artifact ownership; unmet business expectations create BugReports, while environment, auth, locator, or execution blockers create Gaps.
+The recommended entrypoint is a requirement document or link. Existing Excel/Markdown test cases remain a compatibility entrypoint. Users should not need to know MCP tool names or say `Skill("brain-creator")`; keep `Skill("brain-creator")` only as an explicit fallback.
 
-Codex plugin mode defaults to `host-agent`: do not start or wait for a Claude/Codex subprocess when Brain Creator returns `needs_agent_execution`; execute the returned task package as the current Codex agent and finish with `bc_submit_agent_output`.
+## Core Rules
 
-## 入口路由（Entry Routing）
-
-用户通过两种方式使用 Brain Creator。每次用户消息到达时自动判断入口模式。
-
-| | 🗣 自然语言（Natural Language） | ⚡ 快速维护（Quick Maintenance） |
-|---|---|---|
-| **触发方式** | 自由描述测试需求 | 描述已有用例的操作意图，如"查看状态""跑高优先级用例""修复失败" |
-| **适用场景** | 新系统接入、新需求探索、首次生成测试 | 已有用例的维护、执行、状态查询、Gap 处理 |
-| **用户心智** | "我不知道有什么，你帮我弄" | "我知道我要什么，快速操作" |
-
-### 自动路由规则
-
-```
-用户消息到达
-  ├─ 意图清晰指向已有用例维护？
-  │   （如"跑一下"、"状态怎么样"、"有哪些Gap"、"修复失败"）
-  │   └─ 是 → ⚡ 快速维护路由：直接查询状态 + 给出执行建议
-  │
-  ├─ 意图清晰指向新系统/新需求？
-  │   （如"接入"、"connect"、"新系统"、"生成测试"、"帮我测"）
-  │   └─ 是 → 🗣 自然语言路由：按 One-Sentence Workflow 执行
-  │
-  └─ 意图模糊，无法判断？
-      → 主动提示用户当前系统状态，并给出下一步建议
-```
-
-> **注意：** 自然语言仍是推荐入口。若用户明确输入 `/bc ...`，调用 `bc_command` 解析最小快捷命令：`/bc help`、`/bc status`、`/bc run "<path>"`（可带 `--case`、`--module`、`--priority`）、`/bc continue`、`/bc bugs`、`/bc gaps`、`/bc regress bugs`（可带 `--bug`、`--module`、`--priority`）、`/bc review suite`；复盘类命令可带 `--failure-type` / `--failure-types` 过滤失败分类。`bc_command` 会转发到对应 Facade 工具；不要让用户手动编排底层 `bc_*` 工具。
-
----
+- Keep every knowledge asset and execution asset isolated by `knowledgeProjectId` or `systemId`.
+- Keep approved requirement expectations separate from observed system behavior and test results.
+- Do not approve a baseline with unresolved clarification Gaps.
+- Do not execute before the baseline is approved, cases are compiled, a system is bound, and auth is ready.
+- Do not invent navigation, locators, data, expected results, or evidence. Create a Gap when evidence is missing or more than one workflow path is plausible.
+- Never echo passwords, tokens, cookies, storage state, Feishu secrets, or verification codes.
+- Do not retry a cancelled or denied facade call through an equivalent fine-grained tool.
 
 ## Facade-First Tool Policy
 
-Default to the high-level facade tools. The fine-grained `bc_*` tools remain available for compatibility, debugging, audit, and fallback, but the user should not have to orchestrate them. `bc_status` returns `toolGuidance`; follow it before reaching for internal tools.
+New installations use `BRAIN_CREATOR_TOOL_PROFILE=facade`. Prefer these high-level tools:
 
-Do not retry a cancelled or denied facade call through an equivalent fine-grained tool. Report that the host did not authorize the operation, confirm that no change was made, and let the user approve or retry the original facade action.
+- `bc_prepare`: ingest requirements, generate analysis and test design, approve baselines, compile cases, and record system observations.
+- `bc_status`: inspect knowledge projects or runtime systems and choose the next action.
+- `bc_configure`: create knowledge projects, systems, auth, rules, terms, bindings, checkpoints, and inspect connectors.
+- `bc_run`: preview or execute requirement suites, approved cases, document suites, and bug regression.
+- `bc_review`: review requirements, knowledge, coverage, test intents, executable cases, evidence, suites, bugs, and Gaps.
+- `bc_intent_preview`: preview ambiguous operational wording without executing it.
+- `bc_submit_agent_output`: return Planner, Generator, or Healer output in host-agent mode.
+- `bc_command`: optional `/bc help`, status, suite, bug, and Gap shortcuts.
+
+Fine-grained tools remain available with `BRAIN_CREATOR_TOOL_PROFILE=full` for compatibility, audit, and debugging.
 
 ## User Entrypoint Map
 
-| User intent | Default tool path | Confirmation boundary | Reply focus |
-|---|---|---|---|
-| Check current system state | `bc_status` | None | Prefer `statusMarkdown`; summarize system, auth, suites, bugs, gaps, artifacts, and next action. |
-| Connect a new system | `bc_configure target=system` | Confirm name, environment, base URL, and allowlist before creation. | Return system id and setup recommendations. |
-| Configure auth | `bc_configure target=auth` | Never echo secrets; keep sensitive values only in the tool input. | Return redacted auth state and verification result. |
-| Wait for manual login, CAPTCHA, recovery, or 2FA | `bc_configure target=checkpoint` plus the host browser capability | Continue only after the protected page is reached and a fresh browser proves the saved state works. | Explain why execution is waiting, save local storage state, and report only readiness metadata. |
-| Preview ambiguous operational wording | `bc_intent_preview` | Preview only; do not execute. | Show the suggested facade call, parameters, and risks. |
-| Preview a test document suite | `bc_run mode=case-source-suite confirm=false` | Required before execution. | Show counts, module and priority stats, sample cases, bridge state, and risks. |
-| Execute a confirmed test document suite | `bc_run mode=case-source-suite confirm=true` | Requires prior preview; Excel write-back also requires explicit write-back confirmation. | Report suite results, BugReports, Gaps, and evidence paths. |
-| Continue an unfinished suite | `bc_status` then `bc_run mode=case-source-suite confirm=true` | Confirm the latest unfinished suite is the intended target when ambiguous. | Report rerun results and remaining blockers. |
-| Regress open bugs | `bc_run mode=bug-regression` | No plan approval required; make any `bugIds`, `modules`, and `priorities` filters visible. | Report candidates, pass/fail/blocked counts, and `regressionMarkdown`. |
-| Review bugs, gaps, artifacts, cases, or suites | `bc_review target="bug"`, `bc_review target="gap"`, or the matching target | None | Prefer `reviewMarkdown` for concise replies, use `reviewSummary` for structured reasoning, and include `reportMarkdown` only when useful. |
-| Record an external blocker or missing evidence | `bc_report_gap` | Require reason, severity, and owner context. | Return the Gap id, status, and next handling suggestion. |
+| User intent | Default Agent path | Approval boundary |
+|---|---|---|
+| Analyze a local requirement, DOCX, PDF, or Web page | `bc_configure target=knowledge-project` then `bc_prepare action=ingest-requirement` | Generated knowledge stays draft |
+| Analyze a Feishu Wiki/Doc | `bc_prepare action=ingest-requirement` | Use direct OpenAPI or host content-package fallback |
+| Generate requirement analysis and tests | `bc_prepare action=generate-test-design` | Review coverage, Gaps, and data before approval |
+| Approve and compile | `bc_prepare action=approve-baseline confirm=true`, then `compile-cases` | Explicit user confirmation required |
+| Bind a real system | `bc_configure target=system`, then `bc_configure target=system-binding` | Confirm environment and allowlist |
+| Configure auth | `bc_configure target=auth` or `bc_configure target=checkpoint` | Never expose secrets |
+| Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true` |
+| Execute an existing test document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` | Explicit confirmation required |
+| Regress bugs | `bc_run mode=bug-regression` | Show filters and candidates |
+| Review status | `bc_status`, then `bc_review target="bug"` or `bc_review target="gap"` | Read-only |
+| Record an external blocker | `bc_report_gap` | Include reason, severity, owner, and evidence context |
 
-0. For ambiguous natural-language operational requests, use `bc_intent_preview` to map the user wording to a suggested facade call. It must not execute; present the preview and keep the approval boundary for document suites. It can preview document-suite filters (`caseNos`, `modules`, `priorities`), open bug review, open bug regression, and suite continuation.
-1. Use `bc_status` as the first call in a new session. Prefer `systemId` when known; otherwise pass `systemName` and, when needed, `environment`. The Facade tools `bc_status`, `bc_run`, and `bc_review` all support this system resolution. If multiple systems match, ask the user to choose instead of guessing. Prefer `statusMarkdown` for concise user-facing status replies, then inspect structured fields only when the user asks for detail.
-2. Use `bc_configure` for high-level setup of systems, auth, terms, rules, and auth checkpoints.
-3. Use `bc_run` for execution:
-   - `mode: "approved-case"` for an already approved case.
-   - `mode: "full-workflow"` when the user says "confirm and run" for a draft case.
-   - `mode: "case-source-suite"` when the user supplies an `.xlsx` or `.md` test case document path.
-   - `mode: "bug-regression"` when the user asks to retest open bugs.
-4. Use `bc_review` for suite runs, cases, bugs, gaps, and artifacts. Prefer `reviewMarkdown` for concise user-facing replies, inspect `reviewSummary` for structured status and next actions, and use `reportMarkdown` or `regressionMarkdown` only when the user needs a detailed handoff.
-5. Use internal tools such as `bc_generate_plan`, `bc_run_chain`, `bc_list_gaps`, or `bc_read_spec` only when a facade lacks the needed detail or the user is debugging/auditing.
+Use `statusMarkdown` and `reviewMarkdown` when present for concise replies. `/bc help` is optional shorthand, not the primary product entrypoint.
 
-When the user provides a test case document path, first call `bc_run` with `mode: "case-source-suite"` and `confirm: false`. Present the preview summary, risks, bridge status, and sample cases. Only after explicit user confirmation call the same mode with `confirm: true`.
+## Requirement-First Workflow
 
-In host-agent mode, `confirm: true` returns the first case task with `status: "needs_agent_execution"` and suite status `waiting-for-agent`. Execute it in the current Agent and call `bc_submit_agent_output`. If that submission returns another task package, repeat immediately for the next Generator or Healer task. Stop only at `completed`, `failed`, or `blocked`, then use `bc_review` for the user-facing result. Do not ask the user to configure a Claude subprocess and do not classify `waiting-for-agent` as a Gap.
+When the user provides a requirement path or URL:
 
-For `script + storageStatePath` authentication, confirmed document suites run a read-only browser auth preflight before creating a Generator task. If the storage state is missing or redirects to a login page, Brain Creator returns `blocked` with an AuthCheckpoint and Gap. Guide the user through the protected login step, save and verify refreshed storage state in a fresh browser, complete the checkpoint, then resume the suite. Do not submit a Generator or Healer task while this checkpoint is awaiting the user.
+1. Find or create a knowledge project with `bc_configure target=knowledge-project`. Do not require a runtime system yet.
+2. Call `bc_prepare action=ingest-requirement` with the source.
+3. Call `bc_prepare action=generate-test-design` using `provider=builtin` by default.
+4. Present requirement coverage, open questions, risks, test techniques, TestIntents, and TestDataProfiles.
+5. Resolve clarification Gaps. After explicit approval, call `bc_prepare action=approve-baseline confirm=true`.
+6. Compile approved TestIntents with `bc_prepare action=compile-cases`.
+7. Create or select a runtime system with `bc_configure target=system`, then bind it with `bc_configure target=system-binding`.
+8. Configure and verify auth. Use `bc_create_auth_checkpoint` for password, CAPTCHA, recovery, or 2FA intervention.
+9. Preview with `bc_run mode=requirement-suite confirm=false`; execute only after confirmation with `bc_run mode=requirement-suite confirm=true`.
+10. Use `bc_review` to report evidence, BugReports, Gaps, and requirement-versus-observation conflicts.
 
-Document suites stop on the first environment, auth, locator, or evidence Gap by default. If and only if the user explicitly asks to continue attempting all cases despite individual blockers, pass `continueOnBlocked: true` in the preview and confirmed `bc_run` calls. Continue processing returned task packages while preserving every Gap. The final suite remains `blocked` when any case was blocked. This policy never bypasses suite-level auth/bridge preflight and never authorizes Excel write-back.
+Do not let observed system behavior overwrite approved requirements. Submit observed rules or workflows with `bc_prepare action=record-observation`, including evidence `sourceRefs`. Conflicts must remain visible and block execution until resolved.
 
-Document source details:
-- Supported inputs are local `.xlsx`, executable `.md` tables, `obsidian:<path>`, `claudian:<path>`, and `[[path]]`.
-- For Obsidian/Claudian-style references, keep the original source reference in Brain Creator assets; do not paste the full document content into chat.
-- If the user asks to run only specific cases, modules, or priorities, pass `caseNos`, `modules`, and `priorities` to `bc_run mode="case-source-suite"`. These filters are intersected. Preview with the same filters before asking for confirmation.
-- Do not write results back to a source document by default. Only when the user explicitly asks to update Excel/source results, pass both `writeBack: true` and `confirmWriteBack: true`. Write-back currently supports local `.xlsx` only, updates actual result, case status, and BugID, and returns `backupPath` for the pre-write backup.
-- To continue an interrupted or failed suite, first call `bc_status` and inspect `suites.unfinished`. Prefer `bc_run mode="case-source-suite"` with `resume: true` and `confirm: true`; Brain Creator reuses the latest unfinished suite's `source` and `suiteId` and reruns only cases that have not passed. Use explicit `source` + `suiteId` only when the user selects a specific older suite.
-- When resuming a suite that previously stopped on a case-level Gap, include `continueOnBlocked: true` only after the user explicitly asks to keep attempting the remaining cases despite blockers.
-- For bugs, call `bc_review target="bug"` to get a status summary, regression candidates, BugReport list, and `reportMarkdown`. When the user asks to regress open bugs, call `bc_run mode="bug-regression"`; pass `bugIds`, `modules`, and `priorities` when the user narrows the regression scope. These filters are intersected. Include the returned `regressionMarkdown` in the handoff when useful.
+## Requirement Sources
 
----
+Supported first-party adapters:
 
-## One-Sentence Workflow
+- Local `.md`, `.txt`, `.docx`, and `.pdf` files.
+- Public HTTP(S) pages; private-network URLs require explicit `allowPrivateNetwork=true`.
+- Obsidian references such as `obsidian:<path>` and `[[path]]`.
+- Feishu Wiki/Doc links.
 
-When the user gives a request such as "Use Brain Creator to connect this CRM and generate tests for order approval":
+For Feishu, prefer direct OpenAPI when both `BRAIN_CREATOR_FEISHU_APP_ID` and `BRAIN_CREATOR_FEISHU_APP_SECRET` are configured. Otherwise use the host lark capability and retry with a `RequirementContentPackage`. Unsupported tables, sheets, diagrams, whiteboards, and attachments must create Gaps. Never store Feishu credentials in Brain Creator assets.
 
-1. Find or create the target business system. Prefer `bc_status` when `systemId` is known; otherwise use existing system discovery or `bc_configure target=system`.
-2. If auth is needed, use `bc_configure target=auth`; never echo secrets back to chat. For password, recovery, CAPTCHA, or 2FA that must be completed by the user, use `bc_configure target=checkpoint`.
-3. Capture known business language and quality gates with `bc_configure target=term` and `bc_configure target=rule`.
-4. For a natural-language requirement, generate a draft plan through the existing planning flow, present it to the user, and wait for approval before code generation.
-5. When the user says "approve and run" or "确认并执行", prefer `bc_run mode=full-workflow`.
-6. When the user provides a test case document path, prefer `bc_run mode=case-source-suite confirm=false`; include `caseNos`, `modules`, or `priorities` when the user narrows the scope. After explicit confirmation, call `bc_run mode=case-source-suite confirm=true` with the same filters.
-7. Use `bc_review` to summarize suite runs, cases, bugs, gaps, and artifacts when reporting outcomes or continuing later. Read `reviewSummary` first because suite, bug, gap, and artifact reviews normalize `title`, `status`, `metrics`, `evidencePaths`, `nextAction`, and `userMessage`. For suite-run reviews, inspect `metrics.failureClassification` to explain business bugs versus evidence gaps, and use stable failure type enums from `byType`: `assertion_failure`, `auth_failure`, `locator_failure`, `network_failure`, `execution_failure`, `unknown_failure`. When the user asks to focus on one class, pass `failureTypes` to `bc_review`. For detailed suite-run or BugReport handoff, include `reportMarkdown`; after bug regression, include `regressionMarkdown` when useful.
-8. If an external preflight, auth, bridge, or evidence issue blocks execution, create/report a Gap instead of claiming success.
+If `RequirementAnalysis.skill` or `TestCaseDesign.skill` is available and useful, the host may call it and submit normalized output with `provider=host-skill`. Host Skill output must include source references and still pass Brain Creator schema validation, Eval, Gap, and approval gates. Builtin policies must remain fully functional without those Skills.
 
-Users should not need to say `Skill("brain-creator")`. Treat natural-language requests such as "Use Brain Creator to connect this system", "用 Brain Creator 接入这个系统", "generate a reviewed test plan", "run the approved chain", or "show open gaps" as Brain Creator entrypoints. Keep `Skill("brain-creator")` only as an explicit fallback when automatic skill matching fails.
+## Test-Document Compatibility
 
-Do not create or prioritize a Web UI. If the user asks for an entrypoint, treat the entrypoint as natural conversation plus this skill and the Brain Creator MCP tools.
+When the user supplies `.xlsx` or executable `.md` test cases:
+
+1. Call `bc_run mode=case-source-suite confirm=false`.
+   The structured Facade payload uses `confirm: false` for preview.
+2. Show counts, modules, priorities, filters, samples, bridge state, and risks.
+3. Wait for explicit confirmation.
+4. Call `bc_run mode=case-source-suite confirm=true` with the same filters.
+   The confirmed payload uses `confirm: true`.
+5. In host-agent mode, execute every returned `needs_agent_execution` package and call `bc_submit_agent_output` until completed, failed, or blocked.
+6. Use `bc_review` for SuiteRun, ChainRun, BugReport, Gap, and artifact evidence.
+
+Document suites stop on the first environment, auth, locator, or evidence Gap unless the user explicitly selects `continueOnBlocked: true`. Do not write results back to Excel unless both `writeBack: true` and `confirmWriteBack: true` are explicit.
+
+## Host-Agent And Bridge
+
+Codex plugin mode normally uses `host-agent`. Treat `needs_agent_execution` and `waiting-for-agent` as actionable work, not a missing AgentBridge. Read the task prompt/context, write only requested outputs, then call `bc_submit_agent_output`.
+
+Subprocess modes may use Claude or Codex. Check bridge readiness with `bc_status` or `brain-creator-doctor` before confirmed execution. If unavailable, report the blocker immediately instead of waiting for a long timeout.
+
+Generator writes Playwright tests, Playwright executes them, and Healer performs bounded repairs. Business mismatches create BugReports. Auth, environment, locator, network, and missing-evidence blockers create Gaps.
 
 ## System
 
-Use the Brain Creator system tools to create and inspect reusable business system contexts.
-
-1. Call `bc_list_systems` before assuming a system already exists.
-2. Call `bc_configure target=system` once when a user wants to connect a Web system and provides a system name, environment, base URL, default locale, and URL allowlist.
-3. Call `bc_system_overview` to summarize onboarding completeness and asset counts.
-4. Call `bc_archive_system` only when the user confirms a system should be retained for history but no longer used.
-
-Never mix assets across systems. Every later Brain Creator action must use the selected system id.
+- Use `bc_list_systems` only in full-profile discovery or debugging.
+- Prefer `bc_configure target=system` for creation and `bc_status` for selection.
+- Never mix knowledge or assets across systems.
+- The natural-language phrase `Use Brain Creator to connect this system` is a valid entrypoint.
 
 ## Auth
 
-Use the auth tools to store credentials without exposing secrets in later conversation.
-
-1. Call `bc_create_auth` with the selected system id as `projectId`.
-2. Call `bc_verify_auth` after creating the profile.
-3. Call `bc_list_auth` when you need to inspect configured profiles for the selected system.
-4. Call `bc_generate_seed` only when a local Playwright seed fixture is needed for Planner or Generator execution.
-5. Do not repeat raw token, cookie, or password values after the tool call.
-6. Call `bc_create_auth_checkpoint` when the user must manually complete password, recovery, CAPTCHA, or 2FA.
-7. Use an isolated headed browser profile for the manual step. Never type credentials into shell arguments, logs, plans, gaps, or generated tests. After the protected application page is reached, save Playwright storage state under `.brain-creator/auth/<systemId>/storage-state.json`.
-8. Create or update a `script` AuthProfile whose encrypted `storageStatePath` points to that workspace-relative file, then verify the profile. The storage-state file is local runtime data and must stay ignored by Git and npm packaging.
-9. Before completing the checkpoint, open a fresh Playwright context with the saved state and perform a read-only assertion that the application is authenticated and has not returned to the login page.
-10. Call `bc_complete_auth_checkpoint` only after that fresh-context probe passes, or `bc_cancel_auth_checkpoint` when the user stops.
-11. Call `bc_archive_auth` when an older auth profile should be retained for history but no longer selected.
-
-Supported `loginMethod` values are `password`, `cookie`, `token`, and `script`. Returned auth profiles redact all secrets. Auth checkpoints contain reasons and resume instructions only; never put credentials or verification codes in them.
+- Prefer `bc_configure target=auth`; `bc_create_auth` remains an internal compatibility tool.
+- Verify saved auth and use workspace-local storage state under `.brain-creator/auth/`.
+- `bc_create_auth_checkpoint` pauses protected login work safely.
 
 ## Glossary
 
-Use glossary tools to keep business language reusable across planning and generation.
-
-1. Call `bc_add_term` for known domain terms before planning.
-2. Include aliases and `pageScope` when a term only applies to part of the system.
-3. After `bc_generate_plan`, review `testCase.newTerms` with the user.
-4. Call `bc_batch_confirm_terms` with confirmed candidate ids and ignored candidate ids.
-5. Call `bc_update_term` when the user corrects wording, aliases, or page scope.
-6. Call `bc_delete_term` when the user says a term should not be reusable system knowledge.
-7. Call `bc_list_terms` to show the updated glossary.
-
-Do not silently add every candidate term. Do not delete terms without explicit user confirmation.
+- Prefer `bc_configure target=term`.
+- Internal compatibility tools include `bc_add_term`, `bc_batch_confirm_terms`, and term update/delete tools.
+- Terms belong to the selected system or knowledge context and must retain source scope.
 
 ## Rules
 
-Use rules to capture business quality gates before planning tests.
-
-1. Call `bc_add_rule` for requirements that must be checked in generated scenarios.
-2. Use `severity: "block"` for required coverage.
-3. Use `severity: "warn"` for advisory checks.
-4. Call `bc_list_rules` before generating a plan.
-5. Call `bc_delete_rule` only after the user confirms the rule no longer applies to the selected system.
-
-Quality gate checks are deterministic in v2 MVP, so rules should use clear domain terms such as order amount or payment status.
+- Prefer `bc_configure target=rule`.
+- Internal compatibility tools include `bc_add_rule`, rule listing, and `bc_delete_rule`.
+- Blocking rules are quality gates; warning rules are advisory.
 
 ## Plan
 
-Use planning tools to generate structured scenarios before code generation.
-
-1. Confirm the target system id.
-2. Ensure auth and business rules exist.
-3. Call `bc_generate_plan` with `systemId` and the user's requirement.
-4. If `bc_generate_plan` returns `status: "needs_agent_execution"`, execute the Planner task in the current agent, write the requested spec, and call `bc_submit_agent_output`. Continue only when the submission returns `status: "plan_ready"`.
-5. Present the draft scenarios, new term candidates, and rule check results to the user.
-6. Call `bc_update_plan` if the user wants to edit scenarios before approval.
-7. Call `bc_approve_plan` only after the user confirms the test intent.
-8. Call `bc_cancel_plan` when the user stops or closes a protected flow.
-9. Call `bc_resume_plan` only after awaiting manual auth checkpoints are completed or cancelled.
-
-Planning must not generate test code directly. The user should confirm the structured plan first. Approved plans are execution contracts and should not be changed silently.
+- Requirement-first planning uses `bc_prepare` and approved TestIntents.
+- Legacy natural-language planning keeps `bc_generate_plan`, `bc_approve_plan`, and `mode: "full-workflow"` for compatibility.
+- Do not generate test code before approval.
 
 ## Run
 
-Use run tools only after a test case is approved.
-
-1. Confirm the test case has `status: "approved"`.
-2. Call `bc_run_chain` with the approved `caseId`.
-3. If `bc_run_chain` returns `status: "needs_agent_execution"` in host-agent mode, execute the returned task package yourself, write the requested output file, then call `bc_submit_agent_output`. Do not wait for a Claude or Codex subprocess. For Generator and Healer tasks, read the `--seed` argument and import `test` / `expect` from that seed instead of directly from `@playwright/test`; the seed owns authenticated browser setup. A generator submission automatically runs Playwright; if it returns a healer task, execute that task and submit it so Brain Creator can rerun the test and finish the chain.
-4. Call `bc_list_chain_runs` when you need execution history for the selected system.
-5. Report ChainRun status, generated spec path, generated test path, healer attempts, and any gaps.
-
-Use `bc_run_agent` only when debugging a single Planner, Generator, or Healer run. It records an AgentRun but does not replace the approved-case execution flow. If the chain fails after healing attempts, treat returned gaps as work items rather than claiming the test is complete.
+- Prefer `bc_run` modes `requirement-suite`, `approved-case`, `full-workflow`, `case-source-suite`, and `bug-regression`.
+- `bc_run_chain` remains an internal compatibility tool.
+- Preserve every AgentRun, ChainRun, SuiteRun, screenshot, trace, console/network result, assertion, and inference source.
 
 ## Assets And Gaps
 
-Use asset tools to inspect what has already been created for a business system.
+- Prefer `bc_review` and `bc_status`.
+- Internal audit tools include `bc_artifact_overview`, `bc_search_assets`, and `bc_list_gaps`.
+- A failed run with a precise Gap is valid. Fabricated success is not.
 
-1. Call `bc_list_cases` with `systemId` when the user asks for test history.
-2. Call `bc_list_agent_runs` with `systemId` when the user asks for Planner, Generator, or Healer run history.
-3. Call `bc_list_chain_runs` with `systemId` when the user asks for generator/test/healer chain history.
-4. Call `bc_list_specs` and `bc_list_tests` with `systemId` when the user asks for generated spec or test file paths.
-5. Call `bc_read_spec` or `bc_read_test` only for paths returned by the list tools.
-6. Call `bc_artifact_overview` when the user needs a concise generated-artifact summary without inspecting raw paths first.
-7. Call `bc_list_gaps` with `projectId` and optional `status` when the user asks what is blocked.
-8. Call `bc_resolve_gap` only after the user confirms a gap has been handled.
-9. Call `bc_report_gap` when an external preflight or manual workflow issue cannot be inferred from an existing chain.
-10. Call `bc_list_auth_checkpoints` when the user asks what manual authentication work is still waiting.
-11. Call `bc_search_assets` with `projectId` and a short query for broad asset lookup.
-12. Keep results scoped to the current system.
+## One-Sentence Workflow
 
-Asset search is for review and traceability. It is not a substitute for user approval of a generated plan.
+Recommended prompts:
 
-## Guardrails
+```text
+Use Brain Creator to analyze this requirement document, generate test design and data, and wait for my approval.
+```
 
-- Never skip plan approval before code generation.
-- Never fabricate missing evidence; create or report gaps through `bc_report_gap`, `bc_list_gaps`, and `bc_resolve_gap`.
-- Never mix assets across systems. All planning, execution, search, and gap handling must use the selected system id.
-- Use `bc_run_agent` only for diagnostics; the normal user workflow is `bc_generate_plan` to `bc_approve_plan` to `bc_run_chain`.
-- Treat generated artifacts as local workspace assets. Use `bc_read_spec` and `bc_read_test` only for paths returned by Brain Creator list tools.
-- Never store passwords, recovery codes, CAPTCHA answers, or 2FA values in auth checkpoints, gaps, plans, or artifacts.
-- Never mark an auth checkpoint complete merely because an AuthProfile record exists. Require a saved workspace-scoped storage state and a fresh, read-only authenticated browser probe for manual `script` authentication.
-- **工具透明度（Tool Transparency）：** 默认不主动列出工具名，用自然语言描述行为。但当用户追问操作细节、调试失败、做 Eval 或审计时，必须说明调用了哪些 MCP 工具、产出了哪些资产和 Gap。Brain Creator 应当可控、可审计、可复盘。
+```text
+用 Brain Creator 分析这个飞书需求链接，沉淀知识并生成可审核的测试意图。
+```
+
+```text
+Use Brain Creator to connect this system, bind the approved requirement baseline, and preview the executable suite.
+```
+
+```text
+Use Brain Creator to execute this test case document and report bugs, gaps, and evidence.
+```
+
+The Agent should use high-level Facades first, preserve approval boundaries, and return a human-readable summary rather than exposing raw MCP choreography.

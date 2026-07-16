@@ -280,6 +280,10 @@ export type AgentTask = {
     generateRunId?: string;
     maxHealAttempts?: number;
     healAttempts?: number;
+    knowledgeProjectId?: string;
+    executableCaseId?: string;
+    executionEvidenceId?: string;
+    contextPackPath?: string;
   };
   suiteContext?: {
     suiteId: string;
@@ -428,4 +432,220 @@ export type AssetSearchResult = {
   label: string;
   projectId: string;
   status?: string;
+};
+
+export type KnowledgeProject = {
+  id: string;
+  key: string;
+  name: string;
+  defaultLocale: string;
+  status: "active" | "archived";
+  systemIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RequirementSourceType =
+  | "local-file"
+  | "http"
+  | "feishu"
+  | "obsidian"
+  | "host-connector";
+
+export type RequirementContentBlock = { type: string; text: string; level?: number };
+export type RequirementAttachment = { name: string; url?: string; type?: string };
+
+export type RequirementContentPackage = {
+  title: string;
+  content: string;
+  blocks: RequirementContentBlock[];
+  attachments: RequirementAttachment[];
+  source: string;
+  sourceType: RequirementSourceType;
+  contentHash: string;
+  updatedAt?: string;
+  warnings: string[];
+};
+
+export type RequirementSource = {
+  id: string;
+  knowledgeProjectId: string;
+  source: string;
+  sourceType: RequirementSourceType;
+  title: string;
+  contentHash: string;
+  content: string;
+  blocks: RequirementContentBlock[];
+  attachments: RequirementAttachment[];
+  warnings: string[];
+  accessStatus: "available" | "needs-connector" | "failed";
+  revision: number;
+  latestRequirementSetId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RequirementSet = {
+  id: string;
+  knowledgeProjectId: string;
+  sourceId: string;
+  version: number;
+  title: string;
+  summary: string;
+  contentHash: string;
+  status: "draft" | "approved" | "superseded";
+  affectedNodeIds: string[];
+  previousRequirementSetId?: string;
+  approvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type KnowledgeNodeType =
+  | "module"
+  | "actor"
+  | "object"
+  | "field"
+  | "rule"
+  | "workflow"
+  | "state"
+  | "permission"
+  | "integration"
+  | "data-constraint"
+  | "term"
+  | "requirement";
+
+export type KnowledgeNode = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId?: string;
+  type: KnowledgeNodeType;
+  title: string;
+  content: string;
+  module: string;
+  sourceRefs: string[];
+  origin: "source" | "derived" | "observed";
+  confidence: number;
+  status: "draft" | "confirmed" | "conflicted" | "deprecated";
+  policyId?: string;
+  policyVersion?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type KnowledgeEdge = {
+  id: string;
+  knowledgeProjectId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  relation: string;
+  sourceRefs: string[];
+  createdAt: string;
+};
+
+export type TestDesignTechnique =
+  | "equivalence-partitioning"
+  | "boundary-value"
+  | "decision-table"
+  | "state-transition"
+  | "scenario"
+  | "error-guessing";
+
+export type TestIntent = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  title: string;
+  module: string;
+  priority: "P0" | "P1" | "P2" | "P3";
+  objective: string;
+  preconditions: string[];
+  expectedResults: string[];
+  requirementRefs: string[];
+  knowledgeNodeRefs: string[];
+  techniques: TestDesignTechnique[];
+  status: "draft" | "approved" | "compiled" | "blocked";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TestDataProfile = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  name: string;
+  field: string;
+  strategy:
+    | "fixed"
+    | "generated"
+    | "unique"
+    | "existing-reference"
+    | "runtime-captured"
+    | "secret-reference";
+  constraints: string[];
+  seed: string;
+  sourceRefs: string[];
+  createdAt: string;
+};
+
+export type ExecutableCaseStep = {
+  id: string;
+  order: number;
+  action: "navigate" | "fill" | "click" | "assert" | "wait" | "select" | "api";
+  instruction: string;
+  targetSemantic: string;
+  value?: string;
+  expected?: string;
+  locatorPointId?: string;
+  dataProfileId?: string;
+  origin: "source" | "derived" | "observed";
+  sourceRefs: string[];
+};
+
+export type ExecutableCase = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  testIntentId: string;
+  systemId?: string;
+  title: string;
+  status: "ready" | "blocked" | "executed";
+  preconditions: string[];
+  steps: ExecutableCaseStep[];
+  dataProfileIds: string[];
+  gapIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExecutionStepEvidence = {
+  stepId: string;
+  order: number;
+  action: ExecutableCaseStep["action"];
+  instruction: string;
+  expected?: string;
+  actual?: string;
+  assertionStatus: "pending" | "passed" | "failed" | "blocked";
+  screenshotPath?: string;
+  sourceRefs: string[];
+  origin: ExecutableCaseStep["origin"];
+};
+
+export type ExecutionEvidence = {
+  id: string;
+  knowledgeProjectId: string;
+  systemId: string;
+  executableCaseId: string;
+  testCaseId: string;
+  chainRunId?: string;
+  contextPackPath: string;
+  status: "running" | "passed" | "failed" | "blocked";
+  steps: ExecutionStepEvidence[];
+  tracePaths: string[];
+  artifactPaths: string[];
+  consoleErrors: string[];
+  networkFailures: string[];
+  actualResult?: string;
+  createdAt: string;
+  completedAt?: string;
 };

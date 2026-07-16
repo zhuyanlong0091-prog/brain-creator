@@ -2,62 +2,69 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("Agent-native usage documentation", () => {
-  it("documents Brain Creator as a Claude Code and Codex agent workflow in the README", async () => {
+  it("keeps a bilingual requirement-first README", async () => {
     const content = await readFile("README.md", "utf8");
 
-    expect(content).toContain("Brain Creator");
-    expect(content).toContain("## 中文版");
-    expect(content).toContain("## English Version");
-    expect(content).toContain("Claude Code / Codex");
-    expect(content).toContain("Use Brain Creator to connect this system");
-    expect(content).toContain("MCP");
-    expect(content).toContain("source checkout mode");
-    expect(content).toContain("MCP CLI connection mode");
-    expect(content).toContain("repo-local plugin installation mode");
-    expect(content).toContain("brain-creator-doctor");
-    expect(content).toContain("brain-creator-install-assets");
-    expect(content).toContain("brain-creator-write-mcp-config");
-    expect(content).toContain("brain-creator-install-codex-plugin");
-    expect(content).toContain("业务项目安装步骤");
-    expect(content).toContain("Business Project Setup");
-    expect(content).toContain("npm run verify:package-install");
-    expect(content).toContain("发布前检查");
-    expect(content).toContain("Release Readiness");
-    expect(content).toContain("npm run verify:package-contents");
-    expect(content).toContain("npm run release:check");
-    expect(content).toContain("MIT license");
-    expect(content).toContain("docs/release-checklist.md");
-    expect(content).toContain("No Web UI");
-    expect(content).toContain("无 Web UI");
-    expect(content).toContain("智能体入口");
-    expect(content).toContain("docs/agent-usage.md");
-    expect(content).toContain("npm run verify:live-claude-skill-workflow");
+    for (const marker of [
+      "Brain Creator",
+      "## 中文版",
+      "## English Version",
+      "Claude Code / Codex",
+      "Use Brain Creator to connect this system",
+      "MCP",
+      "source checkout mode",
+      "MCP CLI connection mode",
+      "repo-local plugin installation mode",
+      "brain-creator-doctor",
+      "brain-creator-install-assets",
+      "brain-creator-write-mcp-config",
+      "brain-creator-install-codex-plugin",
+      "业务项目安装步骤",
+      "Business Project Setup",
+      "npm run verify:package-install",
+      "发布前检查",
+      "Release Readiness",
+      "npm run verify:package-contents",
+      "npm run release:check",
+      "MIT license",
+      "docs/release-checklist.md",
+      "No Web UI",
+      "无 Web UI",
+      "智能体入口",
+      "docs/agent-usage.md",
+      "npm run verify:live-claude-skill-workflow"
+    ]) {
+      expect(content).toContain(marker);
+    }
   });
 
-  it("documents the end-user agent flow without requiring users to know tool internals", async () => {
+  it("documents the requirement-first Agent flow and legacy compatibility", async () => {
     const content = await readFile("docs/agent-usage.md", "utf8");
 
-    expect(content).toContain("# Brain Creator Agent Usage Guide");
-    expect(content).toContain("one sentence");
-    expect(content).toContain("connect a business system");
-    expect(content).toContain("configure auth");
-    expect(content).toContain("add business rules");
-    expect(content).toContain("generate a draft plan");
-    expect(content).toContain("approve the plan");
-    expect(content).toContain("run the chain");
-    expect(content).toContain("review artifacts and gaps");
-    expect(content).toContain("Use Brain Creator to connect the order admin system");
-    expect(content).toContain("source checkout mode");
-    expect(content).toContain("MCP CLI connection mode");
-    expect(content).toContain("repo-local plugin installation mode");
-    expect(content).toContain("brain-creator-doctor");
-    expect(content).toContain("brain-creator-install-assets");
-    expect(content).toContain("brain-creator-install-codex-plugin");
-    expect(content).toContain("bc_run_chain");
-    expect(content).toContain("bc_create_auth_checkpoint");
-    expect(content).toContain("bc_cancel_plan");
-    expect(content).toContain("bc_resume_plan");
-    expect(content).toContain("bc_report_gap");
+    for (const marker of [
+      "# Brain Creator Agent Usage Guide",
+      "one sentence",
+      "Requirement-First Flow",
+      "Ingest The Requirement",
+      "Analyze And Design",
+      "Approve The Baseline",
+      "Compile Executable Cases",
+      "Preview And Execute",
+      "Review Evidence",
+      "Use Brain Creator to connect the order admin system",
+      "source checkout mode",
+      "MCP CLI connection mode",
+      "repo-local plugin installation mode",
+      "brain-creator-doctor",
+      "brain-creator-install-assets",
+      "bc_run_chain",
+      "bc_create_auth_checkpoint",
+      "bc_cancel_plan",
+      "bc_resume_plan",
+      "bc_report_gap"
+    ]) {
+      expect(content).toContain(marker);
+    }
   });
 
   it("documents the session resume new-session entry point", async () => {
@@ -65,7 +72,7 @@ describe("Agent-native usage documentation", () => {
 
     expect(content).toContain("Session Resume: The New-Session Entry Point");
     expect(content).toContain("bc_session_resume");
-    expect(content).toContain("6–7 independent queries");
+    expect(content).toContain("6-7 independent queries");
     expect(content).toContain("Bridge preflight status");
     expect(content).toContain("docs/e2e-session-resume-workflow.md");
     expect(content).toContain("check the order-admin system status");

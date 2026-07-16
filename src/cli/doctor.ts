@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { delimiter, extname, join } from "node:path";
 import {
   resolveBrainCreatorDataFile,
+  resolveBrainCreatorKnowledgeDir,
   resolveBrainCreatorWorkspace
 } from "../shared/workspace.js";
 
@@ -27,6 +28,9 @@ export type DoctorReport = {
   ok: boolean;
   workspace: string;
   dataFile: string;
+  knowledgeDir: string;
+  toolProfile: "facade" | "full" | "invalid";
+  connectors: { feishu: "direct" | "host-fallback" | "invalid" };
   agentBridge: DoctorAgentBridge;
   checks: DoctorCheck[];
 };
@@ -58,6 +62,9 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
   const fileExists = options.fileExists ?? existsSync;
   const workspace = resolveBrainCreatorWorkspace(cwd, env);
   const dataFile = resolveBrainCreatorDataFile(cwd, env);
+  const knowledgeDir = resolveBrainCreatorKnowledgeDir(cwd, env);
+  const toolProfile = doctorToolProfile(env);
+  const feishu = doctorFeishuMode(env);
   const agentBridge = resolveDoctorAgentBridge(env, commandExists);
   const checks: DoctorCheck[] = [
     {
@@ -70,6 +77,13 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
       status: "pass",
       message: `Local assets file is ${dataFile}.`
     },
+    {
+      name: "Knowledge directory",
+      status: "pass",
+      message: `Generated knowledge will use ${knowledgeDir}.`
+    },
+    toolProfileCheck(toolProfile),
+    feishuConnectorCheck(feishu),
     bridgeCommandCheck(env, commandExists, agentBridge),
     bridgeArgsCheck(env),
     bridgeTimeoutCheck(env),
@@ -81,6 +95,9 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
     ok: checks.every((check) => check.status !== "fail"),
     workspace,
     dataFile,
+    knowledgeDir,
+    toolProfile,
+    connectors: { feishu },
     agentBridge,
     checks
   };
@@ -91,6 +108,9 @@ export function formatDoctorReport(report: DoctorReport) {
     `Brain Creator doctor: ${report.ok ? "ready" : "action required"}`,
     `Workspace: ${report.workspace}`,
     `Data file: ${report.dataFile}`,
+    `Knowledge directory: ${report.knowledgeDir}`,
+    `Tool profile: ${report.toolProfile}`,
+    `Feishu connector: ${report.connectors.feishu}`,
     `Agent provider: ${report.agentBridge.provider}${
       report.agentBridge.command ? ` (${report.agentBridge.command})` : ""
     }`,
@@ -205,6 +225,57 @@ function bridgeTimeoutCheck(env: DoctorEnv): DoctorCheck {
     name: "Agent bridge timeout",
     status: "pass",
     message: `Agent bridge timeout is ${timeout}ms.`
+  };
+}
+
+function doctorToolProfile(env: DoctorEnv): DoctorReport["toolProfile"] {
+  const value = env.BRAIN_CREATOR_TOOL_PROFILE ?? "full";
+  return value === "facade" || value === "full" ? value : "invalid";
+}
+
+function toolProfileCheck(profile: DoctorReport["toolProfile"]): DoctorCheck {
+  if (profile === "invalid") {
+    return {
+      name: "MCP tool profile",
+      status: "fail",
+      message: "BRAIN_CREATOR_TOOL_PROFILE is invalid.",
+      remediation: "Set BRAIN_CREATOR_TOOL_PROFILE to facade or full."
+    };
+  }
+  return {
+    name: "MCP tool profile",
+    status: "pass",
+    message: `${profile} tool exposure is configured.`
+  };
+}
+
+function doctorFeishuMode(env: DoctorEnv): DoctorReport["connectors"]["feishu"] {
+  const appId = Boolean(env.BRAIN_CREATOR_FEISHU_APP_ID);
+  const appSecret = Boolean(env.BRAIN_CREATOR_FEISHU_APP_SECRET);
+  if (appId !== appSecret) return "invalid";
+  return appId ? "direct" : "host-fallback";
+}
+
+function feishuConnectorCheck(mode: DoctorReport["connectors"]["feishu"]): DoctorCheck {
+  if (mode === "invalid") {
+    return {
+      name: "Feishu connector",
+      status: "fail",
+      message: "Feishu OpenAPI credentials are only partially configured.",
+      remediation: "Set both BRAIN_CREATOR_FEISHU_APP_ID and BRAIN_CREATOR_FEISHU_APP_SECRET, or unset both to use host fallback."
+    };
+  }
+  if (mode === "direct") {
+    return {
+      name: "Feishu connector",
+      status: "pass",
+      message: "Feishu OpenAPI direct reading is configured with environment references."
+    };
+  }
+  return {
+    name: "Feishu connector",
+    status: "warn",
+    message: "Feishu direct reading is not configured; host content-package fallback remains available."
   };
 }
 

@@ -1,0 +1,369 @@
+// @vitest-environment node
+
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { InMemoryBrainCreatorRepository, JsonFileBrainCreatorRepository } from "../domain/repository.js";
+import type { RequirementContentPackage } from "../domain/types.js";
+import { KnowledgeService } from "./service.js";
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe("KnowledgeService", () => {
+  it("creates a knowledge project before a runtime system is bound", async () => {
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), knowledgeDir);
+
+    const project = await service.createProject({
+      name: "Order Approval",
+      key: "order-approval",
+      defaultLocale: "en-US"
+    });
+
+    expect(project.systemIds).toEqual([]);
+    expect(await readFile(join(knowledgeDir, "order-approval", "MOC.md"), "utf8")).toContain(
+      "# Order Approval"
+    );
+  });
+
+  it("creates a new requirement revision only when the content hash changes", async () => {
+    const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), await tempDir());
+    const project = await service.createProject({
+      name: "Orders",
+      key: "orders",
+      defaultLocale: "zh-CN"
+    });
+    const first = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("hash-1", "订单金额超过 1000 元需要经理审批。")
+    });
+    const same = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("hash-1", "订单金额超过 1000 元需要经理审批。")
+    });
+    const changed = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("hash-2", "订单金额超过 2000 元需要经理审批。")
+    });
+
+    expect(first.changed).toBe(true);
+    expect(same.changed).toBe(false);
+    expect(same.requirementSet.id).toBe(first.requirementSet.id);
+    expect(changed.requirementSet.version).toBe(2);
+    expect(changed.previousRequirementSetId).toBe(first.requirementSet.id);
+  });
+
+  it("records source parser warnings as gaps instead of silently dropping content", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({ name: "Wiki", key: "wiki-warnings", defaultLocale: "en-US" });
+    const contentPackage = requirementPackage("wiki-warning", "Users approve requests.");
+    contentPackage.warnings = ["Feishu table block requires separate extraction"];
+
+    const result = await service.ingestRequirement({ projectId: project.id, contentPackage });
+
+    expect(result.gaps).toEqual([
+      expect.objectContaining({ sourceType: "requirement-source-warning", status: "open" })
+    ]);
+  });
+
+  it("restores knowledge assets from the versioned JSON repository", async () => {
+    const root = await tempDir();
+    const filePath = join(root, "assets.json");
+    const first = new KnowledgeService(new JsonFileBrainCreatorRepository(filePath), join(root, "knowledge"));
+    const project = await first.createProject({ name: "CRM", key: "crm", defaultLocale: "zh-CN" });
+    await first.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("crm-hash", "销售线索可以转为商机。")
+    });
+
+    const second = new KnowledgeService(
+      new JsonFileBrainCreatorRepository(filePath),
+      join(root, "knowledge")
+    );
+
+    expect(second.listProjects()).toEqual([expect.objectContaining({ id: project.id, key: "crm" })]);
+    expect(second.listRequirementSets(project.id)).toHaveLength(1);
+  });
+
+  it("requires approval before compiling executable cases", async () => {
+    const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), await tempDir());
+    const project = await service.createProject({ name: "Recruiting", key: "recruiting", defaultLocale: "zh-CN" });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "recruiting-hash",
+        "用户进入招聘需求列表，新建招聘需求并填写表单。需求类型选择离职替补后显示替补人员字段。"
+      )
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+
+    expect(design.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ relation: "contains", sourceRefs: expect.any(Array) }),
+        expect.objectContaining({ relation: "covers", sourceRefs: expect.any(Array) })
+      ])
+    );
+
+    expect(() => service.compileExecutableCases(design.testIntents[0].id)).toThrow(
+      "Requirement baseline must be approved"
+    );
+
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const compiled = service.compileExecutableCases(design.testIntents[0].id);
+
+    expect(compiled.executableCase.steps.map((step) => step.action)).toEqual(
+      expect.arrayContaining(["navigate", "click", "fill", "assert"])
+    );
+    expect(compiled.executableCase.steps.every((step) => step.sourceRefs.length > 0)).toBe(true);
+  });
+
+  it("creates a gap instead of guessing when an implicit workflow has multiple paths", async () => {
+    const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), await tempDir());
+    const project = await service.createProject({ name: "Contracts", key: "contracts", defaultLocale: "zh-CN" });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "contracts-hash",
+        "合同可以从列表新建，也可以从客户详情新建。填写合同表单并提交。"
+      )
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+
+    const compiled = service.compileExecutableCases(design.testIntents[0].id);
+
+    expect(compiled.executableCase.status).toBe("blocked");
+    expect(compiled.gaps).toEqual([
+      expect.objectContaining({ reason: expect.stringContaining("multiple workflow paths") })
+    ]);
+  });
+
+  it("recognizes real UTF-8 Chinese workflows and conditional fields", async () => {
+    const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), await tempDir());
+    const project = await service.createProject({ name: "Recruiting", key: "utf8-recruiting", defaultLocale: "zh-CN" });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "utf8-recruiting",
+        "\u8fdb\u5165\u62db\u8058\u9700\u6c42\u5217\u8868\uff0c\u586b\u5199\u62db\u8058\u9700\u6c42\u8868\u5355\u3002\u9700\u6c42\u7c7b\u578b\u9009\u62e9\u79bb\u804c\u66ff\u8865\u540e\u663e\u793a\u66ff\u8865\u4eba\u5458\u5b57\u6bb5\u3002"
+      )
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+
+    const compiled = service.compileExecutableCases(design.testIntents[0].id);
+
+    expect(compiled.executableCase.steps.map((step) => step.action)).toEqual([
+      "navigate", "click", "fill", "select", "assert"
+    ]);
+    expect(compiled.executableCase.steps.find((step) => step.action === "click")?.origin).toBe("derived");
+  });
+
+  it("blocks real UTF-8 Chinese requirements with multiple create paths", async () => {
+    const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), await tempDir());
+    const project = await service.createProject({ name: "Contracts", key: "utf8-contracts", defaultLocale: "zh-CN" });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "utf8-contracts",
+        "\u53ef\u4ee5\u4ece\u5217\u8868\u9875\u65b0\u5efa\u5408\u540c\uff0c\u4e5f\u53ef\u4ee5\u4ece\u5ba2\u6237\u8be6\u60c5\u9875\u65b0\u5efa\u5408\u540c\u3002"
+      )
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+
+    expect(service.compileExecutableCases(design.testIntents[0].id).executableCase.status).toBe("blocked");
+  });
+
+  it("reuses an existing design and deprecates impacted nodes only after the new baseline is approved", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({ name: "Orders", key: "orders-impact", defaultLocale: "en-US" });
+    const first = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("v1", "Orders above 1000 require approval.")
+    });
+    const firstDesign = await service.generateTestDesign(first.requirementSet.id);
+    const reused = await service.generateTestDesign(first.requirementSet.id);
+    service.approveRequirementSet(first.requirementSet.id);
+    const second = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("v2", "Orders above 2000 require approval.")
+    });
+    await service.generateTestDesign(second.requirementSet.id);
+
+    expect(reused.reused).toBe(true);
+    expect(repository.testIntents.filter((item) => item.requirementSetId === first.requirementSet.id)).toHaveLength(
+      firstDesign.testIntents.length
+    );
+    expect(second.requirementSet.affectedNodeIds.length).toBeGreaterThan(0);
+    const unchangedModule = repository.knowledgeNodes.find(
+      (item) => item.requirementSetId === first.requirementSet.id && item.type === "module"
+    );
+    expect(second.requirementSet.affectedNodeIds).not.toContain(unchangedModule?.id);
+    expect(
+      repository.knowledgeNodes.filter((item) => first.requirementSet.affectedNodeIds.includes(item.id))
+    ).toEqual(expect.arrayContaining([expect.objectContaining({ status: "confirmed" })]));
+
+    service.approveRequirementSet(second.requirementSet.id);
+
+    expect(
+      repository.knowledgeNodes.filter((item) => first.requirementSet.affectedNodeIds.includes(item.id))
+    ).toEqual(expect.arrayContaining([expect.objectContaining({ status: "deprecated" })]));
+    expect(unchangedModule?.status).toBe("confirmed");
+  });
+
+  it("blocks baseline approval while requirement clarification gaps remain open", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({ name: "Invoices", key: "invoice-gaps", defaultLocale: "en-US" });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("invoice-gap", "The invoice approval threshold is not specified.")
+    });
+
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+
+    expect(design.evaluation.verdict).toBe("needs-user");
+    expect(design.gaps).toEqual([expect.objectContaining({ sourceType: "requirement-clarification" })]);
+    expect(() => service.approveRequirementSet(ingested.requirementSet.id)).toThrow(
+      "Requirement clarification gaps must be resolved"
+    );
+  });
+
+  it("keeps approved expectations separate from conflicting system observations", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    const project = await service.createProject({ name: "Orders", key: "orders-observed", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-orders",
+      name: "Orders",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://orders.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-orders");
+    repository.knowledgeNodes.push({
+      id: "expected-rule",
+      knowledgeProjectId: project.id,
+      type: "rule",
+      title: "Approval threshold",
+      content: "Orders above 1000 require approval.",
+      module: "Orders",
+      sourceRefs: ["requirement-1"],
+      origin: "source",
+      confidence: 1,
+      status: "confirmed",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const result = await service.recordSystemObservation({
+      projectId: project.id,
+      systemId: "system-orders",
+      type: "rule",
+      title: "Approval threshold",
+      content: "Orders above 2000 require approval.",
+      module: "Orders",
+      sourceRefs: ["trace/order-42.zip"]
+    });
+
+    expect(result.conflicted).toBe(true);
+    expect(result.observation).toEqual(expect.objectContaining({ origin: "observed", status: "conflicted" }));
+    expect(repository.knowledgeNodes.find((node) => node.id === "expected-rule")?.status).toBe("confirmed");
+    expect(result.gaps).toEqual([expect.objectContaining({ sourceType: "system-observation", status: "open" })]);
+    expect(await readFile(join(knowledgeDir, "orders-observed", "systems", "system-orders", "conflicts.md"), "utf8"))
+      .toContain("Orders above 2000 require approval");
+  });
+
+  it("stores step-level execution evidence without inventing missing screenshots", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    const project = await service.createProject({ name: "Evidence", key: "execution-evidence", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-evidence",
+      name: "Evidence",
+      environment: "test",
+      baseUrl: "https://evidence.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://evidence.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-evidence");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("evidence", "Users create an order form.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const compiled = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-evidence",
+      executableCaseId: compiled.id,
+      testCaseId: "test-case-evidence",
+      contextPackPath: "context/evidence.json"
+    });
+
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "failed",
+      chainRunId: "chain-evidence",
+      actualResult: "Expected approved status but received draft",
+      artifactPaths: ["evidence/step-04.png", "evidence/trace.zip"],
+      tracePaths: ["evidence/trace.zip"],
+      consoleErrors: ["console error: failed request"],
+      networkFailures: ["GET /orders 500"]
+    });
+
+    expect(completed.status).toBe("failed");
+    expect(completed.steps.find((step) => step.order === 4)?.screenshotPath).toBe(
+      "evidence/step-04.png"
+    );
+    expect(completed.steps.find((step) => step.action === "assert")).toEqual(
+      expect.objectContaining({ assertionStatus: "failed", actual: expect.stringContaining("draft") })
+    );
+    expect(completed.steps.filter((step) => step.action !== "assert")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ assertionStatus: "blocked" })])
+    );
+    expect(compiled.status).toBe("executed");
+    expect(
+      await readFile(
+        join(knowledgeDir, "execution-evidence", "reports", "chain-evidence", "summary.md"),
+        "utf8"
+      )
+    ).toContain("Expected approved status but received draft");
+  });
+});
+
+function requirementPackage(contentHash: string, content: string): RequirementContentPackage {
+  return {
+    title: "Requirement",
+    content,
+    blocks: [{ type: "paragraph", text: content }],
+    attachments: [],
+    source: "requirements/requirement.md",
+    sourceType: "local-file" as const,
+    contentHash,
+    warnings: []
+  };
+}
+
+async function tempDir() {
+  const dir = await mkdtemp(join(tmpdir(), "brain-knowledge-"));
+  tempDirs.push(dir);
+  return dir;
+}

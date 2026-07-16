@@ -10,6 +10,7 @@ describe("Brain Creator local integration files", () => {
       command: "brain-creator-mcp",
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
+        BRAIN_CREATOR_TOOL_PROFILE: "facade",
         BRAIN_CREATOR_AGENT_PROVIDER: "auto",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
@@ -18,6 +19,7 @@ describe("Brain Creator local integration files", () => {
       command: "brain-creator-mcp",
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
+        BRAIN_CREATOR_TOOL_PROFILE: "facade",
         BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
@@ -82,14 +84,15 @@ describe("Brain Creator local integration files", () => {
     );
   });
 
-  it("verifies the installed package over stdio with the host-agent workflow", async () => {
+  it("verifies the installed package over stdio with the requirement-first facade", async () => {
     const smoke = await readFile("scripts/verifyPackageInstallSmoke.ts", "utf8");
 
     expect(smoke).toContain("StdioClientTransport");
     expect(smoke).toContain('BRAIN_CREATOR_AGENT_PROVIDER: "host-agent"');
+    expect(smoke).toContain('BRAIN_CREATOR_TOOL_PROFILE: "facade"');
     expect(smoke).toContain('command: "/bc help"');
-    expect(smoke).toContain('"bc_prepare_agent_task"');
-    expect(smoke).toContain('"bc_submit_agent_output"');
+    expect(smoke).toContain('name: "bc_prepare"');
+    expect(smoke).toContain('target: "knowledge-project"');
   });
 
   it("defines explicit npm publish exclusions instead of relying on gitignore", async () => {
@@ -113,6 +116,7 @@ describe("Brain Creator local integration files", () => {
       args: ["brain-creator-mcp"],
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
+        BRAIN_CREATOR_TOOL_PROFILE: "facade",
         BRAIN_CREATOR_AGENT_PROVIDER: "auto",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }
@@ -144,8 +148,8 @@ describe("Brain Creator local integration files", () => {
     expect(pluginManifest.interface.displayName).toBe("Brain Creator");
     expect(pluginManifest.interface.category).toBe("Productivity");
     expect(pluginManifest.interface.defaultPrompt).toEqual([
-      "Use Brain Creator to show /bc help shortcuts and current system status.",
-      "Use Brain Creator to connect this system.",
+      "Use Brain Creator to analyze this requirement document or link and prepare a test design for review.",
+      "Use Brain Creator to bind the approved requirement baseline to this system.",
       "Use Brain Creator to preview this test case document, then wait for my confirmation before execution."
     ]);
     expect(pluginManifest.interface.defaultPrompt).toHaveLength(3);
@@ -157,6 +161,7 @@ describe("Brain Creator local integration files", () => {
       args: ["brain-creator-mcp"],
       env: {
         BRAIN_CREATOR_WORKSPACE: ".",
+        BRAIN_CREATOR_TOOL_PROFILE: "facade",
         BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
         BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
       }

@@ -4,6 +4,7 @@
       "command": "brain-creator-mcp",
       "env": {
         "BRAIN_CREATOR_WORKSPACE": ".",
+        "BRAIN_CREATOR_TOOL_PROFILE": "facade",
         "BRAIN_CREATOR_AGENT_PROVIDER": "auto",
         "BRAIN_CREATOR_AGENT_TIMEOUT_MS": "120000"
       }
