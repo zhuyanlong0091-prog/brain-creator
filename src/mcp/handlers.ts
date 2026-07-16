@@ -840,9 +840,12 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     context.service.enableCaseSuiteContinueOnBlocked(suite.id);
   }
   const alreadyPassed = passedCaseNosForSuite(context, systemId, suite.id);
+  const attempted = attemptedCaseNosForSuite(context, systemId, suite.id);
   const casesToRun = parsed.cases.filter(
     (documentCase) =>
-      suite.selectedCaseNos.includes(documentCase.caseNo) && !alreadyPassed.has(documentCase.caseNo)
+      suite.selectedCaseNos.includes(documentCase.caseNo) &&
+      !alreadyPassed.has(documentCase.caseNo) &&
+      (suite.continueOnBlocked !== true || !attempted.has(documentCase.caseNo))
   );
   if (context.agentBridge?.provider === "host-agent") {
     const pendingTask = context.service
@@ -850,7 +853,8 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       .find(
         (task) =>
           task.status === "pending" &&
-          task.suiteContext?.suiteId === suite.id
+          task.suiteContext?.suiteId === suite.id &&
+          !attempted.has(task.suiteContext.caseNo)
       );
     if (pendingTask?.suiteContext) {
       const currentCase = parsed.cases.find(
@@ -870,7 +874,12 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
           testCaseId: pendingTask.chainContext?.testCaseId,
           gapIds: []
         },
-        progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, []),
+        progress: caseSuiteProgress(
+          suite.selectedCaseNos,
+          alreadyPassed,
+          suiteCaseResults(context, systemId, suite.id),
+          attempted
+        ),
         documentCase: currentCase
       };
     }
@@ -882,7 +891,12 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         status: "completed",
         source: caseSource,
         suite: completedSuite,
-        progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, [])
+        progress: caseSuiteProgress(
+          suite.selectedCaseNos,
+          alreadyPassed,
+          suiteCaseResults(context, systemId, suite.id),
+          attempted
+        )
       };
     }
     const result = await executeDocumentCase(context, {
@@ -902,7 +916,12 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         source: caseSource,
         suite: waitingSuite,
         currentCase: result.caseResult,
-        progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, [result.caseResult])
+        progress: caseSuiteProgress(
+          suite.selectedCaseNos,
+          alreadyPassed,
+          suiteCaseResults(context, systemId, suite.id),
+          attempted
+        )
       };
     }
   }
@@ -974,7 +993,12 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     source: caseSource,
     suite,
     suiteRun,
-    progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, caseResults),
+    progress: caseSuiteProgress(
+      suite.selectedCaseNos,
+      alreadyPassed,
+      suiteCaseResults(context, systemId, suite.id),
+      attempted
+    ),
     bugs,
     writeBack
   };
@@ -2478,17 +2502,19 @@ function selectionSummary(
 function caseSuiteProgress(
   selectedCaseNos: string[],
   alreadyPassed: Set<string>,
-  caseResults: CaseSuiteCaseResult[]
+  caseResults: CaseSuiteCaseResult[],
+  attemptedCaseNos: Set<string> = new Set()
 ) {
   const passedNow = caseResults.filter((result) => result.status === "passed").map((result) => result.caseNo);
   const passed = new Set([...alreadyPassed, ...passedNow]);
+  const attempted = new Set([...attemptedCaseNos, ...caseResults.map((result) => result.caseNo)]);
   const failed = caseResults.filter((result) => result.status === "failed").length;
   const blocked = caseResults.filter((result) => result.status === "blocked").length;
-  const remainingCaseNos = selectedCaseNos.filter((caseNo) => !passed.has(caseNo));
+  const remainingCaseNos = selectedCaseNos.filter((caseNo) => !attempted.has(caseNo));
   return {
     selected: selectedCaseNos.length,
     alreadyPassed: alreadyPassed.size,
-    attempted: caseResults.length,
+    attempted: attempted.size,
     passed: passed.size,
     failed,
     blocked,
@@ -2538,7 +2564,12 @@ async function prepareNextHostAgentSuiteTask(
     source,
     suite: waitingSuite,
     currentCase: result.caseResult,
-    progress: caseSuiteProgress(suite.selectedCaseNos, passed, [result.caseResult])
+    progress: caseSuiteProgress(
+      suite.selectedCaseNos,
+      passed,
+      suiteCaseResults(context, suite.systemId, suite.id),
+      attemptedCaseNosForSuite(context, suite.systemId, suite.id)
+    )
   };
 }
 
@@ -2549,7 +2580,10 @@ function unfinishedCaseSuites(context: BrainCreatorMcpContext, systemId: string)
     .filter((suite) => suite.status !== "completed" && suite.status !== "cancelled")
     .map((suite) => {
       const passed = passedCaseNosForSuite(context, systemId, suite.id);
-      const remainingCaseNos = suite.selectedCaseNos.filter((caseNo) => !passed.has(caseNo));
+      const attempted = attemptedCaseNosForSuite(context, systemId, suite.id);
+      const remainingCaseNos = suite.continueOnBlocked === true
+        ? suite.selectedCaseNos.filter((caseNo) => !attempted.has(caseNo))
+        : suite.selectedCaseNos.filter((caseNo) => !passed.has(caseNo));
       const lastRun = context.service
         .listCaseSuiteRuns(systemId)
         .filter((run) => run.suiteId === suite.id)
@@ -2603,6 +2637,17 @@ function passedCaseNosForSuite(context: BrainCreatorMcpContext, systemId: string
   return passed;
 }
 
+function suiteCaseResults(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  suiteId: string
+) {
+  return context.service
+    .listCaseSuiteRuns(systemId)
+    .filter((run) => run.suiteId === suiteId)
+    .flatMap((run) => run.caseResults);
+}
+
 function attemptedCaseNosForSuite(
   context: BrainCreatorMcpContext,
   systemId: string,
@@ -2614,6 +2659,23 @@ function attemptedCaseNosForSuite(
     .filter((item) => item.suiteId === suiteId)) {
     for (const result of run.caseResults) {
       attempted.add(result.caseNo);
+    }
+  }
+  const pendingTaskCaseNos = new Set(
+    context.service
+      .listAgentTasks(systemId)
+      .filter((task) => task.status === "pending" && task.suiteContext?.suiteId === suiteId)
+      .map((task) => task.suiteContext?.caseNo)
+      .filter((caseNo): caseNo is string => Boolean(caseNo))
+  );
+  for (const run of context.service.listChainRuns(systemId)) {
+    if (run.status !== "succeeded" && run.status !== "failed") {
+      continue;
+    }
+    const testCase = context.service.listTestCases(systemId).find((item) => item.id === run.testCaseId);
+    const caseNo = testCase?.requirement.match(/^(TC-\d+)/)?.[1];
+    if (caseNo && pendingTaskCaseNos.has(caseNo)) {
+      attempted.add(caseNo);
     }
   }
   return attempted;
