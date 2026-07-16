@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { BRAIN_CREATOR_TOOLS, registerBrainCreatorTools } from "./tools.js";
+import {
+  BRAIN_CREATOR_TOOLS,
+  FACADE_TOOL_NAMES,
+  parseBrainCreatorToolProfile,
+  registerBrainCreatorTools
+} from "./tools.js";
 
 describe("BRAIN_CREATOR_TOOLS", () => {
   it("defines the core Brain Creator v2 MCP tools", () => {
     expect(BRAIN_CREATOR_TOOLS.map((tool) => tool.name)).toEqual([
+      "bc_prepare",
       "bc_command",
       "bc_intent_preview",
       "bc_status",
@@ -55,6 +61,28 @@ describe("BRAIN_CREATOR_TOOLS", () => {
       "bc_resolve_gap",
       "bc_search_assets"
     ]);
+  });
+
+  it("registers only high-level tools for the facade profile", () => {
+    const registered: string[] = [];
+    const fakeServer = {
+      registerTool(name: string) {
+        registered.push(name);
+      }
+    };
+
+    registerBrainCreatorTools(
+      fakeServer,
+      async () => ({ content: [{ type: "text", text: "{}" }] }),
+      "facade"
+    );
+
+    expect(registered).toEqual(
+      BRAIN_CREATOR_TOOLS.filter((tool) => FACADE_TOOL_NAMES.has(tool.name)).map((tool) => tool.name)
+    );
+    expect(parseBrainCreatorToolProfile()).toBe("full");
+    expect(parseBrainCreatorToolProfile("facade")).toBe("facade");
+    expect(() => parseBrainCreatorToolProfile("small")).toThrow("Unsupported Brain Creator tool profile");
   });
 
   it("registers every tool on a compatible MCP server", () => {

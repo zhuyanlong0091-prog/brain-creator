@@ -1,331 +1,166 @@
 # Brain Creator Agent Usage Guide
 
-This guide is for using Brain Creator inside Claude Code or Codex. You do not need to start from a Web UI, memorize every MCP tool, or manually edit generated test files. The intended experience is:
+Brain Creator is used through one sentence in Claude Code or Codex. Users describe the testing goal; the Agent chooses the Facade MCP tools and keeps approval boundaries visible.
+
+## Recommended First Request
 
 ```text
-User one sentence -> Brain Creator skill -> MCP tools -> planner -> reviewed plan -> generator -> healer -> artifacts and gaps
+Use Brain Creator to analyze this requirement document, generate traceable test design and data, and wait for my approval.
 ```
-
-## Mental Model
-
-Brain Creator is the testing brain for an agent. Claude Code / Codex is the conversation interface. Brain Creator contributes:
-
-- business system context
-- encrypted auth profiles
-- glossary terms and aliases
-- business rules and quality gates
-- draft test cases for human approval
-- generated specs and Playwright test files
-- agent run history, chain run history, and gaps
-
-Start with a natural request such as `Use Brain Creator to connect this system`. The agent should load the Brain Creator skill internally and choose MCP tools for you; use `Skill("brain-creator")` only as an explicit troubleshooting fallback when automatic matching fails.
-
-If you do not know what to ask next, say:
 
 ```text
-Use Brain Creator to show /bc help shortcuts.
+用 Brain Creator 分析这个飞书需求链接，沉淀知识并生成测试意图，等我确认。
 ```
 
-The agent should call `bc_command` with `/bc help` and return the Brain Creator shortcuts, filters, and recommended entrypoints without creating or changing any system assets.
-
-When `/bc status` has no selected system, present the returned compact system picker or connection guidance. Do not expose the raw candidate-id list as an error.
+The recommended path starts from requirements. The older “connect a business system first” path remains available when the user only wants operational maintenance or document-suite execution.
 
 ## Installation Modes
 
-Use source checkout mode when you are developing Brain Creator itself. In this mode, clone the repository, run `npm install`, then use `npm run dev:mcp`.
-
-Use MCP CLI connection mode when you want to use Brain Creator from a business project. The recommended setup is project-local: run `npm install --save-dev brain-creator`, then `npx brain-creator-install-assets`, `npx brain-creator-write-mcp-config`, `npx brain-creator-install-codex-plugin`, and `npx brain-creator-doctor` once in the business project. The assets installer adds the Skill, agent definitions, and a Playwright config only when one is missing. The Codex plugin installer registers the local package and rewrites the current workspace MCP entry to `host-agent`, so Codex does not need a Claude subprocess.
-
-Use repo-local plugin installation mode when you want Brain Creator to appear through Codex `/plugin`. The repository provides `plugins/brain-creator/.codex-plugin/plugin.json`, `plugins/brain-creator/.mcp.json`, bundled Brain Creator skills, and `.agents/plugins/marketplace.json` for local marketplace discovery. This mode registers the Skill and MCP server metadata, while the executable commands still need to be available through a local package install or a future npm publish.
+- **source checkout mode**: contribute to Brain Creator from this repository.
+- **MCP CLI connection mode**: install `brain-creator` in a business project and run `brain-creator-install-assets`, `brain-creator-write-mcp-config`, and `brain-creator-doctor`.
+- **repo-local plugin installation mode**: register this repository or the installed npm package as a Codex plugin marketplace.
 
 Full setup details are in `docs/mcp-installation.md`.
 
-## Flow Checklist
+## Requirement-First Flow
 
-The normal flow is: connect a business system, configure auth, add business language, add business rules, generate a draft plan, approve the plan, run the chain, then review artifacts and gaps.
+### 1. Create Knowledge Context
 
-## A Complete User Flow
+The Agent calls `bc_configure target=knowledge-project`. A real system is not required yet.
 
-### 1. Connect A Business System
+### 2. Ingest The Requirement
 
-Say something like:
+The Agent calls `bc_prepare action=ingest-requirement` for Markdown, TXT, DOCX, PDF, HTTP(S), Obsidian, or Feishu.
 
-```text
-Use Brain Creator to connect the order admin system at https://orders.example.test for local QA. The default language is zh-CN and only that base URL is allowed.
-```
+For Feishu, Brain Creator uses direct OpenAPI when environment credentials are configured. Otherwise the host Agent reads the document with its lark capability and submits a normalized `RequirementContentPackage`.
 
-Expected agent behavior:
+### 3. Analyze And Design
 
-- create or reuse a Brain Creator business system
-- keep later assets scoped to that system
-- summarize the system id, environment, base URL, and onboarding status
+The Agent calls `bc_prepare action=generate-test-design` and presents:
 
-Behind the scenes, this uses tools such as `bc_create_system`, `bc_list_systems`, and `bc_system_overview`.
+- requirement modules, actors, fields, rules, workflows, states, permissions, and integrations;
+- source references and confidence;
+- open questions and risks;
+- test techniques and coverage;
+- TestIntents and TestDataProfiles;
+- parsing, clarification, or connector Gaps.
 
-### 2. Configure Auth
+Builtin policies work without external Skills. When `RequirementAnalysis.skill` or `TestCaseDesign.skill` is available, the Agent may use it as an enhancement, but the output still passes Brain Creator schema, Eval, source-trace, and approval gates.
 
-Say:
+### 4. Approve The Baseline
 
-```text
-Configure token auth for the QA admin role. The token is Bearer <token>. Do not repeat the token back to me.
-```
+The Agent resolves clarification Gaps and waits for explicit approval. It then calls `bc_prepare action=approve-baseline confirm=true`.
 
-Expected agent behavior:
+### 5. Compile Executable Cases
 
-- create an encrypted auth profile
-- verify it when possible
-- generate a local seed file when the chain needs browser auth
-- avoid echoing secrets into summaries
+The Agent calls `bc_prepare action=compile-cases`. Brain Creator may add a hidden action only when confirmed workflow knowledge provides one unique path. Multiple plausible paths create a Gap.
 
-Behind the scenes, this uses `bc_create_auth`, `bc_verify_auth`, `bc_list_auth`, and `bc_generate_seed`.
+### 6. Bind A Runtime System
 
-### 3. Add Business Language
+The Agent uses `bc_configure target=system` and `bc_configure target=system-binding`, then configure auth. Protected password, recovery, CAPTCHA, or 2FA uses `bc_create_auth_checkpoint` and workspace-local storage state.
 
-Say:
+### 7. Preview And Execute
 
-```text
-Add glossary terms: 提交订单 means Submit order, 订单总额 means Order total, both scoped to /orders.
-```
+The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`.
 
-Expected agent behavior:
+The Generator writes a Playwright test, Playwright executes it, and the Healer performs bounded repairs. Business mismatches create BugReports. Auth, environment, network, locator, or missing evidence creates Gaps.
 
-- save terms under the selected business system
-- include aliases and page scope when provided
-- use terms in future planning context
+### 8. Review Evidence
 
-After planning, Brain Creator may also return new term candidates. The agent should ask which candidates to keep, then confirm them.
+The Agent uses `bc_review` to show requirements, knowledge, coverage, TestIntents, ExecutableCases, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.
 
-### 4. Add Business Rules
+## User Entrypoints
 
-Say:
+Typical natural-language requests:
 
 ```text
-Add a blocking rule: every checkout test must assert that Order total is visible.
+Use Brain Creator to connect the order admin system and bind the approved order requirement.
 ```
-
-Expected agent behavior:
-
-- store the rule in the current system
-- use it as a quality gate when generating draft plans
-- report whether the draft plan covers the rule
-
-Behind the scenes, this uses `bc_add_rule` and `bc_list_rules`.
-
-### 5. Generate A Draft Plan
-
-Say:
 
 ```text
-Generate a test plan for submitting an order and checking the order total. Do not generate code until I approve the plan.
+Add business rules for approval thresholds and regenerate the affected test design.
 ```
-
-Expected agent behavior:
-
-- build a planner context from system, auth, glossary, and rules
-- generate structured scenarios
-- show the draft plan in natural language
-- show rule coverage and new glossary candidates
-- wait for approval before code generation
-
-Behind the scenes, this uses `bc_generate_plan`. In host-agent mode it returns a Planner task with `needs_agent_execution`; the current agent writes the requested spec and calls `bc_submit_agent_output`, which returns `plan_ready`. This is the moment where the agent should help you review intent, not rush into code.
-
-### 6. Approve Or Adjust The Plan
-
-If the draft is right, say:
 
 ```text
-Approve this plan and run it.
+Generate a draft plan, approve the plan only after I confirm, then run the chain.
 ```
-
-If it needs changes, say:
 
 ```text
-Change the second scenario so it also verifies the payment status, then show me the updated plan.
+Show the latest artifacts and gaps, including requirement-versus-system conflicts.
 ```
 
-Expected agent behavior:
+Users do not need to name `bc_run_chain` or other internal tools. `/bc help` displays optional Brain Creator shortcuts for status and existing-suite maintenance.
 
-- update draft scenarios when requested
-- call approval only after you confirm the intent
-- treat approval as the contract for generation
+## Existing Test Case Documents
 
-Behind the scenes, this uses `bc_update_plan` and `bc_approve_plan`.
+For an `.xlsx` or executable `.md` document:
 
-### 7. Run The Chain
+1. `bc_run mode=case-source-suite confirm=false` previews the source.
+2. The Agent shows counts, modules, priorities, samples, bridge status, and risks.
+3. The user confirms.
+4. `bc_run mode=case-source-suite confirm=true` executes the selected cases.
+5. `bc_review` returns SuiteRun, ChainRun, BugReport, Gap, and evidence paths.
 
-After approval, the agent should run the generator/test/healer chain:
+Excel write-back remains disabled unless the user explicitly requests both write-back and confirmation.
 
-- generator writes a Playwright `.spec.ts`
-- Playwright executes the generated test
-- healer retries bounded repairs if the generated test fails
-- unresolved failures become gaps instead of fake success
+## Host-Agent Execution
 
-Behind the scenes, this uses `bc_run_chain`.
+Codex plugin installations default to `host-agent`. A `needs_agent_execution` response is work for the current Agent:
 
-### 8. Review Artifacts And Gaps
+1. Read `input.prompt.md` and `input.context.json`.
+2. Create only the requested Planner, Generator, or Healer outputs.
+3. Call `bc_submit_agent_output`.
+4. Continue while another task package is returned.
+5. Stop at `completed`, `failed`, or `blocked`.
 
-Ask:
-
-```text
-Show me the generated artifacts, latest chain result, and any open gaps for this system.
-```
-
-Expected agent behavior:
-
-- summarize latest spec and test artifacts
-- provide paths to generated files
-- show chain status and healer attempts
-- list open gaps with reason, severity, and next action
-
-Behind the scenes, this uses `bc_artifact_overview`, `bc_list_specs`, `bc_list_tests`, `bc_read_spec`, `bc_read_test`, `bc_list_chain_runs`, and `bc_list_gaps`.
-
-### 9. Stop And Resume A Protected Login
-
-If a login requires password, recovery, CAPTCHA, or 2FA, the agent should call `bc_create_auth_checkpoint` and use an isolated headed browser for the protected step. The checkpoint stores only the reason and resume instruction, never the secret value. After the application page is reached, the agent saves storage state under `.brain-creator/auth/<systemId>/storage-state.json`, configures a `script` AuthProfile with an encrypted workspace-relative `storageStatePath`, and verifies the state in a fresh read-only Playwright context before completing the checkpoint.
-
-Passwords and verification codes must never be placed in shell arguments, generated tests, logs, gaps, or reports. Storage state and browser profiles are sensitive local runtime data; they remain under `.brain-creator/` and are excluded from Git and npm packages.
-
-If you close the login page or stop the attempt, the agent should call `bc_cancel_plan`. Brain Creator records the test case as cancelled and creates a `user-interruption` Gap.
-
-To continue later:
-
-1. Restore or repeat the isolated browser login and save a fresh storage state.
-2. Prove the saved state in a new read-only browser context, then complete or cancel the pending auth checkpoint.
-3. Call `bc_resume_plan` to return the cancelled case to draft.
-4. Review and approve the plan again before running the chain.
-
-Use `bc_report_gap` for external preflight failures such as blocked network access, unreachable target pages, or missing evidence outside a chain run.
-
-### 10. Execute A Test Case Document
-
-Say:
-
-```text
-Use Brain Creator to execute this test case document: <path-to-cases.xlsx-or-md>
-```
-
-Expected agent behavior:
-
-1. Call `bc_run mode=case-source-suite confirm=false` and show the case count, filters, risks, and bridge status.
-2. Wait for explicit confirmation.
-3. Call the same facade with `confirm=true`.
-4. In host-agent mode, execute the returned Generator/Healer task in the current Codex or Claude Code session. Import `test` and `expect` from the task's `--seed` file so authenticated browser setup is preserved, write the requested test, and call `bc_submit_agent_output`.
-5. If submission returns another `needs_agent_execution` task, continue with that task. Stop only at `completed`, `failed`, or `blocked`.
-6. Use `bc_review` to report SuiteRun, ChainRun, BugReport, Gap, and evidence paths.
-
-For a system whose active auth profile uses `script + storageStatePath`, confirmed document execution first performs a read-only browser auth preflight. If the state file is missing or navigation redirects to a login route, `bc_run` returns `blocked` with an AuthCheckpoint and Gap before any Generator task is created. Complete the protected login/CAPTCHA/2FA step in an isolated browser, save the refreshed state, verify it in a fresh browser context, complete the checkpoint, and then resume the same suite.
-
-The default safety policy stops a document suite at the first case-level environment, authentication, locator, or evidence Gap. When the user explicitly confirms that independent cases should still be attempted, pass `continueOnBlocked: true` to both the preview and confirmed `bc_run` calls. The host agent must continue consuming returned task packages, preserve each Gap, and report a final `blocked` suite if any case remained blocked. This policy does not bypass suite-level auth/bridge preflight or source write-back confirmation.
-
-`waiting-for-agent` is an active handoff state. It does not mean Brain Creator is missing an AgentBridge, and it must not be reported as a Gap. Generator submission invokes real Playwright automatically; a failing run returns a bounded Healer task.
+`waiting-for-agent` is not a missing bridge. Subprocess mode can use Claude or Codex when explicitly configured.
 
 ## Session Resume: The New-Session Entry Point
 
-When the agent opens a new session for an existing Brain Creator system, the first call should be `bc_session_resume`. It returns a full snapshot in one call:
+For an existing runtime system, `bc_session_resume` or `bc_status` replaces 6-7 independent queries. It returns system, auth, checkpoints, rules, glossary, test case counts, recent runs, artifacts, open Gaps, Bridge preflight status, and recommended next action.
 
-- System profile, auth profiles, checkpoints
-- Business rules, glossary terms
-- Test case counts by status
-- Recent agent runs and chain runs (last 5 each)
-- Generated artifact counts
-- Open gaps
-- **Bridge preflight status** (`{ ok, checkedAt }`) — tells the agent whether Planner/Generator/Healer are reachable
-- **Recommended next action** — computed from the snapshot state
-
-This replaces 6–7 independent queries and gives the agent everything it needs to present a status summary and take the next step.
-
-For the full E2E flow documentation, see `docs/e2e-session-resume-workflow.md`.
-
-## Recommended One-Sentence Prompts
-
-Use these when you want the agent to drive the flow without tool-level instructions:
-
-```text
-Use Brain Creator to connect this CRM as a reusable business system, configure token auth, and prepare it for generating Playwright tests.
-```
-
-```text
-Use Brain Creator for the selected order system, add a blocking business rule that every checkout test must assert Order total, then generate a draft plan for order submission and wait for my approval.
-```
-
-```text
-Use Brain Creator to continue the approved case for the selected system, run the chain, and summarize generated artifacts and open gaps.
-```
-
-```text
-Use Brain Creator to show the current system overview, latest generated specs/tests, chain history, and unresolved gaps.
-```
-
-### New session prompts (session resume path)
+Example prompts:
 
 ```text
 Use Brain Creator to check the order-admin system status and tell me what to do next.
 ```
 
 ```text
-Use Brain Creator to show /bc help shortcuts.
+Use Brain Creator to resume where I left off and report any blocked requirement or suite.
 ```
 
-```text
-Use Brain Creator to resume where I left off with the order-admin system. If the bridge isn't working, tell me how to fix it.
-```
+The end-to-end reference is `docs/e2e-session-resume-workflow.md`.
 
-## What The Agent Should Not Do
+## Legacy Compatibility
 
-- Do not create or prioritize a Web UI for v2.
-- Do not mix assets across business systems.
-- Do not generate code before plan approval.
-- Do not claim success when `bc_run_chain` failed.
-- Do not invent locators, auth state, or API evidence when Brain Creator reports a gap.
-- Do not repeat secrets after auth creation.
+Fine-grained tools remain available in `BRAIN_CREATOR_TOOL_PROFILE=full`:
 
-## Operator Checklist
+- `bc_create_auth`, `bc_generate_seed`, and `bc_create_auth_checkpoint`;
+- term/rule tools;
+- `bc_generate_plan`, `bc_approve_plan`, `bc_cancel_plan`, and `bc_resume_plan`;
+- `bc_run_chain`, artifact readers, and `bc_report_gap`.
 
-Before a real run:
+The Agent should still prefer Facades.
 
-- dependencies are installed with `npm install`
-- Brain Creator MCP is configured for the agent client
-- Claude bridge env vars are set when live Planner / Generator / Healer runs are needed
-- the target system URL is inside the allowlist
-- auth secrets are test credentials, not production credentials
+## Safety
 
-After a run:
-
-- check chain status
-- read generated spec/test paths if needed
-- resolve or keep gaps explicitly
-- confirm new glossary candidates only if they are useful for the system
+- Never expose secrets or save them in requirements, plans, tests, Gaps, or reports.
+- Never execute an unapproved requirement baseline.
+- Never mix systems or knowledge projects.
+- Never overwrite expected requirements with observed behavior.
+- Never fabricate a locator, test result, or evidence path.
+- Do not create a Web UI for this agent-native product.
 
 ## Verification Commands
 
-Use these commands when validating the local setup:
-
 ```bash
 npm test
-npx tsc --noEmit
-npm run verify:live-claude-chain
-npm run verify:live-agent-artifacts
-npm run verify:live-mcp-workflow
-npm run verify:live-claude-skill-workflow
+npm run build
+npm run verify:package-contents
+npm run verify:package-install
+npm run verify:codex-native-entry
+npm run verify:host-agent-chain
+npm run verify:host-agent-document-suite
 npm run verify:live-session-resume-workflow
-```
-
-The strongest user-experience check is `npm run verify:live-claude-skill-workflow`: it launches a real Claude Code session, uses a natural Brain Creator request, calls Brain Creator MCP tools, reaches `bc_run_chain`, and reviews artifacts.
-
-## Troubleshooting
-
-If the agent says the Claude subagent bridge is missing, set:
-
-```bash
-BRAIN_CREATOR_AGENT_COMMAND=claude
-BRAIN_CREATOR_AGENT_ARGS='["--print","--permission-mode","acceptEdits"]'
-BRAIN_CREATOR_AGENT_TIMEOUT_MS=120000
-```
-
-If the chain fails, ask the agent to show open gaps and latest chain runs. A failed chain with a clear gap is a valid Brain Creator outcome; it means the system refused to fabricate missing evidence.
-
-If the agent starts discussing UI screens, redirect it:
-
-```text
-Brain Creator v2 is agent-native. Use Brain Creator and the MCP tools; do not design a Web UI.
+npm run verify:live-claude-skill-workflow
 ```

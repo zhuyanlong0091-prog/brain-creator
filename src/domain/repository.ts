@@ -16,15 +16,27 @@ import type {
   Gap,
   GeneratedCase,
   GlossaryTerm,
+  ExecutableCase,
+  ExecutionEvidence,
+  KnowledgeEdge,
+  KnowledgeNode,
+  KnowledgeProject,
   LocatorPoint,
   PageModel,
   ProbeResult,
+  RequirementSet,
+  RequirementSource,
   SystemProfile,
+  TestDataProfile,
+  TestIntent,
   TestCase,
   TrainingSession
 } from "./types.js";
 
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 2;
+
 export class InMemoryBrainCreatorRepository {
+  schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
   systemProfiles: SystemProfile[] = [];
   authProfiles: AuthProfile[] = [];
   authCheckpoints: AuthCheckpoint[] = [];
@@ -46,6 +58,15 @@ export class InMemoryBrainCreatorRepository {
   caseSuites: CaseSuite[] = [];
   caseSuiteRuns: CaseSuiteRun[] = [];
   bugReports: BugReport[] = [];
+  knowledgeProjects: KnowledgeProject[] = [];
+  requirementSources: RequirementSource[] = [];
+  requirementSets: RequirementSet[] = [];
+  knowledgeNodes: KnowledgeNode[] = [];
+  knowledgeEdges: KnowledgeEdge[] = [];
+  testIntents: TestIntent[] = [];
+  testDataProfiles: TestDataProfile[] = [];
+  executableCases: ExecutableCase[] = [];
+  executionEvidence: ExecutionEvidence[] = [];
 
   persist() {
     return;
@@ -73,6 +94,15 @@ export class InMemoryBrainCreatorRepository {
     this.caseSuites = [];
     this.caseSuiteRuns = [];
     this.bugReports = [];
+    this.knowledgeProjects = [];
+    this.requirementSources = [];
+    this.requirementSets = [];
+    this.knowledgeNodes = [];
+    this.knowledgeEdges = [];
+    this.testIntents = [];
+    this.testDataProfiles = [];
+    this.executableCases = [];
+    this.executionEvidence = [];
     this.persist();
   }
 }
@@ -100,6 +130,16 @@ type RepositorySnapshot = Pick<
   | "caseSuites"
   | "caseSuiteRuns"
   | "bugReports"
+  | "schemaVersion"
+  | "knowledgeProjects"
+  | "requirementSources"
+  | "requirementSets"
+  | "knowledgeNodes"
+  | "knowledgeEdges"
+  | "testIntents"
+  | "testDataProfiles"
+  | "executableCases"
+  | "executionEvidence"
 >;
 
 export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorRepository {
@@ -118,6 +158,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       return;
     }
     const snapshot = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<RepositorySnapshot>;
+    this.schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
     this.systemProfiles = snapshot.systemProfiles ?? [];
     this.authProfiles = snapshot.authProfiles ?? [];
     this.authCheckpoints = snapshot.authCheckpoints ?? [];
@@ -139,6 +180,15 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     this.caseSuites = snapshot.caseSuites ?? [];
     this.caseSuiteRuns = snapshot.caseSuiteRuns ?? [];
     this.bugReports = snapshot.bugReports ?? [];
+    this.knowledgeProjects = snapshot.knowledgeProjects ?? [];
+    this.requirementSources = snapshot.requirementSources ?? [];
+    this.requirementSets = snapshot.requirementSets ?? [];
+    this.knowledgeNodes = snapshot.knowledgeNodes ?? [];
+    this.knowledgeEdges = snapshot.knowledgeEdges ?? [];
+    this.testIntents = snapshot.testIntents ?? [];
+    this.testDataProfiles = snapshot.testDataProfiles ?? [];
+    this.executableCases = snapshot.executableCases ?? [];
+    this.executionEvidence = snapshot.executionEvidence ?? [];
   }
 
   private snapshot(): RepositorySnapshot {
@@ -163,7 +213,17 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       caseSources: this.caseSources,
       caseSuites: this.caseSuites,
       caseSuiteRuns: this.caseSuiteRuns,
-      bugReports: this.bugReports
+      bugReports: this.bugReports,
+      schemaVersion: CURRENT_REPOSITORY_SCHEMA_VERSION,
+      knowledgeProjects: this.knowledgeProjects,
+      requirementSources: this.requirementSources,
+      requirementSets: this.requirementSets,
+      knowledgeNodes: this.knowledgeNodes,
+      knowledgeEdges: this.knowledgeEdges,
+      testIntents: this.testIntents,
+      testDataProfiles: this.testDataProfiles,
+      executableCases: this.executableCases,
+      executionEvidence: this.executionEvidence
     };
   }
 }

@@ -18,15 +18,15 @@
   "interface": {
     "displayName": "Brain Creator",
     "shortDescription": "Use Brain Creator as an agent-native testing brain.",
-    "longDescription": "Brain Creator registers the Brain Creator Skill and MCP server so Claude Code or Codex can connect business systems, manage auth and rules, generate reviewed test plans, run agent chains, and track gaps without starting from a Web UI. In Codex plugin mode it defaults to host-agent task handoff: when Brain Creator returns needs_agent_execution, the current Codex agent should execute the task package and finish with bc_submit_agent_output instead of waiting for a Claude or Codex subprocess.",
+    "longDescription": "Brain Creator registers a requirement-driven testing Skill and MCP server so Claude Code or Codex can ingest requirement documents or Feishu links, grow traceable business knowledge, design and approve tests, bind real systems, execute Playwright chains, and track evidence and gaps without a Web UI. Codex plugin mode uses host-agent task handoff through needs_agent_execution and bc_submit_agent_output.",
     "developerName": "Brain Creator",
     "category": "Productivity",
     "capabilities": [
       "Write"
     ],
     "defaultPrompt": [
-      "Use Brain Creator to show /bc help shortcuts and current system status.",
-      "Use Brain Creator to connect this system.",
+      "Use Brain Creator to analyze this requirement document or link and prepare a test design for review.",
+      "Use Brain Creator to bind the approved requirement baseline to this system.",
       "Use Brain Creator to preview this test case document, then wait for my confirmation before execution."
     ],
     "brandColor": "#0F766E"

@@ -16,8 +16,17 @@ import {
 import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
+  resolveBrainCreatorKnowledgeDir,
   resolveBrainCreatorWorkspace
 } from "../shared/workspace.js";
+import { KnowledgeService } from "../knowledge/service.js";
+import {
+  resolveRequirementSource,
+  type RequirementSourceReader
+} from "../knowledge/sourceAdapters.js";
+import { FeishuOpenApiAdapter } from "../knowledge/feishuAdapter.js";
+import { normalizeHostSkillAnalysis } from "../knowledge/policies.js";
+import { buildContextPack } from "../knowledge/retriever.js";
 import {
   commandRunnerAgentBridge,
   generatePlanDraft,
@@ -27,6 +36,7 @@ import {
   spawnCommand,
   type AgentBridge,
   type AgentBridgeWithMetadata,
+  type CommandResult,
   type CommandRunner
 } from "../agent/orchestrator.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
@@ -43,20 +53,25 @@ import type {
   CaseSuiteCaseResult,
   ChainRun,
   DocumentCase,
+  ExecutableCase,
   Gap,
+  RequirementContentPackage,
   TestArtifact,
   TestCaseScenario,
-  TestCaseStep
+  TestCaseStep,
+  KnowledgeNodeType
 } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
 export type BrainCreatorMcpContext = {
   repository: JsonFileBrainCreatorRepository;
   service: BrainCreatorService;
+  knowledgeService: KnowledgeService;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
   authStateVerifier: AuthStateVerifier;
+  feishuReader?: RequirementSourceReader;
 };
 
 type HostAgentTaskPackage = {
@@ -75,6 +90,8 @@ type CreateContextInput = {
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
   authStateVerifier?: AuthStateVerifier;
+  knowledgeDir?: string;
+  feishuReader?: RequirementSourceReader;
 };
 
 export function createBrainCreatorMcpContext(
@@ -87,12 +104,17 @@ export function createBrainCreatorMcpContext(
   return {
     repository,
     service: new BrainCreatorService(repository),
+    knowledgeService: new KnowledgeService(
+      repository,
+      input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir)
+    ),
     workDir,
     agentBridge:
       input.agentBridge ??
       (input.runner ? commandRunnerAgentBridge(input.runner) : createConfiguredAgentBridge()),
     runner: input.runner,
-    authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth
+    authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
+    feishuReader: input.feishuReader ?? configuredFeishuReader()
   };
 }
 
@@ -103,6 +125,8 @@ export async function handleBrainCreatorTool(
 ): Promise<CallToolResult> {
   try {
     switch (name) {
+      case "bc_prepare":
+        return textResult(await prepareFacade(context, input));
       case "bc_command":
         return textResult(await commandFacade(context, input));
       case "bc_intent_preview":
@@ -114,7 +138,7 @@ export async function handleBrainCreatorTool(
       case "bc_review":
         return textResult(await reviewFacade(context, input));
       case "bc_configure":
-        return textResult(configureFacade(context, input));
+        return textResult(await configureFacade(context, input));
       case "bc_create_system":
         return textResult(
           context.service.createSystemProfile({
@@ -508,7 +532,113 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
   };
 }
 
+async function prepareFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const action = prepareActionArg(input, "action");
+  if (action === "ingest-requirement" || action === "refresh-requirement") {
+    const knowledgeProjectId = stringArg(input, "knowledgeProjectId");
+    const source = stringArg(input, "source");
+    let resolved;
+    try {
+      resolved = await resolveRequirementSource(
+        { source, contentPackage: requirementContentPackageArg(input, "contentPackage") },
+        {
+          baseDir: context.workDir,
+          allowPrivateNetwork: optionalBooleanArg(input, "allowPrivateNetwork"),
+          feishuReader: context.feishuReader
+        }
+      );
+    } catch (error) {
+      if (!isFeishuRequirementSource(source)) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      const gap = reportKnowledgeGap(
+        context,
+        knowledgeProjectId,
+        source,
+        `Feishu connector failed: ${reason}`
+      );
+      return {
+        status: "connector-error",
+        connector: "feishu",
+        error: reason,
+        gap,
+        nextAction: "Fix Feishu access or retry with a host-provided contentPackage."
+      };
+    }
+    if (resolved.status === "needs-host-connector") {
+      const gap = reportKnowledgeGap(
+        context,
+        knowledgeProjectId,
+        source,
+        "Feishu content requires a host lark connector. Submit a RequirementContentPackage or export DOCX/PDF/Markdown."
+      );
+      return {
+        ...resolved,
+        gap,
+        nextAction: "Read the Feishu document through the host lark capability and retry with contentPackage."
+      };
+    }
+    const result = await context.knowledgeService.ingestRequirement({
+      projectId: knowledgeProjectId,
+      contentPackage: resolved.contentPackage
+    });
+    return {
+      ...result,
+      status: result.changed ? "draft-created" : "unchanged",
+      nextAction: result.changed ? "generate-test-design" : "review-existing-baseline"
+    };
+  }
+  if (action === "generate-analysis" || action === "generate-test-design") {
+    const provider = policyProviderArg(input, "provider");
+    if (provider === "host-skill" && input.analysisPackage === undefined) {
+      return {
+        status: "needs-host-skill",
+        requirementSetId: stringArg(input, "requirementSetId"),
+        requiredSkills: ["RequirementAnalysis.skill", "TestCaseDesign.skill"],
+        requiredOutput: "Brain Creator RequirementAnalysis schema",
+        nextAction:
+          "Run the available host Skill against the requirement source, then retry with analysisPackage."
+      };
+    }
+    const requirementSetId = stringArg(input, "requirementSetId");
+    return context.knowledgeService.generateTestDesign(
+      requirementSetId,
+      provider,
+      provider === "host-skill"
+        ? normalizeHostSkillAnalysis(input.analysisPackage, requirementSetId)
+        : undefined
+    );
+  }
+  if (action === "approve-baseline") {
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        requirementSetId: stringArg(input, "requirementSetId"),
+        requiresConfirmation: true,
+        nextAction: "Ask the user to confirm the requirement baseline before approval."
+      };
+    }
+    return context.knowledgeService.approveRequirementSet(stringArg(input, "requirementSetId"));
+  }
+  if (action === "record-observation") {
+    return context.knowledgeService.recordSystemObservation({
+      projectId: stringArg(input, "knowledgeProjectId"),
+      systemId: stringArg(input, "systemId"),
+      type: knowledgeNodeTypeArg(input, "observationType"),
+      title: stringArg(input, "title"),
+      content: stringArg(input, "content"),
+      module: optionalStringArg(input, "module") ?? "General",
+      sourceRefs: stringArrayArg(input, "sourceRefs"),
+      confidence: optionalNumberArg(input, "confidence")
+    });
+  }
+  return context.knowledgeService.compileExecutableCases(stringArg(input, "testIntentId"));
+}
+
 async function statusFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const knowledgeProjectId = optionalStringArg(input, "knowledgeProjectId");
+  if (knowledgeProjectId) {
+    return knowledgeStatus(context, knowledgeProjectId);
+  }
   const systemIdInput = optionalStringArg(input, "systemId");
   const systemNameInput = optionalStringArg(input, "systemName");
   const environment = optionalStringArg(input, "environment");
@@ -672,6 +802,9 @@ async function runFacade(context: BrainCreatorMcpContext, input: Record<string, 
   }
   if (mode === "full-workflow") {
     return fullWorkflow(context, { ...input, caseId: stringArg(input, "caseId") });
+  }
+  if (mode === "requirement-suite") {
+    return runRequirementSuite(context, input);
   }
   const resolution = resolveSystemReference(context, input);
   const inputWithSystem = { ...input, systemId: resolution.systemId };
@@ -1201,9 +1334,17 @@ async function runBugRegression(context: BrainCreatorMcpContext, input: Record<s
 }
 
 async function reviewFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const knowledgeProjectId = optionalStringArg(input, "knowledgeProjectId");
+  const requestedTarget = reviewTargetArg(input, "target");
+  if (knowledgeProjectId && isKnowledgeReviewTarget(requestedTarget)) {
+    return knowledgeReview(context, knowledgeProjectId, requestedTarget, optionalStringArg(input, "id"));
+  }
+  if (isKnowledgeReviewTarget(requestedTarget)) {
+    throw new Error("knowledgeProjectId is required for knowledge review targets");
+  }
   const resolution = resolveSystemReference(context, input);
   const systemId = resolution.systemId;
-  const target = reviewTargetArg(input, "target");
+  const target = requestedTarget;
   const failureTypes = failureTypeFilters(input);
   if (target === "bug") {
     const bugs = context.service
@@ -1270,8 +1411,26 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
   };
 }
 
-function configureFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+async function configureFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const target = configureTargetArg(input, "target");
+  if (target === "knowledge-project") {
+    return context.knowledgeService.createProject({
+      name: stringArg(input, "name"),
+      key: stringArg(input, "key"),
+      defaultLocale: optionalStringArg(input, "defaultLocale") ?? "zh-CN"
+    });
+  }
+  if (target === "system-binding") {
+    return context.knowledgeService.bindSystem(
+      stringArg(input, "knowledgeProjectId"),
+      stringArg(input, "systemId")
+    );
+  }
+  if (target === "connector") {
+    const connector = optionalStringArg(input, "connector") ?? "feishu";
+    if (connector !== "feishu") throw new Error("Only the Feishu connector is supported in this phase");
+    return connectorStatus(context, optionalStringArg(input, "knowledgeProjectId"));
+  }
   if (target === "system") {
     return context.service.createSystemProfile({
       name: stringArg(input, "name"),
@@ -1315,6 +1474,423 @@ function configureFacade(context: BrainCreatorMcpContext, input: Record<string, 
     reason: stringArg(input, "reason"),
     resumeInstruction: stringArg(input, "resumeInstruction")
   });
+}
+
+async function runRequirementSuite(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const projectId = stringArg(input, "knowledgeProjectId");
+  const project = context.repository.knowledgeProjects.find((item) => item.id === projectId);
+  if (!project) throw new Error("Knowledge project not found");
+  const requestedCaseId = optionalStringArg(input, "executableCaseId");
+  const candidates = context.knowledgeService
+    .listExecutableCases(projectId)
+    .filter((item) => item.status === "ready")
+    .filter((item) => !requestedCaseId || item.id === requestedCaseId);
+  if (!optionalBooleanArg(input, "confirm")) {
+    return {
+      mode: "requirement-suite",
+      status: "preview",
+      project,
+      executableCases: candidates,
+      boundSystemIds: project.systemIds,
+      requiresConfirmation: true,
+      nextAction:
+        project.systemIds.length === 0
+          ? "Bind a runtime system before confirming execution."
+          : "Ask the user to confirm the requirement suite execution."
+    };
+  }
+  if (candidates.length === 0) throw new Error("No ready executable cases were selected");
+  const systemId = optionalStringArg(input, "systemId") ?? project.systemIds[0];
+  if (!systemId || !project.systemIds.includes(systemId)) {
+    throw new Error("Requirement suite must use a system bound to the knowledge project");
+  }
+  const blockingKnowledgeGaps = context.repository.gaps.filter(
+    (gap) =>
+      gap.projectId === projectId &&
+      gap.status === "open" &&
+      ["requirement-clarification", "system-observation"].includes(gap.sourceType)
+  );
+  if (blockingKnowledgeGaps.length > 0) {
+    return {
+      mode: "requirement-suite",
+      status: "blocked",
+      knowledgeProjectId: projectId,
+      systemId,
+      gaps: blockingKnowledgeGaps,
+      nextAction: "Resolve requirement or observed-system conflicts before execution."
+    };
+  }
+  const executableCase = candidates[0];
+  executableCase.systemId = systemId;
+  executableCase.updatedAt = new Date().toISOString();
+  context.repository.persist();
+  const contextPack = buildContextPack(context.repository, {
+    knowledgeProjectId: projectId,
+    query: [
+      executableCase.title,
+      ...executableCase.steps.map((step) => `${step.action} ${step.instruction} ${step.targetSemantic}`)
+    ].join("\n"),
+    purpose: "generator",
+    maxChars: 20_000
+  });
+  const contextPackPath = join(
+    context.workDir,
+    ".brain-creator",
+    "knowledge-context",
+    `${executableCase.id}.json`
+  );
+  await mkdir(dirname(contextPackPath), { recursive: true });
+  await writeFile(contextPackPath, `${JSON.stringify(contextPack, null, 2)}\n`, "utf8");
+  const scenario: TestCaseScenario = {
+    id: id("scenario"),
+    title: executableCase.title,
+    priority: "high",
+    steps: executableCase.steps.map((step) => ({
+      action: step.action === "api" ? "wait" : step.action,
+      target: step.targetSemantic,
+      value: step.value,
+      expected: step.expected
+    }))
+  };
+  const testCase = context.service.createTestCase({
+    systemId,
+    requirement: executableCase.title,
+    scenarios: [scenario],
+    newTerms: [],
+    ruleCheckResult: { passed: true, checks: [] }
+  });
+  context.service.approveTestCase(testCase.id);
+  const executionEvidence = context.knowledgeService.createExecutionEvidence({
+    projectId,
+    systemId,
+    executableCaseId: executableCase.id,
+    testCaseId: testCase.id,
+    contextPackPath
+  });
+  const knowledgeContext = formatRequirementGeneratorContext(
+    executableCase,
+    contextPack,
+    executionEvidence.id,
+    context.workDir
+  );
+  let result;
+  try {
+    result = await runApprovedChain(context, {
+      ...input,
+      caseId: testCase.id,
+      knowledgeProjectId: projectId,
+      executableCaseId: executableCase.id,
+      executionEvidenceId: executionEvidence.id,
+      contextPackPath,
+      knowledgeContext
+    });
+  } catch (error) {
+    await context.knowledgeService.completeExecutionEvidence(executionEvidence.id, {
+      status: "blocked",
+      actualResult: error instanceof Error ? error.message : String(error),
+      artifactPaths: [contextPackPath]
+    });
+    throw error;
+  }
+  const requirementFailure =
+    "chainRun" in result && result.chainRun?.status === "failed"
+      ? [
+          "testResult" in result ? result.testResult?.stderr : undefined,
+          "testResult" in result ? result.testResult?.stdout : undefined,
+          result.chainRun.gaps.map((gap) => gap.reason).join("; ")
+        ].find((value): value is string => Boolean(value?.trim()))
+      : undefined;
+  const requirementBug =
+    requirementFailure && isDocumentExpectationFailure(requirementFailure) && "chainRun" in result
+      ? createRequirementBugReport(context, {
+          executableCase,
+          chainRun: result.chainRun,
+          failureReason: requirementFailure,
+          artifactPaths: [contextPackPath, result.specPath, result.testPath].filter(
+            (path): path is string => typeof path === "string"
+          )
+        })
+      : undefined;
+  if (requirementBug && "chainRun" in result) result.chainRun.gaps = [];
+  const completedEvidence =
+    "chainRun" in result && result.chainRun?.status !== "partial"
+      ? await completeRequirementEvidence(
+          context,
+          executionEvidence.id,
+          result.chainRun,
+          "testResult" in result ? result.testResult : undefined,
+          [contextPackPath, result.specPath, result.testPath].filter(
+            (path): path is string => typeof path === "string"
+          )
+        )
+      : executionEvidence;
+  return {
+    ...result,
+    mode: "requirement-suite",
+    knowledgeProjectId: projectId,
+    executableCaseId: executableCase.id,
+    contextPackPath,
+    executionEvidence: completedEvidence,
+    bugReport: requirementBug,
+    remainingExecutableCaseIds: candidates.slice(1).map((item) => item.id)
+  };
+}
+
+function formatRequirementGeneratorContext(
+  executableCase: ExecutableCase,
+  contextPack: ReturnType<typeof buildContextPack>,
+  evidenceId: string,
+  workDir: string
+) {
+  const evidenceDir = join(workDir, ".brain-creator", "evidence", evidenceId);
+  return [
+    "## Brain Creator Knowledge Context",
+    "",
+    contextPack.content || "No additional confirmed knowledge was retrieved.",
+    "",
+    "### Context References",
+    ...(contextPack.references.length > 0
+      ? contextPack.references.map(
+          (reference) =>
+            `- ${reference.nodeId} [${reference.type}] sources=${reference.sourceRefs.join(",")}`
+        )
+      : ["- None"]),
+    "",
+    "## Executable Step Traceability",
+    "",
+    ...executableCase.steps.map(
+      (step) =>
+        `- Step ${step.order} ${step.action}: ${step.instruction}; target=${step.targetSemantic}; origin=${step.origin}; sources=${step.sourceRefs.join(",")}`
+    ),
+    "",
+    "## Evidence Contract",
+    "",
+    "- Wrap each executable step in Playwright test.step with its step number and instruction.",
+    ...executableCase.steps.map(
+      (step) =>
+        `- After step ${step.order}, capture a screenshot at ${join(
+          evidenceDir,
+          `step-${String(step.order).padStart(2, "0")}.png`
+        )}.`
+    ),
+    `- Record browser console errors and failed network requests under ${evidenceDir}.`,
+    "- Keep requirement assertions explicit. Do not replace them with navigation-only checks.",
+    "- Do not invent selectors or data. Fail with a precise evidence message when proof is unavailable."
+  ].join("\n");
+}
+
+async function completeRequirementEvidence(
+  context: BrainCreatorMcpContext,
+  evidenceId: string,
+  chainRun: ChainRun,
+  testResult: CommandResult | undefined,
+  baseArtifactPaths: string[]
+) {
+  const output = [testResult?.stdout, testResult?.stderr].filter(Boolean).join("\n").trim();
+  const outputLines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const discoveredArtifacts = output.match(
+    /(?:[a-z]:[\\/]|\.{0,2}[\\/])?[^\s"'<>]+\.(?:png|zip|har|webm)/gi
+  ) ?? [];
+  const artifactPaths = [...new Set([...baseArtifactPaths, ...discoveredArtifacts])];
+  const status =
+    chainRun.status === "succeeded"
+      ? "passed"
+      : chainRun.gaps.length > 0
+        ? "blocked"
+        : "failed";
+  const actualResult =
+    status === "passed"
+      ? "Playwright assertions passed."
+      : output || chainRun.gaps.map((gap) => gap.reason).join("; ") || "Execution failed.";
+  return context.knowledgeService.completeExecutionEvidence(evidenceId, {
+    status,
+    chainRunId: chainRun.id,
+    actualResult,
+    artifactPaths,
+    tracePaths: artifactPaths.filter((path) => /trace[^\\/]*\.zip$/i.test(path)),
+    consoleErrors: outputLines.filter((line) => /console.*error/i.test(line)),
+    networkFailures: outputLines.filter((line) =>
+      /net::|network|request failed|response.*\b[45]\d\d\b/i.test(line)
+    )
+  });
+}
+
+function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
+  const project = context.repository.knowledgeProjects.find((item) => item.id === projectId);
+  if (!project) throw new Error("Knowledge project not found");
+  const sources = context.repository.requirementSources.filter(
+    (item) => item.knowledgeProjectId === projectId
+  );
+  const requirementSets = context.repository.requirementSets.filter(
+    (item) => item.knowledgeProjectId === projectId
+  );
+  const nodes = context.repository.knowledgeNodes.filter(
+    (item) => item.knowledgeProjectId === projectId
+  );
+  const testIntents = context.knowledgeService.listTestIntents(projectId);
+  const executableCases = context.knowledgeService.listExecutableCases(projectId);
+  const executionEvidence = context.knowledgeService.listExecutionEvidence(projectId);
+  const gaps = context.service.listGaps({ projectId, status: "open" });
+  const nextAction =
+    sources.length === 0
+      ? "ingest_requirement"
+      : requirementSets.some((item) => item.status === "draft")
+        ? "review_and_approve_baseline"
+        : executableCases.some((item) => item.status === "ready")
+          ? project.systemIds.length > 0
+            ? "run_requirement_suite"
+            : "bind_system"
+          : "generate_test_design";
+  return {
+    knowledge: {
+      project,
+      sources: { total: sources.length, recent: sources.slice(-5) },
+      requirementSets: {
+        total: requirementSets.length,
+        byStatus: countBy(requirementSets, (item) => item.status),
+        recent: requirementSets.slice(-5)
+      },
+      nodes: { total: nodes.length, byType: countBy(nodes, (item) => item.type) },
+      testIntents: { total: testIntents.length, byStatus: countBy(testIntents, (item) => item.status) },
+      executableCases: {
+        total: executableCases.length,
+        byStatus: countBy(executableCases, (item) => item.status)
+      },
+      executionEvidence: {
+        total: executionEvidence.length,
+        byStatus: countBy(executionEvidence, (item) => item.status)
+      },
+      openGaps: gaps
+    },
+    connectors: connectorStatus(context, projectId),
+    nextAction
+  };
+}
+
+function knowledgeReview(
+  context: BrainCreatorMcpContext,
+  projectId: string,
+  target: KnowledgeReviewTarget,
+  idValue?: string
+) {
+  const status = knowledgeStatus(context, projectId);
+  const project = status.knowledge.project;
+  if (target === "requirement") {
+    const items = context.repository.requirementSets.filter(
+      (item) => item.knowledgeProjectId === projectId && (!idValue || item.id === idValue)
+    );
+    return {
+      project,
+      items,
+      impacts: items.map((item) => context.knowledgeService.requirementImpact(item.id))
+    };
+  }
+  if (target === "test-intent") {
+    return {
+      project,
+      items: context.knowledgeService
+        .listTestIntents(projectId)
+        .filter((item) => !idValue || item.id === idValue)
+    };
+  }
+  if (target === "executable-case") {
+    return {
+      project,
+      items: context.knowledgeService
+        .listExecutableCases(projectId)
+        .filter((item) => !idValue || item.id === idValue)
+    };
+  }
+  if (target === "coverage") {
+    const intents = context.knowledgeService.listTestIntents(projectId);
+    const sets = context.repository.requirementSets.filter(
+      (item) => item.knowledgeProjectId === projectId && item.status !== "superseded"
+    );
+    return {
+      project,
+      requirements: sets.length,
+      coveredRequirements: new Set(intents.map((item) => item.requirementSetId)).size,
+      traceableIntents: intents.filter(
+        (item) => item.requirementRefs.length > 0 && item.knowledgeNodeRefs.length > 0
+      ).length,
+      totalIntents: intents.length
+    };
+  }
+  if (target === "evidence") {
+    return {
+      project,
+      systems: project.systemIds,
+      executionEvidence: context.knowledgeService.listExecutionEvidence(projectId),
+      artifacts: project.systemIds.flatMap((systemId) => [
+        ...context.service.listTestSpecs(systemId),
+        ...context.service.listTestFiles(systemId),
+        ...context.service.listChainRuns(systemId)
+      ])
+    };
+  }
+  return { ...status.knowledge };
+}
+
+function reportKnowledgeGap(
+  context: BrainCreatorMcpContext,
+  projectId: string,
+  sourceId: string,
+  reason: string
+) {
+  if (!context.repository.knowledgeProjects.some((item) => item.id === projectId)) {
+    throw new Error("Knowledge project not found");
+  }
+  const now = new Date().toISOString();
+  const gap: Gap = {
+    id: id("gap"),
+    projectId,
+    sourceType: "requirement-connector",
+    sourceId,
+    reason,
+    severity: "high",
+    owner: "product",
+    status: "open",
+    createdAt: now,
+    updatedAt: now
+  };
+  context.repository.gaps.push(gap);
+  context.repository.persist();
+  return gap;
+}
+
+function connectorStatus(context?: BrainCreatorMcpContext, projectId?: string) {
+  const directConfigured = Boolean(
+    process.env.BRAIN_CREATOR_FEISHU_APP_ID && process.env.BRAIN_CREATOR_FEISHU_APP_SECRET
+  );
+  const recentSource = context?.repository.requirementSources
+    .filter((source) => source.sourceType === "feishu")
+    .filter((source) => !projectId || source.knowledgeProjectId === projectId)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  return {
+    feishu: {
+      hostMode: "available-via-content-package",
+      directMode: directConfigured ? "configured" : "not-configured",
+      readMode: directConfigured ? "openapi-with-host-fallback" : "host-content-package",
+      credentialStorage: "environment-reference-only",
+      lastSyncedAt: recentSource?.updatedAt,
+      lastSourceId: recentSource?.id
+    }
+  };
+}
+
+function configuredFeishuReader(): RequirementSourceReader | undefined {
+  const appId = process.env.BRAIN_CREATOR_FEISHU_APP_ID;
+  const appSecret = process.env.BRAIN_CREATOR_FEISHU_APP_SECRET;
+  return appId && appSecret ? new FeishuOpenApiAdapter({ appId, appSecret }) : undefined;
+}
+
+function isFeishuRequirementSource(source: string) {
+  try {
+    const hostname = new URL(source).hostname.toLowerCase();
+    return hostname.endsWith(".feishu.cn") || hostname.endsWith(".larksuite.com");
+  } catch {
+    return false;
+  }
 }
 
 async function generatePlan(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
@@ -1410,7 +1986,13 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     const testPath = join(generatedDir, `${testCase.id}.spec.ts`);
     await mkdir(specsDir, { recursive: true });
     await mkdir(generatedDir, { recursive: true });
-    await writeFile(specPath, formatScenariosAsMarkdown(testCase.scenarios), "utf8");
+    await writeFile(
+      specPath,
+      [formatScenariosAsMarkdown(testCase.scenarios), optionalStringArg(input, "knowledgeContext")]
+        .filter(Boolean)
+        .join("\n\n"),
+      "utf8"
+    );
     const seed = await generateSeedFile({
       workDir: context.workDir,
       outputDir: join(context.workDir, "tests"),
@@ -1429,7 +2011,11 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
         seedPath: seed.seedPath,
         testPath,
         maxHealAttempts: optionalNumberArg(input, "maxHealAttempts") ?? 1,
-        healAttempts: 0
+        healAttempts: 0,
+        knowledgeProjectId: optionalStringArg(input, "knowledgeProjectId"),
+        executableCaseId: optionalStringArg(input, "executableCaseId"),
+        executionEvidenceId: optionalStringArg(input, "executionEvidenceId"),
+        contextPackPath: optionalStringArg(input, "contextPackPath")
       },
       suiteContext: suiteContextArg(input)
     });
@@ -1450,7 +2036,8 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     testCase,
     agentBridge: context.agentBridge,
     runner: context.runner,
-    maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
+    maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
+    knowledgeContext: optionalStringArg(input, "knowledgeContext")
   });
   context.service.recordAgentRun(result.generateRun);
   for (const healerRun of result.healerRuns) {
@@ -1794,6 +2381,17 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     completedAt: new Date().toISOString()
   };
   context.service.recordChainRun(chainRun);
+  if (chainContext.executionEvidenceId) {
+    await completeRequirementEvidence(
+      context,
+      chainContext.executionEvidenceId,
+      chainRun,
+      testResult,
+      [chainContext.contextPackPath, chainContext.specPath, chainContext.testPath].filter(
+        (path): path is string => typeof path === "string"
+      )
+    );
+  }
   const suiteRun = result.task.suiteContext
     ? context.service.recordCaseSuiteRun({
         systemId: result.task.systemId,
@@ -1970,6 +2568,29 @@ async function maybeCreateHostAgentBugReport(
     artifactPaths: string[];
   }
 ) {
+  if (
+    input.task.chainContext?.executableCaseId &&
+    isDocumentExpectationFailure(input.failureReason)
+  ) {
+    const executableCase = context.repository.executableCases.find(
+      (item) => item.id === input.task.chainContext?.executableCaseId
+    );
+    if (executableCase) {
+      return createRequirementBugReport(context, {
+        executableCase,
+        chainRun: {
+          id: input.chainRunId,
+          systemId: input.task.systemId,
+          testCaseId: input.task.chainContext.testCaseId,
+          status: "failed",
+          gaps: [],
+          createdAt: input.task.createdAt
+        },
+        failureReason: input.failureReason,
+        artifactPaths: input.artifactPaths
+      });
+    }
+  }
   if (
     !input.task.suiteContext ||
     !isDocumentExpectationFailure(input.failureReason)
@@ -3225,6 +3846,10 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   const generateRunId = candidate.generateRunId;
   const maxHealAttempts = candidate.maxHealAttempts;
   const healAttempts = candidate.healAttempts;
+  const knowledgeProjectId = candidate.knowledgeProjectId;
+  const executableCaseId = candidate.executableCaseId;
+  const executionEvidenceId = candidate.executionEvidenceId;
+  const contextPackPath = candidate.contextPackPath;
   if (typeof testCaseId !== "string" || typeof specPath !== "string" || typeof testPath !== "string") {
     throw new Error("chainContext requires testCaseId, specPath, and testPath");
   }
@@ -3240,7 +3865,60 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   if (healAttempts !== undefined && (typeof healAttempts !== "number" || healAttempts < 0)) {
     throw new Error("chainContext healAttempts must be a non-negative number when provided");
   }
-  return { testCaseId, specPath, seedPath, testPath, generateRunId, maxHealAttempts, healAttempts };
+  for (const [name, value] of Object.entries({
+    knowledgeProjectId,
+    executableCaseId,
+    executionEvidenceId,
+    contextPackPath
+  })) {
+    if (value !== undefined && typeof value !== "string") {
+      throw new Error(`chainContext ${name} must be a string when provided`);
+    }
+  }
+  return {
+    testCaseId,
+    specPath,
+    seedPath,
+    testPath,
+    generateRunId,
+    maxHealAttempts,
+    healAttempts,
+    knowledgeProjectId: knowledgeProjectId as string | undefined,
+    executableCaseId: executableCaseId as string | undefined,
+    executionEvidenceId: executionEvidenceId as string | undefined,
+    contextPackPath: contextPackPath as string | undefined
+  };
+}
+
+function createRequirementBugReport(
+  context: BrainCreatorMcpContext,
+  input: {
+    executableCase: ExecutableCase;
+    chainRun: ChainRun;
+    failureReason: string;
+    artifactPaths: string[];
+  }
+) {
+  const intent = context.repository.testIntents.find(
+    (item) => item.id === input.executableCase.testIntentId
+  );
+  return context.service.createBugReport({
+    systemId: input.chainRun.systemId,
+    sourceId: input.executableCase.id,
+    caseNo: input.executableCase.id,
+    caseTitle: input.executableCase.title,
+    module: intent?.module ?? "General",
+    priority: intent?.priority ?? "P0",
+    expectedResult:
+      intent?.expectedResults.join("; ") ?? "Behavior matches the approved requirement",
+    actualResult: input.failureReason,
+    reproductionSteps: input.executableCase.steps.map(
+      (step) => `${step.order}. ${step.instruction}`
+    ),
+    evidencePaths: input.artifactPaths,
+    chainRunId: input.chainRun.id,
+    gapIds: []
+  });
 }
 
 function suiteContextArg(input: Record<string, unknown>): AgentTask["suiteContext"] | undefined {
@@ -3269,18 +3947,65 @@ function suiteContextArg(input: Record<string, unknown>): AgentTask["suiteContex
 
 function runModeArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
-  if (!["approved-case", "full-workflow", "case-source-suite", "bug-regression"].includes(value)) {
+  if (
+    ![
+      "approved-case",
+      "full-workflow",
+      "case-source-suite",
+      "bug-regression",
+      "requirement-suite"
+    ].includes(value)
+  ) {
     throw new Error(`${key} is invalid`);
   }
-  return value as "approved-case" | "full-workflow" | "case-source-suite" | "bug-regression";
+  return value as
+    | "approved-case"
+    | "full-workflow"
+    | "case-source-suite"
+    | "bug-regression"
+    | "requirement-suite";
 }
+
+type KnowledgeReviewTarget =
+  | "requirement"
+  | "knowledge"
+  | "coverage"
+  | "test-intent"
+  | "executable-case"
+  | "evidence";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
-  if (!["suite-run", "case", "bug", "gap", "artifact"].includes(value)) {
+  if (
+    ![
+      "suite-run",
+      "case",
+      "bug",
+      "gap",
+      "artifact",
+      "requirement",
+      "knowledge",
+      "coverage",
+      "test-intent",
+      "executable-case",
+      "evidence"
+    ].includes(value)
+  ) {
     throw new Error(`${key} is invalid`);
   }
-  return value as "suite-run" | "case" | "bug" | "gap" | "artifact";
+  return value as
+    | "suite-run"
+    | "case"
+    | "bug"
+    | "gap"
+    | "artifact"
+    | KnowledgeReviewTarget;
+}
+
+function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): value is KnowledgeReviewTarget {
+  return ["requirement", "knowledge", "coverage", "test-intent", "executable-case", "evidence"].includes(
+    value
+  );
 }
 
 function resolveSystemReference(
@@ -3748,10 +4473,95 @@ function commandTokens(command: string) {
 
 function configureTargetArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
-  if (!["system", "auth", "term", "rule", "checkpoint"].includes(value)) {
+  if (
+    ![
+      "system",
+      "auth",
+      "term",
+      "rule",
+      "checkpoint",
+      "knowledge-project",
+      "system-binding",
+      "connector"
+    ].includes(value)
+  ) {
     throw new Error(`${key} is invalid`);
   }
-  return value as "system" | "auth" | "term" | "rule" | "checkpoint";
+  return value as
+    | "system"
+    | "auth"
+    | "term"
+    | "rule"
+    | "checkpoint"
+    | "knowledge-project"
+    | "system-binding"
+    | "connector";
+}
+
+function prepareActionArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (
+    ![
+      "ingest-requirement",
+      "refresh-requirement",
+      "generate-analysis",
+      "generate-test-design",
+      "approve-baseline",
+      "compile-cases",
+      "record-observation"
+    ].includes(value)
+  ) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as
+    | "ingest-requirement"
+    | "refresh-requirement"
+    | "generate-analysis"
+    | "generate-test-design"
+    | "approve-baseline"
+    | "compile-cases"
+    | "record-observation";
+}
+
+function knowledgeNodeTypeArg(input: Record<string, unknown>, key: string): KnowledgeNodeType {
+  const value = stringArg(input, key);
+  const allowed: KnowledgeNodeType[] = [
+    "module", "actor", "object", "field", "rule", "workflow", "state", "permission",
+    "integration", "data-constraint", "term", "requirement"
+  ];
+  if (!allowed.includes(value as KnowledgeNodeType)) throw new Error(`${key} is invalid`);
+  return value as KnowledgeNodeType;
+}
+
+function policyProviderArg(input: Record<string, unknown>, key: string) {
+  const value = optionalStringArg(input, key) ?? "builtin";
+  if (value !== "builtin" && value !== "host-skill") throw new Error(`${key} is invalid`);
+  return value;
+}
+
+function requirementContentPackageArg(
+  input: Record<string, unknown>,
+  key: string
+): RequirementContentPackage | undefined {
+  const value = input[key];
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${key} must be an object`);
+  }
+  const candidate = value as RequirementContentPackage;
+  if (
+    typeof candidate.title !== "string" ||
+    typeof candidate.content !== "string" ||
+    typeof candidate.source !== "string" ||
+    typeof candidate.sourceType !== "string" ||
+    typeof candidate.contentHash !== "string" ||
+    !Array.isArray(candidate.blocks) ||
+    !Array.isArray(candidate.attachments) ||
+    !Array.isArray(candidate.warnings)
+  ) {
+    throw new Error(`${key} is invalid`);
+  }
+  return candidate;
 }
 
 function stringArrayArg(input: Record<string, unknown>, key: string): string[] {

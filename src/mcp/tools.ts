@@ -5,6 +5,7 @@ export type BrainCreatorToolName =
   | "bc_command"
   | "bc_intent_preview"
   | "bc_status"
+  | "bc_prepare"
   | "bc_run"
   | "bc_review"
   | "bc_configure"
@@ -73,6 +74,19 @@ type RegisterableMcpServer = {
   ) => unknown;
 };
 
+export type BrainCreatorToolProfile = "facade" | "full";
+
+export const FACADE_TOOL_NAMES = new Set<BrainCreatorToolName>([
+  "bc_command",
+  "bc_intent_preview",
+  "bc_prepare",
+  "bc_status",
+  "bc_run",
+  "bc_review",
+  "bc_configure",
+  "bc_submit_agent_output"
+]);
+
 const READ_ONLY_TOOL_ANNOTATIONS: ToolAnnotations = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -104,12 +118,61 @@ const READ_ONLY_TOOL_NAMES = new Set<BrainCreatorToolName>([
 
 export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
   {
+    name: "bc_prepare",
+    title: "Brain Creator prepare requirement",
+    description:
+      "Requirement-first facade for ingesting or refreshing requirement sources, generating analysis and test design, approving a baseline, and compiling executable cases.",
+    inputSchema: z.object({
+      action: z.enum([
+        "ingest-requirement",
+        "refresh-requirement",
+        "generate-analysis",
+        "generate-test-design",
+        "approve-baseline",
+        "compile-cases",
+        "record-observation"
+      ]),
+      knowledgeProjectId: z.string().optional(),
+      requirementSetId: z.string().optional(),
+      testIntentId: z.string().optional(),
+      systemId: z.string().optional(),
+      observationType: z.enum([
+        "module", "actor", "object", "field", "rule", "workflow", "state", "permission",
+        "integration", "data-constraint", "term", "requirement"
+      ]).optional(),
+      title: z.string().optional(),
+      content: z.string().optional(),
+      module: z.string().optional(),
+      sourceRefs: z.array(z.string()).default([]),
+      confidence: z.number().min(0).max(1).optional(),
+      source: z.string().optional(),
+      provider: z.enum(["builtin", "host-skill"]).default("builtin"),
+      confirm: z.boolean().default(false),
+      allowPrivateNetwork: z.boolean().default(false),
+      contentPackage: z
+        .object({
+          title: z.string(),
+          content: z.string(),
+          blocks: z.array(z.object({ type: z.string(), text: z.string(), level: z.number().optional() })),
+          attachments: z.array(z.object({ name: z.string(), url: z.string().optional(), type: z.string().optional() })),
+          source: z.string(),
+          sourceType: z.enum(["local-file", "http", "feishu", "obsidian", "host-connector"]),
+          contentHash: z.string(),
+          updatedAt: z.string().optional(),
+          warnings: z.array(z.string())
+        })
+        .optional(),
+      analysisPackage: z.record(z.string(), z.unknown()).optional()
+    })
+  },
+  {
     name: "bc_command",
     title: "Brain Creator command",
     description:
       "Minimal slash-command facade. Parses /bc help, /bc status, /bc run <path> with optional --system/--env and --case/--module/--priority filters, /bc continue, /bc bugs, /bc gaps, and /bc regress bugs into existing facade tools.",
     inputSchema: z.object({
       systemId: z.string().optional(),
+      knowledgeProjectId: z.string().optional(),
       systemName: z.string().optional(),
       environment: z.string().optional(),
       command: z.string()
@@ -139,6 +202,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       "Facade status entry for agents. Resolves by systemId or systemName and returns system, auth, bridge, cases, suites, bugs, gaps, artifacts, user summary, quick commands, and next action.",
     inputSchema: z.object({
       systemId: z.string().optional(),
+      knowledgeProjectId: z.string().optional(),
       systemName: z.string().optional(),
       environment: z.string().optional(),
       include: z.array(z.string()).default([])
@@ -150,7 +214,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     description:
       "Facade execution entry for approved cases, full workflow, document case suites, and bug regression.",
     inputSchema: z.object({
-      mode: z.enum(["approved-case", "full-workflow", "case-source-suite", "bug-regression"]),
+      mode: z.enum(["approved-case", "full-workflow", "case-source-suite", "bug-regression", "requirement-suite"]),
       systemId: z.string().optional(),
       systemName: z.string().optional(),
       environment: z.string().optional(),
@@ -166,7 +230,9 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       confirmWriteBack: z.boolean().default(false),
       confirm: z.boolean().default(false),
       maxHealAttempts: z.number().int().min(0).max(10).optional(),
-      bugIds: z.array(z.string()).default([])
+      bugIds: z.array(z.string()).default([]),
+      knowledgeProjectId: z.string().optional(),
+      executableCaseId: z.string().optional()
     })
   },
   {
@@ -174,7 +240,20 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     title: "Brain Creator review",
     description: "Facade review entry for suite runs, cases, bugs, gaps, and artifacts.",
     inputSchema: z.object({
-      target: z.enum(["suite-run", "case", "bug", "gap", "artifact"]),
+      target: z.enum([
+        "suite-run",
+        "case",
+        "bug",
+        "gap",
+        "artifact",
+        "requirement",
+        "knowledge",
+        "coverage",
+        "test-intent",
+        "executable-case",
+        "evidence"
+      ]),
+      knowledgeProjectId: z.string().optional(),
       systemId: z.string().optional(),
       systemName: z.string().optional(),
       environment: z.string().optional(),
@@ -199,7 +278,9 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     title: "Brain Creator configure",
     description: "Facade configuration entry for system, auth, term, rule, and auth checkpoint setup.",
     inputSchema: z.object({
-      target: z.enum(["system", "auth", "term", "rule", "checkpoint"]),
+      target: z.enum(["system", "auth", "term", "rule", "checkpoint", "knowledge-project", "system-binding", "connector"]),
+      knowledgeProjectId: z.string().optional(),
+      connector: z.enum(["feishu"]).optional(),
       systemId: z.string().optional(),
       name: z.string().optional(),
       environment: z.string().optional(),
@@ -624,9 +705,12 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
 
 export function registerBrainCreatorTools(
   server: RegisterableMcpServer,
-  handler: (name: BrainCreatorToolName, input: Record<string, unknown>) => Promise<CallToolResult>
+  handler: (name: BrainCreatorToolName, input: Record<string, unknown>) => Promise<CallToolResult>,
+  profile: BrainCreatorToolProfile = "full"
 ) {
-  for (const tool of BRAIN_CREATOR_TOOLS) {
+  for (const tool of BRAIN_CREATOR_TOOLS.filter(
+    (candidate) => profile === "full" || FACADE_TOOL_NAMES.has(candidate.name)
+  )) {
     server.registerTool(
       tool.name,
       {
@@ -640,4 +724,10 @@ export function registerBrainCreatorTools(
       (input) => handler(tool.name, input)
     );
   }
+}
+
+export function parseBrainCreatorToolProfile(value?: string): BrainCreatorToolProfile {
+  const profile = value ?? "full";
+  if (profile === "facade" || profile === "full") return profile;
+  throw new Error(`Unsupported Brain Creator tool profile: ${profile}`);
 }

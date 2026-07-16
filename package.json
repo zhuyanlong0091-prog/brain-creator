@@ -47,6 +47,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@playwright/test": "^1.57.0",
     "adm-zip": "^0.5.18",
+    "pdf-parse": "^2.4.5",
     "zod": "^4.1.12"
   },
   "devDependencies": {

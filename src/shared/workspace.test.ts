@@ -2,15 +2,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import { join, resolve } from "node:path";
 import {
   resolveBrainCreatorDataFile,
+  resolveBrainCreatorKnowledgeDir,
   resolveBrainCreatorWorkspace
 } from "./workspace.js";
 
 const previousWorkspace = process.env.BRAIN_CREATOR_WORKSPACE;
 const previousDataFile = process.env.BRAIN_CREATOR_DATA_FILE;
+const previousKnowledgeDir = process.env.BRAIN_CREATOR_KNOWLEDGE_DIR;
 
 afterEach(() => {
   restoreEnv("BRAIN_CREATOR_WORKSPACE", previousWorkspace);
   restoreEnv("BRAIN_CREATOR_DATA_FILE", previousDataFile);
+  restoreEnv("BRAIN_CREATOR_KNOWLEDGE_DIR", previousKnowledgeDir);
 });
 
 describe("Brain Creator workspace resolution", () => {
@@ -45,6 +48,20 @@ describe("Brain Creator workspace resolution", () => {
     expect(resolveBrainCreatorDataFile("business-workspace")).toBe(
       resolve("custom/assets.json")
     );
+  });
+
+  it("stores generated knowledge under the resolved workspace by default", () => {
+    delete process.env.BRAIN_CREATOR_KNOWLEDGE_DIR;
+
+    expect(resolveBrainCreatorKnowledgeDir("business-workspace")).toBe(
+      join(resolve("business-workspace"), ".brain-creator", "knowledge")
+    );
+  });
+
+  it("uses BRAIN_CREATOR_KNOWLEDGE_DIR when it is configured", () => {
+    process.env.BRAIN_CREATOR_KNOWLEDGE_DIR = "external-vault";
+
+    expect(resolveBrainCreatorKnowledgeDir("business-workspace")).toBe(resolve("external-vault"));
   });
 });
 

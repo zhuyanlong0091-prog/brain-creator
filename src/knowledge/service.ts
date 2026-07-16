@@ -1,0 +1,892 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
+import type {
+  ExecutableCase,
+  ExecutableCaseStep,
+  ExecutionEvidence,
+  Gap,
+  KnowledgeNode,
+  KnowledgeNodeType,
+  KnowledgeProject,
+  RequirementContentPackage,
+  RequirementSet,
+  RequirementSource,
+  TestIntent
+} from "../domain/types.js";
+import { id } from "../shared/id.js";
+import {
+  analyzeRequirement,
+  designTests,
+  evaluatePolicyOutput,
+  type RequirementAnalysis
+} from "./policies.js";
+
+export class KnowledgeService {
+  constructor(
+    private readonly repository: InMemoryBrainCreatorRepository,
+    private readonly knowledgeDir: string
+  ) {}
+
+  async createProject(input: { name: string; key: string; defaultLocale: string }) {
+    const key = normalizeKey(input.key);
+    if (this.repository.knowledgeProjects.some((project) => project.key === key)) {
+      throw new Error("Knowledge project key already exists");
+    }
+    const now = timestamp();
+    const project: KnowledgeProject = {
+      id: id("knowledgeProject"),
+      key,
+      name: input.name.trim(),
+      defaultLocale: input.defaultLocale.trim() || "zh-CN",
+      status: "active",
+      systemIds: [],
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.knowledgeProjects.push(project);
+    this.repository.persist();
+    await this.writeProjectIndex(project);
+    return project;
+  }
+
+  listProjects() {
+    return [...this.repository.knowledgeProjects];
+  }
+
+  bindSystem(projectId: string, systemId: string) {
+    const project = this.getProject(projectId);
+    if (!this.repository.systemProfiles.some((system) => system.id === systemId)) {
+      throw new Error("Business system not found");
+    }
+    if (!project.systemIds.includes(systemId)) project.systemIds.push(systemId);
+    project.updatedAt = timestamp();
+    this.repository.persist();
+    return project;
+  }
+
+  async ingestRequirement(input: {
+    projectId: string;
+    contentPackage: RequirementContentPackage;
+  }) {
+    const project = this.getProject(input.projectId);
+    const existingSource = this.repository.requirementSources.find(
+      (source) => source.knowledgeProjectId === project.id && source.source === input.contentPackage.source
+    );
+    const existingSet = existingSource?.latestRequirementSetId
+      ? this.repository.requirementSets.find((item) => item.id === existingSource.latestRequirementSetId)
+      : undefined;
+    if (existingSource && existingSet && existingSource.contentHash === input.contentPackage.contentHash) {
+      return { source: existingSource, requirementSet: existingSet, changed: false };
+    }
+
+    const now = timestamp();
+    const source: RequirementSource = existingSource ?? {
+      id: id("requirementSource"),
+      knowledgeProjectId: project.id,
+      source: input.contentPackage.source,
+      sourceType: input.contentPackage.sourceType,
+      title: input.contentPackage.title,
+      contentHash: input.contentPackage.contentHash,
+      content: input.contentPackage.content,
+      blocks: input.contentPackage.blocks,
+      attachments: input.contentPackage.attachments,
+      warnings: input.contentPackage.warnings,
+      accessStatus: "available",
+      revision: 0,
+      createdAt: now,
+      updatedAt: now
+    };
+    if (!existingSource) this.repository.requirementSources.push(source);
+    if (existingSet) {
+      existingSet.status = "superseded";
+      existingSet.updatedAt = now;
+    }
+    Object.assign(source, {
+      title: input.contentPackage.title,
+      sourceType: input.contentPackage.sourceType,
+      contentHash: input.contentPackage.contentHash,
+      content: input.contentPackage.content,
+      blocks: input.contentPackage.blocks,
+      attachments: input.contentPackage.attachments,
+      warnings: input.contentPackage.warnings,
+      revision: source.revision + 1,
+      updatedAt: now
+    });
+
+    const requirementSet: RequirementSet = {
+      id: id("requirementSet"),
+      knowledgeProjectId: project.id,
+      sourceId: source.id,
+      version: source.revision,
+      title: source.title,
+      summary: summarize(source.content),
+      contentHash: source.contentHash,
+      status: "draft",
+      affectedNodeIds: [],
+      previousRequirementSetId: existingSet?.id,
+      createdAt: now,
+      updatedAt: now
+    };
+    source.latestRequirementSetId = requirementSet.id;
+    this.repository.requirementSets.push(requirementSet);
+    const gaps = input.contentPackage.warnings.map((warning) =>
+      this.createGap(
+        project.id,
+        requirementSet.id,
+        `Requirement source warning: ${warning}`,
+        "requirement-source-warning"
+      )
+    );
+    this.repository.persist();
+    await this.writeRequirement(project, source, requirementSet);
+    await this.writeProjectIndex(project);
+    return {
+      source,
+      requirementSet,
+      gaps,
+      changed: true,
+      previousRequirementSetId: existingSet?.id
+    };
+  }
+
+  listRequirementSets(projectId: string) {
+    return this.repository.requirementSets.filter((item) => item.knowledgeProjectId === projectId);
+  }
+
+  async generateTestDesign(
+    requirementSetId: string,
+    provider: "builtin" | "host-skill" = "builtin",
+    analysisOverride?: RequirementAnalysis
+  ) {
+    const requirementSet = this.getRequirementSet(requirementSetId);
+    const existingIntents = this.repository.testIntents.filter(
+      (item) => item.requirementSetId === requirementSetId
+    );
+    if (existingIntents.length > 0) {
+      return {
+        reused: true,
+        evaluation: { verdict: "pass" as const, score: 100, reasons: [] },
+        gaps: this.repository.gaps.filter(
+          (gap) =>
+            gap.projectId === requirementSet.knowledgeProjectId &&
+            gap.sourceId === requirementSetId &&
+            gap.status === "open"
+        ),
+        impact: this.requirementImpact(requirementSetId),
+        edges: this.repository.knowledgeEdges.filter(
+          (edge) => edge.knowledgeProjectId === requirementSet.knowledgeProjectId
+        ),
+        nodes: this.repository.knowledgeNodes.filter(
+          (item) => item.requirementSetId === requirementSetId
+        ),
+        techniques: [...new Set(existingIntents.flatMap((item) => item.techniques))],
+        testIntents: existingIntents,
+        dataProfiles: this.repository.testDataProfiles.filter(
+          (item) => item.requirementSetId === requirementSetId
+        )
+      };
+    }
+    const source = this.getRequirementSource(requirementSet.sourceId);
+    const analysis =
+      analysisOverride ??
+      analyzeRequirement({
+        requirementSetId,
+        title: requirementSet.title,
+        content: source.content,
+        sourceRef: source.id,
+        provider
+      });
+    const evaluation = evaluatePolicyOutput(analysis);
+    const now = timestamp();
+    const previousNodes = requirementSet.previousRequirementSetId
+      ? this.repository.knowledgeNodes.filter(
+          (node) => node.requirementSetId === requirementSet.previousRequirementSetId
+        )
+      : [];
+    const proposedKeys = new Set(analysis.nodes.map(knowledgeNodeKey));
+    const affectedNodeIds = new Set(requirementSet.affectedNodeIds);
+  const nodes: KnowledgeNode[] = [];
+    const resolvedNodes: KnowledgeNode[] = [];
+    for (const proposed of analysis.nodes) {
+      const previous = previousNodes.find((node) => knowledgeNodeKey(node) === knowledgeNodeKey(proposed));
+      if (previous && normalizeText(previous.content) === normalizeText(proposed.content)) {
+        resolvedNodes.push(previous);
+        continue;
+      }
+      const node: KnowledgeNode = {
+        ...proposed,
+        id: id("knowledgeNode"),
+        knowledgeProjectId: requirementSet.knowledgeProjectId,
+        createdAt: now,
+        updatedAt: now
+      };
+      nodes.push(node);
+      resolvedNodes.push(node);
+      affectedNodeIds.add(node.id);
+      if (previous) affectedNodeIds.add(previous.id);
+    }
+    for (const previous of previousNodes) {
+      if (!proposedKeys.has(knowledgeNodeKey(previous))) affectedNodeIds.add(previous.id);
+    }
+    this.repository.knowledgeNodes.push(...nodes);
+    const edges = this.createKnowledgeEdges(requirementSet.knowledgeProjectId, resolvedNodes);
+    requirementSet.affectedNodeIds = [...affectedNodeIds];
+    const design = designTests({ knowledgeProjectId: requirementSet.knowledgeProjectId, analysis });
+    this.repository.testIntents.push(...design.testIntents);
+    this.repository.testDataProfiles.push(...design.dataProfiles);
+    const gaps = analysis.openQuestions.map((question) =>
+      this.createGap(
+        requirementSet.knowledgeProjectId,
+        requirementSet.id,
+        `Requirement clarification needed: ${question}`,
+        "requirement-clarification"
+      )
+    );
+    this.repository.persist();
+    await this.writeAnalysis(requirementSet, analysis, design.testIntents);
+    await this.writeModuleKnowledge(requirementSet, analysis, design.testIntents);
+    return {
+      analysis,
+      evaluation,
+      nodes,
+      edges,
+      gaps,
+      impact: this.requirementImpact(requirementSet.id),
+      ...design
+    };
+  }
+
+  approveRequirementSet(requirementSetId: string) {
+    const requirementSet = this.getRequirementSet(requirementSetId);
+    const unresolved = this.repository.gaps.filter(
+      (gap) =>
+        gap.projectId === requirementSet.knowledgeProjectId &&
+        gap.sourceId === requirementSet.id &&
+        gap.sourceType === "requirement-clarification" &&
+        gap.status === "open"
+    );
+    if (unresolved.length > 0) {
+      throw new Error("Requirement clarification gaps must be resolved before approval");
+    }
+    requirementSet.status = "approved";
+    requirementSet.approvedAt = timestamp();
+    requirementSet.updatedAt = requirementSet.approvedAt;
+    for (const node of this.repository.knowledgeNodes.filter(
+      (item) => item.requirementSetId === requirementSet.id
+    )) {
+      node.status = "confirmed";
+      node.updatedAt = requirementSet.updatedAt;
+    }
+    if (requirementSet.previousRequirementSetId) {
+      for (const node of this.repository.knowledgeNodes.filter(
+        (item) =>
+          item.requirementSetId === requirementSet.previousRequirementSetId &&
+          requirementSet.affectedNodeIds.includes(item.id)
+      )) {
+        node.status = "deprecated";
+        node.updatedAt = requirementSet.updatedAt;
+      }
+    }
+    for (const intent of this.repository.testIntents.filter(
+      (item) => item.requirementSetId === requirementSet.id
+    )) {
+      intent.status = "approved";
+      intent.updatedAt = requirementSet.updatedAt;
+    }
+    this.repository.persist();
+    return requirementSet;
+  }
+
+  compileExecutableCases(testIntentId: string) {
+    const intent = this.getTestIntent(testIntentId);
+    const requirementSet = this.getRequirementSet(intent.requirementSetId);
+    if (requirementSet.status !== "approved") {
+      throw new Error("Requirement baseline must be approved before compiling executable cases");
+    }
+    const source = this.getRequirementSource(requirementSet.sourceId);
+    const sourceRefs = [source.id, requirementSet.id];
+    const multiplePaths =
+      /\u5217\u8868[^\n]{0,20}\u65b0\u5efa/.test(source.content) &&
+      /\u8be6\u60c5[^\n]{0,20}\u65b0\u5efa/.test(source.content);
+    const gaps: Gap[] = multiplePaths
+      ? [this.createGap(requirementSet.knowledgeProjectId, requirementSet.id, "multiple workflow paths require user selection")]
+      : [];
+    const now = timestamp();
+    const executableCase: ExecutableCase = {
+      id: id("executableCase"),
+      knowledgeProjectId: requirementSet.knowledgeProjectId,
+      requirementSetId: requirementSet.id,
+      testIntentId: intent.id,
+      title: intent.title,
+      status: gaps.length > 0 ? "blocked" : "ready",
+      preconditions: intent.preconditions,
+      steps: gaps.length > 0 ? [] : compileSteps(source.content, sourceRefs),
+      dataProfileIds: this.repository.testDataProfiles
+        .filter((profile) => profile.requirementSetId === requirementSet.id)
+        .map((profile) => profile.id),
+      gapIds: gaps.map((gap) => gap.id),
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.executableCases.push(executableCase);
+    intent.status = gaps.length > 0 ? "blocked" : "compiled";
+    intent.updatedAt = now;
+    this.repository.persist();
+    return { executableCase, gaps };
+  }
+
+  listTestIntents(projectId: string) {
+    return this.repository.testIntents.filter((item) => item.knowledgeProjectId === projectId);
+  }
+
+  listExecutableCases(projectId: string) {
+    return this.repository.executableCases.filter((item) => item.knowledgeProjectId === projectId);
+  }
+
+  createExecutionEvidence(input: {
+    projectId: string;
+    systemId: string;
+    executableCaseId: string;
+    testCaseId: string;
+    contextPackPath: string;
+  }) {
+    const project = this.getProject(input.projectId);
+    if (!project.systemIds.includes(input.systemId)) {
+      throw new Error("Execution evidence requires a bound business system");
+    }
+    const executableCase = this.repository.executableCases.find(
+      (item) => item.id === input.executableCaseId && item.knowledgeProjectId === project.id
+    );
+    if (!executableCase) throw new Error("Executable case not found");
+    const evidence: ExecutionEvidence = {
+      id: id("executionEvidence"),
+      knowledgeProjectId: project.id,
+      systemId: input.systemId,
+      executableCaseId: executableCase.id,
+      testCaseId: input.testCaseId,
+      contextPackPath: input.contextPackPath,
+      status: "running",
+      steps: executableCase.steps.map((step) => ({
+        stepId: step.id,
+        order: step.order,
+        action: step.action,
+        instruction: step.instruction,
+        expected: step.expected,
+        assertionStatus: "pending",
+        sourceRefs: step.sourceRefs,
+        origin: step.origin
+      })),
+      tracePaths: [],
+      artifactPaths: [input.contextPackPath],
+      consoleErrors: [],
+      networkFailures: [],
+      createdAt: timestamp()
+    };
+    this.repository.executionEvidence.push(evidence);
+    this.repository.persist();
+    return evidence;
+  }
+
+  async completeExecutionEvidence(
+    evidenceId: string,
+    input: {
+      status: "passed" | "failed" | "blocked";
+      chainRunId?: string;
+      actualResult?: string;
+      artifactPaths: string[];
+      tracePaths?: string[];
+      consoleErrors?: string[];
+      networkFailures?: string[];
+    }
+  ) {
+    const evidence = this.repository.executionEvidence.find((item) => item.id === evidenceId);
+    if (!evidence) throw new Error("Execution evidence not found");
+    evidence.status = input.status;
+    evidence.chainRunId = input.chainRunId;
+    evidence.actualResult = input.actualResult;
+    evidence.artifactPaths = [...new Set([...evidence.artifactPaths, ...input.artifactPaths])];
+    evidence.tracePaths = [...new Set(input.tracePaths ?? [])];
+    evidence.consoleErrors = input.consoleErrors ?? [];
+    evidence.networkFailures = input.networkFailures ?? [];
+    for (const step of evidence.steps) {
+      const screenshot = evidence.artifactPaths.find((path) =>
+        path.toLowerCase().includes(`step-${String(step.order).padStart(2, "0")}`)
+      );
+      step.screenshotPath = screenshot;
+      step.assertionStatus =
+        input.status === "passed"
+          ? "passed"
+          : step.action === "assert"
+            ? input.status
+            : "blocked";
+      if (step.action === "assert") step.actual = input.actualResult;
+    }
+    if (input.status !== "blocked") {
+      const executableCase = this.repository.executableCases.find(
+        (item) => item.id === evidence.executableCaseId
+      );
+      if (executableCase) {
+        executableCase.status = "executed";
+        executableCase.updatedAt = timestamp();
+      }
+    }
+    evidence.completedAt = timestamp();
+    const reportPath = await this.writeExecutionReport(evidence);
+    evidence.artifactPaths = [...new Set([...evidence.artifactPaths, reportPath])];
+    this.repository.persist();
+    return evidence;
+  }
+
+  listExecutionEvidence(projectId: string) {
+    return this.repository.executionEvidence.filter(
+      (item) => item.knowledgeProjectId === projectId
+    );
+  }
+
+  requirementImpact(requirementSetId: string) {
+    const requirementSet = this.getRequirementSet(requirementSetId);
+    const affectedNodes = this.repository.knowledgeNodes.filter((node) =>
+      requirementSet.affectedNodeIds.includes(node.id)
+    );
+    const previousTestIntents = requirementSet.previousRequirementSetId
+      ? this.repository.testIntents.filter(
+          (intent) => intent.requirementSetId === requirementSet.previousRequirementSetId
+        )
+      : [];
+    const previousIntentIds = new Set(previousTestIntents.map((intent) => intent.id));
+    return {
+      requirementSetId,
+      previousRequirementSetId: requirementSet.previousRequirementSetId,
+      affectedNodeIds: requirementSet.affectedNodeIds,
+      affectedNodeKeys: [...new Set(affectedNodes.map(knowledgeNodeKey))],
+      regressionTestIntentIds: previousTestIntents.map((intent) => intent.id),
+      regressionExecutableCaseIds: this.repository.executableCases
+        .filter((item) => previousIntentIds.has(item.testIntentId))
+        .map((item) => item.id)
+    };
+  }
+
+  async recordSystemObservation(input: {
+    projectId: string;
+    systemId: string;
+    type: KnowledgeNodeType;
+    title: string;
+    content: string;
+    module: string;
+    sourceRefs: string[];
+    confidence?: number;
+  }) {
+    const project = this.getProject(input.projectId);
+    if (!project.systemIds.includes(input.systemId)) {
+      throw new Error("Business system must be bound before recording observations");
+    }
+    if (input.sourceRefs.length === 0) {
+      throw new Error("System observations require at least one evidence source reference");
+    }
+    const expected = this.repository.knowledgeNodes.find(
+      (node) =>
+        node.knowledgeProjectId === project.id &&
+        node.origin !== "observed" &&
+        node.status === "confirmed" &&
+        node.type === input.type &&
+        normalizeText(node.title) === normalizeText(input.title)
+    );
+    const conflicted = Boolean(expected && normalizeText(expected.content) !== normalizeText(input.content));
+    const now = timestamp();
+    const observation: KnowledgeNode = {
+      id: id("knowledgeNode"),
+      knowledgeProjectId: project.id,
+      type: input.type,
+      title: input.title.trim(),
+      content: input.content.trim(),
+      module: input.module.trim() || "General",
+      sourceRefs: [...new Set(input.sourceRefs)],
+      origin: "observed",
+      confidence: Math.max(0, Math.min(1, input.confidence ?? 1)),
+      status: conflicted ? "conflicted" : "confirmed",
+      createdAt: now,
+      updatedAt: now
+    };
+    const gaps = conflicted
+      ? [
+          this.createGap(
+            project.id,
+            observation.id,
+            `Observed system behavior conflicts with approved requirement node ${expected?.id}`,
+            "system-observation"
+          )
+        ]
+      : [];
+    this.repository.knowledgeNodes.push(observation);
+    this.repository.persist();
+    await this.writeSystemKnowledge(project, input.systemId);
+    return { observation, expected, conflicted, gaps };
+  }
+
+  private getProject(projectId: string) {
+    const project = this.repository.knowledgeProjects.find((item) => item.id === projectId);
+    if (!project) throw new Error("Knowledge project not found");
+    return project;
+  }
+
+  private createKnowledgeEdges(projectId: string, nodes: KnowledgeNode[]) {
+    const moduleNode = nodes.find((node) => node.type === "module");
+    const requirementNode = nodes.find((node) => node.type === "requirement");
+    const drafts: Array<{
+      fromNodeId: string;
+      toNodeId: string;
+      relation: string;
+      sourceRefs: string[];
+    }> = [];
+    for (const node of nodes) {
+      if (moduleNode && node.id !== moduleNode.id) {
+        drafts.push({
+          fromNodeId: moduleNode.id,
+          toNodeId: node.id,
+          relation: "contains",
+          sourceRefs: [...new Set([...moduleNode.sourceRefs, ...node.sourceRefs])]
+        });
+      }
+      if (requirementNode && node.id !== requirementNode.id && node.type !== "module") {
+        drafts.push({
+          fromNodeId: requirementNode.id,
+          toNodeId: node.id,
+          relation: "covers",
+          sourceRefs: [...new Set([...requirementNode.sourceRefs, ...node.sourceRefs])]
+        });
+      }
+    }
+    const created = drafts
+      .filter(
+        (draft) =>
+          !this.repository.knowledgeEdges.some(
+            (edge) =>
+              edge.knowledgeProjectId === projectId &&
+              edge.fromNodeId === draft.fromNodeId &&
+              edge.toNodeId === draft.toNodeId &&
+              edge.relation === draft.relation
+          )
+      )
+      .map((draft) => ({
+        id: id("knowledgeEdge"),
+        knowledgeProjectId: projectId,
+        ...draft,
+        createdAt: timestamp()
+      }));
+    this.repository.knowledgeEdges.push(...created);
+    return created;
+  }
+
+  private getRequirementSet(requirementSetId: string) {
+    const result = this.repository.requirementSets.find((item) => item.id === requirementSetId);
+    if (!result) throw new Error("Requirement set not found");
+    return result;
+  }
+
+  private getRequirementSource(sourceId: string) {
+    const result = this.repository.requirementSources.find((item) => item.id === sourceId);
+    if (!result) throw new Error("Requirement source not found");
+    return result;
+  }
+
+  private getTestIntent(intentId: string): TestIntent {
+    const result = this.repository.testIntents.find((item) => item.id === intentId);
+    if (!result) throw new Error("Test intent not found");
+    return result;
+  }
+
+  private createGap(
+    projectId: string,
+    sourceId: string,
+    reason: string,
+    sourceType = "executable-case-compiler"
+  ) {
+    const now = timestamp();
+    const gap: Gap = {
+      id: id("gap"),
+      projectId,
+      sourceType,
+      sourceId,
+      reason,
+      severity: "high",
+      owner: "qa",
+      status: "open",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.gaps.push(gap);
+    return gap;
+  }
+
+  private async writeProjectIndex(project: KnowledgeProject) {
+    const projectDir = join(this.knowledgeDir, project.key);
+    await mkdir(projectDir, { recursive: true });
+    const sets = this.listRequirementSets(project.id);
+    await writeFile(
+      join(projectDir, "MOC.md"),
+      [
+        "---",
+        `knowledge_project_id: ${project.id}`,
+        "type: knowledge-project",
+        "---",
+        "",
+        `# ${project.name}`,
+        "",
+        "## Requirements",
+        ...sets.map((item) => `- [[requirements/${item.id}/analysis|${item.title} v${item.version}]]`),
+        "",
+        "## Systems",
+        ...(project.systemIds.length > 0 ? project.systemIds.map((systemId) => `- ${systemId}`) : ["- Not bound"])
+      ].join("\n"),
+      "utf8"
+    );
+  }
+
+  private async writeRequirement(project: KnowledgeProject, source: RequirementSource, set: RequirementSet) {
+    const requirementDir = join(this.knowledgeDir, project.key, "requirements", set.id);
+    await mkdir(requirementDir, { recursive: true });
+    await writeFile(
+      join(requirementDir, "source.md"),
+      [
+        "---",
+        `requirement_set_id: ${set.id}`,
+        `source_id: ${source.id}`,
+        `source: ${JSON.stringify(source.source)}`,
+        `content_hash: ${source.contentHash}`,
+        `status: ${set.status}`,
+        "---",
+        "",
+        `# ${source.title}`,
+        "",
+        source.content
+      ].join("\n"),
+      "utf8"
+    );
+  }
+
+  private async writeAnalysis(
+    set: RequirementSet,
+    analysis: ReturnType<typeof analyzeRequirement>,
+    intents: TestIntent[]
+  ) {
+    const project = this.getProject(set.knowledgeProjectId);
+    const requirementDir = join(this.knowledgeDir, project.key, "requirements", set.id);
+    await mkdir(requirementDir, { recursive: true });
+    await writeFile(
+      join(requirementDir, "analysis.md"),
+      [
+        "---",
+        `requirement_set_id: ${set.id}`,
+        `policy: ${analysis.policyId}@${analysis.policyVersion}`,
+        `provider: ${analysis.provider}`,
+        `status: ${set.status}`,
+        "---",
+        "",
+        `# ${set.title} Analysis`,
+        "",
+        "## Knowledge",
+        ...analysis.nodes.map((node) => `- **${node.type}** ${node.title}: ${node.content}`),
+        "",
+        "## Open Questions",
+        ...(analysis.openQuestions.length > 0 ? analysis.openQuestions.map((item) => `- ${item}`) : ["- None"]),
+        "",
+        "## Test Intents",
+        ...intents.map((intent) => `- ${intent.id}: ${intent.title} [${intent.status}]`)
+      ].join("\n"),
+      "utf8"
+    );
+  }
+
+  private async writeModuleKnowledge(
+    set: RequirementSet,
+    analysis: ReturnType<typeof analyzeRequirement>,
+    intents: TestIntent[]
+  ) {
+    const project = this.getProject(set.knowledgeProjectId);
+    const moduleDir = join(this.knowledgeDir, project.key, "modules", normalizeKey(analysis.module));
+    await mkdir(moduleDir, { recursive: true });
+    const groups = {
+      "analysis.md": analysis.nodes,
+      "rules.md": analysis.nodes.filter((node) => node.type === "rule"),
+      "flows.md": analysis.nodes.filter((node) => node.type === "workflow" || node.type === "state")
+    };
+    for (const [file, nodes] of Object.entries(groups)) {
+      await writeFile(
+        join(moduleDir, file),
+        [
+          "---",
+          `requirement_set_id: ${set.id}`,
+          `module: ${analysis.module}`,
+          `status: ${set.status}`,
+          "---",
+          "",
+          `# ${analysis.module} ${file.replace(".md", "")}`,
+          "",
+          ...(nodes.length > 0
+            ? nodes.map((node) => `- **${node.type}** ${node.title}: ${node.content}`)
+            : ["- No confirmed entries"])
+        ].join("\n"),
+        "utf8"
+      );
+    }
+    await writeFile(
+      join(moduleDir, "cases.md"),
+      [`# ${analysis.module} cases`, "", ...intents.map((intent) => `- ${intent.id}: ${intent.title}`)].join("\n"),
+      "utf8"
+    );
+    const profiles = this.repository.testDataProfiles.filter((item) => item.requirementSetId === set.id);
+    await writeFile(
+      join(moduleDir, "data.md"),
+      [`# ${analysis.module} data`, "", ...profiles.map((item) => `- ${item.name}: ${item.strategy} (${item.constraints.join(", ")})`)].join("\n"),
+      "utf8"
+    );
+  }
+
+  private async writeSystemKnowledge(project: KnowledgeProject, systemId: string) {
+    const systemDir = join(this.knowledgeDir, project.key, "systems", systemId);
+    await mkdir(systemDir, { recursive: true });
+    const expected = this.repository.knowledgeNodes.filter(
+      (node) => node.knowledgeProjectId === project.id && node.origin !== "observed" && node.status === "confirmed"
+    );
+    const observed = this.repository.knowledgeNodes.filter(
+      (node) => node.knowledgeProjectId === project.id && node.origin === "observed"
+    );
+    const files = {
+      "expected.md": expected,
+      "observed.md": observed,
+      "conflicts.md": observed.filter((node) => node.status === "conflicted")
+    };
+    for (const [file, nodes] of Object.entries(files)) {
+      await writeFile(
+        join(systemDir, file),
+        [
+          "---",
+          `knowledge_project_id: ${project.id}`,
+          `system_id: ${systemId}`,
+          `layer: ${file.replace(".md", "")}`,
+          "---",
+          "",
+          `# ${project.name} ${file.replace(".md", "")}`,
+          "",
+          ...(nodes.length > 0
+            ? nodes.map((node) => `- **${node.type}** ${node.title}: ${node.content} (${node.id})`)
+            : ["- None"])
+        ].join("\n"),
+        "utf8"
+      );
+    }
+  }
+
+  private async writeExecutionReport(evidence: ExecutionEvidence) {
+    const project = this.getProject(evidence.knowledgeProjectId);
+    const reportDir = join(
+      this.knowledgeDir,
+      project.key,
+      "reports",
+      evidence.chainRunId ?? evidence.id
+    );
+    const reportPath = join(reportDir, "summary.md");
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(
+      reportPath,
+      [
+        "---",
+        `execution_evidence_id: ${evidence.id}`,
+        `knowledge_project_id: ${evidence.knowledgeProjectId}`,
+        `system_id: ${evidence.systemId}`,
+        `executable_case_id: ${evidence.executableCaseId}`,
+        `chain_run_id: ${evidence.chainRunId ?? "pending"}`,
+        `status: ${evidence.status}`,
+        "---",
+        "",
+        "# Execution Evidence",
+        "",
+        `Actual result: ${evidence.actualResult ?? "Pending"}`,
+        "",
+        "## Steps",
+        ...evidence.steps.map(
+          (step) =>
+            `- ${step.order}. ${step.action} [${step.assertionStatus}] ${step.instruction}; origin=${step.origin}; sources=${step.sourceRefs.join(",")}; screenshot=${step.screenshotPath ?? "N/A"}`
+        ),
+        "",
+        "## Console Errors",
+        ...(evidence.consoleErrors.length > 0 ? evidence.consoleErrors.map((item) => `- ${item}`) : ["- None"]),
+        "",
+        "## Network Failures",
+        ...(evidence.networkFailures.length > 0 ? evidence.networkFailures.map((item) => `- ${item}`) : ["- None"]),
+        "",
+        "## Artifacts",
+        ...evidence.artifactPaths.map((item) => `- ${item}`)
+      ].join("\n"),
+      "utf8"
+    );
+    return reportPath;
+  }
+}
+
+function compileSteps(content: string, sourceRefs: string[]): ExecutableCaseStep[] {
+  const steps: ExecutableCaseStep[] = [];
+  const add = (step: Omit<ExecutableCaseStep, "id" | "order" | "sourceRefs">) =>
+    steps.push({ ...step, id: id("step"), order: steps.length + 1, sourceRefs });
+  add({
+    action: "navigate",
+    instruction: "Open the target module entry page",
+    targetSemantic: "module entry",
+    origin: "derived"
+  });
+  if (/\u65b0\u5efa|create|new|\u586b\u5199|fill/i.test(content)) {
+    add({
+      action: "click",
+      instruction: "Start a new business record before filling the form",
+      targetSemantic: "new record action",
+      origin: /\u65b0\u5efa|create|new/i.test(content) ? "source" : "derived"
+    });
+  }
+  if (/\u586b\u5199|fill|form|\u8868\u5355/i.test(content)) {
+    add({
+      action: "fill",
+      instruction: "Fill required fields with generated data",
+      targetSemantic: "business form",
+      origin: "source"
+    });
+  }
+  if (/\u9009\u62e9.+(?:\u540e|\u5219|\u65f6)|select.+then|type/i.test(content)) {
+    add({
+      action: "select",
+      instruction: "Select the requirement-defined option",
+      targetSemantic: "conditional selector",
+      origin: "source"
+    });
+  }
+  add({
+    action: "assert",
+    instruction: "Verify the resulting state and conditional fields",
+    targetSemantic: "requirement outcome",
+    expected: "Behavior matches the approved requirement",
+    origin: "source"
+  });
+  return steps;
+}
+
+function normalizeKey(value: string) {
+  const key = value.trim().toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-").replace(/^-|-$/g, "");
+  if (!key) throw new Error("Knowledge project key is required");
+  return key;
+}
+
+function summarize(content: string) {
+  return content.replace(/\s+/g, " ").trim().slice(0, 240);
+}
+
+function normalizeText(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function knowledgeNodeKey(node: Pick<KnowledgeNode, "type" | "title" | "module">) {
+  return `${node.type}:${normalizeText(node.module)}:${normalizeText(node.title)}`;
+}
+
+function timestamp() {
+  return new Date().toISOString();
+}

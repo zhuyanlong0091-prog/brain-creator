@@ -34,6 +34,7 @@ describe("install Codex plugin CLI", () => {
     expect(mcpConfig.mcpServers["brain-creator"].env.BRAIN_CREATOR_AGENT_PROVIDER).toBe(
       "host-agent"
     );
+    expect(mcpConfig.mcpServers["brain-creator"].env.BRAIN_CREATOR_TOOL_PROFILE).toBe("facade");
     expect(calls).toEqual([
       {
         command: "codex",

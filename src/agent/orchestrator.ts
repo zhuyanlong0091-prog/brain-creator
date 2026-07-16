@@ -145,6 +145,7 @@ type RunChainInput = {
   agentBridge?: AgentBridge;
   runner?: CommandRunner;
   maxHealAttempts?: number;
+  knowledgeContext?: string;
 };
 
 export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
@@ -261,7 +262,13 @@ export async function runChain(input: RunChainInput) {
   const testRunPath = relative(input.workDir, testPath).replace(/\\/g, "/");
   await mkdir(specsDir, { recursive: true });
   await mkdir(generatedDir, { recursive: true });
-  await writeFile(specPath, formatScenariosAsMarkdown(input.testCase.scenarios), "utf8");
+  await writeFile(
+    specPath,
+    [formatScenariosAsMarkdown(input.testCase.scenarios), input.knowledgeContext]
+      .filter(Boolean)
+      .join("\n\n"),
+    "utf8"
+  );
 
   const seed = await generateSeedFile({
     workDir: input.workDir,
@@ -354,7 +361,8 @@ export async function runChain(input: RunChainInput) {
     generateRun,
     healerRuns,
     specPath,
-    testPath
+    testPath,
+    testResult
   };
 }
 
