@@ -3780,6 +3780,122 @@ describe("handleBrainCreatorTool", () => {
     }
   });
 
+  it("skips stale pending tasks for cases already attempted in a continuing suite", async () => {
+    const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
+    process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
+    try {
+      const workDir = await tempDir();
+      const context = createBrainCreatorMcpContext({
+        dataFilePath: join(workDir, "assets.json"),
+        workDir
+      });
+      context.runner = async () => ({ exitCode: 0, stdout: "passed", stderr: "" });
+      const sourcePath = join(workDir, "cases.xlsx");
+      await writeFile(sourcePath, createXlsxFixture());
+      const system = dataOf(
+        await handleBrainCreatorTool(context, "bc_create_system", {
+          name: "HRMS",
+          environment: "test",
+          baseUrl: "https://hrms.example.test",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["https://hrms.example.test"]
+        })
+      );
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      });
+      const preview = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source: sourcePath,
+          confirm: false
+        })
+      );
+      const suite = context.service.createCaseSuite({
+        systemId: system.id,
+        sourceId: preview.source.id,
+        totalCases: 2,
+        selectedCaseNos: ["TC-001", "TC-002"],
+        continueOnBlocked: true,
+        status: "approved"
+      });
+      context.service.createAgentTask({
+        id: "agentTask_stale",
+        systemId: system.id,
+        agent: "generator",
+        inputSummary: "stale TC-001 task",
+        args: [],
+        outputPaths: [],
+        promptPath: join(workDir, "stale.prompt.md"),
+        contextPath: join(workDir, "stale.context.json"),
+        chainContext: {
+          testCaseId: "case_stale",
+          specPath: join(workDir, "stale.md"),
+          seedPath: join(workDir, "seed.ts"),
+          testPath: join(workDir, "stale.spec.ts"),
+          maxHealAttempts: 0,
+          healAttempts: 0
+        },
+        suiteContext: {
+          suiteId: suite.id,
+          sourceId: preview.source.id,
+          caseNo: "TC-001",
+          title: "TC-001 stale"
+        }
+      });
+      context.service.recordCaseSuiteRun({
+        systemId: system.id,
+        suiteId: suite.id,
+        sourceId: preview.source.id,
+        status: "blocked",
+        total: 1,
+        passed: 0,
+        failed: 0,
+        blocked: 1,
+        caseResults: [
+          {
+            caseNo: "TC-001",
+            title: "TC-001 stale",
+            status: "blocked",
+            testCaseId: "case_stale",
+            chainRunId: "chain_stale",
+            gapIds: ["gap_stale"]
+          }
+        ],
+        artifactPaths: [],
+        bugReportIds: [],
+        gapIds: ["gap_stale"],
+        completedAt: new Date().toISOString()
+      });
+
+      const continued = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source: sourcePath,
+          suiteId: suite.id,
+          confirm: true,
+          continueOnBlocked: true
+        })
+      );
+
+      expect(continued).toEqual(
+        expect.objectContaining({
+          status: "needs_agent_execution",
+          currentCase: expect.objectContaining({ caseNo: "TC-002" }),
+          progress: expect.objectContaining({ attempted: 1, failed: 0, blocked: 1 })
+        })
+      );
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
+    }
+  });
+
   it("creates a BugReport when a host-agent healer still fails a document expectation", async () => {
     const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
     process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
