@@ -110,6 +110,26 @@ describe("parseCaseSource", () => {
     );
   });
 
+  it("parses namespace-prefixed workbooks with a leading overview sheet and empty cells", async () => {
+    const dir = await tempDir();
+    const source = join(dir, "artifact-tool-cases.xlsx");
+    await writeFile(source, createNamespacedXlsx());
+
+    const parsed = await parseCaseSource(source);
+
+    expect(parsed.cases).toHaveLength(1);
+    expect(parsed.cases[0]).toEqual(
+      expect.objectContaining({
+        caseNo: "TC-NS-001",
+        title: "实习生占编默认值为空",
+        actualResult: undefined,
+        priority: "P0",
+        status: "未执行",
+        remark: "用户证据"
+      })
+    );
+  });
+
   it("keeps markdown overview files as non-executable previews", async () => {
     const dir = await tempDir();
     const source = join(dir, "招聘需求及offer流程适配_V2.0_测试用例概览.md");
@@ -184,6 +204,44 @@ function createXlsx(rows: string[][]) {
   zip.addFile("xl/workbook.xml", Buffer.from(workbookXml(), "utf8"));
   zip.addFile("xl/_rels/workbook.xml.rels", Buffer.from(workbookRelsXml(), "utf8"));
   zip.addFile("xl/worksheets/sheet1.xml", Buffer.from(sheetXml(rows), "utf8"));
+  return zip.toBuffer();
+}
+
+function createNamespacedXlsx() {
+  const zip = new AdmZip();
+  zip.addFile("[Content_Types].xml", Buffer.from(contentTypesXml(), "utf8"));
+  zip.addFile("_rels/.rels", Buffer.from(rootRelsXml(), "utf8"));
+  zip.addFile(
+    "xl/workbook.xml",
+    Buffer.from(
+      '<?xml version="1.0" encoding="utf-8"?><x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheets><x:sheet name="概览" sheetId="1" r:id="rId1" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" /><x:sheet name="测试用例" sheetId="2" r:id="rId2" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" /></x:sheets></x:workbook>',
+      "utf8"
+    )
+  );
+  zip.addFile(
+    "xl/_rels/workbook.xml.rels",
+    Buffer.from(
+      '<?xml version="1.0" encoding="utf-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>',
+      "utf8"
+    )
+  );
+  zip.addFile(
+    "xl/worksheets/sheet1.xml",
+    Buffer.from(
+      '<?xml version="1.0" encoding="utf-8"?><x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData><x:row r="1"><x:c r="A1" t="str"><x:v>概览</x:v></x:c></x:row></x:sheetData></x:worksheet>',
+      "utf8"
+    )
+  );
+  const headers = ["用例编号", "用例标题", "所属模块", "前置条件", "操作步骤", "预期结果", "实际结果", "优先级", "用例状态", "BugID", "备注"];
+  const values = ["TC-NS-001", "实习生占编默认值为空", "招聘需求", "用户已登录", "1. 打开新增页", "默认值为空", "", "P0", "未执行", "", "用户证据"];
+  const row = (number: number, items: string[]) => `<x:row r="${number}">${items.map((value, index) => value === "" ? `<x:c r="${columnName(index)}${number}" t="str" />` : `<x:c r="${columnName(index)}${number}" t="str"><x:v>${escapeXml(value)}</x:v></x:c>`).join("")}</x:row>`;
+  zip.addFile(
+    "xl/worksheets/sheet2.xml",
+    Buffer.from(
+      `<?xml version="1.0" encoding="utf-8"?><x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData>${row(1, headers)}${row(2, values)}</x:sheetData></x:worksheet>`,
+      "utf8"
+    )
+  );
   return zip.toBuffer();
 }
 
