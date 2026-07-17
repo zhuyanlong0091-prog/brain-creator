@@ -3552,6 +3552,71 @@ describe("handleBrainCreatorTool", () => {
     }
   });
 
+  it("blocks with a Gap when the host agent reports missing required test data", async () => {
+    const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
+    process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
+    try {
+      const workDir = await tempDir();
+      const context = createBrainCreatorMcpContext({
+        dataFilePath: join(workDir, "assets.json"),
+        workDir
+      });
+      const source = join(workDir, "cases.xlsx");
+      await writeFile(source, createXlsxFixture());
+      const system = dataOf(
+        await handleBrainCreatorTool(context, "bc_create_system", {
+          name: "HRMS",
+          environment: "test",
+          baseUrl: "https://hrms.example.test",
+          defaultLocale: "zh-CN",
+          urlAllowlist: ["https://hrms.example.test"]
+        })
+      );
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "token",
+        secrets: { token: "secret-token" }
+      });
+
+      const firstRun = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source,
+          confirm: true
+        })
+      );
+      const blocked = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: firstRun.task.id,
+          status: "failed",
+          stdout: "",
+          stderr:
+            "Required test data is unavailable: HC-A-001 is absent, so the expected staffing fields cannot be verified."
+        })
+      );
+
+      expect(blocked).toEqual(
+        expect.objectContaining({
+          status: "blocked",
+          suite: expect.objectContaining({ id: firstRun.suite.id, status: "blocked" }),
+          suiteRun: expect.objectContaining({ status: "blocked", failed: 0, blocked: 1 })
+        })
+      );
+      expect(context.service.listBugReports({ systemId: system.id })).toHaveLength(0);
+      expect(context.service.listGaps({ projectId: system.id, status: "open" })).toEqual([
+        expect.objectContaining({ reason: expect.stringContaining("Required test data is unavailable") })
+      ]);
+      expect(
+        context.service.listAgentTasks(system.id).filter((task) => task.status === "pending")
+      ).toHaveLength(0);
+    } finally {
+      restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
+    }
+  });
+
   it("blocks the suite with a Gap when a host-agent healer finds missing environment configuration", async () => {
     const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
     process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";

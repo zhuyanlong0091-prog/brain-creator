@@ -62,7 +62,7 @@ function parseXlsxCaseSource(
   const zip = new AdmZip(buffer);
   const sharedStrings = readSharedStrings(zip);
   const workbook = textEntry(zip, "xl/workbook.xml");
-  const sheetNames = [...workbook.matchAll(/<sheet\b[^>]*name="([^"]+)"/g)].map((item) =>
+  const sheetNames = [...workbook.matchAll(/<(?:\w+:)?sheet\b[^>]*name="([^"]+)"/g)].map((item) =>
     decodeXml(item[1] ?? "")
   );
   const sheetIndex = Math.max(0, sheetNames.findIndex((item) => item.includes("测试用例")));
@@ -144,8 +144,8 @@ function readSharedStrings(zip: AdmZip) {
     return [];
   }
   const xml = entry.getData().toString("utf8");
-  return [...xml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((match) =>
-    [...(match[1] ?? "").matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)]
+  return [...xml.matchAll(/<(?:\w+:)?si>([\s\S]*?)<\/(?:\w+:)?si>/g)].map((match) =>
+    [...(match[1] ?? "").matchAll(/<(?:\w+:)?t(?:\s[^>]*)?>([\s\S]*?)<\/(?:\w+:)?t>/g)]
       .map((textMatch) => decodeXml(textMatch[1] ?? ""))
       .join("")
   );
@@ -153,16 +153,26 @@ function readSharedStrings(zip: AdmZip) {
 
 function readRows(sheetXml: string, sharedStrings: string[]) {
   const rows: string[][] = [];
-  for (const rowMatch of sheetXml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
+  for (const rowMatch of sheetXml.matchAll(
+    /<(?:\w+:)?row\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?row>/g
+  )) {
     const rowNumber = Number(attr(rowMatch[1] ?? "", "r")) || rows.length + 1;
     const values: string[] = [];
-    for (const cellMatch of (rowMatch[2] ?? "").matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+    for (const cellMatch of (rowMatch[2] ?? "").matchAll(
+      /<(?:\w+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:\w+:)?c>)/g
+    )) {
       const attrs = cellMatch[1] ?? "";
       const cellRef = attr(attrs, "r");
       const type = attr(attrs, "t");
       const column = columnIndex(cellRef);
-      const rawValue = firstMatch(cellMatch[2] ?? "", /<v>([\s\S]*?)<\/v>/);
-      const inlineValue = firstMatch(cellMatch[2] ?? "", /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/);
+      const rawValue = firstMatch(
+        cellMatch[2] ?? "",
+        /<(?:\w+:)?v>([\s\S]*?)<\/(?:\w+:)?v>/
+      );
+      const inlineValue = firstMatch(
+        cellMatch[2] ?? "",
+        /<(?:\w+:)?t(?:\s[^>]*)?>([\s\S]*?)<\/(?:\w+:)?t>/
+      );
       values[column] =
         type === "s"
           ? sharedStrings[Number(rawValue)] ?? ""

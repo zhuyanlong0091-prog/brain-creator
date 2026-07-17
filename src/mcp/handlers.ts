@@ -2639,7 +2639,7 @@ function isDocumentExpectationFailure(reason: string) {
 }
 
 function isEnvironmentConfigurationFailure(reason: string) {
-  return /\b(?:process definition key(?: is)? not configured|missing (?:environment )?configuration|configuration missing)\b|未配置流程定义|环境配置缺失/i.test(
+  return /\b(?:process definition key(?: is)? not configured|missing (?:environment )?configuration|configuration missing|required test data is unavailable|missing required test data|test data (?:is )?(?:missing|unavailable)|precondition(?: data)? (?:is )?(?:missing|unavailable))\b|未配置流程定义|环境配置缺失|测试数据(?:缺失|不存在|不可用)|前置数据(?:缺失|不存在|不可用)/i.test(
     reason
   );
 }
