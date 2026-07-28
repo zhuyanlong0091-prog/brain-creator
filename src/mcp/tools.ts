@@ -121,7 +121,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting or refreshing sources, generating atomic source-backed clauses and coverage Eval, explicitly confirming Eval actions, approving a baseline, and compiling executable cases.",
+      "Requirement-first facade for ingesting sources, generating and confirming Requirement Eval, approving a baseline, submitting page/training evidence, refreshing System Brain, and compiling evidence-bound executable cases.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
@@ -131,11 +131,16 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "confirm-eval-actions",
         "approve-baseline",
         "compile-cases",
-        "record-observation"
+        "record-observation",
+        "record-page-evidence",
+        "record-training-evidence",
+        "refresh-system-brain"
       ]),
       knowledgeProjectId: z.string().optional(),
       requirementSetId: z.string().optional(),
       testIntentId: z.string().optional(),
+      pageModelId: z.string().optional(),
+      authProfileId: z.string().optional(),
       actionIds: z.array(z.string()).default([]),
       confirmationNote: z.string().optional(),
       systemId: z.string().optional(),
@@ -148,6 +153,51 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       module: z.string().optional(),
       sourceRefs: z.array(z.string()).default([]),
       confidence: z.number().min(0).max(1).optional(),
+      pageEvidence: z
+        .object({
+          title: z.string(),
+          finalUrl: z.string().url(),
+          domText: z.string(),
+          screenshotPath: z.string(),
+          interactiveElements: z.array(
+            z.object({
+              name: z.string(),
+              role: z.string(),
+              text: z.string(),
+              selector: z.string()
+            })
+          ),
+          consoleErrors: z.array(z.string()).default([]),
+          networkFailures: z.array(z.string()).default([]),
+          issues: z.array(z.string()).default([])
+        })
+        .optional(),
+      trainingEvidence: z
+        .object({
+          actions: z.array(
+            z.object({
+              type: z.string(),
+              targetLocatorId: z.string(),
+              inputValue: z.string().default(""),
+              assertion: z.string().default("")
+            })
+          ),
+          apiRequests: z.array(
+            z.object({
+              method: z.string(),
+              url: z.string(),
+              status: z.number().int()
+            })
+          ),
+          artifacts: z
+            .object({
+              traceUrl: z.string(),
+              harUrl: z.string(),
+              screenshotUrl: z.string()
+            })
+            .optional()
+        })
+        .optional(),
       source: z.string().optional(),
       provider: z.enum(["builtin", "host-skill"]).default("builtin"),
       confirm: z.boolean().default(false),
@@ -241,7 +291,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
   {
     name: "bc_review",
     title: "Brain Creator review",
-    description: "Facade review entry for suite runs, cases, bugs, gaps, and artifacts.",
+    description:
+      "Facade review entry for suite runs, cases, bugs, gaps, artifacts, requirement quality, and historical Requirement Eval accuracy.",
     inputSchema: z.object({
       target: z.enum([
         "suite-run",
@@ -252,6 +303,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "requirement",
         "knowledge",
         "coverage",
+        "requirement-eval-accuracy",
+        "system-brain",
         "test-intent",
         "executable-case",
         "evidence"

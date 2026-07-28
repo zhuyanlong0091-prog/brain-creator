@@ -14,6 +14,7 @@ export type RequirementGoldenSample = {
   expected: {
     clauseCount: number;
     nodeTypes: KnowledgeNodeType[];
+    modules?: string[];
     verdict: "pass" | "needs-user" | "blocked";
     minimumCoverageRate: number;
     minimumContradictions?: number;
@@ -85,6 +86,58 @@ export const REQUIREMENT_GOLDEN_SAMPLES: RequirementGoldenSample[] = [
       verdict: "pass",
       minimumCoverageRate: 1
     }
+  },
+  {
+    id: "commerce-discount-rule-table",
+    domain: "commerce",
+    title: "Discount approval matrix",
+    content: [
+      "| Customer tier | Discount range | Approval result |",
+      "| --- | --- | --- |",
+      "| Standard | 1-10% | Sales manager approval is required |",
+      "| Strategic | 11-30% | Finance approval is required |",
+      "| Any | Above 30% | Discount is not allowed |"
+    ].join("\n"),
+    expected: {
+      clauseCount: 3,
+      nodeTypes: ["actor", "rule", "workflow", "permission", "data-constraint"],
+      verdict: "pass",
+      minimumCoverageRate: 1
+    }
+  },
+  {
+    id: "recruiting-offer-cross-module-flow",
+    domain: "hr",
+    title: "Recruiting to Offer handoff",
+    content:
+      "Recruiter creates a hiring request. When the recruiting request is approved, the Offer module creates an offer. When the offer is approved, the Recruiting module keeps the headcount occupied.",
+    expected: {
+      clauseCount: 3,
+      nodeTypes: ["actor", "object", "workflow", "rule", "state"],
+      modules: ["Recruiting", "Offer"],
+      verdict: "needs-user",
+      minimumCoverageRate: 1,
+      minimumMissingBranches: 2
+    }
+  },
+  {
+    id: "account-permission-matrix",
+    domain: "access-control",
+    title: "Account permission matrix",
+    content: [
+      "| Role | Create account | Approve account | View account |",
+      "| --- | --- | --- | --- |",
+      "| Account specialist | Allowed | Not allowed | Allowed |",
+      "| Account approver | Not allowed | Allowed | Allowed |",
+      "| Auditor | Not allowed | Not allowed | Read-only |"
+    ].join("\n"),
+    expected: {
+      clauseCount: 3,
+      nodeTypes: ["actor", "object", "permission"],
+      modules: ["Account"],
+      verdict: "pass",
+      minimumCoverageRate: 1
+    }
   }
 ];
 
@@ -104,6 +157,7 @@ export function evaluateRequirementGoldenSample(
   });
   const failures: string[] = [];
   const actualNodeTypes = new Set(analysis.nodes.map((node) => node.type));
+  const actualModules = new Set(analysis.clauses.map((clause) => clause.module));
 
   if (analysis.clauses.length !== sample.expected.clauseCount) {
     failures.push(
@@ -112,6 +166,9 @@ export function evaluateRequirementGoldenSample(
   }
   for (const nodeType of sample.expected.nodeTypes) {
     if (!actualNodeTypes.has(nodeType)) failures.push(`Missing knowledge node type: ${nodeType}`);
+  }
+  for (const module of sample.expected.modules ?? []) {
+    if (!actualModules.has(module)) failures.push(`Missing clause module: ${module}`);
   }
   if (evaluation.verdict !== sample.expected.verdict) {
     failures.push(`Expected verdict ${sample.expected.verdict}, received ${evaluation.verdict}`);

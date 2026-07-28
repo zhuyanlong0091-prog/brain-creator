@@ -557,6 +557,7 @@ export type KnowledgeNode = {
   id: string;
   knowledgeProjectId: string;
   requirementSetId?: string;
+  systemId?: string;
   type: KnowledgeNodeType;
   title: string;
   content: string;
@@ -634,6 +635,7 @@ export type ExecutableCaseStep = {
   targetSemantic: string;
   value?: string;
   expected?: string;
+  pageModelId?: string;
   locatorPointId?: string;
   dataProfileId?: string;
   origin: "source" | "derived" | "observed";

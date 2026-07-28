@@ -653,7 +653,81 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       confidence: optionalNumberArg(input, "confidence")
     });
   }
-  return context.knowledgeService.compileExecutableCases(stringArg(input, "testIntentId"));
+  if (action === "record-page-evidence") {
+    const knowledgeProjectId = stringArg(input, "knowledgeProjectId");
+    const systemId = stringArg(input, "systemId");
+    context.knowledgeService.getSystemBrain(knowledgeProjectId, systemId);
+    const evidence = pageEvidenceArg(input, "pageEvidence");
+    assertSystemEvidenceUrl(context, systemId, evidence.finalUrl);
+    const authProfileId = optionalStringArg(input, "authProfileId");
+    if (
+      authProfileId &&
+      !context.repository.authProfiles.some(
+        (profile) => profile.id === authProfileId && profile.projectId === systemId
+      )
+    ) {
+      throw new Error("Auth profile does not belong to the selected business system");
+    }
+    const result = context.service.discoverPageModel({
+      projectId: systemId,
+      route: evidence.finalUrl,
+      name: evidence.title,
+      authProfileId: authProfileId ?? "",
+      domText: evidence.domText,
+      captureMode: "browser",
+      targetUrl: evidence.finalUrl,
+      browserCapture: evidence
+    });
+    return {
+      ...result,
+      brain: await context.knowledgeService.refreshSystemBrain(
+        knowledgeProjectId,
+        systemId
+      )
+    };
+  }
+  if (action === "record-training-evidence") {
+    const knowledgeProjectId = stringArg(input, "knowledgeProjectId");
+    const systemId = stringArg(input, "systemId");
+    const pageModelId = stringArg(input, "pageModelId");
+    const brain = context.knowledgeService.getSystemBrain(knowledgeProjectId, systemId);
+    const page = brain.pages.find((candidate) => candidate.pageModelId === pageModelId);
+    if (!page) {
+      throw new Error("Page model does not belong to the selected System Brain");
+    }
+    const evidence = trainingEvidenceArg(input, "trainingEvidence");
+    if (
+      evidence.actions.some(
+        (action) => !page.locators.some((locator) => locator.id === action.targetLocatorId)
+      )
+    ) {
+      throw new Error("Training action locator does not belong to the selected page model");
+    }
+    const session = context.service.createTrainingSession({ projectId: systemId, pageModelId });
+    const result = context.service.completeTrainingSession({
+      sessionId: session.id,
+      actions: evidence.actions,
+      apiRequests: evidence.apiRequests,
+      artifacts: evidence.artifacts
+    });
+    return {
+      ...result,
+      brain: await context.knowledgeService.refreshSystemBrain(
+        knowledgeProjectId,
+        systemId
+      )
+    };
+  }
+  if (action === "refresh-system-brain") {
+    return context.knowledgeService.refreshSystemBrain(
+      stringArg(input, "knowledgeProjectId"),
+      stringArg(input, "systemId")
+    );
+  }
+  return context.knowledgeService.compileExecutableCases(
+    stringArg(input, "testIntentId"),
+    optionalStringArg(input, "systemId")
+  );
 }
 
 async function statusFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
@@ -1367,7 +1441,14 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
   const knowledgeProjectId = optionalStringArg(input, "knowledgeProjectId");
   const requestedTarget = reviewTargetArg(input, "target");
   if (knowledgeProjectId && isKnowledgeReviewTarget(requestedTarget)) {
-    return knowledgeReview(context, knowledgeProjectId, requestedTarget, optionalStringArg(input, "id"));
+    return knowledgeReview(
+      context,
+      knowledgeProjectId,
+      requestedTarget,
+      requestedTarget === "system-brain"
+        ? optionalStringArg(input, "systemId") ?? optionalStringArg(input, "id")
+        : optionalStringArg(input, "id")
+    );
   }
   if (isKnowledgeReviewTarget(requestedTarget)) {
     throw new Error("knowledgeProjectId is required for knowledge review targets");
@@ -1551,6 +1632,9 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     };
   }
   const executableCase = candidates[0];
+  if (executableCase.systemId && executableCase.systemId !== systemId) {
+    throw new Error("Executable case was compiled for another business system");
+  }
   executableCase.systemId = systemId;
   executableCase.updatedAt = new Date().toISOString();
   context.repository.persist();
@@ -1771,6 +1855,18 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const blockedEvalActions = evaluationGates.flatMap((gate) =>
     gate.actions.filter((action) => action.status === "blocked")
   );
+  const systemBrains = project.systemIds.map((systemId) => {
+    const brain = context.knowledgeService.getSystemBrain(projectId, systemId);
+    return {
+      systemId,
+      readiness: brain.readiness,
+      pages: brain.pages.length,
+      workflows: brain.workflows.length,
+      behaviorRules: brain.behaviorRules.length,
+      apiFlows: brain.apiFlows.length,
+      conflicts: brain.conflicts.length
+    };
+  });
   let nextAction = "generate_test_design";
   if (sources.length === 0) nextAction = "ingest_requirement";
   else if (blockedEvalActions.length > 0) nextAction = "revise_blocked_requirement";
@@ -1779,6 +1875,13 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     nextAction = "review_and_approve_baseline";
   } else if (executableCases.some((item) => item.status === "ready")) {
     nextAction = project.systemIds.length > 0 ? "run_requirement_suite" : "bind_system";
+  } else if (testIntents.some((item) => item.status === "approved")) {
+    if (project.systemIds.length === 0) nextAction = "bind_system";
+    else if (!systemBrains.some((brain) => brain.readiness.readyForCompilation)) {
+      nextAction = "refresh_system_brain";
+    } else {
+      nextAction = "compile_cases";
+    }
   }
   return {
     knowledge: {
@@ -1805,6 +1908,8 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         total: executionEvidence.length,
         byStatus: countBy(executionEvidence, (item) => item.status)
       },
+      requirementEvalHistory: context.knowledgeService.requirementEvalAccuracy(projectId),
+      systemBrains,
       openGaps: gaps
     },
     connectors: connectorStatus(context, projectId),
@@ -1859,6 +1964,19 @@ function knowledgeReview(
         (item) => item.requirementRefs.length > 0 && item.knowledgeNodeRefs.length > 0
       ).length,
       totalIntents: intents.length
+    };
+  }
+  if (target === "requirement-eval-accuracy") {
+    return {
+      project,
+      accuracy: context.knowledgeService.requirementEvalAccuracy(projectId, idValue)
+    };
+  }
+  if (target === "system-brain") {
+    if (!idValue) throw new Error("systemId is required to review System Brain");
+    return {
+      project,
+      brain: context.knowledgeService.getSystemBrain(projectId, idValue)
     };
   }
   if (target === "evidence") {
@@ -3948,6 +4066,14 @@ function optionalNumberArg(input: Record<string, unknown>, key: string): number 
   return typeof value === "number" ? value : undefined;
 }
 
+function numberArg(input: Record<string, unknown>, key: string): number {
+  const value = input[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${key} must be a number`);
+  }
+  return value;
+}
+
 function optionalBooleanArg(input: Record<string, unknown>, key: string): boolean {
   return input[key] === true;
 }
@@ -4116,6 +4242,8 @@ type KnowledgeReviewTarget =
   | "requirement"
   | "knowledge"
   | "coverage"
+  | "requirement-eval-accuracy"
+  | "system-brain"
   | "test-intent"
   | "executable-case"
   | "evidence";
@@ -4132,6 +4260,8 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "requirement",
       "knowledge",
       "coverage",
+      "requirement-eval-accuracy",
+      "system-brain",
       "test-intent",
       "executable-case",
       "evidence"
@@ -4149,9 +4279,16 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
 }
 
 function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): value is KnowledgeReviewTarget {
-  return ["requirement", "knowledge", "coverage", "test-intent", "executable-case", "evidence"].includes(
-    value
-  );
+  return [
+    "requirement",
+    "knowledge",
+    "coverage",
+    "requirement-eval-accuracy",
+    "system-brain",
+    "test-intent",
+    "executable-case",
+    "evidence"
+  ].includes(value);
 }
 
 function resolveSystemReference(
@@ -4655,7 +4792,10 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "confirm-eval-actions",
       "approve-baseline",
       "compile-cases",
-      "record-observation"
+      "record-observation",
+      "record-page-evidence",
+      "record-training-evidence",
+      "refresh-system-brain"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
@@ -4668,7 +4808,10 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "confirm-eval-actions"
     | "approve-baseline"
     | "compile-cases"
-    | "record-observation";
+    | "record-observation"
+    | "record-page-evidence"
+    | "record-training-evidence"
+    | "refresh-system-brain";
 }
 
 function knowledgeNodeTypeArg(input: Record<string, unknown>, key: string): KnowledgeNodeType {
@@ -4710,6 +4853,123 @@ function requirementContentPackageArg(
     throw new Error(`${key} is invalid`);
   }
   return candidate;
+}
+
+function pageEvidenceArg(input: Record<string, unknown>, key: string) {
+  const value = input[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${key} must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  const interactiveElements = record.interactiveElements;
+  if (!Array.isArray(interactiveElements)) {
+    throw new Error(`${key}.interactiveElements must be an array`);
+  }
+  return {
+    title: stringArg(record, "title"),
+    finalUrl: stringArg(record, "finalUrl"),
+    domText: stringArg(record, "domText"),
+    screenshotPath: stringArg(record, "screenshotPath"),
+    interactiveElements: interactiveElements.map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error(`${key}.interactiveElements[${index}] must be an object`);
+      }
+      const element = item as Record<string, unknown>;
+      return {
+        name: stringArg(element, "name"),
+        role: stringArg(element, "role"),
+        text: stringArg(element, "text"),
+        selector: stringArg(element, "selector")
+      };
+    }),
+    consoleErrors: stringArrayArg(record, "consoleErrors"),
+    networkFailures: stringArrayArg(record, "networkFailures"),
+    issues: stringArrayArg(record, "issues")
+  };
+}
+
+function trainingEvidenceArg(input: Record<string, unknown>, key: string) {
+  const value = input[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${key} must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.actions) || !Array.isArray(record.apiRequests)) {
+    throw new Error(`${key} requires actions and apiRequests arrays`);
+  }
+  const actions = record.actions.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`${key}.actions[${index}] must be an object`);
+    }
+    const action = item as Record<string, unknown>;
+    const type = stringArg(action, "type");
+    if (!["click", "fill", "select", "assert", "navigate", "wait"].includes(type)) {
+      throw new Error(`${key}.actions[${index}].type is invalid`);
+    }
+    return {
+      type,
+      targetLocatorId: stringArg(action, "targetLocatorId"),
+      inputValue: optionalStringArg(action, "inputValue") ?? "",
+      assertion: optionalStringArg(action, "assertion") ?? ""
+    };
+  });
+  const apiRequests = record.apiRequests.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`${key}.apiRequests[${index}] must be an object`);
+    }
+    const request = item as Record<string, unknown>;
+    const status = numberArg(request, "status");
+    if (!Number.isInteger(status) || status < 100 || status > 599) {
+      throw new Error(`${key}.apiRequests[${index}].status is invalid`);
+    }
+    return {
+      method: stringArg(request, "method").toUpperCase(),
+      url: stringArg(request, "url"),
+      status
+    };
+  });
+  const artifactValue = record.artifacts;
+  let artifacts: { traceUrl: string; harUrl: string; screenshotUrl: string } | undefined;
+  if (artifactValue !== undefined) {
+    if (!artifactValue || typeof artifactValue !== "object" || Array.isArray(artifactValue)) {
+      throw new Error(`${key}.artifacts must be an object`);
+    }
+    const artifact = artifactValue as Record<string, unknown>;
+    artifacts = {
+      traceUrl: stringArg(artifact, "traceUrl"),
+      harUrl: stringArg(artifact, "harUrl"),
+      screenshotUrl: stringArg(artifact, "screenshotUrl")
+    };
+  }
+  return { actions, apiRequests, artifacts };
+}
+
+function assertSystemEvidenceUrl(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  value: string
+) {
+  const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+  if (!system) throw new Error("Business system not found");
+  const target = new URL(value);
+  if (!["http:", "https:"].includes(target.protocol)) {
+    throw new Error("Page evidence URL must use http or https");
+  }
+  const allowed = [system.baseUrl, ...system.urlAllowlist].some((candidate) => {
+    try {
+      const allowedUrl = new URL(candidate);
+      const allowedPath = allowedUrl.pathname.replace(/\/+$/, "") || "/";
+      return (
+        target.origin === allowedUrl.origin &&
+        (allowedPath === "/" ||
+          target.pathname === allowedPath ||
+          target.pathname.startsWith(`${allowedPath}/`))
+      );
+    } catch {
+      return false;
+    }
+  });
+  if (!allowed) throw new Error("Page evidence URL is outside the system URL allowlist");
 }
 
 function stringArrayArg(input: Record<string, unknown>, key: string): string[] {

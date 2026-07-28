@@ -197,7 +197,23 @@ try {
   console.log(`Package: ${tarballName}`);
 } finally {
   if (!keepArtifacts) {
-    await rm(smokeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    await removeSmokeRoot(smokeRoot);
+  }
+}
+
+async function removeSmokeRoot(path: string) {
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String(error.code)
+          : "";
+      if (!["EBUSY", "EPERM", "ENOTEMPTY"].includes(code) || attempt === 10) throw error;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, attempt * 250));
+    }
   }
 }
 

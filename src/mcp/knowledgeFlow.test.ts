@@ -13,6 +13,348 @@ afterEach(async () => {
 });
 
 describe("Brain Creator requirement-first facade", () => {
+  it("refreshes and reviews System Brain through facade tools", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "System Brain Facade",
+      key: "system-brain-facade",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Order Console",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://orders.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const recordedPage = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "record-page-evidence",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        pageEvidence: {
+          title: "Orders",
+          finalUrl: "https://orders.example.test/orders",
+          domText: "Create Order",
+          screenshotPath: "evidence/orders.png",
+          interactiveElements: [
+            {
+              name: "Create Order",
+              role: "button",
+              text: "Create Order",
+              selector: "[data-testid=create-order]"
+            }
+          ],
+          consoleErrors: [],
+          networkFailures: [],
+          issues: []
+        }
+      })
+    );
+    const rejectedTraining = await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "record-training-evidence",
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      pageModelId: recordedPage.pageModel.id,
+      trainingEvidence: {
+        actions: [
+          {
+            type: "click",
+            targetLocatorId: "locator-from-another-page",
+            inputValue: "",
+            assertion: "Order form opens"
+          }
+        ],
+        apiRequests: []
+      }
+    });
+    expect(rejectedTraining.isError).toBe(true);
+    const recordedTraining = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "record-training-evidence",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        pageModelId: recordedPage.pageModel.id,
+        trainingEvidence: {
+          actions: [
+            {
+              type: "click",
+              targetLocatorId: recordedPage.locatorPoints[0].id,
+              inputValue: "",
+              assertion: "Order form opens"
+            }
+          ],
+          apiRequests: [{ method: "POST", url: "/api/orders", status: 201 }],
+          artifacts: {
+            videoUrl: "evidence/orders.webm",
+            traceUrl: "evidence/orders.zip",
+            harUrl: "evidence/orders.har",
+            screenshotUrl: "evidence/orders-final.png"
+          }
+        }
+      })
+    );
+    const updatedPage = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "record-page-evidence",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        pageEvidence: {
+          title: "Orders Updated",
+          finalUrl: "https://orders.example.test/orders",
+          domText: "Create Order Save",
+          screenshotPath: "evidence/orders-v2.png",
+          interactiveElements: [
+            {
+              name: "Create Order",
+              role: "button",
+              text: "Create Order",
+              selector: "[data-testid=create-order]"
+            },
+            {
+              name: "Save",
+              role: "button",
+              text: "Save",
+              selector: "[data-testid=save-order]"
+            }
+          ],
+          consoleErrors: [],
+          networkFailures: [],
+          issues: []
+        }
+      })
+    );
+    const refreshed = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "refresh-system-brain",
+        knowledgeProjectId: project.id,
+        systemId: system.id
+      })
+    );
+    const reviewed = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "system-brain",
+        knowledgeProjectId: project.id,
+        systemId: system.id
+      })
+    );
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+
+    expect(recordedPage.brain.readiness.readyForCompilation).toBe(true);
+    expect(recordedTraining.brain.readiness).toEqual(
+      expect.objectContaining({ workflowEvidence: true, apiEvidence: true })
+    );
+    expect(updatedPage.pageModel.version).toBe(2);
+    expect(refreshed.readiness.readyForCompilation).toBe(true);
+    expect(reviewed.brain.pages).toHaveLength(1);
+    expect(reviewed.brain.pages[0]).toEqual(
+      expect.objectContaining({
+        pageModelId: updatedPage.pageModel.id,
+        version: 2,
+        name: "Orders Updated"
+      })
+    );
+    expect(reviewed.brain.workflows).toHaveLength(1);
+    expect(reviewed.brain.behaviorRules).toHaveLength(1);
+    expect(status.knowledge.systemBrains).toEqual([
+      expect.objectContaining({
+        systemId: system.id,
+        readiness: expect.objectContaining({ readyForCompilation: true })
+      })
+    ]);
+
+    const rejected = await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "record-page-evidence",
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      pageEvidence: {
+        title: "Foreign",
+        finalUrl: "https://foreign.example.test/orders",
+        domText: "Create Order",
+        screenshotPath: "evidence/foreign.png",
+        interactiveElements: [],
+        consoleErrors: [],
+        networkFailures: [],
+        issues: []
+      }
+    });
+    expect(rejected.isError).toBe(true);
+    expect(rejected.content[0]).toEqual(
+      expect.objectContaining({ text: expect.stringContaining("outside the system URL allowlist") })
+    );
+    const prefixAttack = await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "record-page-evidence",
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      pageEvidence: {
+        title: "Prefix Attack",
+        finalUrl: "https://orders.example.test.evil.com/orders",
+        domText: "Create Order",
+        screenshotPath: "evidence/prefix-attack.png",
+        interactiveElements: [],
+        consoleErrors: [],
+        networkFailures: [],
+        issues: []
+      }
+    });
+    expect(prefixAttack.isError).toBe(true);
+  });
+
+  it("recommends binding, System Brain refresh, evidence compilation, and execution in order", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Knowledge Next Action",
+      key: "knowledge-next-action",
+      defaultLocale: "en-US"
+    });
+    const ingested = await context.knowledgeService.ingestRequirement({
+      projectId: project.id,
+      contentPackage: {
+        title: "Customer Requirement",
+        content: "Users create a customer record.",
+        blocks: [{ type: "paragraph", text: "Users create a customer record." }],
+        attachments: [],
+        source: "requirements/customer.md",
+        sourceType: "local-file",
+        contentHash: "next-action",
+        warnings: []
+      }
+    });
+    const design = await context.knowledgeService.generateTestDesign(
+      ingested.requirementSet.id
+    );
+    context.knowledgeService.approveRequirementSet(ingested.requirementSet.id);
+
+    expect(
+      dataOf(
+        await handleBrainCreatorTool(context, "bc_status", {
+          knowledgeProjectId: project.id
+        })
+      ).nextAction
+    ).toBe("bind_system");
+
+    const system = context.service.createSystemProfile({
+      name: "Customer Console",
+      environment: "test",
+      baseUrl: "https://customers.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://customers.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    expect(
+      dataOf(
+        await handleBrainCreatorTool(context, "bc_status", {
+          knowledgeProjectId: project.id
+        })
+      ).nextAction
+    ).toBe("refresh_system_brain");
+
+    context.repository.pageModels.push({
+      id: "page-next-action",
+      projectId: system.id,
+      route: "/customers",
+      name: "Customers",
+      version: 1,
+      domSnapshotId: "dom-next-action",
+      screenshotId: "shot-next-action",
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    context.repository.locatorPoints.push({
+      id: "locator-next-action",
+      pageModelId: "page-next-action",
+      name: "Create Customer",
+      selector: "[data-testid=create-customer]",
+      role: "button",
+      text: "Create Customer",
+      fallbackSelectors: ["text=Create Customer"],
+      confidence: 0.98
+    });
+    await context.knowledgeService.refreshSystemBrain(project.id, system.id);
+    expect(
+      dataOf(
+        await handleBrainCreatorTool(context, "bc_status", {
+          knowledgeProjectId: project.id
+        })
+      ).nextAction
+    ).toBe("compile_cases");
+
+    context.knowledgeService.compileExecutableCases(design.testIntents[0].id, system.id);
+    expect(
+      dataOf(
+        await handleBrainCreatorTool(context, "bc_status", {
+          knowledgeProjectId: project.id
+        })
+      ).nextAction
+    ).toBe("run_requirement_suite");
+
+    const otherSystem = context.service.createSystemProfile({
+      name: "Other Customer Console",
+      environment: "test",
+      baseUrl: "https://other-customers.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://other-customers.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, otherSystem.id);
+    const crossSystemRun = envelopeOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        knowledgeProjectId: project.id,
+        systemId: otherSystem.id,
+        confirm: true
+      })
+    );
+    expect(crossSystemRun.success).toBe(false);
+    expect(crossSystemRun.errors).toEqual([
+      expect.stringContaining("compiled for another business system")
+    ]);
+  });
+
+  it("exposes historical Requirement Eval accuracy through the review facade", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Eval Review",
+      key: "eval-review",
+      defaultLocale: "en-US"
+    });
+
+    const reviewed = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "requirement-eval-accuracy",
+        knowledgeProjectId: project.id
+      })
+    );
+
+    expect(reviewed).toEqual(
+      expect.objectContaining({
+        project,
+        accuracy: expect.objectContaining({
+          totalEvidence: 0,
+          accuracyRate: null,
+          methodology: expect.any(String)
+        })
+      })
+    );
+  });
+
   it("ingests, analyzes, approves, and compiles a local requirement through facade tools", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
