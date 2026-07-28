@@ -266,6 +266,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
             "auth_failure",
             "locator_failure",
             "network_failure",
+            "automation_failure",
             "execution_failure",
             "unknown_failure"
           ])

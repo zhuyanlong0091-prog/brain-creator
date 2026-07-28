@@ -2,7 +2,7 @@
 
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
 
@@ -270,7 +270,16 @@ describe("Brain Creator requirement-first facade", () => {
     const context = createBrainCreatorMcpContext({
       workDir,
       dataFilePath: join(workDir, "assets.json"),
-      agentBridge: bridge
+      agentBridge: bridge,
+      runner: async () => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: [
+          "Error: expect(received).toBe(expected)",
+          "Expected: \"approved\"",
+          "Received: \"draft\""
+        ].join("\n")
+      })
     });
     const project = dataOf(
       await handleBrainCreatorTool(context, "bc_configure", {
@@ -350,7 +359,7 @@ describe("Brain Creator requirement-first facade", () => {
     await writeFile(
       result.testPath,
       [
-        'import { test, expect } from "@playwright/test";',
+        `import { test, expect } from "../${basename(result.seedPath)}";`,
         'test("requirement mismatch", async () => { expect("draft").toBe("approved"); });'
       ].join("\n"),
       "utf8"

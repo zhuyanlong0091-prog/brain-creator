@@ -155,6 +155,10 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 
 Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过授权。
 
+`bc_status` 的 `readiness` 分为 `ready`、`action-required` 和 `blocked`。存在未完成 Suite、待执行 AgentTask、开放 Bug 或 Gap 时返回 `action-required`；Bridge 或人工鉴权检查点不可用时返回 `blocked`。Suite 状态会分别展示已通过、已失败、已阻塞、等待 Agent 和未开始的用例，并让 `nextCaseNo` 优先指向真实等待执行的任务。
+
+执行失败只有在证据支持“系统行为不符合预期”时才创建 BugReport。生成脚本语法、解析、索引、定位器或缺少元素证据等自动化实现问题会创建 Gap，并可在复盘时按 `automation_failure` 或 `locator_failure` 过滤。
+
 ### 需求准备与审批
 
 1. 创建 `KnowledgeProject`。
@@ -272,6 +276,10 @@ The source checkout mode is for contributors. The repo-local plugin installation
 | Show shortcuts | `/bc help` |
 
 Prefer `statusMarkdown` and `reviewMarkdown` for user-facing summaries.
+
+`bc_status.readiness` is `ready`, `action-required`, or `blocked`. Unfinished suites, pending AgentTasks, open bugs, and open Gaps produce `action-required`; unavailable bridges and manual auth checkpoints produce `blocked`. Suite progress separates passed, failed, blocked, waiting-for-agent, and not-started cases, and `nextCaseNo` prioritizes the active AgentTask.
+
+Brain Creator creates a BugReport only when evidence supports a business expectation mismatch. Generated test syntax, parser, index, locator, or missing-element evidence failures create Gaps and can be reviewed as `automation_failure` or `locator_failure`.
 
 ### Requirement Workflow
 

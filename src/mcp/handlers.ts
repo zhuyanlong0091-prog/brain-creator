@@ -664,12 +664,16 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const bugs = context.service.listBugReports({ systemId });
   const openBugs = bugs.filter((bug) => bug.status === "open" || bug.status === "retest-failed");
   const unfinishedSuites = unfinishedCaseSuites(context, systemId);
+  const pendingAgentTasks = context.service
+    .listAgentTasks(systemId)
+    .filter((task) => task.status === "pending");
   const awaitingAuthCheckpoints = snapshot.auth.checkpoints.filter(
     (checkpoint) => checkpoint.status === "awaiting-user"
   );
   const nextAction = facadeNextAction({
     bridgeOk: snapshot.bridge.ok,
     awaitingAuthCheckpoints: awaitingAuthCheckpoints.length,
+    pendingAgentTasks: pendingAgentTasks.length,
     openBugs: openBugs.length,
     openGaps: snapshot.openGaps.length,
     approvedCases: snapshot.cases.byStatus.approved,
@@ -681,6 +685,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     bridgeOk: snapshot.bridge.ok,
     authProfiles: snapshot.auth.profiles.length,
     awaitingAuthCheckpoints: awaitingAuthCheckpoints.length,
+    pendingAgentTasks: pendingAgentTasks.length,
     openBugs: openBugs.length,
     openGaps: snapshot.openGaps.length,
     unfinishedSuites: unfinishedSuites.length,
@@ -703,6 +708,9 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       total: suiteRuns.length,
       byStatus: countBy(suiteRuns, (run) => run.status),
       recent: suiteRuns.slice(-5)
+    },
+    agentTasks: {
+      pending: pendingAgentTasks
     },
     bugs: {
       total: bugs.length,
@@ -1003,7 +1011,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
           testCaseId: pendingTask.chainContext?.testCaseId,
           gapIds: []
         },
-        progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, []),
+        progress: caseSuiteProgress(context, waitingSuite),
         documentCase: currentCase
       };
     }
@@ -1015,7 +1023,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         status: "completed",
         source: caseSource,
         suite: completedSuite,
-        progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, [])
+        progress: caseSuiteProgress(context, completedSuite)
       };
     }
     const result = await executeDocumentCase(context, {
@@ -1035,7 +1043,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         source: caseSource,
         suite: waitingSuite,
         currentCase: result.caseResult,
-        progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, [result.caseResult])
+        progress: caseSuiteProgress(context, waitingSuite)
       };
     }
   }
@@ -1107,7 +1115,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     source: caseSource,
     suite,
     suiteRun,
-    progress: caseSuiteProgress(suite.selectedCaseNos, alreadyPassed, caseResults),
+    progress: caseSuiteProgress(context, suite),
     bugs,
     writeBack
   };
@@ -2630,10 +2638,19 @@ async function maybeCreateHostAgentBugReport(
 }
 
 function isDocumentExpectationFailure(reason: string) {
-  if (isEnvironmentConfigurationFailure(reason)) {
+  if (
+    isEnvironmentConfigurationFailure(reason) ||
+    isGeneratedTestImplementationFailure(reason)
+  ) {
     return false;
   }
   return /\b(expected|actual|assert|assertion|toBe|toEqual|toContain|not visible)\b/i.test(
+    reason
+  );
+}
+
+function isGeneratedTestImplementationFailure(reason: string) {
+  return /\b(?:syntaxerror|typeerror|referenceerror|cannot find module|module not found|no tests found|strict mode violation|target page, context or browser has been closed|sharedstrings|decodexml|index out of bounds)\b|expect\(locator\)[\s\S]*element\(s\) not found/i.test(
     reason
   );
 }
@@ -3096,25 +3113,19 @@ function selectionSummary(
   };
 }
 
-function caseSuiteProgress(
-  selectedCaseNos: string[],
-  alreadyPassed: Set<string>,
-  caseResults: CaseSuiteCaseResult[]
-) {
-  const passedNow = caseResults.filter((result) => result.status === "passed").map((result) => result.caseNo);
-  const passed = new Set([...alreadyPassed, ...passedNow]);
-  const failed = caseResults.filter((result) => result.status === "failed").length;
-  const blocked = caseResults.filter((result) => result.status === "blocked").length;
-  const remainingCaseNos = selectedCaseNos.filter((caseNo) => !passed.has(caseNo));
+function caseSuiteProgress(context: BrainCreatorMcpContext, suite: CaseSuite) {
+  const snapshot = caseSuiteExecutionSnapshot(context, suite);
   return {
-    selected: selectedCaseNos.length,
-    alreadyPassed: alreadyPassed.size,
-    attempted: caseResults.length,
-    passed: passed.size,
-    failed,
-    blocked,
-    remaining: remainingCaseNos.length,
-    remainingCaseNos
+    selected: suite.selectedCaseNos.length,
+    alreadyPassed: snapshot.passedCaseNos.length,
+    attempted: snapshot.attemptedCaseNos.length,
+    passed: snapshot.passedCaseNos.length,
+    failed: snapshot.failedCaseNos.length,
+    blocked: snapshot.blockedCaseNos.length,
+    waiting: snapshot.waitingCaseNos.length,
+    pending: snapshot.pendingCaseNos.length,
+    remaining: snapshot.remainingCaseNos.length,
+    ...snapshot
   };
 }
 
@@ -3151,7 +3162,6 @@ async function prepareNextHostAgentSuiteTask(
     return undefined;
   }
   const waitingSuite = context.service.updateCaseSuiteStatus(suite.id, "waiting-for-agent");
-  const passed = passedCaseNosForSuite(context, suite.systemId, suite.id);
   return {
     ...result.taskPackage,
     mode: "case-source-suite",
@@ -3159,7 +3169,7 @@ async function prepareNextHostAgentSuiteTask(
     source,
     suite: waitingSuite,
     currentCase: result.caseResult,
-    progress: caseSuiteProgress(suite.selectedCaseNos, passed, [result.caseResult])
+    progress: caseSuiteProgress(context, waitingSuite)
   };
 }
 
@@ -3169,8 +3179,7 @@ function unfinishedCaseSuites(context: BrainCreatorMcpContext, systemId: string)
     .listCaseSuites(systemId)
     .filter((suite) => suite.status !== "completed" && suite.status !== "cancelled")
     .map((suite) => {
-      const passed = passedCaseNosForSuite(context, systemId, suite.id);
-      const remainingCaseNos = suite.selectedCaseNos.filter((caseNo) => !passed.has(caseNo));
+      const progress = caseSuiteExecutionSnapshot(context, suite);
       const lastRun = context.service
         .listCaseSuiteRuns(systemId)
         .filter((run) => run.suiteId === suite.id)
@@ -3181,14 +3190,94 @@ function unfinishedCaseSuites(context: BrainCreatorMcpContext, systemId: string)
         source: sourcesById.get(suite.sourceId)?.source,
         status: suite.status,
         totalCases: suite.totalCases,
-        passedCaseNos: [...passed],
-        remainingCaseNos,
-        nextCaseNo: remainingCaseNos[0],
-        lastRunId: lastRun?.id
+        ...progress,
+        lastRunId: lastRun?.id,
+        updatedAt: suite.updatedAt
       };
     })
     .filter((suite) => suite.remainingCaseNos.length > 0 && suite.source)
-    .sort((left, right) => (left.lastRunId ?? "").localeCompare(right.lastRunId ?? ""));
+    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+}
+
+function caseSuiteExecutionSnapshot(context: BrainCreatorMcpContext, suite: CaseSuite) {
+  const latestResultByCaseNo = new Map<string, CaseSuiteCaseResult>();
+  const attempted = new Set<string>();
+  for (const run of context.service
+    .listCaseSuiteRuns(suite.systemId)
+    .filter((item) => item.suiteId === suite.id)) {
+    for (const result of run.caseResults) {
+      attempted.add(result.caseNo);
+      const current = latestResultByCaseNo.get(result.caseNo);
+      if (current?.status === "passed") {
+        continue;
+      }
+      latestResultByCaseNo.set(result.caseNo, result);
+    }
+  }
+  const pendingTasks = context.service
+    .listAgentTasks(suite.systemId)
+    .filter((task) => task.status === "pending" && task.suiteContext?.suiteId === suite.id)
+    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+  const waitingByCaseNo = new Map(
+    pendingTasks.flatMap((task) =>
+      task.suiteContext ? [[task.suiteContext.caseNo, task] as const] : []
+    )
+  );
+  const passedCaseNos: string[] = [];
+  const failedCaseNos: string[] = [];
+  const blockedCaseNos: string[] = [];
+  const waitingCaseNos: string[] = [];
+  const pendingCaseNos: string[] = [];
+  for (const caseNo of suite.selectedCaseNos) {
+    const result = latestResultByCaseNo.get(caseNo);
+    if (result?.status === "passed") {
+      passedCaseNos.push(caseNo);
+    } else if (waitingByCaseNo.has(caseNo) || result?.status === "waiting-for-agent") {
+      waitingCaseNos.push(caseNo);
+    } else if (result?.status === "failed") {
+      failedCaseNos.push(caseNo);
+    } else if (result?.status === "blocked") {
+      blockedCaseNos.push(caseNo);
+    } else {
+      pendingCaseNos.push(caseNo);
+    }
+  }
+  const passed = new Set(passedCaseNos);
+  const remainingCaseNos = suite.selectedCaseNos.filter(
+    (caseNo) => !passed.has(caseNo)
+  );
+  const activeTask = pendingTasks.at(-1);
+  return {
+    attemptedCaseNos: suite.selectedCaseNos.filter((caseNo) => attempted.has(caseNo)),
+    passedCaseNos,
+    failedCaseNos,
+    blockedCaseNos,
+    waitingCaseNos,
+    pendingCaseNos,
+    retryableCaseNos: [...failedCaseNos, ...blockedCaseNos],
+    remainingCaseNos,
+    nextCaseNo:
+      activeTask?.suiteContext?.caseNo ??
+      waitingCaseNos[0] ??
+      pendingCaseNos[0] ??
+      failedCaseNos[0] ??
+      blockedCaseNos[0],
+    activeTask: activeTask?.suiteContext
+      ? {
+          taskId: activeTask.id,
+          agent: activeTask.agent,
+          caseNo: activeTask.suiteContext.caseNo,
+          title: activeTask.suiteContext.title,
+          createdAt: activeTask.createdAt
+        }
+      : undefined,
+    stateIssues:
+      suite.status === "waiting-for-agent" && pendingTasks.length === 0
+        ? ["Suite is waiting for an agent, but no pending AgentTask exists."]
+        : pendingTasks.length > 1
+          ? [`Suite has ${pendingTasks.length} pending AgentTasks; only the latest is active.`]
+          : []
+  };
 }
 
 function latestUnfinishedCaseSuite(context: BrainCreatorMcpContext, systemId: string) {
@@ -3255,6 +3344,7 @@ function hostAgentSuiteFailureStatus(
 function facadeNextAction(state: {
   bridgeOk: boolean;
   awaitingAuthCheckpoints: number;
+  pendingAgentTasks: number;
   openBugs: number;
   openGaps: number;
   approvedCases: number;
@@ -3266,6 +3356,9 @@ function facadeNextAction(state: {
   }
   if (!state.bridgeOk) {
     return "configure_bridge";
+  }
+  if (state.pendingAgentTasks > 0) {
+    return "continue_case_source_suite";
   }
   if (state.openGaps > 0) {
     return "review_gaps";
@@ -3290,6 +3383,7 @@ function statusUserSummary(state: {
   bridgeOk: boolean;
   authProfiles: number;
   awaitingAuthCheckpoints: number;
+  pendingAgentTasks: number;
   openBugs: number;
   openGaps: number;
   unfinishedSuites: number;
@@ -3297,13 +3391,22 @@ function statusUserSummary(state: {
 }) {
   return {
     systemName: state.systemName,
-    readiness: state.bridgeOk && state.awaitingAuthCheckpoints === 0 ? "ready" : "blocked",
+    readiness:
+      !state.bridgeOk || state.awaitingAuthCheckpoints > 0
+        ? "blocked"
+        : state.pendingAgentTasks > 0 ||
+            state.openBugs > 0 ||
+            state.openGaps > 0 ||
+            state.unfinishedSuites > 0
+          ? "action-required"
+          : "ready",
     nextAction: state.nextAction,
     nextCommand: nextCommandForAction(state.nextAction),
     nextStep: nextStepForAction(state.nextAction),
     counts: {
       authProfiles: state.authProfiles,
       awaitingAuthCheckpoints: state.awaitingAuthCheckpoints,
+      pendingAgentTasks: state.pendingAgentTasks,
       openBugs: state.openBugs,
       openGaps: state.openGaps,
       unfinishedSuites: state.unfinishedSuites
@@ -3318,6 +3421,7 @@ function statusMarkdown(summary: ReturnType<typeof statusUserSummary>) {
     `- Readiness: ${summary.readiness}`,
     `- Auth profiles: ${summary.counts.authProfiles}`,
     `- Awaiting auth checkpoints: ${summary.counts.awaitingAuthCheckpoints}`,
+    `- Pending agent tasks: ${summary.counts.pendingAgentTasks}`,
     `- Open bugs: ${summary.counts.openBugs}`,
     `- Open gaps: ${summary.counts.openGaps}`,
     `- Unfinished suites: ${summary.counts.unfinishedSuites}`,
@@ -3531,6 +3635,7 @@ type FailureType =
   | "auth_failure"
   | "locator_failure"
   | "network_failure"
+  | "automation_failure"
   | "execution_failure"
   | "unknown_failure";
 
@@ -3541,6 +3646,9 @@ function classifyFailure(reason: string, sourceType = ""): FailureType {
   }
   if (/\b(selector|locator|element|dom|stable selector)\b/.test(text)) {
     return "locator_failure";
+  }
+  if (isGeneratedTestImplementationFailure(text)) {
+    return "automation_failure";
   }
   if (/\b(network|net::|econn|timeout|timed out|dns|socket|connection|http 5\d\d)\b/.test(text)) {
     return "network_failure";
@@ -3568,6 +3676,7 @@ function failureTypeArg(value: string): FailureType {
     "auth_failure",
     "locator_failure",
     "network_failure",
+    "automation_failure",
     "execution_failure",
     "unknown_failure"
   ];

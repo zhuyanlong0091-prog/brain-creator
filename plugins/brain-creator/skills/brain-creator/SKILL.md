@@ -105,6 +105,10 @@ Subprocess modes may use Claude or Codex. Check bridge readiness with `bc_status
 
 Generator writes Playwright tests, Playwright executes them, and Healer performs bounded repairs. Business mismatches create BugReports. Auth, environment, locator, network, and missing-evidence blockers create Gaps.
 
+Treat `bc_status.readiness` as a three-state signal: `ready`, `action-required`, or `blocked`. Pending AgentTasks, unfinished suites, open BugReports, and open Gaps are `action-required`; Bridge or manual auth blockers are `blocked`. When suite progress includes an `activeTask`, continue that task before relying on an older failed case in `remainingCaseNos`.
+
+After the bounded Healer attempt, create a BugReport only when the failure contains reliable business-result evidence. Generated test syntax, parser, index, locator, or missing-element evidence failures are automation/evidence Gaps. Use `automation_failure` and `locator_failure` review filters when diagnosing them.
+
 ## System
 
 - Use `bc_list_systems` only in full-profile discovery or debugging.
