@@ -24,6 +24,13 @@ import {
   evaluatePolicyOutput,
   type RequirementAnalysis
 } from "./policies.js";
+import {
+  bindStepsToSystemBrain,
+  buildSystemBrain,
+  systemObservationDrafts,
+  type SystemBrain,
+  type SystemObservationDraft
+} from "./systemBrain.js";
 
 export class KnowledgeService {
   constructor(
@@ -460,7 +467,7 @@ export class KnowledgeService {
     return requirementSet;
   }
 
-  compileExecutableCases(testIntentId: string) {
+  compileExecutableCases(testIntentId: string, systemId?: string) {
     const intent = this.getTestIntent(testIntentId);
     const requirementSet = this.getRequirementSet(intent.requirementSetId);
     if (requirementSet.status !== "approved") {
@@ -486,16 +493,36 @@ export class KnowledgeService {
     const gaps: Gap[] = multiplePaths
       ? [this.createGap(requirementSet.knowledgeProjectId, requirementSet.id, "multiple workflow paths require user selection")]
       : [];
+    let steps = gaps.length > 0 ? [] : compileSteps(executionContent, sourceRefs);
+    if (systemId) {
+      const project = this.getProject(requirementSet.knowledgeProjectId);
+      if (!project.systemIds.includes(systemId)) {
+        throw new Error("Business system must be bound before compiling executable cases");
+      }
+      const bound = bindStepsToSystemBrain(
+        steps,
+        buildSystemBrain(this.repository, project.id, systemId),
+        `${intent.module} ${intent.title} ${intent.objective}`
+      );
+      steps = bound.steps;
+      const reasons = [...new Set(bound.missingEvidence.map((item) => item.reason))];
+      gaps.push(
+        ...reasons.map((reason) =>
+          this.createGap(project.id, requirementSet.id, reason, "system-brain")
+        )
+      );
+    }
     const now = timestamp();
     const executableCase: ExecutableCase = {
       id: id("executableCase"),
       knowledgeProjectId: requirementSet.knowledgeProjectId,
       requirementSetId: requirementSet.id,
       testIntentId: intent.id,
+      systemId,
       title: intent.title,
       status: gaps.length > 0 ? "blocked" : "ready",
       preconditions: intent.preconditions,
-      steps: gaps.length > 0 ? [] : compileSteps(executionContent, sourceRefs),
+      steps,
       dataProfileIds: this.repository.testDataProfiles
         .filter((profile) => profile.requirementSetId === requirementSet.id)
         .map((profile) => profile.id),
@@ -618,6 +645,111 @@ export class KnowledgeService {
     );
   }
 
+  requirementEvalAccuracy(projectId: string, requirementSetId?: string) {
+    this.getProject(projectId);
+    const evidence = this.repository.executionEvidence.filter((item) => {
+      if (item.knowledgeProjectId !== projectId) return false;
+      if (!requirementSetId) return true;
+      const executableCase = this.repository.executableCases.find(
+        (candidate) => candidate.id === item.executableCaseId
+      );
+      return executableCase?.requirementSetId === requirementSetId;
+    });
+    const classified = evidence.map((item) => {
+      const executableCase = this.repository.executableCases.find(
+        (candidate) => candidate.id === item.executableCaseId
+      );
+      const linkedBug = this.repository.bugReports.some(
+        (bug) =>
+          bug.systemId === item.systemId &&
+          ((item.chainRunId !== undefined && bug.chainRunId === item.chainRunId) ||
+            bug.sourceId === item.executableCaseId)
+      );
+      const linkedGap = this.repository.gaps.some(
+        (gap) =>
+          gap.projectId === projectId &&
+          [
+            item.id,
+            item.executableCaseId,
+            item.chainRunId
+          ].some((sourceId) => sourceId !== undefined && gap.sourceId === sourceId)
+      );
+      const technicalFailure =
+        item.consoleErrors.length > 0 || item.networkFailures.length > 0 || linkedGap;
+      let outcome: "validated" | "contradicted" | "inconclusive" = "inconclusive";
+      if (
+        executableCase &&
+        (item.status === "passed" || (item.status === "failed" && linkedBug))
+      ) {
+        outcome = "validated";
+      } else if (executableCase && item.status === "failed" && !technicalFailure) {
+        outcome = "contradicted";
+      }
+      return {
+        evidence: item,
+        requirementSetId: executableCase?.requirementSetId,
+        outcome,
+        linkedBug,
+        traceable:
+          executableCase !== undefined &&
+          this.repository.requirementSets.some(
+            (requirementSet) => requirementSet.id === executableCase.requirementSetId
+          ) &&
+          item.steps.length > 0 &&
+          item.steps.every((step) => step.sourceRefs.length > 0)
+      };
+    });
+    const summarize = (items: typeof classified) => {
+      const validated = items.filter((item) => item.outcome === "validated").length;
+      const contradicted = items.filter((item) => item.outcome === "contradicted").length;
+      const inconclusive = items.filter((item) => item.outcome === "inconclusive").length;
+      const validatedOrContradicted = validated + contradicted;
+      const conformanceOutcomes = items.filter(
+        (item) =>
+          item.requirementSetId !== undefined &&
+          (item.evidence.status === "passed" || item.linkedBug)
+      );
+      return {
+        totalEvidence: items.length,
+        validated,
+        contradicted,
+        inconclusive,
+        productDefects: items.filter((item) => item.linkedBug).length,
+        accuracyRate:
+          validatedOrContradicted === 0 ? null : validated / validatedOrContradicted,
+        systemConformanceRate:
+          conformanceOutcomes.length === 0
+            ? null
+            : conformanceOutcomes.filter((item) => item.evidence.status === "passed").length /
+              conformanceOutcomes.length,
+        traceabilityRate:
+          items.length === 0
+            ? null
+            : items.filter((item) => item.traceable).length / items.length
+      };
+    };
+    const requirementSetIds = [
+      ...new Set(
+        classified
+          .map((item) => item.requirementSetId)
+          .filter((value): value is string => value !== undefined)
+      )
+    ];
+
+    return {
+      ...summarize(classified),
+      methodology:
+        "Passed evidence and failed evidence linked to a BugReport validate the requirement expectation. Unclassified semantic failures contradict it. Blocked, Gap-linked, or technical failures are inconclusive.",
+      byRequirementSet: requirementSetIds.map((setId) => ({
+        requirementSetId: setId,
+        title:
+          this.repository.requirementSets.find((item) => item.id === setId)?.title ??
+          setId,
+        ...summarize(classified.filter((item) => item.requirementSetId === setId))
+      }))
+    };
+  }
+
   requirementImpact(requirementSetId: string) {
     const requirementSet = this.getRequirementSet(requirementSetId);
     const affectedNodes = this.repository.knowledgeNodes.filter((node) =>
@@ -658,44 +790,42 @@ export class KnowledgeService {
     if (input.sourceRefs.length === 0) {
       throw new Error("System observations require at least one evidence source reference");
     }
-    const expected = this.repository.knowledgeNodes.find(
-      (node) =>
-        node.knowledgeProjectId === project.id &&
-        node.origin !== "observed" &&
-        node.status === "confirmed" &&
-        node.type === input.type &&
-        normalizeText(node.title) === normalizeText(input.title)
-    );
-    const conflicted = Boolean(expected && normalizeText(expected.content) !== normalizeText(input.content));
-    const now = timestamp();
-    const observation: KnowledgeNode = {
-      id: id("knowledgeNode"),
-      knowledgeProjectId: project.id,
+    const result = this.upsertSystemObservation(project, input.systemId, {
       type: input.type,
-      title: input.title.trim(),
-      content: input.content.trim(),
-      module: input.module.trim() || "General",
-      sourceRefs: [...new Set(input.sourceRefs)],
-      origin: "observed",
-      confidence: Math.max(0, Math.min(1, input.confidence ?? 1)),
-      status: conflicted ? "conflicted" : "confirmed",
-      createdAt: now,
-      updatedAt: now
-    };
-    const gaps = conflicted
-      ? [
-          this.createGap(
-            project.id,
-            observation.id,
-            `Observed system behavior conflicts with approved requirement node ${expected?.id}`,
-            "system-observation"
-          )
-        ]
-      : [];
-    this.repository.knowledgeNodes.push(observation);
+      title: input.title,
+      content: input.content,
+      module: input.module,
+      sourceRefs: input.sourceRefs,
+      confidence: input.confidence ?? 1
+    });
     this.repository.persist();
     await this.writeSystemKnowledge(project, input.systemId);
-    return { observation, expected, conflicted, gaps };
+    return result;
+  }
+
+  getSystemBrain(projectId: string, systemId: string) {
+    const project = this.getProject(projectId);
+    if (!project.systemIds.includes(systemId)) {
+      throw new Error("Business system must be bound before reading System Brain");
+    }
+    return buildSystemBrain(this.repository, projectId, systemId);
+  }
+
+  async refreshSystemBrain(projectId: string, systemId: string) {
+    const project = this.getProject(projectId);
+    if (!project.systemIds.includes(systemId)) {
+      throw new Error("Business system must be bound before refreshing System Brain");
+    }
+    const sourceBrain = buildSystemBrain(this.repository, projectId, systemId);
+    for (const draft of systemObservationDrafts(sourceBrain)) {
+      this.upsertSystemObservation(project, systemId, draft);
+    }
+    this.repository.persist();
+    const brain = buildSystemBrain(this.repository, projectId, systemId);
+    await this.writeProjectIndex(project);
+    await this.writeSystemKnowledge(project, systemId);
+    await this.writeSystemBrain(project, brain);
+    return brain;
   }
 
   private getProject(projectId: string) {
@@ -705,8 +835,8 @@ export class KnowledgeService {
   }
 
   private createKnowledgeEdges(projectId: string, nodes: KnowledgeNode[]) {
-    const moduleNode = nodes.find((node) => node.type === "module");
-    const requirementNode = nodes.find((node) => node.type === "requirement");
+    const moduleNodes = nodes.filter((node) => node.type === "module");
+    const requirementNodes = nodes.filter((node) => node.type === "requirement");
     const drafts: Array<{
       fromNodeId: string;
       toNodeId: string;
@@ -714,6 +844,9 @@ export class KnowledgeService {
       sourceRefs: string[];
     }> = [];
     for (const node of nodes) {
+      const moduleNode = moduleNodes.find(
+        (candidate) => normalizeText(candidate.module) === normalizeText(node.module)
+      );
       if (moduleNode && node.id !== moduleNode.id) {
         drafts.push({
           fromNodeId: moduleNode.id,
@@ -722,12 +855,41 @@ export class KnowledgeService {
           sourceRefs: [...new Set([...moduleNode.sourceRefs, ...node.sourceRefs])]
         });
       }
+      const requirementNode = requirementNodes.find((candidate) =>
+        candidate.sourceRefs.some((sourceRef) => node.sourceRefs.includes(sourceRef))
+      );
       if (requirementNode && node.id !== requirementNode.id && node.type !== "module") {
         drafts.push({
           fromNodeId: requirementNode.id,
           toNodeId: node.id,
           relation: "covers",
           sourceRefs: [...new Set([...requirementNode.sourceRefs, ...node.sourceRefs])]
+        });
+      }
+    }
+    for (let index = 0; index < requirementNodes.length - 1; index += 1) {
+      const current = requirementNodes[index];
+      const next = requirementNodes[index + 1];
+      const currentHasWorkflow = nodes.some(
+        (node) =>
+          node.type === "workflow" &&
+          node.sourceRefs.some((sourceRef) => current.sourceRefs.includes(sourceRef))
+      );
+      const nextHasWorkflow = nodes.some(
+        (node) =>
+          node.type === "workflow" &&
+          node.sourceRefs.some((sourceRef) => next.sourceRefs.includes(sourceRef))
+      );
+      if (
+        normalizeText(current.module) !== normalizeText(next.module) &&
+        currentHasWorkflow &&
+        nextHasWorkflow
+      ) {
+        drafts.push({
+          fromNodeId: current.id,
+          toNodeId: next.id,
+          relation: "flows-to",
+          sourceRefs: [...new Set([...current.sourceRefs, ...next.sourceRefs])]
         });
       }
     }
@@ -793,6 +955,88 @@ export class KnowledgeService {
     return gap;
   }
 
+  private upsertSystemObservation(
+    project: KnowledgeProject,
+    systemId: string,
+    draft: SystemObservationDraft
+  ) {
+    const expected = this.repository.knowledgeNodes.find(
+      (node) =>
+        node.knowledgeProjectId === project.id &&
+        node.origin !== "observed" &&
+        node.status === "confirmed" &&
+        node.type === draft.type &&
+        normalizeText(node.title) === normalizeText(draft.title)
+    );
+    const conflicted = Boolean(
+      expected && normalizeText(expected.content) !== normalizeText(draft.content)
+    );
+    const now = timestamp();
+    const existing = this.repository.knowledgeNodes.find(
+      (node) =>
+        node.knowledgeProjectId === project.id &&
+        node.origin === "observed" &&
+        node.systemId === systemId &&
+        node.type === draft.type &&
+        normalizeText(node.title) === normalizeText(draft.title) &&
+        observationIdentityRef(node.sourceRefs) === observationIdentityRef(draft.sourceRefs)
+    );
+    const observation: KnowledgeNode = existing ?? {
+      id: id("knowledgeNode"),
+      knowledgeProjectId: project.id,
+      systemId,
+      type: draft.type,
+      title: draft.title.trim(),
+      content: draft.content.trim(),
+      module: draft.module.trim() || "General",
+      sourceRefs: [...new Set(draft.sourceRefs)],
+      origin: "observed",
+      confidence: Math.max(0, Math.min(1, draft.confidence)),
+      status: conflicted ? "conflicted" : "confirmed",
+      createdAt: now,
+      updatedAt: now
+    };
+    Object.assign(observation, {
+      systemId,
+      title: draft.title.trim(),
+      content: draft.content.trim(),
+      module: draft.module.trim() || "General",
+      sourceRefs: [...new Set(draft.sourceRefs)],
+      confidence: Math.max(0, Math.min(1, draft.confidence)),
+      status: conflicted ? "conflicted" : "confirmed",
+      updatedAt: now
+    });
+    if (!existing) this.repository.knowledgeNodes.push(observation);
+    const existingGaps = this.repository.gaps.filter(
+      (gap) =>
+        gap.projectId === project.id &&
+        gap.sourceType === "system-observation" &&
+        gap.sourceId === observation.id
+    );
+    if (conflicted && existingGaps.every((gap) => gap.status !== "open")) {
+      existingGaps.push(
+        this.createGap(
+          project.id,
+          observation.id,
+          `Observed system behavior conflicts with approved requirement node ${expected?.id}`,
+          "system-observation"
+        )
+      );
+    }
+    if (!conflicted) {
+      for (const gap of existingGaps.filter((item) => item.status === "open")) {
+        gap.status = "resolved";
+        gap.updatedAt = now;
+      }
+    }
+    return {
+      observation,
+      expected,
+      conflicted,
+      gaps: existingGaps.filter((gap) => gap.status === "open")
+    };
+  }
+
   private async writeProjectIndex(project: KnowledgeProject) {
     const projectDir = join(this.knowledgeDir, project.key);
     await mkdir(projectDir, { recursive: true });
@@ -811,7 +1055,11 @@ export class KnowledgeService {
         ...sets.map((item) => `- [[requirements/${item.id}/analysis|${item.title} v${item.version}]]`),
         "",
         "## Systems",
-        ...(project.systemIds.length > 0 ? project.systemIds.map((systemId) => `- ${systemId}`) : ["- Not bound"])
+        ...(project.systemIds.length > 0
+          ? project.systemIds.map(
+              (systemId) => `- [[systems/${systemId}/brain|${systemId}]]`
+            )
+          : ["- Not bound"])
       ].join("\n"),
       "utf8"
     );
@@ -865,7 +1113,7 @@ export class KnowledgeService {
         "## Requirement Clauses",
         ...analysis.clauses.map(
           (clause) =>
-            `- [${clause.sourceRef}] ${clause.text} (${clause.nodeTypes.length > 0 ? clause.nodeTypes.join(", ") : "unclassified"})`
+            `- [${clause.sourceRef}] [module=${clause.module}] ${clause.text} (${clause.nodeTypes.length > 0 ? clause.nodeTypes.join(", ") : "unclassified"})`
         ),
         "",
         "## Knowledge",
@@ -948,43 +1196,71 @@ export class KnowledgeService {
     intents: TestIntent[]
   ) {
     const project = this.getProject(set.knowledgeProjectId);
-    const moduleDir = join(this.knowledgeDir, project.key, "modules", normalizeKey(analysis.module));
-    await mkdir(moduleDir, { recursive: true });
-    const groups = {
-      "analysis.md": analysis.nodes,
-      "rules.md": analysis.nodes.filter((node) => node.type === "rule"),
-      "flows.md": analysis.nodes.filter((node) => node.type === "workflow" || node.type === "state")
-    };
-    for (const [file, nodes] of Object.entries(groups)) {
+    const modules = [...new Set(analysis.clauses.map((clause) => clause.module))];
+    const profiles = this.repository.testDataProfiles.filter(
+      (item) => item.requirementSetId === set.id
+    );
+    for (const module of modules) {
+      const moduleDir = join(this.knowledgeDir, project.key, "modules", normalizeKey(module));
+      await mkdir(moduleDir, { recursive: true });
+      const moduleNodes = analysis.nodes.filter((node) => node.module === module);
+      const groups = {
+        "analysis.md": moduleNodes,
+        "rules.md": moduleNodes.filter((node) => node.type === "rule"),
+        "flows.md": moduleNodes.filter(
+          (node) => node.type === "workflow" || node.type === "state"
+        )
+      };
+      for (const [file, nodes] of Object.entries(groups)) {
+        await writeFile(
+          join(moduleDir, file),
+          [
+            "---",
+            `requirement_set_id: ${set.id}`,
+            `module: ${module}`,
+            `status: ${set.status}`,
+            "---",
+            "",
+            `# ${module} ${file.replace(".md", "")}`,
+            "",
+            ...(nodes.length > 0
+              ? nodes.map((node) => `- **${node.type}** ${node.title}: ${node.content}`)
+              : ["- No confirmed entries"])
+          ].join("\n"),
+          "utf8"
+        );
+      }
+      const moduleIntents = intents.filter((intent) => intent.module === module);
       await writeFile(
-        join(moduleDir, file),
+        join(moduleDir, "cases.md"),
         [
-          "---",
-          `requirement_set_id: ${set.id}`,
-          `module: ${analysis.module}`,
-          `status: ${set.status}`,
-          "---",
+          `# ${module} cases`,
           "",
-          `# ${analysis.module} ${file.replace(".md", "")}`,
+          ...moduleIntents.map((intent) => `- ${intent.id}: ${intent.title}`)
+        ].join("\n"),
+        "utf8"
+      );
+      const moduleSourceRefs = new Set(
+        analysis.clauses
+          .filter((clause) => clause.module === module)
+          .map((clause) => clause.sourceRef)
+      );
+      const moduleProfiles = profiles.filter((profile) =>
+        profile.sourceRefs.some((sourceRef) => moduleSourceRefs.has(sourceRef))
+      );
+      await writeFile(
+        join(moduleDir, "data.md"),
+        [
+          `# ${module} data`,
           "",
-          ...(nodes.length > 0
-            ? nodes.map((node) => `- **${node.type}** ${node.title}: ${node.content}`)
-            : ["- No confirmed entries"])
+          ...moduleProfiles.map(
+            (item) =>
+              `- ${item.name}: ${item.strategy} (${item.constraints.join(", ")})`
+          )
         ].join("\n"),
         "utf8"
       );
     }
-    await writeFile(
-      join(moduleDir, "cases.md"),
-      [`# ${analysis.module} cases`, "", ...intents.map((intent) => `- ${intent.id}: ${intent.title}`)].join("\n"),
-      "utf8"
-    );
-    const profiles = this.repository.testDataProfiles.filter((item) => item.requirementSetId === set.id);
-    await writeFile(
-      join(moduleDir, "data.md"),
-      [`# ${analysis.module} data`, "", ...profiles.map((item) => `- ${item.name}: ${item.strategy} (${item.constraints.join(", ")})`)].join("\n"),
-      "utf8"
-    );
   }
 
   private async writeSystemKnowledge(project: KnowledgeProject, systemId: string) {
@@ -994,7 +1270,10 @@ export class KnowledgeService {
       (node) => node.knowledgeProjectId === project.id && node.origin !== "observed" && node.status === "confirmed"
     );
     const observed = this.repository.knowledgeNodes.filter(
-      (node) => node.knowledgeProjectId === project.id && node.origin === "observed"
+      (node) =>
+        node.knowledgeProjectId === project.id &&
+        node.origin === "observed" &&
+        node.systemId === systemId
     );
     const files = {
       "expected.md": expected,
@@ -1020,6 +1299,72 @@ export class KnowledgeService {
         "utf8"
       );
     }
+  }
+
+  private async writeSystemBrain(project: KnowledgeProject, brain: SystemBrain) {
+    const systemDir = join(this.knowledgeDir, project.key, "systems", brain.systemId);
+    await mkdir(systemDir, { recursive: true });
+    await writeFile(
+      join(systemDir, "brain.md"),
+      [
+        "---",
+        `knowledge_project_id: ${project.id}`,
+        `system_id: ${brain.systemId}`,
+        "layer: system-brain",
+        "---",
+        "",
+        `# ${project.name} System Brain`,
+        "",
+        "## Readiness",
+        `- Page evidence: ${brain.readiness.pageEvidence}`,
+        `- Locator evidence: ${brain.readiness.locatorEvidence}`,
+        `- Workflow evidence: ${brain.readiness.workflowEvidence}`,
+        `- API evidence: ${brain.readiness.apiEvidence}`,
+        `- Ready for compilation: ${brain.readiness.readyForCompilation}`,
+        "",
+        "## Pages",
+        ...(brain.pages.length > 0
+          ? brain.pages.map(
+              (page) =>
+                `- ${page.name} v${page.version} (${page.route}): ${page.locatorCount} locators, ${page.probeIssueCount} probe issues [${page.sourceRefs.join(", ")}]`
+            )
+          : ["- None"]),
+        "",
+        "## Trained Workflows",
+        ...(brain.workflows.length > 0
+          ? brain.workflows.map(
+              (workflow) =>
+                `- ${workflow.pageName}: ${workflow.actionStepIds.length} actions, ${workflow.apiFlowIds.length} API flows [${workflow.sourceRefs.join(", ")}]`
+            )
+          : ["- None"]),
+        "",
+        "## Observed Behavior Rules",
+        ...(brain.behaviorRules.length > 0
+          ? brain.behaviorRules.map(
+              (rule) =>
+                `- ${rule.trigger} -> ${rule.effect} [${rule.sourceRefs.join(", ")}]`
+            )
+          : ["- None"]),
+        "",
+        "## API Flows",
+        ...(brain.apiFlows.length > 0
+          ? brain.apiFlows.map(
+              (flow) =>
+                `- ${flow.name}: ${flow.requests
+                  .map((request) => `${request.method} ${request.url} ${request.status}`)
+                  .join("; ")}`
+            )
+          : ["- None"]),
+        "",
+        "## Conflicts",
+        ...(brain.conflicts.length > 0
+          ? brain.conflicts.map(
+              (conflict) => `- ${conflict.title}: ${conflict.content} (${conflict.id})`
+            )
+          : ["- None"])
+      ].join("\n"),
+      "utf8"
+    );
   }
 
   private async writeExecutionReport(evidence: ExecutionEvidence) {
@@ -1208,6 +1553,21 @@ function normalizeText(value: string) {
 
 function knowledgeNodeKey(node: Pick<KnowledgeNode, "type" | "title" | "module">) {
   return `${node.type}:${normalizeText(node.module)}:${normalizeText(node.title)}`;
+}
+
+function observationIdentityRef(sourceRefs: string[]) {
+  const prefixes = [
+    "locator-point:",
+    "action-step:",
+    "api-flow:",
+    "training-session:",
+    "page-model:"
+  ];
+  for (const prefix of prefixes) {
+    const match = sourceRefs.find((sourceRef) => sourceRef.startsWith(prefix));
+    if (match) return match;
+  }
+  return [...sourceRefs].sort()[0] ?? "";
 }
 
 function timestamp() {

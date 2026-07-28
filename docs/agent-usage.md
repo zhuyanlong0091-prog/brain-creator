@@ -49,15 +49,19 @@ Builtin policies work without external Skills. When `RequirementAnalysis.skill` 
 
 ### 4. Approve The Baseline
 
-The Agent resolves clarification Gaps and waits for explicit approval. It then calls `bc_prepare action=approve-baseline confirm=true`.
+The Agent presents every Requirement Eval action. Clarifications and missing branches require an explicit `confirmationNote`; direct contradictions require a source revision. It then calls `bc_prepare action=approve-baseline confirm=true` only after the Eval gate passes.
 
-### 5. Compile Executable Cases
+Seven golden samples cover ordinary clauses, complex Markdown rule tables, cross-module workflows, permission matrices, contradictions, and missing branches. Historical quality can be reviewed with `bc_review target=requirement-eval-accuracy`; technical failures remain inconclusive instead of reducing the requirement score.
 
-The Agent calls `bc_prepare action=compile-cases`. Brain Creator may add a hidden action only when confirmed workflow knowledge provides one unique path. Multiple plausible paths create a Gap.
+### 5. Bind And Refresh System Brain
 
-### 6. Bind A Runtime System
+The Agent uses `bc_configure target=system` and `bc_configure target=system-binding`, then configures auth. Protected password, recovery, CAPTCHA, or 2FA uses `bc_create_auth_checkpoint` and workspace-local storage state.
 
-The Agent uses `bc_configure target=system` and `bc_configure target=system-binding`, then configure auth. Protected password, recovery, CAPTCHA, or 2FA uses `bc_create_auth_checkpoint` and workspace-local storage state.
+The host Agent explores the real system with its browser capability, then submits structured evidence through `bc_prepare action=record-page-evidence` and `record-training-evidence`. Submitted URLs must stay inside the selected system allowlist. Brain Creator then refreshes a system-isolated view of PageModels, LocatorPoints, ProbeResults, TrainingSessions, ActionSteps, cascade behavior, and ApiFlows. It writes `systems/<system-id>/brain.md` while preserving separate expected, observed, and conflict layers.
+
+### 6. Compile Executable Cases
+
+The Agent calls `bc_prepare action=compile-cases` with `systemId`. Brain Creator binds steps to real PageModel, LocatorPoint, and ProbeResult evidence. It may add an implicit action only when confirmed workflow knowledge provides one unique path. Multiple plausible paths or missing page/locator evidence create a Gap.
 
 ### 7. Preview And Execute
 
@@ -67,7 +71,7 @@ The Generator writes a Playwright test, Playwright executes it, and the Healer p
 
 ### 8. Review Evidence
 
-The Agent uses `bc_review` to show requirements, knowledge, coverage, TestIntents, ExecutableCases, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.
+The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, TestIntents, ExecutableCases, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.
 
 ## User Entrypoints
 

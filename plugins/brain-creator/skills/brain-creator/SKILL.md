@@ -23,11 +23,11 @@ The recommended entrypoint is a requirement document or link. Existing Excel/Mar
 
 New installations use `BRAIN_CREATOR_TOOL_PROFILE=facade`. Prefer these high-level tools:
 
-- `bc_prepare`: ingest requirements, generate analysis and test design, approve baselines, compile cases, and record system observations.
+- `bc_prepare`: ingest requirements, generate analysis and test design, approve baselines, submit page/training evidence, refresh System Brain, compile evidence-bound cases, and record system observations.
 - `bc_status`: inspect knowledge projects or runtime systems and choose the next action.
 - `bc_configure`: create knowledge projects, systems, auth, rules, terms, bindings, checkpoints, and inspect connectors.
 - `bc_run`: preview or execute requirement suites, approved cases, document suites, and bug regression.
-- `bc_review`: review requirements, knowledge, coverage, test intents, executable cases, evidence, suites, bugs, and Gaps.
+- `bc_review`: review requirements, knowledge, coverage, Requirement Eval history, System Brain, test intents, executable cases, evidence, suites, bugs, and Gaps.
 - `bc_intent_preview`: preview ambiguous operational wording without executing it.
 - `bc_submit_agent_output`: return Planner, Generator, or Healer output in host-agent mode.
 - `bc_command`: optional `/bc help`, status, suite, bug, and Gap shortcuts.
@@ -42,13 +42,16 @@ Fine-grained tools remain available with `BRAIN_CREATOR_TOOL_PROFILE=full` for c
 | Analyze a Feishu Wiki/Doc | `bc_prepare action=ingest-requirement` | Use direct OpenAPI or host content-package fallback |
 | Generate requirement analysis and tests | `bc_prepare action=generate-test-design` | Review coverage, Gaps, and data before approval |
 | Confirm Requirement Eval actions | `bc_prepare action=confirm-eval-actions confirm=true` | Present each action and preserve the user's `confirmationNote` |
-| Approve and compile | `bc_prepare action=approve-baseline confirm=true`, then `compile-cases` | Explicit user confirmation required |
+| Approve a baseline | `bc_prepare action=approve-baseline confirm=true` | Explicit user confirmation required |
 | Bind a real system | `bc_configure target=system`, then `bc_configure target=system-binding` | Confirm environment and allowlist |
+| Submit page/training evidence | `bc_prepare action=record-page-evidence` / `record-training-evidence` | Use real host-browser evidence inside the selected system allowlist |
+| Refresh System Brain | `bc_prepare action=refresh-system-brain` | Preserve system isolation and evidence references |
+| Compile against a system | `bc_prepare action=compile-cases` with `systemId` | Missing page or locator evidence creates a Gap |
 | Configure auth | `bc_configure target=auth` or `bc_configure target=checkpoint` | Never expose secrets |
 | Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true` |
 | Execute an existing test document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` | Explicit confirmation required |
 | Regress bugs | `bc_run mode=bug-regression` | Show filters and candidates |
-| Review status | `bc_status`, then `bc_review target="bug"` or `bc_review target="gap"` | Read-only |
+| Review status | `bc_status`, then `bc_review target="bug"`, `bc_review target="gap"`, `bc_review target=requirement-eval-accuracy`, or `bc_review target=system-brain` | Read-only |
 | Record an external blocker | `bc_report_gap` | Include reason, severity, owner, and evidence context |
 
 Use `statusMarkdown` and `reviewMarkdown` when present for concise replies. `/bc help` is optional shorthand, not the primary product entrypoint.
@@ -63,13 +66,16 @@ When the user provides a requirement path or URL:
 4. Present atomic clauses and their source anchors, typed coverage, unsupported claims, contradictions, missing branches, risks, test techniques, TestIntents, and TestDataProfiles. Do not collapse the result into one broad requirement summary.
 5. Present each pending Eval action. For clarification or a missing branch, call `bc_prepare action=confirm-eval-actions confirm=true` with the selected `actionIds` and the user's non-empty `confirmationNote`. Never infer or fabricate that note.
 6. A blocked contradiction cannot be confirmed. Ask the user to revise or refresh the requirement source, then regenerate the design.
-7. Only after the Eval gate passes, call `bc_prepare action=approve-baseline confirm=true`, then compile approved TestIntents with `bc_prepare action=compile-cases`.
-8. Create or select a runtime system with `bc_configure target=system`, then bind it with `bc_configure target=system-binding`.
-9. Configure and verify auth. Use `bc_create_auth_checkpoint` for password, CAPTCHA, recovery, or 2FA intervention.
-10. Preview with `bc_run mode=requirement-suite confirm=false`; execute only after confirmation with `bc_run mode=requirement-suite confirm=true`.
-11. Use `bc_review` to report evidence, BugReports, Gaps, and requirement-versus-observation conflicts.
+7. Only after the Eval gate passes, call `bc_prepare action=approve-baseline confirm=true`.
+8. Create or select a runtime system with `bc_configure target=system`, bind it with `bc_configure target=system-binding`, and configure verified auth.
+9. Explore the real system with the host browser, submit allowlisted evidence with `bc_prepare action=record-page-evidence` and `record-training-evidence`, then refresh System Brain.
+10. Compile approved TestIntents with `bc_prepare action=compile-cases` and the selected `systemId`. Missing page or locator evidence must block with a Gap.
+11. Preview with `bc_run mode=requirement-suite confirm=false`; execute only after confirmation with `bc_run mode=requirement-suite confirm=true`.
+12. Use `bc_review target=requirement-eval-accuracy` and `bc_review target=system-brain` alongside evidence, BugReport, and Gap reviews.
 
-Do not let observed system behavior overwrite approved requirements. Submit observed rules or workflows with `bc_prepare action=record-observation`, including evidence `sourceRefs`. Conflicts must remain visible and block execution until resolved.
+Do not let observed system behavior overwrite approved requirements. Prefer `refresh-system-brain` to derive observed pages, fields, workflows, cascades, and API integrations from existing assets. Submit additional observed rules or workflows with `bc_prepare action=record-observation`, including evidence `sourceRefs`. Conflicts must remain visible and block execution until resolved.
+
+Historical Requirement Eval accuracy is an estimate, not a fabricated model score. Passed evidence and failed evidence linked to a BugReport validate the requirement expectation; unclassified semantic failures contradict it pending review; blocked, console, and network failures remain inconclusive. Report system conformance and traceability separately.
 
 ## Requirement Sources
 
@@ -115,6 +121,8 @@ After the bounded Healer attempt, create a BugReport only when the failure conta
 
 - Use `bc_list_systems` only in full-profile discovery or debugging.
 - Prefer `bc_configure target=system` for creation and `bc_status` for selection.
+- Refresh System Brain after page modeling or training changes. Repeated refreshes must be idempotent and isolated to the selected `systemId`.
+- Compile with `systemId` so navigation and actions bind PageModel, LocatorPoint, and ProbeResult evidence instead of semantic guesses.
 - Never mix knowledge or assets across systems.
 - The natural-language phrase `Use Brain Creator to connect this system` is a valid entrypoint.
 

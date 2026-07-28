@@ -614,12 +614,16 @@ export class BrainCreatorService {
     this.assertAuthProfileMatchesProject(input.authProfileId, input.projectId);
     const now = timestamp();
     const capture = input.captureMode === "browser" ? input.browserCapture : undefined;
+    const route = capture?.finalUrl ?? input.targetUrl ?? input.route;
+    const previousVersion = this.repository.pageModels
+      .filter((page) => page.projectId === input.projectId && page.route === route)
+      .reduce((highest, page) => Math.max(highest, page.version), 0);
     const pageModel: PageModel = {
       id: id("page"),
       projectId: input.projectId,
-      route: capture?.finalUrl ?? input.targetUrl ?? input.route,
+      route,
       name: capture?.title || input.name,
-      version: 1,
+      version: previousVersion + 1,
       domSnapshotId: id("dom"),
       screenshotId: capture?.screenshotPath ?? id("shot"),
       status: "succeeded",

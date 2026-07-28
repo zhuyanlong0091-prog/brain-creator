@@ -67,26 +67,28 @@ export function analyzeRequirement(input: {
   const clauses = splitRequirementClauses(input.content, input.sourceRef, input.requirementSetId, module);
   const policyMetadata = {
     requirementSetId: input.requirementSetId,
-    module,
     status: "draft" as const,
     policyId: REQUIREMENT_ANALYSIS_POLICY.id,
     policyVersion: REQUIREMENT_ANALYSIS_POLICY.version
   };
-  const nodes: RequirementAnalysis["nodes"] = [
-    {
+  const modules = [...new Set(clauses.map((clause) => clause.module))];
+  const nodes: RequirementAnalysis["nodes"] = modules.map((clauseModule) => ({
       ...policyMetadata,
+      module: clauseModule,
       type: "module",
-      title: module,
-      content: `Module inferred from ${input.title}`,
-      sourceRefs: clauses.map((clause) => clause.sourceRef),
+      title: clauseModule,
+      content: `Module inferred from requirement clauses in ${input.title}`,
+      sourceRefs: clauses
+        .filter((clause) => clause.module === clauseModule)
+        .map((clause) => clause.sourceRef),
       origin: "derived",
       confidence: 0.8
-    }
-  ];
+    }));
 
   for (const clause of clauses) {
     nodes.push({
       ...policyMetadata,
+      module: clause.module,
       type: "requirement",
       title: `${input.title} ${clause.index}`,
       content: clause.text,
@@ -97,8 +99,9 @@ export function analyzeRequirement(input: {
     for (const type of clause.nodeTypes) {
       nodes.push({
         ...policyMetadata,
+        module: clause.module,
         type,
-        title: `${module} ${nodeTypeLabel(type)}: ${shortText(clause.text)}`,
+        title: `${clause.module} ${nodeTypeLabel(type)}: ${shortText(clause.text)}`,
         content: clause.text,
         sourceRefs: [clause.sourceRef],
         origin: "derived",
@@ -149,8 +152,8 @@ export function designTests(input: {
       id: id("intent"),
       knowledgeProjectId: input.knowledgeProjectId,
       requirementSetId: input.analysis.requirementSetId,
-      title: `${input.analysis.module}: ${shortText(clause.text)}`,
-      module: input.analysis.module,
+      title: `${clause.module}: ${shortText(clause.text)}`,
+      module: clause.module,
       priority: priorityForClause(clause),
       objective: clause.text,
       preconditions: ["The requirement baseline is approved", "The target environment is available"],
@@ -176,7 +179,7 @@ export function designTests(input: {
       id: id("data"),
       knowledgeProjectId: input.knowledgeProjectId,
       requirementSetId: input.analysis.requirementSetId,
-      name: `${input.analysis.module} clause ${clause.index} data`,
+      name: `${clause.module} clause ${clause.index} data`,
       field: semanticFieldName(clause.text, clause.index),
       strategy: "generated",
       constraints: techniques.map((technique) => `cover:${technique}`),
@@ -343,8 +346,7 @@ function splitRequirementClauses(
   requirementSetId: string,
   module: string
 ) {
-  const parts = content
-    .split(/(?:\r?\n)+|[.!?\u3002\uff01\uff1f;\uff1b]+/)
+  const parts = requirementParts(content)
     .map((item) => item.trim())
     .filter((item) => !/^#{1,6}\s+/.test(item))
     .map((item) => item.replace(/^(?:[-*]\s+|\d+[.)\u3001]\s*)/, "").trim())
@@ -356,14 +358,62 @@ function splitRequirementClauses(
     index: index + 1,
     text,
     sourceRef: `${sourceRef}#clause-${index + 1}`,
-    module,
+    module: inferClauseModule(text, module),
     nodeTypes: classifyClause(text)
   }));
 }
 
+function requirementParts(content: string) {
+  const lines = content.split(/\r?\n/);
+  const parts: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    const nextLine = lines[index + 1]?.trim() ?? "";
+    if (isMarkdownTableRow(line) && isMarkdownTableSeparator(nextLine)) {
+      const headers = markdownTableCells(line);
+      index += 2;
+      while (index < lines.length && isMarkdownTableRow(lines[index])) {
+        const cells = markdownTableCells(lines[index]);
+        if (cells.length > 0) {
+          parts.push(
+            headers
+              .map((header, cellIndex) => `${header}: ${cells[cellIndex] ?? ""}`)
+              .join("; ")
+          );
+        }
+        index += 1;
+      }
+      index -= 1;
+      continue;
+    }
+    parts.push(
+      ...line
+        .split(/[.!?\u3002\uff01\uff1f;\uff1b]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    );
+  }
+  return parts;
+}
+
+function isMarkdownTableRow(value: string) {
+  const trimmed = value.trim();
+  return trimmed.includes("|") && markdownTableCells(trimmed).length > 1;
+}
+
+function isMarkdownTableSeparator(value: string) {
+  const cells = markdownTableCells(value);
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function markdownTableCells(value: string) {
+  const trimmed = value.trim().replace(/^\|/, "").replace(/\|$/, "");
+  return trimmed.split("|").map((cell) => cell.trim());
+}
+
 function classifyClause(text: string): KnowledgeNodeType[] {
   const types = new Set<KnowledgeNodeType>();
-  if (matches(text, /create|new|fill|submit|approve|reject|navigate|select|click|save|\u65b0\u5efa|\u521b\u5efa|\u586b\u5199|\u63d0\u4ea4|\u5ba1\u6279|\u9a73\u56de|\u8fdb\u5165|\u9009\u62e9|\u70b9\u51fb|\u4fdd\u5b58|\u5207\u6362|\u914d\u7f6e|\u6821\u9a8c/i)) {
+  if (matches(text, /create|new|fill|submit|approve|approval|reject|navigate|select|click|save|\u65b0\u5efa|\u521b\u5efa|\u586b\u5199|\u63d0\u4ea4|\u5ba1\u6279|\u9a73\u56de|\u8fdb\u5165|\u9009\u62e9|\u70b9\u51fb|\u4fdd\u5b58|\u5207\u6362|\u914d\u7f6e|\u6821\u9a8c/i)) {
     types.add("workflow");
   }
   if (matches(text, /require|must|above|below|only|cannot|\bif\b|\bwhen\b|\u8d85\u8fc7|\u4f4e\u4e8e|\u5fc5\u987b|\u4ec5|\u4e0d\u5141\u8bb8|\u9009\u62e9.+\u540e|\u5207\u6362.+\u540e|\u5982\u679c|\u5f53.+\u65f6|\u672a\u547d\u4e2d|\u914d\u7f6e\u4e3a|\u9ed8\u8ba4\u503c|\u4f18\u5148\u7ea7|\u91cd\u590d\u6027|\u624d\u4f1a/i)) {
@@ -372,10 +422,10 @@ function classifyClause(text: string): KnowledgeNodeType[] {
   if (matches(text, /status|state|draft|approved|enabled|disabled|\u72b6\u6001|\u8349\u7a3f|\u5df2\u5ba1\u6279|\u542f\u7528|\u505c\u7528|\u53d8\u4e3a/i)) {
     types.add("state");
   }
-  if (matches(text, /buyer|user|manager|finance|admin|employee|\u91c7\u8d2d|\u7528\u6237|\u7ecf\u7406|\u8d22\u52a1|\u7ba1\u7406\u5458|\u5458\u5de5|\u89d2\u8272/i)) {
+  if (matches(text, /buyer|user|manager|finance|admin|employee|recruiter|specialist|approver|auditor|\u91c7\u8d2d|\u7528\u6237|\u7ecf\u7406|\u8d22\u52a1|\u7ba1\u7406\u5458|\u5458\u5de5|\u89d2\u8272|\u4e13\u5458|\u5ba1\u6279\u4eba|\u5ba1\u8ba1\u5458/i)) {
     types.add("actor");
   }
-  if (matches(text, /\bmay\b|\bcan\b|permission|role|only .+ can|\u53ef\u4ee5|\u80fd\u591f|\u6743\u9650|\u89d2\u8272|\u4ec5.+\u53ef/i)) {
+  if (matches(text, /\bmay\b|\bcan\b|permission|role|only .+ can|allowed|not allowed|read-only|\u53ef\u4ee5|\u80fd\u591f|\u6743\u9650|\u89d2\u8272|\u4ec5.+\u53ef|\u5141\u8bb8|\u7981\u6b62|\u53ea\u8bfb/i)) {
     types.add("permission");
   }
   if (matches(text, /field|form|input|select|name|type|amount|visible|hidden|editable|default value|\u5b57\u6bb5|\u8868\u5355|\u8f93\u5165|\u4e0b\u62c9|\u59d3\u540d|\u7c7b\u578b|\u91d1\u989d|\u663e\u793a|\u9690\u85cf|\u53ef\u7f16\u8f91|\u9ed8\u8ba4\u503c/i)) {
@@ -387,7 +437,7 @@ function classifyClause(text: string): KnowledgeNodeType[] {
   if (matches(text, /\d|length|max(?:imum)?|min(?:imum)?|required|empty|unique|enum|multi-select|default value|\u957f\u5ea6|\u6700\u5927|\u6700\u5c0f|\u5fc5\u586b|\u7a7a\u503c|\u4e3a\u7a7a|\u9ed8\u8ba4\u503c|\u552f\u4e00|\u679a\u4e3e|\u591a\u9009|\u8303\u56f4/i)) {
     types.add("data-constraint");
   }
-  if (matches(text, /order|record|request|contract|invoice|form|\u8ba2\u5355|\u8bb0\u5f55|\u9700\u6c42|\u5408\u540c|\u53d1\u7968|\u8868\u5355/i)) {
+  if (matches(text, /order|record|request|contract|invoice|form|account|offer|\u8ba2\u5355|\u8bb0\u5f55|\u9700\u6c42|\u5408\u540c|\u53d1\u7968|\u8868\u5355|\u8d26\u53f7/i)) {
     types.add("object");
   }
   return [...types];
@@ -499,6 +549,27 @@ function inferModule(title: string, content: string) {
     `${title} ${content}`
   )?.[1];
   return english ? `${english[0].toUpperCase()}${english.slice(1)}` : title.trim() || "General";
+}
+
+function inferClauseModule(text: string, fallback: string) {
+  const explicitEnglish =
+    /\b(recruiting|offer|order|contract|customer|account|invoice|approval)\s+module\b/i.exec(
+      text
+    )?.[1];
+  if (explicitEnglish) return titleCase(explicitEnglish);
+  const explicitChinese = /([\u4e00-\u9fff]{2,12})(?:\u6a21\u5757|\u529f\u80fd)/.exec(text)?.[1];
+  if (explicitChinese) return explicitChinese;
+  const english =
+    /\b(recruiter|recruiting|offer|order|contract|customer|account|invoice|approval)\b/i.exec(
+      text
+    )?.[1];
+  if (/^recruiter$/i.test(english ?? "")) return "Recruiting";
+  return english ? titleCase(english) : fallback;
+}
+
+function titleCase(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return `${normalized[0]?.toUpperCase() ?? ""}${normalized.slice(1)}`;
 }
 
 function nodeTypeLabel(type: KnowledgeNodeType) {

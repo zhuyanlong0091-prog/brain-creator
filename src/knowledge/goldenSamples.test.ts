@@ -31,14 +31,20 @@ describe("Requirement Brain golden samples", () => {
 
     expect(summary).toEqual(
       expect.objectContaining({
-        totalSamples: 4,
-        passedSamples: 4,
+        totalSamples: 7,
+        passedSamples: 7,
         passRate: 1,
         averageCoverageRate: 1,
         unsupportedClaimCount: 0
       })
     );
-    expect(summary.domains).toEqual(["hr", "inventory", "order"]);
+    expect(summary.domains).toEqual([
+      "access-control",
+      "commerce",
+      "hr",
+      "inventory",
+      "order"
+    ]);
   });
 
   it("keeps every generated intent bound to exactly one golden requirement clause", () => {
@@ -58,5 +64,50 @@ describe("Requirement Brain golden samples", () => {
         )
       ).toBe(true);
     }
+  });
+
+  it("turns complex table rows into atomic clauses without treating headers as requirements", () => {
+    const result = evaluateRequirementGoldenSample(
+      REQUIREMENT_GOLDEN_SAMPLES.find(
+        (sample) => sample.id === "commerce-discount-rule-table"
+      )!
+    );
+
+    expect(result.analysis.clauses).toHaveLength(3);
+    expect(result.analysis.clauses[0].text).toContain("Customer tier: Standard");
+    expect(result.analysis.clauses.some((clause) => clause.text.includes("---"))).toBe(false);
+  });
+
+  it("keeps module ownership for cross-module workflow clauses", () => {
+    const result = evaluateRequirementGoldenSample(
+      REQUIREMENT_GOLDEN_SAMPLES.find(
+        (sample) => sample.id === "recruiting-offer-cross-module-flow"
+      )!
+    );
+
+    expect(new Set(result.analysis.clauses.map((clause) => clause.module))).toEqual(
+      new Set(["Recruiting", "Offer"])
+    );
+    expect(result.design.testIntents.map((intent) => intent.module)).toEqual([
+      "Recruiting",
+      "Offer",
+      "Recruiting"
+    ]);
+  });
+
+  it("preserves actor and permission semantics for every permission matrix row", () => {
+    const result = evaluateRequirementGoldenSample(
+      REQUIREMENT_GOLDEN_SAMPLES.find(
+        (sample) => sample.id === "account-permission-matrix"
+      )!
+    );
+
+    expect(result.analysis.clauses).toHaveLength(3);
+    expect(
+      result.analysis.clauses.every(
+        (clause) =>
+          clause.nodeTypes.includes("actor") && clause.nodeTypes.includes("permission")
+      )
+    ).toBe(true);
   });
 });

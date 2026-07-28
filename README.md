@@ -16,8 +16,8 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
   -> 自生长业务知识
   -> TestIntent + TestDataProfile
   -> 用户审核
-  -> ExecutableCase
-  -> 绑定真实系统
+  -> 绑定真实系统 + System Brain
+  -> 证据化 ExecutableCase
   -> Generator + Playwright + Healer
   -> Evidence + BugReport + Gap
 ```
@@ -40,10 +40,13 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
 - 动态知识节点：模块、角色、对象、字段、规则、流程、状态、权限、集成、数据约束、术语和需求。
 - 需求会拆成带 `#clause-N` 来源锚点的原子条款，每条条款分别生成可追踪的 TestIntent，不再用一条宽泛用例覆盖整篇文档。
 - Requirement Eval 会输出条款覆盖率、无依据内容、直接矛盾、缺失条件分支和所需人工动作；需要确认的动作跨会话持久化，确认说明会回流为知识节点，直接矛盾必须修订需求源。
-- 内置 HR、订单和库存黄金样本，通过 `npm run verify:requirement-eval` 固定覆盖率、来源追踪、矛盾识别和逐条 TestIntent 基线。
+- 内置 7 个 HR、订单、库存、商业规则和权限控制黄金样本，覆盖普通条款、复杂 Markdown 表格、跨模块流程、权限矩阵、矛盾和缺失分支；通过 `npm run verify:requirement-eval` 固定覆盖率、来源追踪和逐条 TestIntent 基线。
+- Requirement Eval 历史统计会基于 ExecutionEvidence、BugReport 和技术失败计算需求结论验证率、系统符合率与追溯率；产品缺陷不会被误算为需求分析错误，技术阻塞保持不确定。
 - 需求 hash 幂等、版本修订、影响节点、受影响回归范围和旧版本追溯。
 - TestIntent、TestDataProfile、ExecutableCase、隐含唯一动作补全与歧义 Gap。
 - 多系统绑定、鉴权、AuthCheckpoint、Claude/Codex/host-agent Bridge。
+- System Brain 将 PageModel、LocatorPoint、ProbeResult、TrainingSession、ActionStep 和 ApiFlow 聚合为按系统隔离的页面、流程、级联行为和 API 证据；重复刷新幂等，需求预期与系统观察冲突单独保留。
+- 指定 `systemId` 编译 ExecutableCase 时，步骤会绑定真实 PageModel/LocatorPoint/ProbeResult 证据；缺少页面或定位证据时阻塞并创建 Gap。
 - Generator、真实 Playwright、有限 Healer、Suite、BugReport、Gap 和证据复盘。
 - 旧版 `.xlsx` / `.md` 测试用例文档的预览、确认、执行、续跑、回归和可选 Excel 回写。
 
@@ -145,8 +148,11 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 | 导入/刷新需求 | `bc_prepare action=ingest-requirement` / `refresh-requirement` |
 | 生成分析与测试设计 | `bc_prepare action=generate-test-design` |
 | 确认 Requirement Eval 动作 | `bc_prepare action=confirm-eval-actions confirm=true`，必须提交 `confirmationNote` |
-| 审批与编译 | `bc_prepare action=approve-baseline` / `compile-cases` |
+| 审批需求基线 | `bc_prepare action=approve-baseline` |
 | 创建/绑定系统 | `bc_configure target=system` / `bc_configure target=system-binding` |
+| 提交页面/训练证据 | 宿主 Agent 浏览真实系统后使用 `bc_prepare action=record-page-evidence` / `record-training-evidence` |
+| 刷新系统知识 | `bc_prepare action=refresh-system-brain`，内部聚合页面建模和训练证据 |
+| 按系统编译 | `bc_prepare action=compile-cases` 并传入 `systemId` |
 | 配置鉴权 | `bc_configure target=auth` |
 | 等待人工登录 | `bc_configure target=checkpoint` |
 | 查看知识或系统状态 | `bc_status`，优先展示 `statusMarkdown` |
@@ -154,6 +160,8 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 | 兼容执行测试文档 | `bc_run mode=case-source-suite confirm=false`，确认后 `bc_run mode=case-source-suite confirm=true` |
 | 回归 Bug | `bc_run mode=bug-regression` |
 | 查看 Bug/Gap/证据 | `bc_review target="bug"`、`bc_review target="gap"`，优先展示 `reviewMarkdown` |
+| 查看需求质量历史 | `bc_review target=requirement-eval-accuracy` |
+| 查看系统知识 | `bc_review target=system-brain` 并传入 `systemId` |
 | 记录外部阻塞 | `bc_report_gap` |
 | 快捷帮助 | `/bc help`（可选） |
 
@@ -173,10 +181,10 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 4. 展示条款覆盖率、无依据内容、风险、矛盾、缺失条件分支、Gap 和测试数据。
 5. 展示每个 Eval action；可澄清项和缺失分支使用 `confirm-eval-actions` 保存用户说明，直接矛盾必须修订需求源，不能通过确认绕过。
 6. 所有 Eval action 通过门禁后，用户再次明确确认并审批 baseline。
-7. 编译 ExecutableCase；只补全知识中唯一可推导的隐含动作。
-8. 创建并绑定 SystemProfile，配置鉴权。
+7. 创建并绑定 SystemProfile，配置鉴权；宿主 Agent 用真实浏览器采集页面/训练证据并提交，URL 必须位于当前系统 allowlist，随后刷新 System Brain。
+8. 指定 `systemId` 编译 ExecutableCase；只补全唯一且有页面、流程或定位证据的动作，缺证据时创建 Gap。
 9. `bc_run mode=requirement-suite confirm=false` 预览，用户确认后执行。
-10. 用 `bc_review` 查看证据、Bug、Gap 和需求/观察冲突。
+10. 用 `bc_review` 查看证据、Bug、Gap、Requirement Eval 历史准确率和需求/观察冲突。
 
 ### 飞书需求接入
 
@@ -198,7 +206,7 @@ BRAIN_CREATOR_FEISHU_APP_SECRET=<app-secret>
   MOC.md
   requirements/<requirement-set-id>/{source.md,analysis.md,evaluation-confirmations.md}
   modules/<dynamic-module>/{analysis.md,rules.md,flows.md,data.md,cases.md}
-  systems/<system-id>/{expected.md,observed.md,conflicts.md}
+  systems/<system-id>/{brain.md,expected.md,observed.md,conflicts.md}
 ```
 
 可指向外部 Obsidian 目录：
@@ -273,14 +281,19 @@ The source checkout mode is for contributors. The repo-local plugin installation
 | Analyze a requirement document or link | `bc_configure target=knowledge-project`, then `bc_prepare` |
 | Review knowledge and coverage | `bc_status` and `bc_review` |
 | Confirm Requirement Eval actions | `bc_prepare action=confirm-eval-actions confirm=true` with a resolution note |
-| Approve and compile tests | `bc_prepare action=approve-baseline`, then `compile-cases` |
+| Approve the requirement baseline | `bc_prepare action=approve-baseline` |
 | Create and bind a real system | `bc_configure target=system`, then `bc_configure target=system-binding` |
+| Submit page/training evidence | `bc_prepare action=record-page-evidence` / `record-training-evidence` after host browser exploration |
+| Refresh system knowledge | `bc_prepare action=refresh-system-brain` |
+| Compile against real evidence | `bc_prepare action=compile-cases` with `systemId` |
 | Configure auth | `bc_configure target=auth` |
 | Wait for protected login | `bc_configure target=checkpoint` |
 | Preview and run approved requirement cases | `bc_run mode=requirement-suite` |
 | Run an existing case document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` |
 | Regress bugs | `bc_run mode=bug-regression` |
 | Review bugs and Gaps | `bc_review target="bug"`, `bc_review target="gap"` |
+| Review Requirement Eval history | `bc_review target=requirement-eval-accuracy` |
+| Review System Brain | `bc_review target=system-brain` with `systemId` |
 | Record an external blocker | `bc_report_gap` |
 | Show shortcuts | `/bc help` |
 
@@ -299,10 +312,17 @@ Brain Creator creates a BugReport only when evidence supports a business expecta
 3. Split the source into atomic clauses with `#clause-N` evidence anchors, then create typed knowledge and one traceable TestIntent per clause.
 4. Review clause coverage, unsupported claims, contradictions, missing branches, risks, Gaps, and TestDataProfiles.
 5. Present each Eval action. Confirm clarification and missing-branch actions with a durable resolution note; revise the source for blocked contradictions.
-6. After the Eval gate passes, approve explicitly and compile ExecutableCases.
-7. Bind a real system and verified auth.
-8. Preview and confirm `requirement-suite` execution.
-9. Review step evidence, BugReports, Gaps, and requirement-versus-observation conflicts.
+6. After the Eval gate passes, approve the requirement baseline explicitly.
+7. Bind a real system and verified auth, use the host browser to submit allowlisted page/training evidence, and refresh System Brain.
+8. Compile ExecutableCases with `systemId`; missing PageModel or LocatorPoint evidence blocks compilation with a Gap.
+9. Preview and confirm `requirement-suite` execution.
+10. Review step evidence, BugReports, Gaps, historical Requirement Eval accuracy, and requirement-versus-observation conflicts.
+
+### Requirement Eval And System Brain
+
+`npm run verify:requirement-eval` evaluates seven cross-domain golden samples, including complex Markdown rule tables, cross-module workflows, and permission matrices. `bc_review target=requirement-eval-accuracy` then estimates historical accuracy from traceable execution: passed evidence and business mismatches linked to BugReports validate the requirement expectation, unclassified semantic failures require review, and blocked or technical failures remain inconclusive.
+
+System Brain is a derived, system-isolated view over existing PageModel, LocatorPoint, ProbeResult, TrainingSession, ActionStep, and ApiFlow assets. `refresh-system-brain` writes `.brain-creator/knowledge/<project>/systems/<system-id>/brain.md` and updates observed/conflict layers without overwriting approved requirement expectations.
 
 ### Feishu
 

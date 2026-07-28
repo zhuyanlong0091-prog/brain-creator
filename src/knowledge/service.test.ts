@@ -161,6 +161,57 @@ describe("KnowledgeService", () => {
     expect(report).toContain(design.analysis.clauses[0].sourceRef);
   });
 
+  it("writes cross-module clauses into separate module knowledge files and edges", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    const project = await service.createProject({
+      name: "Recruiting Offer",
+      key: "recruiting-offer",
+      defaultLocale: "en-US"
+    });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "cross-module",
+        "Recruiter creates a hiring request. When the request is approved, the Offer module creates an offer."
+      )
+    });
+
+    const result = await service.generateTestDesign(ingested.requirementSet.id);
+
+    expect(result.testIntents.map((intent) => intent.module)).toEqual([
+      "Recruiting",
+      "Offer"
+    ]);
+    expect(
+      await readFile(
+        join(knowledgeDir, "recruiting-offer", "modules", "recruiting", "flows.md"),
+        "utf8"
+      )
+    ).toContain("Recruiter creates a hiring request");
+    expect(
+      await readFile(
+        join(knowledgeDir, "recruiting-offer", "modules", "offer", "flows.md"),
+        "utf8"
+      )
+    ).toContain("Offer module creates an offer");
+    const moduleNodes = repository.knowledgeNodes.filter(
+      (node) => node.requirementSetId === ingested.requirementSet.id && node.type === "module"
+    );
+    for (const moduleNode of moduleNodes) {
+      expect(
+        repository.knowledgeEdges.some(
+          (edge) =>
+            edge.fromNodeId === moduleNode.id &&
+            repository.knowledgeNodes.some(
+              (node) => node.id === edge.toNodeId && node.module === moduleNode.module
+            )
+        )
+      ).toBe(true);
+    }
+  });
+
   it("persists Eval actions and blocks approval until the user explicitly confirms them", async () => {
     const root = await tempDir();
     const dataFile = join(root, "assets.json");
@@ -538,6 +589,132 @@ describe("KnowledgeService", () => {
         "utf8"
       )
     ).toContain("Expected approved status but received draft");
+  });
+
+  it("estimates Requirement Eval accuracy from traceable historical execution outcomes", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({
+      name: "Historical Eval",
+      key: "historical-eval",
+      defaultLocale: "en-US"
+    });
+    repository.systemProfiles.push({
+      id: "system-history",
+      name: "Historical Eval",
+      environment: "test",
+      baseUrl: "https://history.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://history.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-history");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("history", "Users create a customer record.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+
+    const passCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const passEvidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-history",
+      executableCaseId: passCase.id,
+      testCaseId: "test-pass",
+      contextPackPath: "context/pass.json"
+    });
+    await service.completeExecutionEvidence(passEvidence.id, {
+      status: "passed",
+      chainRunId: "chain-pass",
+      actualResult: "Customer record created",
+      artifactPaths: []
+    });
+
+    const bugCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const bugEvidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-history",
+      executableCaseId: bugCase.id,
+      testCaseId: "test-bug",
+      contextPackPath: "context/bug.json"
+    });
+    await service.completeExecutionEvidence(bugEvidence.id, {
+      status: "failed",
+      chainRunId: "chain-bug",
+      actualResult: "Save returned an error",
+      artifactPaths: []
+    });
+    repository.bugReports.push({
+      id: "bug-history",
+      systemId: "system-history",
+      sourceId: bugCase.id,
+      caseNo: bugCase.id,
+      caseTitle: bugCase.title,
+      module: "Customer",
+      priority: "P0",
+      expectedResult: "Customer record is created",
+      actualResult: "Save returned an error",
+      reproductionSteps: [],
+      evidencePaths: [],
+      chainRunId: "chain-bug",
+      gapIds: [],
+      status: "open",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const disputedCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const disputedEvidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-history",
+      executableCaseId: disputedCase.id,
+      testCaseId: "test-disputed",
+      contextPackPath: "context/disputed.json"
+    });
+    await service.completeExecutionEvidence(disputedEvidence.id, {
+      status: "failed",
+      chainRunId: "chain-disputed",
+      actualResult: "Observed behavior contradicts the expected workflow",
+      artifactPaths: []
+    });
+
+    const blockedCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const blockedEvidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-history",
+      executableCaseId: blockedCase.id,
+      testCaseId: "test-blocked",
+      contextPackPath: "context/blocked.json"
+    });
+    await service.completeExecutionEvidence(blockedEvidence.id, {
+      status: "blocked",
+      actualResult: "Environment request failed",
+      artifactPaths: [],
+      networkFailures: ["GET /customers 503"]
+    });
+
+    expect(service.requirementEvalAccuracy(project.id)).toEqual(
+      expect.objectContaining({
+        totalEvidence: 4,
+        validated: 2,
+        contradicted: 1,
+        inconclusive: 1,
+        accuracyRate: 2 / 3,
+        systemConformanceRate: 1 / 2,
+        traceabilityRate: 1
+      })
+    );
+    expect(service.requirementEvalAccuracy(project.id).byRequirementSet).toEqual([
+      expect.objectContaining({
+        requirementSetId: ingested.requirementSet.id,
+        validated: 2,
+        contradicted: 1,
+        inconclusive: 1
+      })
+    ]);
   });
 });
 
