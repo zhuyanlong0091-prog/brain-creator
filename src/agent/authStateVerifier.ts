@@ -73,7 +73,7 @@ export const verifyStoredBrowserAuth: AuthStateVerifier = async (input) => {
   }
 };
 
-function browserExecutablePath() {
+export function browserExecutablePath() {
   const candidates = [
     process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
     process.platform === "win32"

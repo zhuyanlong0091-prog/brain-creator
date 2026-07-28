@@ -3,7 +3,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
 
 const tempDirs: string[] = [];
@@ -13,6 +13,125 @@ afterEach(async () => {
 });
 
 describe("Brain Creator requirement-first facade", () => {
+  it("runs bounded system exploration and exposes its progress through status and review", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json"),
+      systemExplorer: {
+        explore: vi.fn().mockResolvedValue({
+          pages: [
+            {
+              depth: 0,
+              evidence: {
+                title: "Orders",
+                finalUrl: "https://orders.example.test/orders",
+                domText: "Create Order",
+                screenshotPath: "evidence/orders.png",
+                interactiveElements: [
+                  {
+                    name: "Create Order",
+                    role: "link",
+                    text: "Create Order",
+                    selector: "[data-testid=create-order]"
+                  }
+                ],
+                consoleErrors: [],
+                networkFailures: [],
+                issues: []
+              },
+              links: [
+                {
+                  text: "Create Order",
+                  url: "https://orders.example.test/orders/new"
+                }
+              ]
+            },
+            {
+              depth: 1,
+              evidence: {
+                title: "Create Order",
+                finalUrl: "https://orders.example.test/orders/new",
+                domText: "Order Name",
+                screenshotPath: "evidence/order-new.png",
+                interactiveElements: [
+                  {
+                    name: "Order Name",
+                    role: "textbox",
+                    text: "Order Name",
+                    selector: "[name=orderName]"
+                  }
+                ],
+                consoleErrors: [],
+                networkFailures: [],
+                issues: []
+              },
+              links: []
+            }
+          ],
+          blockers: [],
+          warnings: [],
+          budgetExhausted: false
+        })
+      }
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Exploration Knowledge",
+      key: "exploration-knowledge",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Order Console",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://orders.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+
+    const explored = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "explore-system",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        startUrl: "https://orders.example.test/orders",
+        maxPages: 3,
+        maxDepth: 1,
+        maxDurationMs: 30_000
+      })
+    );
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+    const review = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "system-exploration",
+        knowledgeProjectId: project.id,
+        id: explored.exploration.id
+      })
+    );
+
+    expect(explored.exploration.status).toBe("completed");
+    expect(explored.brain.navigationEdges).toHaveLength(1);
+    expect(status.knowledge.explorations).toEqual(
+      expect.objectContaining({
+        total: 1,
+        byStatus: { completed: 1 }
+      })
+    );
+    expect(status.knowledge.systemBrains[0]).toEqual(
+      expect.objectContaining({
+        navigationEdges: 1,
+        latestExploration: expect.objectContaining({ status: "completed" })
+      })
+    );
+    expect(review.items).toEqual([
+      expect.objectContaining({ id: explored.exploration.id, status: "completed" })
+    ]);
+  });
+
   it("refreshes and reviews System Brain through facade tools", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
@@ -209,7 +328,7 @@ describe("Brain Creator requirement-first facade", () => {
     expect(prefixAttack.isError).toBe(true);
   });
 
-  it("recommends binding, System Brain refresh, evidence compilation, and execution in order", async () => {
+  it("recommends binding, System Brain exploration, evidence compilation, and execution in order", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
       workDir,
@@ -260,7 +379,7 @@ describe("Brain Creator requirement-first facade", () => {
           knowledgeProjectId: project.id
         })
       ).nextAction
-    ).toBe("refresh_system_brain");
+    ).toBe("explore_system");
 
     context.repository.pageModels.push({
       id: "page-next-action",

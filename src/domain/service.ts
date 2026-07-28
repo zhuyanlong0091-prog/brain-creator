@@ -21,6 +21,7 @@ import type {
   GeneratedCase,
   GlossaryTerm,
   LocatorPoint,
+  PageCaptureEvidence,
   PageModel,
   ProbeResult,
   RuleCheckResult,
@@ -35,22 +36,6 @@ import type {
 type PageCaptureAuth = {
   loginMethod: AuthProfile["loginMethod"];
   secrets: Record<string, string>;
-};
-
-type PageCaptureResult = {
-  title: string;
-  finalUrl: string;
-  domText: string;
-  screenshotPath: string;
-  interactiveElements: Array<{
-    name: string;
-    role: string;
-    text: string;
-    selector: string;
-  }>;
-  consoleErrors: string[];
-  networkFailures: string[];
-  issues: string[];
 };
 
 type CreateSystemProfileInput = {
@@ -94,7 +79,7 @@ type DiscoverPageInput = {
   domText: string;
   captureMode?: "manual" | "browser";
   targetUrl?: string;
-  browserCapture?: PageCaptureResult;
+  browserCapture?: PageCaptureEvidence;
 };
 
 type CompleteTrainingInput = {
@@ -466,6 +451,9 @@ export class BrainCreatorService {
       },
       assetCounts: {
         authProfiles: authProfiles.length,
+        systemExplorations: this.repository.systemExplorations.filter(
+          (item) => item.systemId === systemId
+        ).length,
         authCheckpoints: this.repository.authCheckpoints.filter((item) => item.systemId === systemId)
           .length,
         pageModels: pageModelIds.length,
@@ -1408,6 +1396,23 @@ export class BrainCreatorService {
         projectId: item.systemId,
         status: item.status
       }));
+    const systemExplorations = this.repository.systemExplorations
+      .filter(
+        (item) =>
+          inProject(item.systemId) &&
+          includes(
+            `${item.startUrl} ${item.status} ${item.warnings.join(" ")} ${item.navigationEdges
+              .map((edge) => `${edge.text} ${edge.fromUrl} ${edge.toUrl}`)
+              .join(" ")}`
+          )
+      )
+      .map<AssetSearchResult>((item) => ({
+        id: item.id,
+        type: "system-exploration",
+        label: `System exploration ${item.startUrl}`,
+        projectId: item.systemId,
+        status: item.status
+      }));
 
     return [
       ...systems,
@@ -1426,7 +1431,8 @@ export class BrainCreatorService {
       ...caseSources,
       ...caseSuites,
       ...caseSuiteRuns,
-      ...bugReports
+      ...bugReports,
+      ...systemExplorations
     ];
   }
 
@@ -1589,6 +1595,9 @@ export class BrainCreatorService {
       "system-profile": this.repository.systemProfiles.filter((item) => item.id === input.projectId),
       "auth-profile": this.repository.authProfiles.filter((item) => item.projectId === input.projectId),
       "auth-checkpoint": this.repository.authCheckpoints.filter(
+        (item) => item.systemId === input.projectId
+      ),
+      "system-exploration": this.repository.systemExplorations.filter(
         (item) => item.systemId === input.projectId
       ),
       "locator-point": this.repository.locatorPoints.filter((item) =>
@@ -1758,7 +1767,7 @@ function extractLocatorPoints(pageModelId: string, domText: string): LocatorPoin
 
 function locatorPointsFromCapture(
   pageModelId: string,
-  capture: PageCaptureResult
+  capture: PageCaptureEvidence
 ): LocatorPoint[] {
   return capture.interactiveElements.map((element) => ({
     id: id("locator"),

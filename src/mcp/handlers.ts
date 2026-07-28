@@ -28,6 +28,10 @@ import { FeishuOpenApiAdapter } from "../knowledge/feishuAdapter.js";
 import { normalizeHostSkillAnalysis } from "../knowledge/policies.js";
 import { buildContextPack } from "../knowledge/retriever.js";
 import {
+  SystemExplorationCoordinator,
+  type SystemExplorer
+} from "../knowledge/systemExplorer.js";
+import {
   commandRunnerAgentBridge,
   generatePlanDraft,
   preflightAgentBridge,
@@ -67,6 +71,7 @@ export type BrainCreatorMcpContext = {
   repository: JsonFileBrainCreatorRepository;
   service: BrainCreatorService;
   knowledgeService: KnowledgeService;
+  systemExploration: SystemExplorationCoordinator;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
@@ -92,6 +97,7 @@ type CreateContextInput = {
   authStateVerifier?: AuthStateVerifier;
   knowledgeDir?: string;
   feishuReader?: RequirementSourceReader;
+  systemExplorer?: SystemExplorer;
 };
 
 export function createBrainCreatorMcpContext(
@@ -101,13 +107,22 @@ export function createBrainCreatorMcpContext(
   const repository = new JsonFileBrainCreatorRepository(
     input.dataFilePath ?? resolveBrainCreatorDataFile(workDir)
   );
+  const service = new BrainCreatorService(repository);
+  const knowledgeService = new KnowledgeService(
+    repository,
+    input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir)
+  );
   return {
     repository,
-    service: new BrainCreatorService(repository),
-    knowledgeService: new KnowledgeService(
+    service,
+    knowledgeService,
+    systemExploration: new SystemExplorationCoordinator({
       repository,
-      input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir)
-    ),
+      service,
+      knowledgeService,
+      workDir,
+      explorer: input.systemExplorer
+    }),
     workDir,
     agentBridge:
       input.agentBridge ??
@@ -640,6 +655,19 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       };
     }
     return context.knowledgeService.approveRequirementSet(stringArg(input, "requirementSetId"));
+  }
+  if (action === "explore-system") {
+    return context.systemExploration.explore({
+      knowledgeProjectId: stringArg(input, "knowledgeProjectId"),
+      systemId: stringArg(input, "systemId"),
+      authProfileId: optionalStringArg(input, "authProfileId"),
+      startUrl: optionalStringArg(input, "startUrl"),
+      budget: {
+        maxPages: optionalNumberArg(input, "maxPages"),
+        maxDepth: optionalNumberArg(input, "maxDepth"),
+        maxDurationMs: optionalNumberArg(input, "maxDurationMs")
+      }
+    });
   }
   if (action === "record-observation") {
     return context.knowledgeService.recordSystemObservation({
@@ -1857,6 +1885,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   );
   const systemBrains = project.systemIds.map((systemId) => {
     const brain = context.knowledgeService.getSystemBrain(projectId, systemId);
+    const explorations = context.systemExploration.list(projectId, systemId);
     return {
       systemId,
       readiness: brain.readiness,
@@ -1864,9 +1893,20 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       workflows: brain.workflows.length,
       behaviorRules: brain.behaviorRules.length,
       apiFlows: brain.apiFlows.length,
+      navigationEdges: brain.navigationEdges.length,
+      latestExploration: explorations.at(-1),
       conflicts: brain.conflicts.length
     };
   });
+  const explorations = context.systemExploration.list(projectId);
+  const runningExplorations = explorations.filter((item) => item.status === "running");
+  const unresolvedExplorations = explorations.filter(
+    (item) =>
+      (item.status === "blocked" || item.status === "partial") &&
+      item.gapIds.some((gapId) =>
+        context.repository.gaps.some((gap) => gap.id === gapId && gap.status === "open")
+      )
+  );
   let nextAction = "generate_test_design";
   if (sources.length === 0) nextAction = "ingest_requirement";
   else if (blockedEvalActions.length > 0) nextAction = "revise_blocked_requirement";
@@ -1877,8 +1917,15 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     nextAction = project.systemIds.length > 0 ? "run_requirement_suite" : "bind_system";
   } else if (testIntents.some((item) => item.status === "approved")) {
     if (project.systemIds.length === 0) nextAction = "bind_system";
+    else if (runningExplorations.length > 0) nextAction = "review_system_exploration";
+    else if (
+      unresolvedExplorations.length > 0 &&
+      !systemBrains.some((brain) => brain.readiness.readyForCompilation)
+    ) {
+      nextAction = "resolve_system_exploration_gap";
+    }
     else if (!systemBrains.some((brain) => brain.readiness.readyForCompilation)) {
-      nextAction = "refresh_system_brain";
+      nextAction = "explore_system";
     } else {
       nextAction = "compile_cases";
     }
@@ -1909,6 +1956,13 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         byStatus: countBy(executionEvidence, (item) => item.status)
       },
       requirementEvalHistory: context.knowledgeService.requirementEvalAccuracy(projectId),
+      explorations: {
+        total: explorations.length,
+        byStatus: countBy(explorations, (item) => item.status),
+        running: runningExplorations,
+        unresolved: unresolvedExplorations,
+        recent: explorations.slice(-5)
+      },
       systemBrains,
       openGaps: gaps
     },
@@ -1977,6 +2031,14 @@ function knowledgeReview(
     return {
       project,
       brain: context.knowledgeService.getSystemBrain(projectId, idValue)
+    };
+  }
+  if (target === "system-exploration") {
+    return {
+      project,
+      items: context.systemExploration
+        .list(projectId)
+        .filter((item) => !idValue || item.id === idValue)
     };
   }
   if (target === "evidence") {
@@ -4244,6 +4306,7 @@ type KnowledgeReviewTarget =
   | "coverage"
   | "requirement-eval-accuracy"
   | "system-brain"
+  | "system-exploration"
   | "test-intent"
   | "executable-case"
   | "evidence";
@@ -4262,6 +4325,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "coverage",
       "requirement-eval-accuracy",
       "system-brain",
+      "system-exploration",
       "test-intent",
       "executable-case",
       "evidence"
@@ -4285,6 +4349,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "coverage",
     "requirement-eval-accuracy",
     "system-brain",
+    "system-exploration",
     "test-intent",
     "executable-case",
     "evidence"
@@ -4795,6 +4860,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "record-observation",
       "record-page-evidence",
       "record-training-evidence",
+      "explore-system",
       "refresh-system-brain"
     ].includes(value)
   ) {
@@ -4811,6 +4877,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "record-observation"
     | "record-page-evidence"
     | "record-training-evidence"
+    | "explore-system"
     | "refresh-system-brain";
 }
 

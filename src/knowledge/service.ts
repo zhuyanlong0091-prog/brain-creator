@@ -1320,6 +1320,7 @@ export class KnowledgeService {
         `- Locator evidence: ${brain.readiness.locatorEvidence}`,
         `- Workflow evidence: ${brain.readiness.workflowEvidence}`,
         `- API evidence: ${brain.readiness.apiEvidence}`,
+        `- Navigation evidence: ${brain.readiness.navigationEvidence}`,
         `- Ready for compilation: ${brain.readiness.readyForCompilation}`,
         "",
         "## Pages",
@@ -1335,6 +1336,14 @@ export class KnowledgeService {
           ? brain.workflows.map(
               (workflow) =>
                 `- ${workflow.pageName}: ${workflow.actionStepIds.length} actions, ${workflow.apiFlowIds.length} API flows [${workflow.sourceRefs.join(", ")}]`
+            )
+          : ["- None"]),
+        "",
+        "## Navigation Graph",
+        ...(brain.navigationEdges.length > 0
+          ? brain.navigationEdges.map(
+              (edge) =>
+                `- ${edge.text}: ${edge.fromUrl} -> ${edge.toUrl} [${edge.sourceRefs.join(", ")}]`
             )
           : ["- None"]),
         "",

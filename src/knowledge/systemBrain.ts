@@ -47,6 +47,16 @@ export type SystemBrainApiFlow = {
   sourceRefs: string[];
 };
 
+export type SystemBrainNavigationEdge = {
+  explorationId: string;
+  fromPageModelId: string;
+  toPageModelId?: string;
+  fromUrl: string;
+  toUrl: string;
+  text: string;
+  sourceRefs: string[];
+};
+
 export type SystemBrain = {
   knowledgeProjectId: string;
   systemId: string;
@@ -54,6 +64,7 @@ export type SystemBrain = {
   workflows: SystemBrainWorkflow[];
   behaviorRules: SystemBrainBehaviorRule[];
   apiFlows: SystemBrainApiFlow[];
+  navigationEdges: SystemBrainNavigationEdge[];
   observations: Array<{
     id: string;
     type: KnowledgeNodeType;
@@ -77,6 +88,7 @@ export type SystemBrain = {
     locatorEvidence: boolean;
     workflowEvidence: boolean;
     apiEvidence: boolean;
+    navigationEvidence: boolean;
     readyForCompilation: boolean;
   };
 };
@@ -182,6 +194,28 @@ export function buildSystemBrain(
     requests: flow.requests,
     sourceRefs: [`training-session:${flow.sessionId}`, `api-flow:${flow.id}`]
   }));
+  const navigationEdges = uniqueNavigationEdges(
+    repository.systemExplorations
+      .filter(
+        (exploration) =>
+          exploration.knowledgeProjectId === knowledgeProjectId &&
+          exploration.systemId === systemId &&
+          (exploration.status === "completed" || exploration.status === "partial")
+      )
+      .flatMap((exploration) =>
+        exploration.navigationEdges.map(
+          (edge): SystemBrainNavigationEdge => ({
+            explorationId: exploration.id,
+            ...edge,
+            sourceRefs: [
+              `system-exploration:${exploration.id}`,
+              `page-model:${edge.fromPageModelId}`,
+              ...(edge.toPageModelId ? [`page-model:${edge.toPageModelId}`] : [])
+            ]
+          })
+        )
+      )
+  );
   const observations = repository.knowledgeNodes
     .filter(
       (node) =>
@@ -207,6 +241,7 @@ export function buildSystemBrain(
     locatorEvidence: pages.some((page) => page.locatorCount > 0),
     workflowEvidence: workflows.some((workflow) => workflow.actionStepIds.length > 0),
     apiEvidence: normalizedApiFlows.length > 0,
+    navigationEvidence: navigationEdges.length > 0,
     readyForCompilation:
       pages.length > 0 && pages.some((page) => page.locatorCount > 0)
   };
@@ -218,6 +253,7 @@ export function buildSystemBrain(
     workflows,
     behaviorRules,
     apiFlows: normalizedApiFlows,
+    navigationEdges,
     observations,
     conflicts,
     readiness
@@ -261,6 +297,18 @@ export function systemObservationDrafts(brain: SystemBrain): SystemObservationDr
       module: pageModule(workflow.pageName),
       sourceRefs: workflow.sourceRefs,
       confidence: 0.95
+    });
+  }
+  for (const edge of brain.navigationEdges) {
+    const fromPage = brain.pages.find((page) => page.pageModelId === edge.fromPageModelId);
+    const toPage = brain.pages.find((page) => page.pageModelId === edge.toPageModelId);
+    drafts.push({
+      type: "workflow",
+      title: `${edge.text} navigation`,
+      content: `${edge.text} navigates from ${edge.fromUrl} to ${edge.toUrl}`,
+      module: pageModule(fromPage?.name ?? toPage?.name ?? "General"),
+      sourceRefs: edge.sourceRefs,
+      confidence: edge.toPageModelId ? 0.96 : 0.85
     });
   }
   for (const rule of brain.behaviorRules) {
@@ -435,4 +483,13 @@ function latestPageModels<T extends { route: string; version: number; updatedAt:
     }
   }
   return [...latest.values()];
+}
+
+function uniqueNavigationEdges(edges: SystemBrainNavigationEdge[]) {
+  const unique = new Map<string, SystemBrainNavigationEdge>();
+  for (const edge of edges) {
+    const key = `${edge.fromUrl}\u0000${edge.toUrl}\u0000${edge.text}`;
+    unique.set(key, edge);
+  }
+  return [...unique.values()];
 }

@@ -150,6 +150,7 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 | 确认 Requirement Eval 动作 | `bc_prepare action=confirm-eval-actions confirm=true`，必须提交 `confirmationNote` |
 | 审批需求基线 | `bc_prepare action=approve-baseline` |
 | 创建/绑定系统 | `bc_configure target=system` / `bc_configure target=system-binding` |
+| 自动探索真实系统 | `bc_prepare action=explore-system`，只读访问 allowlist 内链接并受页数、深度和时长预算约束 |
 | 提交页面/训练证据 | 宿主 Agent 浏览真实系统后使用 `bc_prepare action=record-page-evidence` / `record-training-evidence` |
 | 刷新系统知识 | `bc_prepare action=refresh-system-brain`，内部聚合页面建模和训练证据 |
 | 按系统编译 | `bc_prepare action=compile-cases` 并传入 `systemId` |
@@ -162,6 +163,7 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 | 查看 Bug/Gap/证据 | `bc_review target="bug"`、`bc_review target="gap"`，优先展示 `reviewMarkdown` |
 | 查看需求质量历史 | `bc_review target=requirement-eval-accuracy` |
 | 查看系统知识 | `bc_review target=system-brain` 并传入 `systemId` |
+| 查看系统探索记录 | `bc_review target=system-exploration` |
 | 记录外部阻塞 | `bc_report_gap` |
 | 快捷帮助 | `/bc help`（可选） |
 
@@ -181,10 +183,12 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 4. 展示条款覆盖率、无依据内容、风险、矛盾、缺失条件分支、Gap 和测试数据。
 5. 展示每个 Eval action；可澄清项和缺失分支使用 `confirm-eval-actions` 保存用户说明，直接矛盾必须修订需求源，不能通过确认绕过。
 6. 所有 Eval action 通过门禁后，用户再次明确确认并审批 baseline。
-7. 创建并绑定 SystemProfile，配置鉴权；宿主 Agent 用真实浏览器采集页面/训练证据并提交，URL 必须位于当前系统 allowlist，随后刷新 System Brain。
+7. 创建并绑定 SystemProfile，配置鉴权；优先调用 `bc_prepare action=explore-system` 自动发现 allowlist 内页面、交互元素和导航关系。需要菜单点击、级联操作或训练轨迹时，再由宿主 Agent 补充页面/训练证据。
 8. 指定 `systemId` 编译 ExecutableCase；只补全唯一且有页面、流程或定位证据的动作，缺证据时创建 Gap。
 9. `bc_run mode=requirement-suite confirm=false` 预览，用户确认后执行。
 10. 用 `bc_review` 查看证据、Bug、Gap、Requirement Eval 历史准确率和需求/观察冲突。
+
+系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。探索器不点击按钮、不提交表单，并过滤登出、删除、审批、发布等危险链接。SPA 菜单、弹窗、级联字段和真实业务流程仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
 
 ### 飞书需求接入
 
@@ -283,6 +287,7 @@ The source checkout mode is for contributors. The repo-local plugin installation
 | Confirm Requirement Eval actions | `bc_prepare action=confirm-eval-actions confirm=true` with a resolution note |
 | Approve the requirement baseline | `bc_prepare action=approve-baseline` |
 | Create and bind a real system | `bc_configure target=system`, then `bc_configure target=system-binding` |
+| Explore a real system | `bc_prepare action=explore-system` with bounded, read-only allowlisted navigation |
 | Submit page/training evidence | `bc_prepare action=record-page-evidence` / `record-training-evidence` after host browser exploration |
 | Refresh system knowledge | `bc_prepare action=refresh-system-brain` |
 | Compile against real evidence | `bc_prepare action=compile-cases` with `systemId` |
@@ -294,6 +299,7 @@ The source checkout mode is for contributors. The repo-local plugin installation
 | Review bugs and Gaps | `bc_review target="bug"`, `bc_review target="gap"` |
 | Review Requirement Eval history | `bc_review target=requirement-eval-accuracy` |
 | Review System Brain | `bc_review target=system-brain` with `systemId` |
+| Review exploration runs | `bc_review target=system-exploration` |
 | Record an external blocker | `bc_report_gap` |
 | Show shortcuts | `/bc help` |
 
@@ -313,16 +319,18 @@ Brain Creator creates a BugReport only when evidence supports a business expecta
 4. Review clause coverage, unsupported claims, contradictions, missing branches, risks, Gaps, and TestDataProfiles.
 5. Present each Eval action. Confirm clarification and missing-branch actions with a durable resolution note; revise the source for blocked contradictions.
 6. After the Eval gate passes, approve the requirement baseline explicitly.
-7. Bind a real system and verified auth, use the host browser to submit allowlisted page/training evidence, and refresh System Brain.
+7. Bind a real system and verified auth. Run `bc_prepare action=explore-system` to discover allowlisted pages, controls, and navigation links; use host-browser evidence only for interactive menus, cascades, and trained workflows that read-only link exploration cannot observe.
 8. Compile ExecutableCases with `systemId`; missing PageModel or LocatorPoint evidence blocks compilation with a Gap.
 9. Preview and confirm `requirement-suite` execution.
 10. Review step evidence, BugReports, Gaps, historical Requirement Eval accuracy, and requirement-versus-observation conflicts.
+
+System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. It does not click buttons or submit forms, and filters logout, delete, approval, and publish links. SPA menus, dialogs, cascades, and business workflows still require supplemental host-Agent page or training evidence.
 
 ### Requirement Eval And System Brain
 
 `npm run verify:requirement-eval` evaluates seven cross-domain golden samples, including complex Markdown rule tables, cross-module workflows, and permission matrices. `bc_review target=requirement-eval-accuracy` then estimates historical accuracy from traceable execution: passed evidence and business mismatches linked to BugReports validate the requirement expectation, unclassified semantic failures require review, and blocked or technical failures remain inconclusive.
 
-System Brain is a derived, system-isolated view over existing PageModel, LocatorPoint, ProbeResult, TrainingSession, ActionStep, and ApiFlow assets. `refresh-system-brain` writes `.brain-creator/knowledge/<project>/systems/<system-id>/brain.md` and updates observed/conflict layers without overwriting approved requirement expectations.
+System Brain is a derived, system-isolated view over PageModel, LocatorPoint, ProbeResult, SystemExploration, TrainingSession, ActionStep, and ApiFlow assets. `explore-system` performs a bounded breadth-first scan using Playwright: it only navigates HTTP(S) links inside the system allowlist, never submits forms, and stops on login, CAPTCHA, budget, or scope boundaries. `refresh-system-brain` writes `.brain-creator/knowledge/<project>/systems/<system-id>/brain.md`, including the navigation graph, while preserving separate expected, observed, and conflict layers.
 
 ### Feishu
 
