@@ -121,13 +121,14 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting or refreshing sources, generating atomic source-backed clauses and test intents with coverage Eval, approving a baseline, and compiling executable cases.",
+      "Requirement-first facade for ingesting or refreshing sources, generating atomic source-backed clauses and coverage Eval, explicitly confirming Eval actions, approving a baseline, and compiling executable cases.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
         "refresh-requirement",
         "generate-analysis",
         "generate-test-design",
+        "confirm-eval-actions",
         "approve-baseline",
         "compile-cases",
         "record-observation"
@@ -135,6 +136,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       knowledgeProjectId: z.string().optional(),
       requirementSetId: z.string().optional(),
       testIntentId: z.string().optional(),
+      actionIds: z.array(z.string()).default([]),
+      confirmationNote: z.string().optional(),
       systemId: z.string().optional(),
       observationType: z.enum([
         "module", "actor", "object", "field", "rule", "workflow", "state", "permission",

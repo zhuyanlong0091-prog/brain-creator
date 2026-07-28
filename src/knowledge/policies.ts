@@ -363,10 +363,10 @@ function splitRequirementClauses(
 
 function classifyClause(text: string): KnowledgeNodeType[] {
   const types = new Set<KnowledgeNodeType>();
-  if (matches(text, /create|new|fill|submit|approve|reject|navigate|select|click|save|\u65b0\u5efa|\u521b\u5efa|\u586b\u5199|\u63d0\u4ea4|\u5ba1\u6279|\u9a73\u56de|\u8fdb\u5165|\u9009\u62e9|\u70b9\u51fb|\u4fdd\u5b58/i)) {
+  if (matches(text, /create|new|fill|submit|approve|reject|navigate|select|click|save|\u65b0\u5efa|\u521b\u5efa|\u586b\u5199|\u63d0\u4ea4|\u5ba1\u6279|\u9a73\u56de|\u8fdb\u5165|\u9009\u62e9|\u70b9\u51fb|\u4fdd\u5b58|\u5207\u6362|\u914d\u7f6e|\u6821\u9a8c/i)) {
     types.add("workflow");
   }
-  if (matches(text, /require|must|above|below|only|cannot|\bif\b|\bwhen\b|\u8d85\u8fc7|\u4f4e\u4e8e|\u5fc5\u987b|\u4ec5|\u4e0d\u5141\u8bb8|\u9009\u62e9.+\u540e|\u5982\u679c|\u5f53.+\u65f6|\u624d\u4f1a/i)) {
+  if (matches(text, /require|must|above|below|only|cannot|\bif\b|\bwhen\b|\u8d85\u8fc7|\u4f4e\u4e8e|\u5fc5\u987b|\u4ec5|\u4e0d\u5141\u8bb8|\u9009\u62e9.+\u540e|\u5207\u6362.+\u540e|\u5982\u679c|\u5f53.+\u65f6|\u672a\u547d\u4e2d|\u914d\u7f6e\u4e3a|\u9ed8\u8ba4\u503c|\u4f18\u5148\u7ea7|\u91cd\u590d\u6027|\u624d\u4f1a/i)) {
     types.add("rule");
   }
   if (matches(text, /status|state|draft|approved|enabled|disabled|\u72b6\u6001|\u8349\u7a3f|\u5df2\u5ba1\u6279|\u542f\u7528|\u505c\u7528|\u53d8\u4e3a/i)) {
@@ -378,13 +378,13 @@ function classifyClause(text: string): KnowledgeNodeType[] {
   if (matches(text, /\bmay\b|\bcan\b|permission|role|only .+ can|\u53ef\u4ee5|\u80fd\u591f|\u6743\u9650|\u89d2\u8272|\u4ec5.+\u53ef/i)) {
     types.add("permission");
   }
-  if (matches(text, /field|form|input|select|name|type|amount|visible|hidden|editable|\u5b57\u6bb5|\u8868\u5355|\u8f93\u5165|\u4e0b\u62c9|\u59d3\u540d|\u7c7b\u578b|\u91d1\u989d|\u663e\u793a|\u9690\u85cf|\u53ef\u7f16\u8f91/i)) {
+  if (matches(text, /field|form|input|select|name|type|amount|visible|hidden|editable|default value|\u5b57\u6bb5|\u8868\u5355|\u8f93\u5165|\u4e0b\u62c9|\u59d3\u540d|\u7c7b\u578b|\u91d1\u989d|\u663e\u793a|\u9690\u85cf|\u53ef\u7f16\u8f91|\u9ed8\u8ba4\u503c/i)) {
     types.add("field");
   }
   if (matches(text, /api|webhook|integration|sync|third party|\u540c\u6b65|\u63a5\u53e3|\u7b2c\u4e09\u65b9/i)) {
     types.add("integration");
   }
-  if (matches(text, /\d|length|max(?:imum)?|min(?:imum)?|required|empty|unique|enum|multi-select|\u957f\u5ea6|\u6700\u5927|\u6700\u5c0f|\u5fc5\u586b|\u7a7a\u503c|\u552f\u4e00|\u679a\u4e3e|\u591a\u9009|\u8303\u56f4/i)) {
+  if (matches(text, /\d|length|max(?:imum)?|min(?:imum)?|required|empty|unique|enum|multi-select|default value|\u957f\u5ea6|\u6700\u5927|\u6700\u5c0f|\u5fc5\u586b|\u7a7a\u503c|\u4e3a\u7a7a|\u9ed8\u8ba4\u503c|\u552f\u4e00|\u679a\u4e3e|\u591a\u9009|\u8303\u56f4/i)) {
     types.add("data-constraint");
   }
   if (matches(text, /order|record|request|contract|invoice|form|\u8ba2\u5355|\u8bb0\u5f55|\u9700\u6c42|\u5408\u540c|\u53d1\u7968|\u8868\u5355/i)) {
@@ -416,7 +416,7 @@ function findMissingBranches(clauses: RequirementClause[]) {
   return clauses
     .filter(
       (clause) =>
-        matches(clause.text, /\bif\b|\bwhen\b|\u5982\u679c|\u5f53.+\u65f6|\u9009\u62e9.+\u540e/i) &&
+        matches(clause.text, /\bif\b|\bwhen\b|\u5982\u679c|\u5f53.+\u65f6|\u9009\u62e9.+\u540e|\u5207\u6362.+\u540e|\u542f\u7528.+\u65f6/i) &&
         !matches(clause.text, /\belse\b|otherwise|\u5426\u5219|\u672a\u547d\u4e2d|\u4e0d\u6ee1\u8db3/i)
     )
     .map((clause) => `Missing alternate branch: ${clause.text}`);

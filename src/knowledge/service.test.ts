@@ -114,6 +114,12 @@ describe("KnowledgeService", () => {
       "Requirement baseline must be approved"
     );
 
+    await service.confirmEvaluationActions({
+      requirementSetId: ingested.requirementSet.id,
+      actionIds: design.evaluationGate.actions.map((action) => action.id),
+      note: "When the replacement type is not selected, the replacement employee field stays hidden.",
+      confirm: true
+    });
     service.approveRequirementSet(ingested.requirementSet.id);
     const compiled = service.compileExecutableCases(design.testIntents[0].id);
 
@@ -155,6 +161,91 @@ describe("KnowledgeService", () => {
     expect(report).toContain(design.analysis.clauses[0].sourceRef);
   });
 
+  it("persists Eval actions and blocks approval until the user explicitly confirms them", async () => {
+    const root = await tempDir();
+    const dataFile = join(root, "assets.json");
+    const knowledgeDir = join(root, "knowledge");
+    const first = new KnowledgeService(new JsonFileBrainCreatorRepository(dataFile), knowledgeDir);
+    const project = await first.createProject({
+      name: "Order Workflow",
+      key: "order-eval-gate",
+      defaultLocale: "en-US"
+    });
+    const ingested = await first.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "order-eval-gate-v1",
+        "When the manager approves the order, status changes from draft to approved."
+      )
+    });
+
+    const design = await first.generateTestDesign(ingested.requirementSet.id);
+    const pendingAction = design.evaluationGate.actions[0];
+
+    expect(design.evaluationGate).toEqual(
+      expect.objectContaining({
+        status: "needs-confirmation",
+        verdict: "needs-user",
+        actions: [
+          expect.objectContaining({
+            kind: "missing-branch",
+            status: "pending",
+            sourceRefs: [expect.stringContaining("#clause-1")]
+          })
+        ]
+      })
+    );
+    expect(() => first.approveRequirementSet(ingested.requirementSet.id)).toThrow(
+      "Requirement Eval actions must be confirmed before approval"
+    );
+
+    const restored = new KnowledgeService(
+      new JsonFileBrainCreatorRepository(dataFile),
+      knowledgeDir
+    );
+    expect(restored.listRequirementSets(project.id)[0].evaluationGate?.actions[0].status).toBe("pending");
+    await expect(
+      restored.confirmEvaluationActions({
+        requirementSetId: ingested.requirementSet.id,
+        actionIds: [pendingAction.id],
+        note: "If approval does not occur, the order remains in draft.",
+        confirm: false
+      })
+    ).rejects.toThrow("Explicit confirmation is required");
+
+    const confirmed = await restored.confirmEvaluationActions({
+      requirementSetId: ingested.requirementSet.id,
+      actionIds: [pendingAction.id],
+      note: "If approval does not occur, the order remains in draft.",
+      confirm: true
+    });
+    const confirmationReport = await readFile(
+      join(
+        knowledgeDir,
+        "order-eval-gate",
+        "requirements",
+        ingested.requirementSet.id,
+        "evaluation-confirmations.md"
+      ),
+      "utf8"
+    );
+
+    expect(confirmed.evaluationGate.status).toBe("confirmed");
+    expect(confirmed.evaluationGate.actions[0]).toEqual(
+      expect.objectContaining({
+        status: "confirmed",
+        confirmationNote: "If approval does not occur, the order remains in draft.",
+        confirmedAt: expect.any(String)
+      })
+    );
+    expect(confirmationReport).toContain("If approval does not occur");
+    expect(restored.approveRequirementSet(ingested.requirementSet.id).status).toBe("approved");
+    const compiled = restored.compileExecutableCases(design.testIntents[0].id).executableCase;
+    expect(compiled.steps.every((step) =>
+      step.sourceRefs.some((sourceRef) => sourceRef.includes("#eval-action-"))
+    )).toBe(true);
+  });
+
   it("creates a gap instead of guessing when an implicit workflow has multiple paths", async () => {
     const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), await tempDir());
     const project = await service.createProject({ name: "Contracts", key: "contracts", defaultLocale: "zh-CN" });
@@ -187,6 +278,12 @@ describe("KnowledgeService", () => {
       )
     });
     const design = await service.generateTestDesign(ingested.requirementSet.id);
+    await service.confirmEvaluationActions({
+      requirementSetId: ingested.requirementSet.id,
+      actionIds: design.evaluationGate.actions.map((action) => action.id),
+      note: "未选择离职替补时，替补人员字段保持隐藏。",
+      confirm: true
+    });
     service.approveRequirementSet(ingested.requirementSet.id);
 
     const compiled = service.compileExecutableCases(design.testIntents[0].id);
@@ -264,9 +361,31 @@ describe("KnowledgeService", () => {
 
     expect(design.evaluation.verdict).toBe("needs-user");
     expect(design.gaps).toEqual([expect.objectContaining({ sourceType: "requirement-clarification" })]);
-    expect(() => service.approveRequirementSet(ingested.requirementSet.id)).toThrow(
-      "Requirement clarification gaps must be resolved"
+    expect(design.evaluationGate.actions[0]).toEqual(
+      expect.objectContaining({
+        kind: "clarification",
+        status: "pending",
+        gapIds: [design.gaps[0].id]
+      })
     );
+    expect(() => service.approveRequirementSet(ingested.requirementSet.id)).toThrow(
+      "Requirement Eval actions must be confirmed"
+    );
+    const confirmation = await service.confirmEvaluationActions({
+      requirementSetId: ingested.requirementSet.id,
+      actionIds: [design.evaluationGate.actions[0].id],
+      note: "The invoice approval threshold is 1000.",
+      confirm: true
+    });
+
+    expect(design.gaps[0].status).toBe("resolved");
+    expect(confirmation.evaluationGate.actions[0].resolutionNodeId).toEqual(expect.any(String));
+    expect(
+      repository.knowledgeNodes.find(
+        (node) => node.id === confirmation.evaluationGate.actions[0].resolutionNodeId
+      )
+    ).toEqual(expect.objectContaining({ content: "The invoice approval threshold is 1000." }));
+    expect(service.approveRequirementSet(ingested.requirementSet.id).status).toBe("approved");
   });
 
   it("blocks baseline approval when requirement clauses contradict each other", async () => {
@@ -291,9 +410,23 @@ describe("KnowledgeService", () => {
     expect(design.gaps).toEqual([
       expect.objectContaining({ sourceType: "requirement-conflict", status: "open" })
     ]);
-    expect(() => service.approveRequirementSet(ingested.requirementSet.id)).toThrow(
-      "Requirement conflict gaps must be resolved"
+    expect(design.evaluationGate).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        actions: [expect.objectContaining({ kind: "contradiction", status: "blocked" })]
+      })
     );
+    expect(() => service.approveRequirementSet(ingested.requirementSet.id)).toThrow(
+      "Blocked Requirement Eval output cannot be approved"
+    );
+    await expect(
+      service.confirmEvaluationActions({
+        requirementSetId: ingested.requirementSet.id,
+        actionIds: [design.evaluationGate.actions[0].id],
+        note: "The field should be visible.",
+        confirm: true
+      })
+    ).rejects.toThrow("Blocked Requirement Eval actions cannot be confirmed");
   });
 
   it("keeps approved expectations separate from conflicting system observations", async () => {
