@@ -123,6 +123,38 @@ describe("KnowledgeService", () => {
     expect(compiled.executableCase.steps.every((step) => step.sourceRefs.length > 0)).toBe(true);
   });
 
+  it("persists atomic test intents and a traceable requirement evaluation report", async () => {
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), knowledgeDir);
+    const project = await service.createProject({
+      name: "Order Approval",
+      key: "order-coverage",
+      defaultLocale: "en-US"
+    });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "order-coverage-v1",
+        "Buyer creates an order. Orders above 1000 require manager approval. Status changes from draft to approved. Finance users may reject the order."
+      )
+    });
+
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    const report = await readFile(
+      join(knowledgeDir, "order-coverage", "requirements", ingested.requirementSet.id, "analysis.md"),
+      "utf8"
+    );
+
+    expect(design.testIntents).toHaveLength(4);
+    expect(design.evaluation.coverage).toEqual(
+      expect.objectContaining({ totalClauses: 4, coveredClauses: 4, coverageRate: 1 })
+    );
+    expect(report).toContain("## Requirement Clauses");
+    expect(report).toContain("## Evaluation");
+    expect(report).toContain("Coverage: 4/4 (100%)");
+    expect(report).toContain(design.analysis.clauses[0].sourceRef);
+  });
+
   it("creates a gap instead of guessing when an implicit workflow has multiple paths", async () => {
     const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), await tempDir());
     const project = await service.createProject({ name: "Contracts", key: "contracts", defaultLocale: "zh-CN" });
@@ -234,6 +266,33 @@ describe("KnowledgeService", () => {
     expect(design.gaps).toEqual([expect.objectContaining({ sourceType: "requirement-clarification" })]);
     expect(() => service.approveRequirementSet(ingested.requirementSet.id)).toThrow(
       "Requirement clarification gaps must be resolved"
+    );
+  });
+
+  it("blocks baseline approval when requirement clauses contradict each other", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({
+      name: "Approval Form",
+      key: "approval-conflict",
+      defaultLocale: "en-US"
+    });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "approval-conflict-v1",
+        "The approval field is visible. The approval field is not visible."
+      )
+    });
+
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+
+    expect(design.evaluation.verdict).toBe("needs-user");
+    expect(design.gaps).toEqual([
+      expect.objectContaining({ sourceType: "requirement-conflict", status: "open" })
+    ]);
+    expect(() => service.approveRequirementSet(ingested.requirementSet.id)).toThrow(
+      "Requirement conflict gaps must be resolved"
     );
   });
 

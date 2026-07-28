@@ -38,6 +38,8 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
 - 内置 `RequirementAnalysisPolicy` 与 `TestDesignPolicy`，无需额外安装 Skill。
 - 可选复用宿主的 `RequirementAnalysis.skill`、`TestCaseDesign.skill`，但输出仍须经过 schema、Eval、来源追踪和审批。
 - 动态知识节点：模块、角色、对象、字段、规则、流程、状态、权限、集成、数据约束、术语和需求。
+- 需求会拆成带 `#clause-N` 来源锚点的原子条款，每条条款分别生成可追踪的 TestIntent，不再用一条宽泛用例覆盖整篇文档。
+- Requirement Eval 会输出条款覆盖率、无依据内容、直接矛盾、缺失条件分支和所需人工动作；矛盾未解决时禁止审批。
 - 需求 hash 幂等、版本修订、影响节点、受影响回归范围和旧版本追溯。
 - TestIntent、TestDataProfile、ExecutableCase、隐含唯一动作补全与歧义 Gap。
 - 多系统绑定、鉴权、AuthCheckpoint、Claude/Codex/host-agent Bridge。
@@ -163,9 +165,9 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 
 1. 创建 `KnowledgeProject`。
 2. 用 `bc_prepare` 导入需求来源。
-3. 生成需求分析、知识节点、TestIntent 和 TestDataProfile。
-4. 展示风险、待澄清 Gap、覆盖和测试数据。
-5. 用户明确确认后审批 baseline。
+3. 将需求拆成原子条款，为每条条款生成来源可追踪的知识节点、TestIntent 和 TestDataProfile。
+4. 展示条款覆盖率、无依据内容、风险、矛盾、缺失条件分支、Gap 和测试数据。
+5. 解决待澄清项与需求矛盾，确认 Eval 所需动作；用户明确确认后审批 baseline。
 6. 编译 ExecutableCase；只补全知识中唯一可推导的隐含动作。
 7. 创建并绑定 SystemProfile，配置鉴权。
 8. `bc_run mode=requirement-suite confirm=false` 预览，用户确认后执行。
@@ -285,9 +287,9 @@ Brain Creator creates a BugReport only when evidence supports a business expecta
 
 1. Create a knowledge project without requiring a runtime system.
 2. Ingest a local document, Feishu link, Web page, or Obsidian reference.
-3. Run builtin requirement analysis and test design, or normalize optional host Skill output.
-4. Review source traceability, coverage, risks, Gaps, TestIntents, and TestDataProfiles.
-5. Approve explicitly and compile ExecutableCases.
+3. Split the source into atomic clauses with `#clause-N` evidence anchors, then create typed knowledge and one traceable TestIntent per clause.
+4. Review clause coverage, unsupported claims, contradictions, missing branches, risks, Gaps, and TestDataProfiles.
+5. Resolve clarification and conflict Gaps, confirm Eval actions, then approve explicitly and compile ExecutableCases.
 6. Bind a real system and verified auth.
 7. Preview and confirm `requirement-suite` execution.
 8. Review step evidence, BugReports, Gaps, and requirement-versus-observation conflicts.

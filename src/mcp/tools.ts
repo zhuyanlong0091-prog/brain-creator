@@ -121,7 +121,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting or refreshing requirement sources, generating analysis and test design, approving a baseline, and compiling executable cases.",
+      "Requirement-first facade for ingesting or refreshing sources, generating atomic source-backed clauses and test intents with coverage Eval, approving a baseline, and compiling executable cases.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
