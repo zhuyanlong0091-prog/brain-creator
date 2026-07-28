@@ -60,6 +60,11 @@ describe("Brain Creator requirement-first facade", () => {
 
     expect(ingested.requirementSet.status).toBe("draft");
     expect(designed.evaluation.verdict).toBe("pass");
+    expect(designed.analysis.clauses).toHaveLength(2);
+    expect(designed.testIntents).toHaveLength(2);
+    expect(designed.evaluation.coverage).toEqual(
+      expect.objectContaining({ totalClauses: 2, coveredClauses: 2, coverageRate: 1 })
+    );
     expect(compiled.executableCase.status).toBe("ready");
   });
 

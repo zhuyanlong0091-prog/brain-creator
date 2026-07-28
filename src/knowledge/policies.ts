@@ -1,6 +1,7 @@
 import { id } from "../shared/id.js";
 import type {
   KnowledgeNode,
+  KnowledgeNodeType,
   TestDataProfile,
   TestDesignTechnique,
   TestIntent
@@ -8,13 +9,22 @@ import type {
 
 export const REQUIREMENT_ANALYSIS_POLICY = {
   id: "brain-creator.requirement-analysis",
-  version: "1.0.0"
+  version: "2.0.0"
 } as const;
 
 export const TEST_DESIGN_POLICY = {
   id: "brain-creator.test-design",
-  version: "1.0.0"
+  version: "2.0.0"
 } as const;
+
+export type RequirementClause = {
+  id: string;
+  index: number;
+  text: string;
+  sourceRef: string;
+  module: string;
+  nodeTypes: KnowledgeNodeType[];
+};
 
 export type RequirementAnalysis = {
   requirementSetId: string;
@@ -22,9 +32,28 @@ export type RequirementAnalysis = {
   policyVersion: string;
   provider: "builtin" | "host-skill";
   module: string;
+  clauses: RequirementClause[];
   nodes: Array<Omit<KnowledgeNode, "id" | "knowledgeProjectId" | "createdAt" | "updatedAt">>;
   openQuestions: string[];
   risks: string[];
+  contradictions: string[];
+  missingBranches: string[];
+};
+
+export type RequirementPolicyEvaluation = {
+  verdict: "pass" | "needs-user" | "blocked";
+  score: number;
+  reasons: string[];
+  requiredActions: string[];
+  coverage: {
+    totalClauses: number;
+    coveredClauses: number;
+    coverageRate: number;
+    uncoveredSourceRefs: string[];
+  };
+  contradictions: string[];
+  missingBranches: string[];
+  unsupportedClaims: string[];
 };
 
 export function analyzeRequirement(input: {
@@ -35,50 +64,56 @@ export function analyzeRequirement(input: {
   provider?: RequirementAnalysis["provider"];
 }): RequirementAnalysis {
   const module = inferModule(input.title, input.content);
-  const base = {
+  const clauses = splitRequirementClauses(input.content, input.sourceRef, input.requirementSetId, module);
+  const policyMetadata = {
     requirementSetId: input.requirementSetId,
     module,
-    sourceRefs: [input.sourceRef],
-    origin: "derived" as const,
-    confidence: 0.8,
     status: "draft" as const,
     policyId: REQUIREMENT_ANALYSIS_POLICY.id,
     policyVersion: REQUIREMENT_ANALYSIS_POLICY.version
   };
   const nodes: RequirementAnalysis["nodes"] = [
-    { ...base, type: "module", title: module, content: `Module inferred from ${input.title}` },
-    { ...base, type: "requirement", title: input.title, content: input.content }
+    {
+      ...policyMetadata,
+      type: "module",
+      title: module,
+      content: `Module inferred from ${input.title}`,
+      sourceRefs: clauses.map((clause) => clause.sourceRef),
+      origin: "derived",
+      confidence: 0.8
+    }
   ];
 
-  if (matches(input.content, /create|new|fill|submit|approve|reject|\u65b0\u5efa|\u586b\u5199|\u63d0\u4ea4|\u5ba1\u6279|\u9a73\u56de|\u8fdb\u5165/i)) {
-    nodes.push({ ...base, type: "workflow", title: `${module} workflow`, content: input.content });
-  }
-  if (matches(input.content, /require|must|above|below|\u8d85\u8fc7|\u4f4e\u4e8e|\u5fc5\u987b|\u9009\u62e9.+\u540e|\u5982\u679c|\u624d\u4f1a/i)) {
-    nodes.push({ ...base, type: "rule", title: `${module} business rule`, content: input.content });
-  }
-  if (matches(input.content, /status|state|draft|approved|\u72b6\u6001|\u8349\u7a3f|\u5df2\u5ba1\u6279|\u53d8\u4e3a/i)) {
-    nodes.push({ ...base, type: "state", title: `${module} state model`, content: input.content });
-  }
-  if (matches(input.content, /role|user|manager|finance|\u6743\u9650|\u89d2\u8272|\u7528\u6237|\u7ecf\u7406|\u8d22\u52a1/i)) {
-    nodes.push({ ...base, type: "actor", title: `${module} actors`, content: input.content });
-    nodes.push({ ...base, type: "permission", title: `${module} permissions`, content: input.content });
-  }
-  if (matches(input.content, /field|form|amount|\u5b57\u6bb5|\u8868\u5355|\u91d1\u989d|\u59d3\u540d|\u7c7b\u578b/i)) {
-    nodes.push({ ...base, type: "field", title: `${module} fields`, content: input.content });
-  }
-  if (matches(input.content, /api|webhook|integration|\u540c\u6b65|\u63a5\u53e3|\u7b2c\u4e09\u65b9/i)) {
-    nodes.push({ ...base, type: "integration", title: `${module} integration`, content: input.content });
+  for (const clause of clauses) {
+    nodes.push({
+      ...policyMetadata,
+      type: "requirement",
+      title: `${input.title} ${clause.index}`,
+      content: clause.text,
+      sourceRefs: [clause.sourceRef],
+      origin: "source",
+      confidence: 1
+    });
+    for (const type of clause.nodeTypes) {
+      nodes.push({
+        ...policyMetadata,
+        type,
+        title: `${module} ${nodeTypeLabel(type)}: ${shortText(clause.text)}`,
+        content: clause.text,
+        sourceRefs: [clause.sourceRef],
+        origin: "derived",
+        confidence: 0.85
+      });
+    }
   }
 
-  const openQuestions = sentenceMatches(
-    input.content,
-    /not specified|unspecified|\u5f85\u786e\u8ba4|\u672a\u660e\u786e|\u672a\u77e5/i
-  );
+  const openQuestions = clauses
+    .filter((clause) => matches(clause.text, /not specified|unspecified|\u5f85\u786e\u8ba4|\u672a\u660e\u786e|\u672a\u77e5/i))
+    .map((clause) => clause.text);
   const risks = [
-    ...sentenceMatches(
-      input.content,
-      /permission|amount|payment|approval|\u6743\u9650|\u91d1\u989d|\u652f\u4ed8|\u5ba1\u6279/i
-    ).map((value) => `Business risk: ${value}`),
+    ...clauses
+      .filter((clause) => matches(clause.text, /permission|amount|payment|approval|\u6743\u9650|\u91d1\u989d|\u652f\u4ed8|\u5ba1\u6279/i))
+      .map((clause) => `Business risk: ${clause.text}`),
     ...openQuestions.map((value) => `Ambiguity risk: ${value}`)
   ];
 
@@ -88,9 +123,12 @@ export function analyzeRequirement(input: {
     policyVersion: REQUIREMENT_ANALYSIS_POLICY.version,
     provider: input.provider ?? "builtin",
     module,
+    clauses,
     nodes,
     openQuestions,
-    risks
+    risks,
+    contradictions: findContradictions(clauses),
+    missingBranches: findMissingBranches(clauses)
   };
 }
 
@@ -98,78 +136,142 @@ export function designTests(input: {
   knowledgeProjectId: string;
   analysis: RequirementAnalysis;
 }) {
-  const content = input.analysis.nodes.map((node) => node.content).join("\n");
-  const techniques = new Set<TestDesignTechnique>(["scenario", "error-guessing"]);
-  if (matches(content, /above|below|between|\u8d85\u8fc7|\u4f4e\u4e8e|\u8303\u56f4|\u957f\u5ea6|\u91d1\u989d/i)) techniques.add("boundary-value");
-  if (matches(content, /status|state|draft|approved|\u72b6\u6001|\u8349\u7a3f|\u53d8\u4e3a/i)) techniques.add("state-transition");
-  if (matches(content, /if|when|\u9009\u62e9.+\u540e|\u6761\u4ef6|\u5426\u5219/i)) techniques.add("decision-table");
-  if (matches(content, /field|form|input|\u5b57\u6bb5|\u8868\u5355|\u8f93\u5165/i)) techniques.add("equivalence-partitioning");
-
   const now = new Date().toISOString();
-  const requirementRefs = input.analysis.nodes
-    .filter((node) => node.type === "requirement")
-    .flatMap((node) => node.sourceRefs);
-  const intent: TestIntent = {
-    id: id("intent"),
-    knowledgeProjectId: input.knowledgeProjectId,
-    requirementSetId: input.analysis.requirementSetId,
-    title: `${input.analysis.module} requirement coverage`,
-    module: input.analysis.module,
-    priority: "P0",
-    objective: content,
-    preconditions: ["The requirement baseline is approved", "The target environment is available"],
-    expectedResults: ["The system behavior matches the approved requirement"],
-    requirementRefs,
-    knowledgeNodeRefs: input.analysis.nodes.map((node) => `${node.type}:${node.title}`),
-    techniques: [...techniques],
-    status: "draft",
-    createdAt: now,
-    updatedAt: now
-  };
-  const needsData =
-    techniques.has("boundary-value") ||
-    techniques.has("equivalence-partitioning") ||
-    matches(content, /field|form|amount|\u5b57\u6bb5|\u8868\u5355|\u91d1\u989d|\u8f93\u5165/i);
-  const dataProfiles: TestDataProfile[] = needsData
-    ? [
-        {
-          id: id("data"),
-          knowledgeProjectId: input.knowledgeProjectId,
-          requirementSetId: input.analysis.requirementSetId,
-          name: `${input.analysis.module} generated data`,
-          field: "requirement-input",
-          strategy: "generated",
-          constraints: [...techniques].map((technique) => `cover:${technique}`),
-          seed: input.analysis.requirementSetId,
-          sourceRefs: requirementRefs,
-          createdAt: now
-        }
-      ]
-    : [];
+  const allTechniques = new Set<TestDesignTechnique>();
+  const testIntents = input.analysis.clauses.map((clause): TestIntent => {
+    const techniques = techniquesForClause(clause);
+    techniques.forEach((technique) => allTechniques.add(technique));
+    const relatedNodes = input.analysis.nodes.filter(
+      (node) => node.sourceRefs.includes(clause.sourceRef) && node.type !== "module"
+    );
+
+    return {
+      id: id("intent"),
+      knowledgeProjectId: input.knowledgeProjectId,
+      requirementSetId: input.analysis.requirementSetId,
+      title: `${input.analysis.module}: ${shortText(clause.text)}`,
+      module: input.analysis.module,
+      priority: priorityForClause(clause),
+      objective: clause.text,
+      preconditions: ["The requirement baseline is approved", "The target environment is available"],
+      expectedResults: [clause.text],
+      requirementRefs: [clause.sourceRef],
+      knowledgeNodeRefs: relatedNodes.map((node) => `${node.type}:${node.title}`),
+      techniques,
+      status: "draft",
+      createdAt: now,
+      updatedAt: now
+    };
+  });
+
+  const dataProfiles = input.analysis.clauses.flatMap((clause): TestDataProfile[] => {
+    const techniques = techniquesForClause(clause);
+    const needsData =
+      clause.nodeTypes.includes("field") ||
+      clause.nodeTypes.includes("data-constraint") ||
+      techniques.includes("boundary-value") ||
+      techniques.includes("equivalence-partitioning");
+    if (!needsData) return [];
+    return [{
+      id: id("data"),
+      knowledgeProjectId: input.knowledgeProjectId,
+      requirementSetId: input.analysis.requirementSetId,
+      name: `${input.analysis.module} clause ${clause.index} data`,
+      field: semanticFieldName(clause.text, clause.index),
+      strategy: "generated",
+      constraints: techniques.map((technique) => `cover:${technique}`),
+      seed: `${input.analysis.requirementSetId}:${clause.index}`,
+      sourceRefs: [clause.sourceRef],
+      createdAt: now
+    }];
+  });
+  const coveredClauseSourceRefs = testIntents.flatMap((intent) => intent.requirementRefs);
+  const uncoveredClauseSourceRefs = input.analysis.clauses
+    .map((clause) => clause.sourceRef)
+    .filter((sourceRef) => !coveredClauseSourceRefs.includes(sourceRef));
 
   return {
     policyId: TEST_DESIGN_POLICY.id,
     policyVersion: TEST_DESIGN_POLICY.version,
     provider: input.analysis.provider,
-    techniques: [...techniques],
-    testIntents: [intent],
-    dataProfiles
+    techniques: [...allTechniques],
+    testIntents,
+    dataProfiles,
+    coverage: {
+      totalClauses: input.analysis.clauses.length,
+      coveredClauseSourceRefs,
+      uncoveredClauseSourceRefs,
+      intentCount: testIntents.length
+    }
   };
 }
 
-export function evaluatePolicyOutput(analysis: RequirementAnalysis) {
-  const invalid = analysis.nodes.length === 0 || analysis.nodes.some((node) => node.sourceRefs.length === 0);
-  if (invalid) {
+export function evaluatePolicyOutput(analysis: RequirementAnalysis): RequirementPolicyEvaluation {
+  const allowedSourceRefs = new Set(analysis.clauses.map((clause) => clause.sourceRef));
+  const unsupportedClaims = analysis.nodes.flatMap((node) => {
+    if (node.sourceRefs.length === 0) return [`${node.type}:${node.title} has no source evidence`];
+    const unknownRefs = node.sourceRefs.filter((sourceRef) => !allowedSourceRefs.has(sourceRef));
+    return unknownRefs.map((sourceRef) => `${node.type}:${node.title} references unsupported source ${sourceRef}`);
+  });
+  const uncoveredSourceRefs = analysis.clauses
+    .filter((clause) =>
+      !analysis.nodes.some(
+        (node) =>
+          node.type !== "module" &&
+          node.type !== "requirement" &&
+          node.sourceRefs.includes(clause.sourceRef)
+      )
+    )
+    .map((clause) => clause.sourceRef);
+  const coveredClauses = analysis.clauses.length - uncoveredSourceRefs.length;
+  const coverageRate = analysis.clauses.length === 0 ? 0 : coveredClauses / analysis.clauses.length;
+  const coverage = {
+    totalClauses: analysis.clauses.length,
+    coveredClauses,
+    coverageRate,
+    uncoveredSourceRefs
+  };
+
+  if (analysis.nodes.length === 0 || analysis.clauses.length === 0 || unsupportedClaims.length > 0) {
     return {
-      verdict: "blocked" as const,
+      verdict: "blocked",
       score: 0,
-      reasons: ["Every generated knowledge node must reference source evidence"]
+      reasons: ["Every generated knowledge node must reference source evidence"],
+      requiredActions: ["Remove unsupported claims or attach valid requirement source references"],
+      coverage,
+      contradictions: analysis.contradictions,
+      missingBranches: analysis.missingBranches,
+      unsupportedClaims
     };
   }
+
+  const reasons = [
+    ...analysis.openQuestions,
+    ...analysis.contradictions,
+    ...analysis.missingBranches,
+    ...uncoveredSourceRefs.map((sourceRef) => `No typed knowledge coverage for ${sourceRef}`)
+  ];
+  const requiredActions: string[] = [];
+  if (analysis.openQuestions.length > 0) requiredActions.push("Confirm unresolved requirement questions");
+  if (analysis.contradictions.length > 0) requiredActions.push("Resolve contradictory requirement clauses");
+  if (analysis.missingBranches.length > 0) requiredActions.push("Confirm the missing conditional branch behavior");
+  if (uncoveredSourceRefs.length > 0) requiredActions.push("Classify uncovered requirement clauses");
+
   return {
-    verdict: analysis.openQuestions.length > 0 ? ("needs-user" as const) : ("pass" as const),
-    score: Math.max(0, 100 - analysis.openQuestions.length * 10),
-    reasons: analysis.openQuestions
+    verdict: reasons.length > 0 ? "needs-user" : "pass",
+    score: Math.max(
+      0,
+      Math.round(coverageRate * 100) -
+        analysis.openQuestions.length * 10 -
+        analysis.contradictions.length * 15 -
+        analysis.missingBranches.length * 5
+    ),
+    reasons,
+    requiredActions,
+    coverage,
+    contradictions: analysis.contradictions,
+    missingBranches: analysis.missingBranches,
+    unsupportedClaims
   };
 }
 
@@ -184,7 +286,7 @@ export function normalizeHostSkillAnalysis(
   if (typeof input.module !== "string" || !Array.isArray(input.nodes)) {
     throw new Error("Host Skill analysisPackage requires module and nodes");
   }
-  const validTypes = new Set([
+  const validTypes = new Set<KnowledgeNodeType>([
     "module", "actor", "object", "field", "rule", "workflow", "state", "permission",
     "integration", "data-constraint", "term", "requirement"
   ]);
@@ -195,7 +297,7 @@ export function normalizeHostSkillAnalysis(
     const node = value as Record<string, unknown>;
     if (
       typeof node.type !== "string" ||
-      !validTypes.has(node.type) ||
+      !validTypes.has(node.type as KnowledgeNodeType) ||
       typeof node.title !== "string" ||
       typeof node.content !== "string" ||
       !Array.isArray(node.sourceRefs) ||
@@ -206,7 +308,7 @@ export function normalizeHostSkillAnalysis(
     }
     return {
       requirementSetId,
-      type: node.type as KnowledgeNode["type"],
+      type: node.type as KnowledgeNodeType,
       title: node.title,
       content: node.content,
       module: input.module as string,
@@ -218,16 +320,176 @@ export function normalizeHostSkillAnalysis(
       policyVersion: typeof input.policyVersion === "string" ? input.policyVersion : "host-skill"
     };
   });
+  const clauses = normalizeHostClauses(input.clauses, nodes, requirementSetId, input.module);
+
   return {
     requirementSetId,
     policyId: typeof input.policyId === "string" ? input.policyId : REQUIREMENT_ANALYSIS_POLICY.id,
     policyVersion: typeof input.policyVersion === "string" ? input.policyVersion : "host-skill",
     provider: "host-skill",
     module: input.module,
+    clauses,
     nodes,
     openQuestions: stringList(input.openQuestions),
-    risks: stringList(input.risks)
+    risks: stringList(input.risks),
+    contradictions: stringList(input.contradictions),
+    missingBranches: stringList(input.missingBranches)
   };
+}
+
+function splitRequirementClauses(
+  content: string,
+  sourceRef: string,
+  requirementSetId: string,
+  module: string
+) {
+  const parts = content
+    .split(/(?:\r?\n)+|[.!?\u3002\uff01\uff1f;\uff1b]+/)
+    .map((item) => item.trim())
+    .filter((item) => !/^#{1,6}\s+/.test(item))
+    .map((item) => item.replace(/^(?:[-*]\s+|\d+[.)\u3001]\s*)/, "").trim())
+    .filter(Boolean);
+  const values = parts.length > 0 ? parts : [content.trim()].filter(Boolean);
+
+  return values.map((text, index): RequirementClause => ({
+    id: `${requirementSetId}:clause-${index + 1}`,
+    index: index + 1,
+    text,
+    sourceRef: `${sourceRef}#clause-${index + 1}`,
+    module,
+    nodeTypes: classifyClause(text)
+  }));
+}
+
+function classifyClause(text: string): KnowledgeNodeType[] {
+  const types = new Set<KnowledgeNodeType>();
+  if (matches(text, /create|new|fill|submit|approve|reject|navigate|select|click|save|\u65b0\u5efa|\u521b\u5efa|\u586b\u5199|\u63d0\u4ea4|\u5ba1\u6279|\u9a73\u56de|\u8fdb\u5165|\u9009\u62e9|\u70b9\u51fb|\u4fdd\u5b58/i)) {
+    types.add("workflow");
+  }
+  if (matches(text, /require|must|above|below|only|cannot|\bif\b|\bwhen\b|\u8d85\u8fc7|\u4f4e\u4e8e|\u5fc5\u987b|\u4ec5|\u4e0d\u5141\u8bb8|\u9009\u62e9.+\u540e|\u5982\u679c|\u5f53.+\u65f6|\u624d\u4f1a/i)) {
+    types.add("rule");
+  }
+  if (matches(text, /status|state|draft|approved|enabled|disabled|\u72b6\u6001|\u8349\u7a3f|\u5df2\u5ba1\u6279|\u542f\u7528|\u505c\u7528|\u53d8\u4e3a/i)) {
+    types.add("state");
+  }
+  if (matches(text, /buyer|user|manager|finance|admin|employee|\u91c7\u8d2d|\u7528\u6237|\u7ecf\u7406|\u8d22\u52a1|\u7ba1\u7406\u5458|\u5458\u5de5|\u89d2\u8272/i)) {
+    types.add("actor");
+  }
+  if (matches(text, /\bmay\b|\bcan\b|permission|role|only .+ can|\u53ef\u4ee5|\u80fd\u591f|\u6743\u9650|\u89d2\u8272|\u4ec5.+\u53ef/i)) {
+    types.add("permission");
+  }
+  if (matches(text, /field|form|input|select|name|type|amount|visible|hidden|editable|\u5b57\u6bb5|\u8868\u5355|\u8f93\u5165|\u4e0b\u62c9|\u59d3\u540d|\u7c7b\u578b|\u91d1\u989d|\u663e\u793a|\u9690\u85cf|\u53ef\u7f16\u8f91/i)) {
+    types.add("field");
+  }
+  if (matches(text, /api|webhook|integration|sync|third party|\u540c\u6b65|\u63a5\u53e3|\u7b2c\u4e09\u65b9/i)) {
+    types.add("integration");
+  }
+  if (matches(text, /\d|length|max(?:imum)?|min(?:imum)?|required|empty|unique|enum|multi-select|\u957f\u5ea6|\u6700\u5927|\u6700\u5c0f|\u5fc5\u586b|\u7a7a\u503c|\u552f\u4e00|\u679a\u4e3e|\u591a\u9009|\u8303\u56f4/i)) {
+    types.add("data-constraint");
+  }
+  if (matches(text, /order|record|request|contract|invoice|form|\u8ba2\u5355|\u8bb0\u5f55|\u9700\u6c42|\u5408\u540c|\u53d1\u7968|\u8868\u5355/i)) {
+    types.add("object");
+  }
+  return [...types];
+}
+
+function techniquesForClause(clause: RequirementClause) {
+  const techniques = new Set<TestDesignTechnique>(["scenario", "error-guessing"]);
+  if (clause.nodeTypes.includes("data-constraint") || matches(clause.text, /above|below|between|\u8d85\u8fc7|\u4f4e\u4e8e|\u8303\u56f4|\u957f\u5ea6|\u91d1\u989d/i)) {
+    techniques.add("boundary-value");
+  }
+  if (clause.nodeTypes.includes("state")) techniques.add("state-transition");
+  if (clause.nodeTypes.includes("rule") && matches(clause.text, /\bif\b|\bwhen\b|\u9009\u62e9.+\u540e|\u5f53.+\u65f6|\u6761\u4ef6|\u5426\u5219/i)) {
+    techniques.add("decision-table");
+  }
+  if (clause.nodeTypes.includes("field")) techniques.add("equivalence-partitioning");
+  return [...techniques];
+}
+
+function priorityForClause(clause: RequirementClause): TestIntent["priority"] {
+  if (clause.nodeTypes.some((type) => ["rule", "workflow", "state", "permission"].includes(type))) return "P0";
+  if (clause.nodeTypes.some((type) => ["field", "data-constraint", "integration"].includes(type))) return "P1";
+  return "P2";
+}
+
+function findMissingBranches(clauses: RequirementClause[]) {
+  return clauses
+    .filter(
+      (clause) =>
+        matches(clause.text, /\bif\b|\bwhen\b|\u5982\u679c|\u5f53.+\u65f6|\u9009\u62e9.+\u540e/i) &&
+        !matches(clause.text, /\belse\b|otherwise|\u5426\u5219|\u672a\u547d\u4e2d|\u4e0d\u6ee1\u8db3/i)
+    )
+    .map((clause) => `Missing alternate branch: ${clause.text}`);
+}
+
+function findContradictions(clauses: RequirementClause[]) {
+  const contradictions: string[] = [];
+  for (let left = 0; left < clauses.length; left += 1) {
+    for (let right = left + 1; right < clauses.length; right += 1) {
+      const first = contradictionKey(clauses[left].text);
+      const second = contradictionKey(clauses[right].text);
+      if (first.key && first.key === second.key && first.negative !== second.negative) {
+        contradictions.push(`Contradictory clauses: "${clauses[left].text}" <> "${clauses[right].text}"`);
+      }
+    }
+  }
+  return contradictions;
+}
+
+function contradictionKey(text: string) {
+  const negativePattern = /\bnot\b|\bcannot\b|\bmust not\b|\bdoes not\b|disabled|hidden|\u4e0d\u53ef|\u4e0d\u5141\u8bb8|\u7981\u6b62|\u9690\u85cf|\u505c\u7528|\u4e0d/g;
+  const negative = matches(text, new RegExp(negativePattern.source, "i"));
+  const key = text
+    .toLowerCase()
+    .replace(negativePattern, "")
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "");
+  return { key, negative };
+}
+
+function normalizeHostClauses(
+  raw: unknown,
+  nodes: RequirementAnalysis["nodes"],
+  requirementSetId: string,
+  module: string
+) {
+  if (Array.isArray(raw) && raw.length > 0) {
+    return raw.map((value, index): RequirementClause => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(`Host Skill clauses[${index}] must be an object`);
+      }
+      const clause = value as Record<string, unknown>;
+      if (typeof clause.text !== "string" || typeof clause.sourceRef !== "string") {
+        throw new Error(`Host Skill clauses[${index}] requires text and sourceRef`);
+      }
+      const text = clause.text;
+      const sourceRef = clause.sourceRef;
+      return {
+        id: typeof clause.id === "string" ? clause.id : `${requirementSetId}:clause-${index + 1}`,
+        index: index + 1,
+        text,
+        sourceRef,
+        module,
+        nodeTypes: nodes
+          .filter((node) => node.sourceRefs.includes(sourceRef) && node.type !== "module" && node.type !== "requirement")
+          .map((node) => node.type)
+      };
+    });
+  }
+
+  const sourceRefs = [...new Set(nodes.flatMap((node) => node.sourceRefs))];
+  return sourceRefs.map((sourceRef, index): RequirementClause => {
+    const related = nodes.filter((node) => node.sourceRefs.includes(sourceRef));
+    return {
+      id: `${requirementSetId}:clause-${index + 1}`,
+      index: index + 1,
+      text: related[0]?.content ?? sourceRef,
+      sourceRef,
+      module,
+      nodeTypes: related
+        .filter((node) => node.type !== "module" && node.type !== "requirement")
+        .map((node) => node.type)
+    };
+  });
 }
 
 function inferModule(title: string, content: string) {
@@ -239,11 +501,17 @@ function inferModule(title: string, content: string) {
   return english ? `${english[0].toUpperCase()}${english.slice(1)}` : title.trim() || "General";
 }
 
-function sentenceMatches(content: string, pattern: RegExp) {
-  return content
-    .split(/[\u3002\uff01\uff0c?!\n]+/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0 && matches(item, pattern));
+function nodeTypeLabel(type: KnowledgeNodeType) {
+  return type.replace("-", " ");
+}
+
+function shortText(value: string) {
+  return value.length > 72 ? `${value.slice(0, 69)}...` : value;
+}
+
+function semanticFieldName(text: string, index: number) {
+  const match = /\b([a-z][a-z0-9 -]{1,30})(?: field| input| amount| type)\b/i.exec(text);
+  return match?.[1]?.trim().replace(/\s+/g, "-").toLowerCase() ?? `clause-${index}-input`;
 }
 
 function matches(content: string, pattern: RegExp) {

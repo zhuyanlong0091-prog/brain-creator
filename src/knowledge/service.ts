@@ -160,13 +160,28 @@ export class KnowledgeService {
     analysisOverride?: RequirementAnalysis
   ) {
     const requirementSet = this.getRequirementSet(requirementSetId);
+    const source = this.getRequirementSource(requirementSet.sourceId);
+    const analysis =
+      analysisOverride ??
+      analyzeRequirement({
+        requirementSetId,
+        title: requirementSet.title,
+        content: source.content,
+        sourceRef: source.id,
+        provider
+      });
+    const evaluation = evaluatePolicyOutput(analysis);
     const existingIntents = this.repository.testIntents.filter(
       (item) => item.requirementSetId === requirementSetId
     );
     if (existingIntents.length > 0) {
+      const coveredClauseSourceRefs = [
+        ...new Set(existingIntents.flatMap((item) => item.requirementRefs))
+      ];
       return {
         reused: true,
-        evaluation: { verdict: "pass" as const, score: 100, reasons: [] },
+        analysis,
+        evaluation,
         gaps: this.repository.gaps.filter(
           (gap) =>
             gap.projectId === requirementSet.knowledgeProjectId &&
@@ -184,20 +199,17 @@ export class KnowledgeService {
         testIntents: existingIntents,
         dataProfiles: this.repository.testDataProfiles.filter(
           (item) => item.requirementSetId === requirementSetId
-        )
+        ),
+        coverage: {
+          totalClauses: analysis.clauses.length,
+          coveredClauseSourceRefs,
+          uncoveredClauseSourceRefs: analysis.clauses
+            .map((clause) => clause.sourceRef)
+            .filter((sourceRef) => !coveredClauseSourceRefs.includes(sourceRef)),
+          intentCount: existingIntents.length
+        }
       };
     }
-    const source = this.getRequirementSource(requirementSet.sourceId);
-    const analysis =
-      analysisOverride ??
-      analyzeRequirement({
-        requirementSetId,
-        title: requirementSet.title,
-        content: source.content,
-        sourceRef: source.id,
-        provider
-      });
-    const evaluation = evaluatePolicyOutput(analysis);
     const now = timestamp();
     const previousNodes = requirementSet.previousRequirementSetId
       ? this.repository.knowledgeNodes.filter(
@@ -206,7 +218,7 @@ export class KnowledgeService {
       : [];
     const proposedKeys = new Set(analysis.nodes.map(knowledgeNodeKey));
     const affectedNodeIds = new Set(requirementSet.affectedNodeIds);
-  const nodes: KnowledgeNode[] = [];
+    const nodes: KnowledgeNode[] = [];
     const resolvedNodes: KnowledgeNode[] = [];
     for (const proposed of analysis.nodes) {
       const previous = previousNodes.find((node) => knowledgeNodeKey(node) === knowledgeNodeKey(proposed));
@@ -235,16 +247,26 @@ export class KnowledgeService {
     const design = designTests({ knowledgeProjectId: requirementSet.knowledgeProjectId, analysis });
     this.repository.testIntents.push(...design.testIntents);
     this.repository.testDataProfiles.push(...design.dataProfiles);
-    const gaps = analysis.openQuestions.map((question) =>
-      this.createGap(
-        requirementSet.knowledgeProjectId,
-        requirementSet.id,
-        `Requirement clarification needed: ${question}`,
-        "requirement-clarification"
+    const gaps = [
+      ...analysis.openQuestions.map((question) =>
+        this.createGap(
+          requirementSet.knowledgeProjectId,
+          requirementSet.id,
+          `Requirement clarification needed: ${question}`,
+          "requirement-clarification"
+        )
+      ),
+      ...analysis.contradictions.map((contradiction) =>
+        this.createGap(
+          requirementSet.knowledgeProjectId,
+          requirementSet.id,
+          `Requirement conflict must be resolved: ${contradiction}`,
+          "requirement-conflict"
+        )
       )
-    );
+    ];
     this.repository.persist();
-    await this.writeAnalysis(requirementSet, analysis, design.testIntents);
+    await this.writeAnalysis(requirementSet, analysis, design.testIntents, evaluation, design.coverage);
     await this.writeModuleKnowledge(requirementSet, analysis, design.testIntents);
     return {
       analysis,
@@ -259,15 +281,25 @@ export class KnowledgeService {
 
   approveRequirementSet(requirementSetId: string) {
     const requirementSet = this.getRequirementSet(requirementSetId);
-    const unresolved = this.repository.gaps.filter(
+    const unresolvedClarifications = this.repository.gaps.filter(
       (gap) =>
         gap.projectId === requirementSet.knowledgeProjectId &&
         gap.sourceId === requirementSet.id &&
         gap.sourceType === "requirement-clarification" &&
         gap.status === "open"
     );
-    if (unresolved.length > 0) {
+    if (unresolvedClarifications.length > 0) {
       throw new Error("Requirement clarification gaps must be resolved before approval");
+    }
+    const unresolvedConflicts = this.repository.gaps.filter(
+      (gap) =>
+        gap.projectId === requirementSet.knowledgeProjectId &&
+        gap.sourceId === requirementSet.id &&
+        gap.sourceType === "requirement-conflict" &&
+        gap.status === "open"
+    );
+    if (unresolvedConflicts.length > 0) {
+      throw new Error("Requirement conflict gaps must be resolved before approval");
     }
     requirementSet.status = "approved";
     requirementSet.approvedAt = timestamp();
@@ -667,8 +699,10 @@ export class KnowledgeService {
 
   private async writeAnalysis(
     set: RequirementSet,
-    analysis: ReturnType<typeof analyzeRequirement>,
-    intents: TestIntent[]
+    analysis: RequirementAnalysis,
+    intents: TestIntent[],
+    evaluation: ReturnType<typeof evaluatePolicyOutput>,
+    coverage: ReturnType<typeof designTests>["coverage"]
   ) {
     const project = this.getProject(set.knowledgeProjectId);
     const requirementDir = join(this.knowledgeDir, project.key, "requirements", set.id);
@@ -685,8 +719,38 @@ export class KnowledgeService {
         "",
         `# ${set.title} Analysis`,
         "",
+        "## Requirement Clauses",
+        ...analysis.clauses.map(
+          (clause) =>
+            `- [${clause.sourceRef}] ${clause.text} (${clause.nodeTypes.length > 0 ? clause.nodeTypes.join(", ") : "unclassified"})`
+        ),
+        "",
         "## Knowledge",
-        ...analysis.nodes.map((node) => `- **${node.type}** ${node.title}: ${node.content}`),
+        ...analysis.nodes.map(
+          (node) => `- **${node.type}** ${node.title}: ${node.content} [${node.sourceRefs.join(", ")}]`
+        ),
+        "",
+        "## Evaluation",
+        `- Verdict: ${evaluation.verdict}`,
+        `- Score: ${evaluation.score}`,
+        `- Coverage: ${evaluation.coverage.coveredClauses}/${evaluation.coverage.totalClauses} (${Math.round(evaluation.coverage.coverageRate * 100)}%)`,
+        `- Test intents: ${coverage.intentCount}`,
+        `- Unsupported claims: ${evaluation.unsupportedClaims.length}`,
+        "",
+        "### Required Actions",
+        ...(evaluation.requiredActions.length > 0
+          ? evaluation.requiredActions.map((item) => `- ${item}`)
+          : ["- None"]),
+        "",
+        "### Contradictions",
+        ...(analysis.contradictions.length > 0
+          ? analysis.contradictions.map((item) => `- ${item}`)
+          : ["- None"]),
+        "",
+        "### Missing Branches",
+        ...(analysis.missingBranches.length > 0
+          ? analysis.missingBranches.map((item) => `- ${item}`)
+          : ["- None"]),
         "",
         "## Open Questions",
         ...(analysis.openQuestions.length > 0 ? analysis.openQuestions.map((item) => `- ${item}`) : ["- None"]),

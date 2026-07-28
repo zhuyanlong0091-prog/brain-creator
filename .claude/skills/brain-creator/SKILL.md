@@ -59,8 +59,8 @@ When the user provides a requirement path or URL:
 1. Find or create a knowledge project with `bc_configure target=knowledge-project`. Do not require a runtime system yet.
 2. Call `bc_prepare action=ingest-requirement` with the source.
 3. Call `bc_prepare action=generate-test-design` using `provider=builtin` by default.
-4. Present requirement coverage, open questions, risks, test techniques, TestIntents, and TestDataProfiles.
-5. Resolve clarification Gaps. After explicit approval, call `bc_prepare action=approve-baseline confirm=true`.
+4. Present atomic clauses and their source anchors, typed coverage, unsupported claims, contradictions, missing branches, risks, test techniques, TestIntents, and TestDataProfiles. Do not collapse the result into one broad requirement summary.
+5. Resolve clarification and requirement-conflict Gaps, confirm every Eval required action, and do not approve blocked output. After explicit approval, call `bc_prepare action=approve-baseline confirm=true`.
 6. Compile approved TestIntents with `bc_prepare action=compile-cases`.
 7. Create or select a runtime system with `bc_configure target=system`, then bind it with `bc_configure target=system-binding`.
 8. Configure and verify auth. Use `bc_create_auth_checkpoint` for password, CAPTCHA, recovery, or 2FA intervention.
