@@ -53,11 +53,13 @@ The Agent presents every Requirement Eval action. Clarifications and missing bra
 
 Seven golden samples cover ordinary clauses, complex Markdown rule tables, cross-module workflows, permission matrices, contradictions, and missing branches. Historical quality can be reviewed with `bc_review target=requirement-eval-accuracy`; technical failures remain inconclusive instead of reducing the requirement score.
 
-### 5. Bind And Refresh System Brain
+### 5. Bind And Explore System Brain
 
 The Agent uses `bc_configure target=system` and `bc_configure target=system-binding`, then configures auth. Protected password, recovery, CAPTCHA, or 2FA uses `bc_create_auth_checkpoint` and workspace-local storage state.
 
-The host Agent explores the real system with its browser capability, then submits structured evidence through `bc_prepare action=record-page-evidence` and `record-training-evidence`. Submitted URLs must stay inside the selected system allowlist. Brain Creator then refreshes a system-isolated view of PageModels, LocatorPoints, ProbeResults, TrainingSessions, ActionSteps, cascade behavior, and ApiFlows. It writes `systems/<system-id>/brain.md` while preserving separate expected, observed, and conflict layers.
+The Agent first calls `bc_prepare action=explore-system`. Brain Creator performs a bounded, read-only Playwright breadth-first exploration: it visits only HTTP(S) links inside the selected system allowlist, never submits forms, and enforces page, depth, and wall-time budgets. A verified AuthProfile may provide a workspace-local `storageStatePath`. Login pages, CAPTCHA, 2FA, invalid scopes, or empty evidence block the run and create a Gap; authentication blockers also create a resumable checkpoint.
+
+The exploration creates versioned PageModels, LocatorPoints, ProbeResults, and a navigation graph, then refreshes `systems/<system-id>/brain.md`. For interactive menus, field cascades, or business workflows that link-only exploration cannot observe, the host Agent supplements evidence through `bc_prepare action=record-page-evidence` and `record-training-evidence`.
 
 ### 6. Compile Executable Cases
 
@@ -71,7 +73,7 @@ The Generator writes a Playwright test, Playwright executes it, and the Healer p
 
 ### 8. Review Evidence
 
-The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, TestIntents, ExecutableCases, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.
+The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.
 
 ## User Entrypoints
 

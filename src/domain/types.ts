@@ -26,6 +26,7 @@ export type AssetType =
   | "test-case"
   | "test-spec"
   | "test-file"
+  | "system-exploration"
   | "agent-task"
   | "agent-run"
   | "chain-run";
@@ -102,6 +103,54 @@ export type ProbeResult = {
   result: string;
   issues: string[];
   createdAt: string;
+};
+
+export type PageCaptureEvidence = {
+  title: string;
+  finalUrl: string;
+  domText: string;
+  screenshotPath: string;
+  interactiveElements: Array<{
+    name: string;
+    role: string;
+    text: string;
+    selector: string;
+  }>;
+  consoleErrors: string[];
+  networkFailures: string[];
+  issues: string[];
+};
+
+export type SystemExplorationBudget = {
+  maxPages: number;
+  maxDepth: number;
+  maxDurationMs: number;
+};
+
+export type SystemExplorationNavigationEdge = {
+  fromUrl: string;
+  toUrl: string;
+  text: string;
+  fromPageModelId: string;
+  toPageModelId?: string;
+};
+
+export type SystemExploration = {
+  id: string;
+  knowledgeProjectId: string;
+  systemId: string;
+  authProfileId?: string;
+  startUrl: string;
+  status: "running" | "completed" | "partial" | "blocked" | "cancelled";
+  budget: SystemExplorationBudget;
+  pageModelIds: string[];
+  navigationEdges: SystemExplorationNavigationEdge[];
+  warnings: string[];
+  gapIds: string[];
+  artifactDir: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
 };
 
 export type TrainingSession = {

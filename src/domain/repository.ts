@@ -27,17 +27,19 @@ import type {
   RequirementSet,
   RequirementSource,
   SystemProfile,
+  SystemExploration,
   TestDataProfile,
   TestIntent,
   TestCase,
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 2;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 3;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
   systemProfiles: SystemProfile[] = [];
+  systemExplorations: SystemExploration[] = [];
   authProfiles: AuthProfile[] = [];
   authCheckpoints: AuthCheckpoint[] = [];
   pageModels: PageModel[] = [];
@@ -74,6 +76,7 @@ export class InMemoryBrainCreatorRepository {
 
   reset() {
     this.systemProfiles = [];
+    this.systemExplorations = [];
     this.authProfiles = [];
     this.authCheckpoints = [];
     this.pageModels = [];
@@ -110,6 +113,7 @@ export class InMemoryBrainCreatorRepository {
 type RepositorySnapshot = Pick<
   InMemoryBrainCreatorRepository,
   | "systemProfiles"
+  | "systemExplorations"
   | "authProfiles"
   | "authCheckpoints"
   | "pageModels"
@@ -160,6 +164,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     const snapshot = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<RepositorySnapshot>;
     this.schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
     this.systemProfiles = snapshot.systemProfiles ?? [];
+    this.systemExplorations = snapshot.systemExplorations ?? [];
     this.authProfiles = snapshot.authProfiles ?? [];
     this.authCheckpoints = snapshot.authCheckpoints ?? [];
     this.pageModels = snapshot.pageModels ?? [];
@@ -194,6 +199,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
   private snapshot(): RepositorySnapshot {
     return {
       systemProfiles: this.systemProfiles,
+      systemExplorations: this.systemExplorations,
       authProfiles: this.authProfiles,
       authCheckpoints: this.authCheckpoints,
       pageModels: this.pageModels,

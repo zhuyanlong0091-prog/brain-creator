@@ -121,7 +121,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, generating and confirming Requirement Eval, approving a baseline, submitting page/training evidence, refreshing System Brain, and compiling evidence-bound executable cases.",
+      "Requirement-first facade for ingesting sources, generating and confirming Requirement Eval, approving a baseline, running bounded read-only system exploration, submitting page/training evidence, refreshing System Brain, and compiling evidence-bound executable cases.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
@@ -134,6 +134,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "record-observation",
         "record-page-evidence",
         "record-training-evidence",
+        "explore-system",
         "refresh-system-brain"
       ]),
       knowledgeProjectId: z.string().optional(),
@@ -141,6 +142,10 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       testIntentId: z.string().optional(),
       pageModelId: z.string().optional(),
       authProfileId: z.string().optional(),
+      startUrl: z.string().url().optional(),
+      maxPages: z.number().int().min(1).max(25).optional(),
+      maxDepth: z.number().int().min(0).max(4).optional(),
+      maxDurationMs: z.number().int().min(5_000).max(300_000).optional(),
       actionIds: z.array(z.string()).default([]),
       confirmationNote: z.string().optional(),
       systemId: z.string().optional(),
@@ -292,7 +297,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_review",
     title: "Brain Creator review",
     description:
-      "Facade review entry for suite runs, cases, bugs, gaps, artifacts, requirement quality, and historical Requirement Eval accuracy.",
+      "Facade review entry for suite runs, cases, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
     inputSchema: z.object({
       target: z.enum([
         "suite-run",
@@ -305,6 +310,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "coverage",
         "requirement-eval-accuracy",
         "system-brain",
+        "system-exploration",
         "test-intent",
         "executable-case",
         "evidence"

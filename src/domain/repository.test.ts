@@ -165,6 +165,35 @@ describe("JsonFileBrainCreatorRepository", () => {
       expect.objectContaining({ id: checkpoint.id, status: "awaiting-user" })
     ]);
   });
+
+  it("restores System Brain exploration runs after recreation", async () => {
+    const filePath = join(await tempDir(), "assets.json");
+    const first = new JsonFileBrainCreatorRepository(filePath);
+    first.systemExplorations.push({
+      id: "exploration_1",
+      knowledgeProjectId: "knowledge_1",
+      systemId: "system_1",
+      startUrl: "https://orders.example.test/",
+      status: "completed",
+      budget: { maxPages: 5, maxDepth: 2, maxDurationMs: 60_000 },
+      pageModelIds: ["page_1"],
+      navigationEdges: [],
+      warnings: [],
+      gapIds: [],
+      artifactDir: ".brain-creator/system-explorations/exploration_1",
+      createdAt: "2026-07-28T00:00:00.000Z",
+      updatedAt: "2026-07-28T00:01:00.000Z",
+      completedAt: "2026-07-28T00:01:00.000Z"
+    });
+    first.persist();
+
+    const second = new JsonFileBrainCreatorRepository(filePath);
+
+    expect(second.schemaVersion).toBe(3);
+    expect(second.systemExplorations).toEqual([
+      expect.objectContaining({ id: "exploration_1", status: "completed" })
+    ]);
+  });
 });
 
 async function tempDir() {
