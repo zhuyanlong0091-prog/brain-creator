@@ -9,6 +9,9 @@ import type {
   KnowledgeNode,
   KnowledgeNodeType,
   KnowledgeProject,
+  RequirementEvalAction,
+  RequirementEvalActionKind,
+  RequirementEvaluationGate,
   RequirementContentPackage,
   RequirementSet,
   RequirementSource,
@@ -175,6 +178,17 @@ export class KnowledgeService {
       (item) => item.requirementSetId === requirementSetId
     );
     if (existingIntents.length > 0) {
+      const requirementGaps = this.repository.gaps.filter(
+        (gap) =>
+          gap.projectId === requirementSet.knowledgeProjectId &&
+          gap.sourceId === requirementSetId
+      );
+      requirementSet.evaluationGate ??= buildRequirementEvaluationGate(
+        analysis,
+        evaluation,
+        requirementGaps
+      );
+      this.repository.persist();
       const coveredClauseSourceRefs = [
         ...new Set(existingIntents.flatMap((item) => item.requirementRefs))
       ];
@@ -182,12 +196,8 @@ export class KnowledgeService {
         reused: true,
         analysis,
         evaluation,
-        gaps: this.repository.gaps.filter(
-          (gap) =>
-            gap.projectId === requirementSet.knowledgeProjectId &&
-            gap.sourceId === requirementSetId &&
-            gap.status === "open"
-        ),
+        evaluationGate: requirementSet.evaluationGate,
+        gaps: requirementGaps.filter((gap) => gap.status === "open"),
         impact: this.requirementImpact(requirementSetId),
         edges: this.repository.knowledgeEdges.filter(
           (edge) => edge.knowledgeProjectId === requirementSet.knowledgeProjectId
@@ -265,12 +275,21 @@ export class KnowledgeService {
         )
       )
     ];
+    requirementSet.evaluationGate = buildRequirementEvaluationGate(analysis, evaluation, gaps);
     this.repository.persist();
-    await this.writeAnalysis(requirementSet, analysis, design.testIntents, evaluation, design.coverage);
+    await this.writeAnalysis(
+      requirementSet,
+      analysis,
+      design.testIntents,
+      evaluation,
+      design.coverage,
+      requirementSet.evaluationGate
+    );
     await this.writeModuleKnowledge(requirementSet, analysis, design.testIntents);
     return {
       analysis,
       evaluation,
+      evaluationGate: requirementSet.evaluationGate,
       nodes,
       edges,
       gaps,
@@ -279,8 +298,119 @@ export class KnowledgeService {
     };
   }
 
+  async confirmEvaluationActions(input: {
+    requirementSetId: string;
+    actionIds: string[];
+    note: string;
+    confirm: boolean;
+  }) {
+    if (!input.confirm) {
+      throw new Error("Explicit confirmation is required for Requirement Eval actions");
+    }
+    const note = input.note.trim();
+    if (!note) {
+      throw new Error("A confirmation note is required for Requirement Eval actions");
+    }
+    const requirementSet = this.getRequirementSet(input.requirementSetId);
+    const evaluationGate = requirementSet.evaluationGate;
+    if (!evaluationGate) {
+      throw new Error("Generate the Requirement Eval before confirming actions");
+    }
+    const pendingActions = evaluationGate.actions.filter((action) => action.status === "pending");
+    const selectedIds = input.actionIds.length > 0
+      ? new Set(input.actionIds)
+      : new Set(pendingActions.map((action) => action.id));
+    const unknownIds = [...selectedIds].filter(
+      (actionId) => !evaluationGate.actions.some((action) => action.id === actionId)
+    );
+    if (unknownIds.length > 0) {
+      throw new Error(`Requirement Eval actions not found: ${unknownIds.join(", ")}`);
+    }
+    const selectedActions = evaluationGate.actions.filter((action) => selectedIds.has(action.id));
+    if (selectedActions.length === 0) {
+      throw new Error("No pending Requirement Eval actions were selected");
+    }
+    if (selectedActions.some((action) => action.status === "blocked")) {
+      throw new Error("Blocked Requirement Eval actions cannot be confirmed");
+    }
+
+    const confirmedAt = timestamp();
+    const resolvedGapIds: string[] = [];
+    const module =
+      this.repository.knowledgeNodes.find(
+        (node) => node.requirementSetId === requirementSet.id && node.type === "module"
+      )?.module ?? "General";
+    for (const action of selectedActions) {
+      if (action.status === "confirmed") continue;
+      action.status = "confirmed";
+      action.confirmedAt = confirmedAt;
+      action.confirmationNote = note;
+      const resolutionSourceRef = `${requirementSet.id}#eval-action-${action.id}`;
+      const resolutionNode: KnowledgeNode = {
+        id: id("knowledgeNode"),
+        knowledgeProjectId: requirementSet.knowledgeProjectId,
+        requirementSetId: requirementSet.id,
+        type: action.kind === "uncovered-coverage" ? "requirement" : "rule",
+        title: `Confirmed Eval resolution: ${action.id}`,
+        content: note,
+        module,
+        sourceRefs: [...new Set([...action.sourceRefs, resolutionSourceRef])],
+        origin: "source",
+        confidence: 1,
+        status: "draft",
+        createdAt: confirmedAt,
+        updatedAt: confirmedAt
+      };
+      action.resolutionNodeId = resolutionNode.id;
+      this.repository.knowledgeNodes.push(resolutionNode);
+      for (const intent of this.repository.testIntents.filter(
+        (item) =>
+          item.requirementSetId === requirementSet.id &&
+          item.requirementRefs.some((sourceRef) => action.sourceRefs.includes(sourceRef))
+      )) {
+        intent.expectedResults = [
+          ...new Set([...intent.expectedResults, `Confirmed Eval resolution: ${note}`])
+        ];
+        intent.knowledgeNodeRefs = [
+          ...new Set([...intent.knowledgeNodeRefs, `${resolutionNode.type}:${resolutionNode.title}`])
+        ];
+        intent.updatedAt = confirmedAt;
+      }
+      for (const gapId of action.gapIds) {
+        const gap = this.repository.gaps.find((item) => item.id === gapId);
+        if (gap?.status === "open") {
+          gap.status = "resolved";
+          gap.updatedAt = confirmedAt;
+          resolvedGapIds.push(gap.id);
+        }
+      }
+    }
+    evaluationGate.status = evaluationGate.actions.some((action) => action.status === "blocked")
+      ? "blocked"
+      : evaluationGate.actions.some((action) => action.status === "pending")
+        ? "needs-confirmation"
+        : "confirmed";
+    if (evaluationGate.status === "confirmed") evaluationGate.confirmedAt = confirmedAt;
+    requirementSet.updatedAt = confirmedAt;
+    this.repository.persist();
+    await this.writeEvaluationConfirmations(requirementSet);
+    return { requirementSet, evaluationGate, resolvedGapIds };
+  }
+
   approveRequirementSet(requirementSetId: string) {
     const requirementSet = this.getRequirementSet(requirementSetId);
+    if (!requirementSet.evaluationGate) {
+      throw new Error("Requirement Eval must be generated before approval");
+    }
+    if (
+      requirementSet.evaluationGate.status === "blocked" ||
+      requirementSet.evaluationGate.actions.some((action) => action.status === "blocked")
+    ) {
+      throw new Error("Blocked Requirement Eval output cannot be approved");
+    }
+    if (requirementSet.evaluationGate.actions.some((action) => action.status === "pending")) {
+      throw new Error("Requirement Eval actions must be confirmed before approval");
+    }
     const unresolvedClarifications = this.repository.gaps.filter(
       (gap) =>
         gap.projectId === requirementSet.knowledgeProjectId &&
@@ -337,7 +467,19 @@ export class KnowledgeService {
       throw new Error("Requirement baseline must be approved before compiling executable cases");
     }
     const source = this.getRequirementSource(requirementSet.sourceId);
-    const sourceRefs = [source.id, requirementSet.id];
+    const confirmedEvalActions =
+      requirementSet.evaluationGate?.actions.filter(
+        (action) => action.status === "confirmed" && action.confirmationNote
+      ) ?? [];
+    const executionContent = [
+      source.content,
+      ...confirmedEvalActions.map((action) => action.confirmationNote as string)
+    ].join("\n");
+    const sourceRefs = [
+      source.id,
+      requirementSet.id,
+      ...confirmedEvalActions.map((action) => `${requirementSet.id}#eval-action-${action.id}`)
+    ];
     const multiplePaths =
       /\u5217\u8868[^\n]{0,20}\u65b0\u5efa/.test(source.content) &&
       /\u8be6\u60c5[^\n]{0,20}\u65b0\u5efa/.test(source.content);
@@ -353,7 +495,7 @@ export class KnowledgeService {
       title: intent.title,
       status: gaps.length > 0 ? "blocked" : "ready",
       preconditions: intent.preconditions,
-      steps: gaps.length > 0 ? [] : compileSteps(source.content, sourceRefs),
+      steps: gaps.length > 0 ? [] : compileSteps(executionContent, sourceRefs),
       dataProfileIds: this.repository.testDataProfiles
         .filter((profile) => profile.requirementSetId === requirementSet.id)
         .map((profile) => profile.id),
@@ -702,7 +844,8 @@ export class KnowledgeService {
     analysis: RequirementAnalysis,
     intents: TestIntent[],
     evaluation: ReturnType<typeof evaluatePolicyOutput>,
-    coverage: ReturnType<typeof designTests>["coverage"]
+    coverage: ReturnType<typeof designTests>["coverage"],
+    evaluationGate: RequirementEvaluationGate
   ) {
     const project = this.getProject(set.knowledgeProjectId);
     const requirementDir = join(this.knowledgeDir, project.key, "requirements", set.id);
@@ -736,10 +879,14 @@ export class KnowledgeService {
         `- Coverage: ${evaluation.coverage.coveredClauses}/${evaluation.coverage.totalClauses} (${Math.round(evaluation.coverage.coverageRate * 100)}%)`,
         `- Test intents: ${coverage.intentCount}`,
         `- Unsupported claims: ${evaluation.unsupportedClaims.length}`,
+        `- Gate status: ${evaluationGate.status}`,
         "",
         "### Required Actions",
-        ...(evaluation.requiredActions.length > 0
-          ? evaluation.requiredActions.map((item) => `- ${item}`)
+        ...(evaluationGate.actions.length > 0
+          ? evaluationGate.actions.map(
+              (action) =>
+                `- [${action.status}] ${action.id} (${action.kind}): ${action.message} [${action.sourceRefs.join(", ")}]`
+            )
           : ["- None"]),
         "",
         "### Contradictions",
@@ -757,6 +904,39 @@ export class KnowledgeService {
         "",
         "## Test Intents",
         ...intents.map((intent) => `- ${intent.id}: ${intent.title} [${intent.status}]`)
+      ].join("\n"),
+      "utf8"
+    );
+  }
+
+  private async writeEvaluationConfirmations(set: RequirementSet) {
+    const project = this.getProject(set.knowledgeProjectId);
+    const requirementDir = join(this.knowledgeDir, project.key, "requirements", set.id);
+    await mkdir(requirementDir, { recursive: true });
+    const gate = set.evaluationGate;
+    await writeFile(
+      join(requirementDir, "evaluation-confirmations.md"),
+      [
+        "---",
+        `requirement_set_id: ${set.id}`,
+        `gate_status: ${gate?.status ?? "missing"}`,
+        `updated_at: ${set.updatedAt}`,
+        "---",
+        "",
+        `# ${set.title} Eval Confirmations`,
+        "",
+        ...(gate?.actions.length
+          ? gate.actions.flatMap((action) => [
+              `## ${action.id}`,
+              `- Kind: ${action.kind}`,
+              `- Status: ${action.status}`,
+              `- Requirement evidence: ${action.sourceRefs.join(", ") || "None"}`,
+              `- Resolution node: ${action.resolutionNodeId ?? "None"}`,
+              `- Confirmed at: ${action.confirmedAt ?? "Not confirmed"}`,
+              `- Confirmation: ${action.confirmationNote ?? "None"}`,
+              ""
+            ])
+          : ["- No Requirement Eval actions"])
       ].join("\n"),
       "utf8"
     );
@@ -887,6 +1067,85 @@ export class KnowledgeService {
     );
     return reportPath;
   }
+}
+
+function buildRequirementEvaluationGate(
+  analysis: RequirementAnalysis,
+  evaluation: ReturnType<typeof evaluatePolicyOutput>,
+  gaps: Gap[]
+): RequirementEvaluationGate {
+  const createdAt = timestamp();
+  const actions: RequirementEvalAction[] = [];
+  const addAction = (
+    kind: RequirementEvalActionKind,
+    message: string,
+    sourceRefs: string[],
+    status: RequirementEvalAction["status"] = "pending"
+  ) => {
+    const sourceType =
+      kind === "clarification"
+        ? "requirement-clarification"
+        : kind === "contradiction"
+          ? "requirement-conflict"
+          : undefined;
+    actions.push({
+      id: id("evalAction"),
+      kind,
+      message,
+      sourceRefs,
+      gapIds: sourceType
+        ? gaps
+            .filter((gap) => gap.sourceType === sourceType && gap.reason.includes(message))
+            .map((gap) => gap.id)
+        : [],
+      status,
+      createdAt
+    });
+  };
+  const sourceRefsFor = (message: string) =>
+    analysis.clauses
+      .filter((clause) => message.includes(clause.text))
+      .map((clause) => clause.sourceRef);
+
+  for (const question of analysis.openQuestions) {
+    addAction("clarification", question, sourceRefsFor(question));
+  }
+  for (const contradiction of analysis.contradictions) {
+    addAction("contradiction", contradiction, sourceRefsFor(contradiction), "blocked");
+  }
+  for (const missingBranch of analysis.missingBranches) {
+    addAction("missing-branch", missingBranch, sourceRefsFor(missingBranch));
+  }
+  for (const sourceRef of evaluation.coverage.uncoveredSourceRefs) {
+    addAction("uncovered-coverage", `Classify uncovered requirement clause ${sourceRef}`, [sourceRef]);
+  }
+  for (const unsupportedClaim of evaluation.unsupportedClaims) {
+    addAction("unsupported-claim", unsupportedClaim, [], "blocked");
+  }
+  if (evaluation.verdict === "blocked" && !actions.some((action) => action.status === "blocked")) {
+    addAction(
+      "unsupported-claim",
+      evaluation.reasons.join("; ") || "Requirement Eval output is blocked",
+      [],
+      "blocked"
+    );
+  }
+
+  return {
+    policyId: analysis.policyId,
+    policyVersion: analysis.policyVersion,
+    verdict: evaluation.verdict,
+    score: evaluation.score,
+    coverage: evaluation.coverage,
+    status:
+      evaluation.verdict === "blocked" || actions.some((action) => action.status === "blocked")
+        ? "blocked"
+        : actions.some((action) => action.status === "pending")
+          ? "needs-confirmation"
+          : "passed",
+    actions,
+    generatedAt: createdAt
+  };
 }
 
 function compileSteps(content: string, sourceRefs: string[]): ExecutableCaseStep[] {

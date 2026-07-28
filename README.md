@@ -39,7 +39,8 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
 - 可选复用宿主的 `RequirementAnalysis.skill`、`TestCaseDesign.skill`，但输出仍须经过 schema、Eval、来源追踪和审批。
 - 动态知识节点：模块、角色、对象、字段、规则、流程、状态、权限、集成、数据约束、术语和需求。
 - 需求会拆成带 `#clause-N` 来源锚点的原子条款，每条条款分别生成可追踪的 TestIntent，不再用一条宽泛用例覆盖整篇文档。
-- Requirement Eval 会输出条款覆盖率、无依据内容、直接矛盾、缺失条件分支和所需人工动作；矛盾未解决时禁止审批。
+- Requirement Eval 会输出条款覆盖率、无依据内容、直接矛盾、缺失条件分支和所需人工动作；需要确认的动作跨会话持久化，确认说明会回流为知识节点，直接矛盾必须修订需求源。
+- 内置 HR、订单和库存黄金样本，通过 `npm run verify:requirement-eval` 固定覆盖率、来源追踪、矛盾识别和逐条 TestIntent 基线。
 - 需求 hash 幂等、版本修订、影响节点、受影响回归范围和旧版本追溯。
 - TestIntent、TestDataProfile、ExecutableCase、隐含唯一动作补全与歧义 Gap。
 - 多系统绑定、鉴权、AuthCheckpoint、Claude/Codex/host-agent Bridge。
@@ -143,6 +144,7 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 | 创建需求知识项目 | `bc_configure target=knowledge-project` |
 | 导入/刷新需求 | `bc_prepare action=ingest-requirement` / `refresh-requirement` |
 | 生成分析与测试设计 | `bc_prepare action=generate-test-design` |
+| 确认 Requirement Eval 动作 | `bc_prepare action=confirm-eval-actions confirm=true`，必须提交 `confirmationNote` |
 | 审批与编译 | `bc_prepare action=approve-baseline` / `compile-cases` |
 | 创建/绑定系统 | `bc_configure target=system` / `bc_configure target=system-binding` |
 | 配置鉴权 | `bc_configure target=auth` |
@@ -159,6 +161,8 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 
 `bc_status` 的 `readiness` 分为 `ready`、`action-required` 和 `blocked`。存在未完成 Suite、待执行 AgentTask、开放 Bug 或 Gap 时返回 `action-required`；Bridge 或人工鉴权检查点不可用时返回 `blocked`。Suite 状态会分别展示已通过、已失败、已阻塞、等待 Agent 和未开始的用例，并让 `nextCaseNo` 优先指向真实等待执行的任务。
 
+需求知识项目存在待确认 Eval action 时，`bc_status.nextAction` 返回 `confirm_requirement_eval`；存在不可确认的矛盾时返回 `revise_blocked_requirement`。
+
 执行失败只有在证据支持“系统行为不符合预期”时才创建 BugReport。生成脚本语法、解析、索引、定位器或缺少元素证据等自动化实现问题会创建 Gap，并可在复盘时按 `automation_failure` 或 `locator_failure` 过滤。
 
 ### 需求准备与审批
@@ -167,11 +171,12 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 2. 用 `bc_prepare` 导入需求来源。
 3. 将需求拆成原子条款，为每条条款生成来源可追踪的知识节点、TestIntent 和 TestDataProfile。
 4. 展示条款覆盖率、无依据内容、风险、矛盾、缺失条件分支、Gap 和测试数据。
-5. 解决待澄清项与需求矛盾，确认 Eval 所需动作；用户明确确认后审批 baseline。
-6. 编译 ExecutableCase；只补全知识中唯一可推导的隐含动作。
-7. 创建并绑定 SystemProfile，配置鉴权。
-8. `bc_run mode=requirement-suite confirm=false` 预览，用户确认后执行。
-9. 用 `bc_review` 查看证据、Bug、Gap 和需求/观察冲突。
+5. 展示每个 Eval action；可澄清项和缺失分支使用 `confirm-eval-actions` 保存用户说明，直接矛盾必须修订需求源，不能通过确认绕过。
+6. 所有 Eval action 通过门禁后，用户再次明确确认并审批 baseline。
+7. 编译 ExecutableCase；只补全知识中唯一可推导的隐含动作。
+8. 创建并绑定 SystemProfile，配置鉴权。
+9. `bc_run mode=requirement-suite confirm=false` 预览，用户确认后执行。
+10. 用 `bc_review` 查看证据、Bug、Gap 和需求/观察冲突。
 
 ### 飞书需求接入
 
@@ -191,7 +196,7 @@ BRAIN_CREATOR_FEISHU_APP_SECRET=<app-secret>
 ```text
 .brain-creator/knowledge/<project-key>/
   MOC.md
-  requirements/<requirement-set-id>/{source.md,analysis.md}
+  requirements/<requirement-set-id>/{source.md,analysis.md,evaluation-confirmations.md}
   modules/<dynamic-module>/{analysis.md,rules.md,flows.md,data.md,cases.md}
   systems/<system-id>/{expected.md,observed.md,conflicts.md}
 ```
@@ -219,6 +224,7 @@ BRAIN_CREATOR_KNOWLEDGE_DIR=F:\YourVault\BrainCreator
 ```bash
 npm test
 npm run build
+npm run verify:requirement-eval
 npm run verify:package-contents
 npm run verify:package-install
 npm run verify:codex-native-entry
@@ -266,6 +272,7 @@ The source checkout mode is for contributors. The repo-local plugin installation
 | Preview ambiguous operational wording | `bc_intent_preview` |
 | Analyze a requirement document or link | `bc_configure target=knowledge-project`, then `bc_prepare` |
 | Review knowledge and coverage | `bc_status` and `bc_review` |
+| Confirm Requirement Eval actions | `bc_prepare action=confirm-eval-actions confirm=true` with a resolution note |
 | Approve and compile tests | `bc_prepare action=approve-baseline`, then `compile-cases` |
 | Create and bind a real system | `bc_configure target=system`, then `bc_configure target=system-binding` |
 | Configure auth | `bc_configure target=auth` |
@@ -281,6 +288,8 @@ Prefer `statusMarkdown` and `reviewMarkdown` for user-facing summaries.
 
 `bc_status.readiness` is `ready`, `action-required`, or `blocked`. Unfinished suites, pending AgentTasks, open bugs, and open Gaps produce `action-required`; unavailable bridges and manual auth checkpoints produce `blocked`. Suite progress separates passed, failed, blocked, waiting-for-agent, and not-started cases, and `nextCaseNo` prioritizes the active AgentTask.
 
+For knowledge projects, `bc_status.nextAction` returns `confirm_requirement_eval` for pending actions and `revise_blocked_requirement` for non-confirmable contradictions.
+
 Brain Creator creates a BugReport only when evidence supports a business expectation mismatch. Generated test syntax, parser, index, locator, or missing-element evidence failures create Gaps and can be reviewed as `automation_failure` or `locator_failure`.
 
 ### Requirement Workflow
@@ -289,10 +298,11 @@ Brain Creator creates a BugReport only when evidence supports a business expecta
 2. Ingest a local document, Feishu link, Web page, or Obsidian reference.
 3. Split the source into atomic clauses with `#clause-N` evidence anchors, then create typed knowledge and one traceable TestIntent per clause.
 4. Review clause coverage, unsupported claims, contradictions, missing branches, risks, Gaps, and TestDataProfiles.
-5. Resolve clarification and conflict Gaps, confirm Eval actions, then approve explicitly and compile ExecutableCases.
-6. Bind a real system and verified auth.
-7. Preview and confirm `requirement-suite` execution.
-8. Review step evidence, BugReports, Gaps, and requirement-versus-observation conflicts.
+5. Present each Eval action. Confirm clarification and missing-branch actions with a durable resolution note; revise the source for blocked contradictions.
+6. After the Eval gate passes, approve explicitly and compile ExecutableCases.
+7. Bind a real system and verified auth.
+8. Preview and confirm `requirement-suite` execution.
+9. Review step evidence, BugReports, Gaps, and requirement-versus-observation conflicts.
 
 ### Feishu
 
@@ -305,6 +315,7 @@ Notion and Google Drive are future adapters; Feishu has priority.
 ```bash
 npm test
 npm run build
+npm run verify:requirement-eval
 npm run verify:package-contents
 npm run verify:package-install
 npm run verify:codex-native-entry

@@ -68,6 +68,146 @@ describe("Brain Creator requirement-first facade", () => {
     expect(compiled.executableCase.status).toBe("ready");
   });
 
+  it("requires a separate Facade confirmation for Requirement Eval actions", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = dataOf(
+      await handleBrainCreatorTool(context, "bc_configure", {
+        target: "knowledge-project",
+        name: "Approval Workflow",
+        key: "approval-workflow"
+      })
+    );
+    const source = join(workDir, "approval.md");
+    await writeFile(
+      source,
+      "# Approval\n\nWhen the manager approves, status changes from draft to approved.",
+      "utf8"
+    );
+    const ingested = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "ingest-requirement",
+        knowledgeProjectId: project.id,
+        source
+      })
+    );
+    const designed = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "generate-test-design",
+        requirementSetId: ingested.requirementSet.id
+      })
+    );
+    const pendingStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+    const rejectedApproval = envelopeOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "approve-baseline",
+        requirementSetId: ingested.requirementSet.id,
+        confirm: true
+      })
+    );
+    const preview = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "confirm-eval-actions",
+        requirementSetId: ingested.requirementSet.id,
+        actionIds: [designed.evaluationGate.actions[0].id],
+        confirmationNote: "The alternate path keeps the draft status.",
+        confirm: false
+      })
+    );
+    const confirmed = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "confirm-eval-actions",
+        requirementSetId: ingested.requirementSet.id,
+        actionIds: [designed.evaluationGate.actions[0].id],
+        confirmationNote: "The alternate path keeps the draft status.",
+        confirm: true
+      })
+    );
+    const approved = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "approve-baseline",
+        requirementSetId: ingested.requirementSet.id,
+        confirm: true
+      })
+    );
+
+    expect(rejectedApproval.success).toBe(false);
+    expect(rejectedApproval.errors).toEqual([expect.stringContaining("Eval actions")]);
+    expect(pendingStatus.nextAction).toBe("confirm_requirement_eval");
+    expect(pendingStatus.knowledge.evaluationGates).toEqual(
+      expect.objectContaining({ pendingActions: 1, blockedActions: 0 })
+    );
+    expect(preview).toEqual(
+      expect.objectContaining({ status: "preview", requiresConfirmation: true })
+    );
+    expect(confirmed.evaluationGate.status).toBe("confirmed");
+    expect(approved.status).toBe("approved");
+  });
+
+  it("does not let a superseded blocked Eval gate poison the revised baseline status", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = dataOf(
+      await handleBrainCreatorTool(context, "bc_configure", {
+        target: "knowledge-project",
+        name: "Inventory",
+        key: "inventory-revision"
+      })
+    );
+    const source = join(workDir, "inventory.md");
+    await writeFile(
+      source,
+      "# Inventory\n\nThe stock field is visible. The stock field is not visible.",
+      "utf8"
+    );
+    const first = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "ingest-requirement",
+        knowledgeProjectId: project.id,
+        source
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "generate-test-design",
+      requirementSetId: first.requirementSet.id
+    });
+
+    await writeFile(source, "# Inventory\n\nThe stock field is visible.", "utf8");
+    const revised = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "refresh-requirement",
+        knowledgeProjectId: project.id,
+        source
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "generate-test-design",
+      requirementSetId: revised.requirementSet.id
+    });
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+
+    expect(
+      context.repository.requirementSets.find((item) => item.id === first.requirementSet.id)?.status
+    ).toBe("superseded");
+    expect(revised.requirementSet.status).toBe("draft");
+    expect(status.knowledge.evaluationGates.blockedActions).toBe(0);
+    expect(status.nextAction).toBe("review_and_approve_baseline");
+  });
+
   it("previews Feishu host connector work without persisting a false requirement revision", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({ workDir, dataFilePath: join(workDir, "assets.json") });

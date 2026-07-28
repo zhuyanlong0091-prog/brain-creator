@@ -485,6 +485,43 @@ export type RequirementSource = {
   updatedAt: string;
 };
 
+export type RequirementEvalActionKind =
+  | "clarification"
+  | "contradiction"
+  | "missing-branch"
+  | "uncovered-coverage"
+  | "unsupported-claim";
+
+export type RequirementEvalAction = {
+  id: string;
+  kind: RequirementEvalActionKind;
+  message: string;
+  sourceRefs: string[];
+  gapIds: string[];
+  status: "pending" | "confirmed" | "blocked";
+  createdAt: string;
+  confirmedAt?: string;
+  confirmationNote?: string;
+  resolutionNodeId?: string;
+};
+
+export type RequirementEvaluationGate = {
+  policyId: string;
+  policyVersion: string;
+  verdict: "pass" | "needs-user" | "blocked";
+  score: number;
+  coverage: {
+    totalClauses: number;
+    coveredClauses: number;
+    coverageRate: number;
+    uncoveredSourceRefs: string[];
+  };
+  status: "passed" | "needs-confirmation" | "confirmed" | "blocked";
+  actions: RequirementEvalAction[];
+  generatedAt: string;
+  confirmedAt?: string;
+};
+
 export type RequirementSet = {
   id: string;
   knowledgeProjectId: string;
@@ -495,6 +532,7 @@ export type RequirementSet = {
   contentHash: string;
   status: "draft" | "approved" | "superseded";
   affectedNodeIds: string[];
+  evaluationGate?: RequirementEvaluationGate;
   previousRequirementSetId?: string;
   approvedAt?: string;
   createdAt: string;

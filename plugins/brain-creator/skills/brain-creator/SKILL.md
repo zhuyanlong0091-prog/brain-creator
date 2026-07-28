@@ -41,6 +41,7 @@ Fine-grained tools remain available with `BRAIN_CREATOR_TOOL_PROFILE=full` for c
 | Analyze a local requirement, DOCX, PDF, or Web page | `bc_configure target=knowledge-project` then `bc_prepare action=ingest-requirement` | Generated knowledge stays draft |
 | Analyze a Feishu Wiki/Doc | `bc_prepare action=ingest-requirement` | Use direct OpenAPI or host content-package fallback |
 | Generate requirement analysis and tests | `bc_prepare action=generate-test-design` | Review coverage, Gaps, and data before approval |
+| Confirm Requirement Eval actions | `bc_prepare action=confirm-eval-actions confirm=true` | Present each action and preserve the user's `confirmationNote` |
 | Approve and compile | `bc_prepare action=approve-baseline confirm=true`, then `compile-cases` | Explicit user confirmation required |
 | Bind a real system | `bc_configure target=system`, then `bc_configure target=system-binding` | Confirm environment and allowlist |
 | Configure auth | `bc_configure target=auth` or `bc_configure target=checkpoint` | Never expose secrets |
@@ -60,12 +61,13 @@ When the user provides a requirement path or URL:
 2. Call `bc_prepare action=ingest-requirement` with the source.
 3. Call `bc_prepare action=generate-test-design` using `provider=builtin` by default.
 4. Present atomic clauses and their source anchors, typed coverage, unsupported claims, contradictions, missing branches, risks, test techniques, TestIntents, and TestDataProfiles. Do not collapse the result into one broad requirement summary.
-5. Resolve clarification and requirement-conflict Gaps, confirm every Eval required action, and do not approve blocked output. After explicit approval, call `bc_prepare action=approve-baseline confirm=true`.
-6. Compile approved TestIntents with `bc_prepare action=compile-cases`.
-7. Create or select a runtime system with `bc_configure target=system`, then bind it with `bc_configure target=system-binding`.
-8. Configure and verify auth. Use `bc_create_auth_checkpoint` for password, CAPTCHA, recovery, or 2FA intervention.
-9. Preview with `bc_run mode=requirement-suite confirm=false`; execute only after confirmation with `bc_run mode=requirement-suite confirm=true`.
-10. Use `bc_review` to report evidence, BugReports, Gaps, and requirement-versus-observation conflicts.
+5. Present each pending Eval action. For clarification or a missing branch, call `bc_prepare action=confirm-eval-actions confirm=true` with the selected `actionIds` and the user's non-empty `confirmationNote`. Never infer or fabricate that note.
+6. A blocked contradiction cannot be confirmed. Ask the user to revise or refresh the requirement source, then regenerate the design.
+7. Only after the Eval gate passes, call `bc_prepare action=approve-baseline confirm=true`, then compile approved TestIntents with `bc_prepare action=compile-cases`.
+8. Create or select a runtime system with `bc_configure target=system`, then bind it with `bc_configure target=system-binding`.
+9. Configure and verify auth. Use `bc_create_auth_checkpoint` for password, CAPTCHA, recovery, or 2FA intervention.
+10. Preview with `bc_run mode=requirement-suite confirm=false`; execute only after confirmation with `bc_run mode=requirement-suite confirm=true`.
+11. Use `bc_review` to report evidence, BugReports, Gaps, and requirement-versus-observation conflicts.
 
 Do not let observed system behavior overwrite approved requirements. Submit observed rules or workflows with `bc_prepare action=record-observation`, including evidence `sourceRefs`. Conflicts must remain visible and block execution until resolved.
 

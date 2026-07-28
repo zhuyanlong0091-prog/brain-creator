@@ -608,6 +608,28 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
         : undefined
     );
   }
+  if (action === "confirm-eval-actions") {
+    const requirementSetId = stringArg(input, "requirementSetId");
+    if (!optionalBooleanArg(input, "confirm")) {
+      const requirementSet = context.repository.requirementSets.find(
+        (item) => item.id === requirementSetId
+      );
+      if (!requirementSet) throw new Error("Requirement set not found");
+      return {
+        status: "preview",
+        requirementSetId,
+        evaluationGate: requirementSet.evaluationGate,
+        requiresConfirmation: true,
+        nextAction: "Present every pending Eval action and ask the user for an explicit resolution note."
+      };
+    }
+    return context.knowledgeService.confirmEvaluationActions({
+      requirementSetId,
+      actionIds: stringArrayArg(input, "actionIds"),
+      note: stringArg(input, "confirmationNote"),
+      confirm: true
+    });
+  }
   if (action === "approve-baseline") {
     if (!optionalBooleanArg(input, "confirm")) {
       return {
@@ -1732,6 +1754,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const requirementSets = context.repository.requirementSets.filter(
     (item) => item.knowledgeProjectId === projectId
   );
+  const activeRequirementSets = requirementSets.filter((item) => item.status !== "superseded");
   const nodes = context.repository.knowledgeNodes.filter(
     (item) => item.knowledgeProjectId === projectId
   );
@@ -1739,16 +1762,24 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const executableCases = context.knowledgeService.listExecutableCases(projectId);
   const executionEvidence = context.knowledgeService.listExecutionEvidence(projectId);
   const gaps = context.service.listGaps({ projectId, status: "open" });
-  const nextAction =
-    sources.length === 0
-      ? "ingest_requirement"
-      : requirementSets.some((item) => item.status === "draft")
-        ? "review_and_approve_baseline"
-        : executableCases.some((item) => item.status === "ready")
-          ? project.systemIds.length > 0
-            ? "run_requirement_suite"
-            : "bind_system"
-          : "generate_test_design";
+  const evaluationGates = activeRequirementSets.flatMap((item) =>
+    item.evaluationGate ? [item.evaluationGate] : []
+  );
+  const pendingEvalActions = evaluationGates.flatMap((gate) =>
+    gate.actions.filter((action) => action.status === "pending")
+  );
+  const blockedEvalActions = evaluationGates.flatMap((gate) =>
+    gate.actions.filter((action) => action.status === "blocked")
+  );
+  let nextAction = "generate_test_design";
+  if (sources.length === 0) nextAction = "ingest_requirement";
+  else if (blockedEvalActions.length > 0) nextAction = "revise_blocked_requirement";
+  else if (pendingEvalActions.length > 0) nextAction = "confirm_requirement_eval";
+  else if (activeRequirementSets.some((item) => item.status === "draft")) {
+    nextAction = "review_and_approve_baseline";
+  } else if (executableCases.some((item) => item.status === "ready")) {
+    nextAction = project.systemIds.length > 0 ? "run_requirement_suite" : "bind_system";
+  }
   return {
     knowledge: {
       project,
@@ -1757,6 +1788,12 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         total: requirementSets.length,
         byStatus: countBy(requirementSets, (item) => item.status),
         recent: requirementSets.slice(-5)
+      },
+      evaluationGates: {
+        total: evaluationGates.length,
+        byStatus: countBy(evaluationGates, (item) => item.status),
+        pendingActions: pendingEvalActions.length,
+        blockedActions: blockedEvalActions.length
       },
       nodes: { total: nodes.length, byType: countBy(nodes, (item) => item.type) },
       testIntents: { total: testIntents.length, byStatus: countBy(testIntents, (item) => item.status) },
@@ -4615,6 +4652,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "refresh-requirement",
       "generate-analysis",
       "generate-test-design",
+      "confirm-eval-actions",
       "approve-baseline",
       "compile-cases",
       "record-observation"
@@ -4627,6 +4665,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "refresh-requirement"
     | "generate-analysis"
     | "generate-test-design"
+    | "confirm-eval-actions"
     | "approve-baseline"
     | "compile-cases"
     | "record-observation";
