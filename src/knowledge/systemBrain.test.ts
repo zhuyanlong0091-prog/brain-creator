@@ -74,6 +74,7 @@ describe("System Brain", () => {
       workflowEvidence: true,
       apiEvidence: true,
       navigationEvidence: false,
+      stateEvidence: false,
       readyForCompilation: true
     });
     expect(second.pages.some((page) => page.pageModelId === "page-other")).toBe(false);

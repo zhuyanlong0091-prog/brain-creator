@@ -125,6 +125,7 @@ export type SystemExplorationBudget = {
   maxPages: number;
   maxDepth: number;
   maxDurationMs: number;
+  maxInteractionsPerPage: number;
 };
 
 export type SystemExplorationNavigationEdge = {
@@ -135,6 +136,35 @@ export type SystemExplorationNavigationEdge = {
   toPageModelId?: string;
 };
 
+export type SystemInteractionState = {
+  id: string;
+  url: string;
+  visibleElements: string[];
+  dialogs: string[];
+};
+
+export type SystemExplorationInteractionTransition = {
+  id: string;
+  pageModelId: string;
+  pageUrl: string;
+  targetName: string;
+  targetRole: string;
+  targetSelector: string;
+  targetKind: "tab" | "disclosure" | "select";
+  action: "click" | "select";
+  inputValue?: string;
+  before: SystemInteractionState;
+  after: SystemInteractionState;
+  visibleAdded: string[];
+  visibleRemoved: string[];
+  dialogAdded: string[];
+  dialogRemoved: string[];
+  urlChanged: boolean;
+  blockedRequests: Array<{ method: string; url: string }>;
+  status: "observed" | "no-change" | "blocked" | "failed";
+  screenshotPath?: string;
+};
+
 export type SystemExploration = {
   id: string;
   knowledgeProjectId: string;
@@ -142,9 +172,11 @@ export type SystemExploration = {
   authProfileId?: string;
   startUrl: string;
   status: "running" | "completed" | "partial" | "blocked" | "cancelled";
+  interactionMode: "off" | "safe";
   budget: SystemExplorationBudget;
   pageModelIds: string[];
   navigationEdges: SystemExplorationNavigationEdge[];
+  interactionTransitions: SystemExplorationInteractionTransition[];
   warnings: string[];
   gapIds: string[];
   artifactDir: string;

@@ -1,6 +1,8 @@
 // @vitest-environment node
 
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,11 +10,14 @@ import { BrainCreatorService } from "../domain/service.js";
 import { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import { KnowledgeService } from "./service.js";
 import {
+  classifySafeInteractionCandidate,
   isAllowedExplorationUrl,
   isReadOnlyNavigationUrl,
+  PlaywrightSystemExplorer,
   SystemExplorationCoordinator,
   type SystemExplorer
 } from "./systemExplorer.js";
+import { bindStepsToSystemBrain } from "./systemBrain.js";
 
 const tempDirs: string[] = [];
 
@@ -131,6 +136,137 @@ describe("System exploration coordinator", () => {
     expect(isReadOnlyNavigationUrl("https://orders.example.test/orders/new")).toBe(true);
   });
 
+  it("only permits explicitly safe interaction candidates", () => {
+    expect(
+      classifySafeInteractionCandidate({
+        name: "Recruiting Settings",
+        role: "tab",
+        selector: "[role=tab]",
+        tag: "button"
+      })
+    ).toEqual(expect.objectContaining({ allowed: true, action: "click" }));
+    expect(
+      classifySafeInteractionCandidate({
+        name: "More filters",
+        role: "button",
+        selector: "[aria-expanded=false]",
+        tag: "button",
+        ariaExpanded: "false"
+      })
+    ).toEqual(expect.objectContaining({ allowed: true, action: "click" }));
+    expect(
+      classifySafeInteractionCandidate({
+        name: "Employee Type",
+        role: "combobox",
+        selector: "[name=employeeType]",
+        tag: "select",
+        currentValue: "",
+        options: [
+          { value: "", label: "Select", disabled: false },
+          { value: "intern", label: "Intern", disabled: false }
+        ]
+      })
+    ).toEqual(
+      expect.objectContaining({ allowed: true, action: "select", inputValue: "intern" })
+    );
+    for (const name of ["Save", "Delete", "Approve", "Submit", "创建", "删除", "审批"]) {
+      expect(
+        classifySafeInteractionCandidate({
+          name,
+          role: "button",
+          selector: `[aria-label=${JSON.stringify(name)}]`,
+          tag: "button",
+          ariaExpanded: "false"
+        })
+      ).toEqual(expect.objectContaining({ allowed: false }));
+    }
+  });
+
+  it("persists safe field transitions and exposes them to case binding", async () => {
+    const fixture = await createFixture();
+    const explorer: SystemExplorer = {
+      explore: vi.fn().mockResolvedValue({
+        pages: [cascadePageResult()],
+        blockers: [],
+        warnings: [],
+        budgetExhausted: false
+      })
+    };
+    const coordinator = new SystemExplorationCoordinator({
+      repository: fixture.repository,
+      service: fixture.domainService,
+      knowledgeService: fixture.knowledgeService,
+      workDir: fixture.workDir,
+      explorer
+    });
+
+    const result = await coordinator.explore({
+      knowledgeProjectId: fixture.projectId,
+      systemId: fixture.systemId,
+      startUrl: "https://orders.example.test/recruiting",
+      interactionMode: "safe",
+      budget: {
+        maxPages: 2,
+        maxDepth: 1,
+        maxDurationMs: 30_000,
+        maxInteractionsPerPage: 3
+      }
+    });
+    const bound = bindStepsToSystemBrain(
+      [
+        {
+          id: "step-select",
+          order: 1,
+          action: "select",
+          instruction: "Select Intern as Employee Type",
+          targetSemantic: "Employee Type",
+          origin: "source",
+          sourceRefs: ["requirement:employee-type"]
+        },
+        {
+          id: "step-assert",
+          order: 2,
+          action: "assert",
+          instruction: "Replacement Employee becomes visible",
+          targetSemantic: "Replacement Employee",
+          expected: "Replacement Employee is visible",
+          origin: "source",
+          sourceRefs: ["requirement:replacement"]
+        }
+      ],
+      result.brain,
+      "Recruiting Employee Type Intern Replacement Employee"
+    );
+
+    expect(result.exploration.interactionMode).toBe("safe");
+    expect(result.exploration.interactionTransitions).toEqual([
+      expect.objectContaining({
+        pageModelId: expect.any(String),
+        action: "select",
+        inputValue: "intern",
+        visibleAdded: ["Replacement Employee"],
+        status: "observed"
+      })
+    ]);
+    expect(result.brain.stateTransitions).toEqual([
+      expect.objectContaining({
+        targetName: "Employee Type",
+        visibleAdded: ["Replacement Employee"]
+      })
+    ]);
+    expect(result.brain.readiness.stateEvidence).toBe(true);
+    expect(bound.missingEvidence).toEqual([]);
+    expect(bound.steps[0].sourceRefs).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^system-interaction:/),
+        "locator-point:" + result.brain.pages[0].locators[0].id
+      ])
+    );
+    expect(bound.steps[1].sourceRefs).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^system-interaction:/)])
+    );
+  });
+
   it("turns authentication blockers into a resumable Gap and checkpoint", async () => {
     const fixture = await createFixture(true);
     const explorer: SystemExplorer = {
@@ -204,6 +340,145 @@ describe("System exploration coordinator", () => {
     expect(result.gaps[0].reason).toContain("budget");
     expect(fixture.repository.pageModels).toHaveLength(0);
   });
+
+  it("rejects unsafe interaction evidence from a custom explorer", async () => {
+    const fixture = await createFixture();
+    const unsafePage = cascadePageResult();
+    unsafePage.evidence.interactiveElements = [
+      {
+        name: "Save",
+        role: "button",
+        text: "Save",
+        selector: "[data-testid=save]"
+      }
+    ];
+    unsafePage.interactions[0].target = {
+      name: "Save",
+      role: "button",
+      selector: "[data-testid=save]",
+      kind: "disclosure"
+    };
+    unsafePage.interactions[0].action = "click";
+    const coordinator = new SystemExplorationCoordinator({
+      repository: fixture.repository,
+      service: fixture.domainService,
+      knowledgeService: fixture.knowledgeService,
+      workDir: fixture.workDir,
+      explorer: {
+        explore: vi.fn().mockResolvedValue({
+          pages: [unsafePage],
+          blockers: [],
+          warnings: [],
+          budgetExhausted: false
+        })
+      }
+    });
+
+    const result = await coordinator.explore({
+      knowledgeProjectId: fixture.projectId,
+      systemId: fixture.systemId,
+      interactionMode: "safe",
+      budget: { maxInteractionsPerPage: 1 }
+    });
+
+    expect(result.exploration.status).toBe("blocked");
+    expect(result.gaps[0].reason).toContain("safe policy");
+    expect(fixture.repository.pageModels).toHaveLength(0);
+  });
+
+  it(
+    "captures safe browser state changes while blocking write requests",
+    async () => {
+      let writeRequests = 0;
+      const server = createServer((request, response) => {
+        if (request.method === "POST") writeRequests += 1;
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`
+          <!doctype html>
+          <html>
+            <head><title>Recruiting</title></head>
+            <body>
+              <label>
+                Employee Type
+                <select id="employee-type" onchange="document.querySelector('#replacement').hidden = this.value !== 'intern'">
+                  <option value="employee">Employee</option>
+                  <option value="intern">Intern</option>
+                </select>
+              </label>
+              <input id="replacement" aria-label="Replacement Employee" hidden>
+              <label>
+                Sync Type
+                <select id="sync-type" onchange="fetch('/api/sync', { method: 'POST' }).catch(() => {})">
+                  <option value="manual">Manual</option>
+                  <option value="automatic">Automatic</option>
+                </select>
+              </label>
+              <button id="save" aria-expanded="false" onclick="fetch('/api/save', { method: 'POST' })">
+                Save
+              </button>
+            </body>
+          </html>
+        `);
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address() as AddressInfo;
+      const baseUrl = `http://127.0.0.1:${address.port}/`;
+
+      try {
+        const fixture = await createLocalFixture(baseUrl);
+        const coordinator = new SystemExplorationCoordinator({
+          repository: fixture.repository,
+          service: fixture.domainService,
+          knowledgeService: fixture.knowledgeService,
+          workDir: fixture.workDir,
+          explorer: new PlaywrightSystemExplorer()
+        });
+
+        const result = await coordinator.explore({
+          knowledgeProjectId: fixture.projectId,
+          systemId: fixture.systemId,
+          interactionMode: "safe",
+          budget: {
+            maxPages: 1,
+            maxDepth: 0,
+            maxDurationMs: 30_000,
+            maxInteractionsPerPage: 4
+          }
+        });
+
+        const employeeType = result.exploration.interactionTransitions.find(
+          (transition) => transition.targetName === "Employee Type"
+        );
+        const syncType = result.exploration.interactionTransitions.find(
+          (transition) => transition.targetName === "Sync Type"
+        );
+        expect(employeeType).toEqual(
+          expect.objectContaining({
+            status: "observed",
+            visibleAdded: ["Replacement Employee"]
+          })
+        );
+        expect(syncType).toEqual(
+          expect.objectContaining({
+            status: "blocked",
+            blockedRequests: [expect.objectContaining({ method: "POST" })]
+          })
+        );
+        expect(
+          result.exploration.interactionTransitions.some(
+            (transition) => transition.targetName === "Save"
+          )
+        ).toBe(false);
+        expect(result.brain.stateTransitions).toHaveLength(1);
+        expect(writeRequests).toBe(0);
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        );
+      }
+    },
+    30_000
+  );
 });
 
 async function createFixture(withAuth = false) {
@@ -275,5 +550,91 @@ function pageResult(
       issues: []
     },
     links
+  };
+}
+
+async function createLocalFixture(baseUrl: string) {
+  const workDir = await mkdtemp(join(tmpdir(), "brain-local-exploration-"));
+  tempDirs.push(workDir);
+  const repository = new InMemoryBrainCreatorRepository();
+  const domainService = new BrainCreatorService(repository);
+  const knowledgeService = new KnowledgeService(repository, join(workDir, "knowledge"));
+  const system = domainService.createSystemProfile({
+    name: "Recruiting",
+    environment: "test",
+    baseUrl,
+    defaultLocale: "en-US",
+    urlAllowlist: [baseUrl]
+  });
+  const project = await knowledgeService.createProject({
+    name: "Recruiting Knowledge",
+    key: "recruiting-knowledge",
+    defaultLocale: "en-US"
+  });
+  knowledgeService.bindSystem(project.id, system.id);
+  return {
+    workDir,
+    repository,
+    domainService,
+    knowledgeService,
+    projectId: project.id,
+    systemId: system.id
+  };
+}
+
+function cascadePageResult() {
+  const url = "https://orders.example.test/recruiting";
+  return {
+    depth: 0,
+    evidence: {
+      title: "Recruiting",
+      finalUrl: url,
+      domText: "Employee Type",
+      screenshotPath: "evidence/recruiting.png",
+      interactiveElements: [
+        {
+          name: "Employee Type",
+          role: "combobox",
+          text: "Employee Type",
+          selector: "[name=employeeType]"
+        }
+      ],
+      consoleErrors: [],
+      networkFailures: [],
+      issues: []
+    },
+    links: [],
+    interactions: [
+      {
+        target: {
+          name: "Employee Type",
+          role: "combobox",
+          selector: "[name=employeeType]",
+          kind: "select"
+        },
+        action: "select",
+        inputValue: "intern",
+        before: {
+          id: "state-before",
+          url,
+          visibleElements: ["Employee Type"],
+          dialogs: []
+        },
+        after: {
+          id: "state-after",
+          url,
+          visibleElements: ["Employee Type", "Replacement Employee"],
+          dialogs: []
+        },
+        visibleAdded: ["Replacement Employee"],
+        visibleRemoved: [],
+        dialogAdded: [],
+        dialogRemoved: [],
+        urlChanged: false,
+        blockedRequests: [],
+        status: "observed",
+        screenshotPath: "evidence/recruiting-interaction.png"
+      }
+    ]
   };
 }

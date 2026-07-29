@@ -175,9 +175,16 @@ describe("JsonFileBrainCreatorRepository", () => {
       systemId: "system_1",
       startUrl: "https://orders.example.test/",
       status: "completed",
-      budget: { maxPages: 5, maxDepth: 2, maxDurationMs: 60_000 },
+      interactionMode: "off",
+      budget: {
+        maxPages: 5,
+        maxDepth: 2,
+        maxDurationMs: 60_000,
+        maxInteractionsPerPage: 0
+      },
       pageModelIds: ["page_1"],
       navigationEdges: [],
+      interactionTransitions: [],
       warnings: [],
       gapIds: [],
       artifactDir: ".brain-creator/system-explorations/exploration_1",
@@ -189,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(3);
+    expect(second.schemaVersion).toBe(4);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);

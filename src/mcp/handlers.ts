@@ -662,10 +662,12 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemId: stringArg(input, "systemId"),
       authProfileId: optionalStringArg(input, "authProfileId"),
       startUrl: optionalStringArg(input, "startUrl"),
+      interactionMode: explorationInteractionModeArg(input, "interactionMode"),
       budget: {
         maxPages: optionalNumberArg(input, "maxPages"),
         maxDepth: optionalNumberArg(input, "maxDepth"),
-        maxDurationMs: optionalNumberArg(input, "maxDurationMs")
+        maxDurationMs: optionalNumberArg(input, "maxDurationMs"),
+        maxInteractionsPerPage: optionalNumberArg(input, "maxInteractionsPerPage")
       }
     });
   }
@@ -1894,6 +1896,8 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       behaviorRules: brain.behaviorRules.length,
       apiFlows: brain.apiFlows.length,
       navigationEdges: brain.navigationEdges.length,
+      states: brain.states.length,
+      stateTransitions: brain.stateTransitions.length,
       latestExploration: explorations.at(-1),
       conflicts: brain.conflicts.length
     };
@@ -4894,6 +4898,15 @@ function knowledgeNodeTypeArg(input: Record<string, unknown>, key: string): Know
 function policyProviderArg(input: Record<string, unknown>, key: string) {
   const value = optionalStringArg(input, key) ?? "builtin";
   if (value !== "builtin" && value !== "host-skill") throw new Error(`${key} is invalid`);
+  return value;
+}
+
+function explorationInteractionModeArg(
+  input: Record<string, unknown>,
+  key: string
+): "off" | "safe" {
+  const value = optionalStringArg(input, key) ?? "off";
+  if (value !== "off" && value !== "safe") throw new Error(`${key} is invalid`);
   return value;
 }
 

@@ -97,7 +97,9 @@ describe("Brain Creator requirement-first facade", () => {
         startUrl: "https://orders.example.test/orders",
         maxPages: 3,
         maxDepth: 1,
-        maxDurationMs: 30_000
+        maxDurationMs: 30_000,
+        interactionMode: "safe",
+        maxInteractionsPerPage: 2
       })
     );
     const status = dataOf(
@@ -113,7 +115,13 @@ describe("Brain Creator requirement-first facade", () => {
       })
     );
 
-    expect(explored.exploration.status).toBe("completed");
+    expect(explored.exploration).toEqual(
+      expect.objectContaining({
+        status: "completed",
+        interactionMode: "safe",
+        budget: expect.objectContaining({ maxInteractionsPerPage: 2 })
+      })
+    );
     expect(explored.brain.navigationEdges).toHaveLength(1);
     expect(status.knowledge.explorations).toEqual(
       expect.objectContaining({
@@ -124,6 +132,8 @@ describe("Brain Creator requirement-first facade", () => {
     expect(status.knowledge.systemBrains[0]).toEqual(
       expect.objectContaining({
         navigationEdges: 1,
+        states: 0,
+        stateTransitions: 0,
         latestExploration: expect.objectContaining({ status: "completed" })
       })
     );
