@@ -47,6 +47,7 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
 - 多系统绑定、鉴权、AuthCheckpoint、Claude/Codex/host-agent Bridge。
 - System Brain 将 PageModel、LocatorPoint、ProbeResult、SystemExploration、TrainingSession、ActionStep 和 ApiFlow 聚合为按系统隔离的页面、状态转换、流程、级联行为和 API 证据；重复刷新幂等，需求预期与系统观察冲突单独保留。
 - 用例编译会在 System Brain 导航图上计算入口到目标页面的最短证据路径；只有唯一最短路径才会补全为 `origin=observed` 的导航步骤，同长多路径或目标不可达会阻塞并创建 Gap。
+- 状态动作编译完全由 `SystemBrainStateTransition` 驱动：通用匹配目标控件、动作、输入值和前后状态差异，并保存 `statePlan`。它不包含招聘、订单等业务特判；文档中的业务场景只作为编排验证样例。
 - 指定 `systemId` 编译 ExecutableCase 时，步骤会绑定真实 PageModel/LocatorPoint/ProbeResult 证据；缺少页面或定位证据时阻塞并创建 Gap。
 - Generator、真实 Playwright、有限 Healer、Suite、BugReport、Gap 和证据复盘。
 - 旧版 `.xlsx` / `.md` 测试用例文档的预览、确认、执行、续跑、回归和可选 Excel 回写。
@@ -334,6 +335,8 @@ System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limit
 System Brain is a derived, system-isolated view over PageModel, LocatorPoint, ProbeResult, SystemExploration, TrainingSession, ActionStep, and ApiFlow assets. `explore-system` performs a bounded breadth-first scan using Playwright and can optionally capture safe interaction state transitions. `refresh-system-brain` writes `.brain-creator/knowledge/<project>/systems/<system-id>/brain.md`, including navigation and state graphs, while preserving separate expected, observed, and conflict layers.
 
 During case compilation, Brain Creator finds the shortest evidence-backed route from a graph entry page to the target page. It compiles navigation clicks only when that shortest path is unique, marks them as `origin=observed`, and stores an auditable `pathPlan`. Equally short alternatives, an ambiguous target page, an unreachable target, or an exhausted path-search budget block the case and create a System Brain Gap. `candidatePathCount` preserves the total while at most 10 candidate details are returned to keep Agent context bounded.
+
+State-action compilation is data-driven from `SystemBrainStateTransition`: it matches generic control targets, actions, input values, and before/after effects, then stores an auditable `statePlan`. No product-domain rule is encoded in the planner; recruiting, settings, and other examples are fixtures that validate the same orchestration contract. Equal candidates, missing input values, or missing locator evidence block with a Gap.
 
 ### Feishu
 

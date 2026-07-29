@@ -538,6 +538,7 @@ describe("Brain Creator requirement-first facade", () => {
     );
     expect(compiled.executableCase.status).toBe("ready");
     expect(compiled.workflowPath).toBeUndefined();
+    expect(compiled.stateActions).toBeUndefined();
     expect(compiled.nextAction).toBe("preview-requirement-suite");
   });
 

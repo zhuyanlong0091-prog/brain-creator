@@ -761,6 +761,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
   return {
     ...compiled,
     workflowPath: compiled.executableCase.pathPlan,
+    stateActions: compiled.executableCase.statePlan,
     nextAction:
       compiled.executableCase.status === "ready"
         ? "preview-requirement-suite"
