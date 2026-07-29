@@ -537,6 +537,8 @@ describe("Brain Creator requirement-first facade", () => {
       expect.objectContaining({ totalClauses: 2, coveredClauses: 2, coverageRate: 1 })
     );
     expect(compiled.executableCase.status).toBe("ready");
+    expect(compiled.workflowPath).toBeUndefined();
+    expect(compiled.nextAction).toBe("preview-requirement-suite");
   });
 
   it("requires a separate Facade confirmation for Requirement Eval actions", async () => {

@@ -754,10 +754,18 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       stringArg(input, "systemId")
     );
   }
-  return context.knowledgeService.compileExecutableCases(
+  const compiled = context.knowledgeService.compileExecutableCases(
     stringArg(input, "testIntentId"),
     optionalStringArg(input, "systemId")
   );
+  return {
+    ...compiled,
+    workflowPath: compiled.executableCase.pathPlan,
+    nextAction:
+      compiled.executableCase.status === "ready"
+        ? "preview-requirement-suite"
+        : "review-system-brain-gaps"
+  };
 }
 
 async function statusFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {

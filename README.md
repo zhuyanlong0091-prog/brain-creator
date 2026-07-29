@@ -46,6 +46,7 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
 - TestIntent、TestDataProfile、ExecutableCase、隐含唯一动作补全与歧义 Gap。
 - 多系统绑定、鉴权、AuthCheckpoint、Claude/Codex/host-agent Bridge。
 - System Brain 将 PageModel、LocatorPoint、ProbeResult、SystemExploration、TrainingSession、ActionStep 和 ApiFlow 聚合为按系统隔离的页面、状态转换、流程、级联行为和 API 证据；重复刷新幂等，需求预期与系统观察冲突单独保留。
+- 用例编译会在 System Brain 导航图上计算入口到目标页面的最短证据路径；只有唯一最短路径才会补全为 `origin=observed` 的导航步骤，同长多路径或目标不可达会阻塞并创建 Gap。
 - 指定 `systemId` 编译 ExecutableCase 时，步骤会绑定真实 PageModel/LocatorPoint/ProbeResult 证据；缺少页面或定位证据时阻塞并创建 Gap。
 - Generator、真实 Playwright、有限 Healer、Suite、BugReport、Gap 和证据复盘。
 - 旧版 `.xlsx` / `.md` 测试用例文档的预览、确认、执行、续跑、回归和可选 Excel 回写。
@@ -184,7 +185,7 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 5. 展示每个 Eval action；可澄清项和缺失分支使用 `confirm-eval-actions` 保存用户说明，直接矛盾必须修订需求源，不能通过确认绕过。
 6. 所有 Eval action 通过门禁后，用户再次明确确认并审批 baseline。
 7. 创建并绑定 SystemProfile，配置鉴权；优先调用 `bc_prepare action=explore-system` 自动发现 allowlist 内页面、交互元素和导航关系。需要观察 Tab、展开控件或原生下拉的级联变化时，可由用户显式批准 `interactionMode=safe`；更复杂菜单和业务流程仍由宿主 Agent 补充页面/训练证据。
-8. 指定 `systemId` 编译 ExecutableCase；只补全唯一且有页面、流程或定位证据的动作，缺证据时创建 Gap。
+8. 指定 `systemId` 编译 ExecutableCase；系统保存可审计的 `pathPlan`，只补全唯一最短且有页面、导航边和定位证据的动作。同长多路径、目标页不明确或不可达时创建 Gap。
 9. `bc_run mode=requirement-suite confirm=false` 预览，用户确认后执行。
 10. 用 `bc_review` 查看证据、Bug、Gap、Requirement Eval 历史准确率和需求/观察冲突。
 
@@ -331,6 +332,8 @@ System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limit
 `npm run verify:requirement-eval` evaluates seven cross-domain golden samples, including complex Markdown rule tables, cross-module workflows, and permission matrices. `bc_review target=requirement-eval-accuracy` then estimates historical accuracy from traceable execution: passed evidence and business mismatches linked to BugReports validate the requirement expectation, unclassified semantic failures require review, and blocked or technical failures remain inconclusive.
 
 System Brain is a derived, system-isolated view over PageModel, LocatorPoint, ProbeResult, SystemExploration, TrainingSession, ActionStep, and ApiFlow assets. `explore-system` performs a bounded breadth-first scan using Playwright and can optionally capture safe interaction state transitions. `refresh-system-brain` writes `.brain-creator/knowledge/<project>/systems/<system-id>/brain.md`, including navigation and state graphs, while preserving separate expected, observed, and conflict layers.
+
+During case compilation, Brain Creator finds the shortest evidence-backed route from a graph entry page to the target page. It compiles navigation clicks only when that shortest path is unique, marks them as `origin=observed`, and stores an auditable `pathPlan`. Equally short alternatives, an ambiguous target page, an unreachable target, or an exhausted path-search budget block the case and create a System Brain Gap. `candidatePathCount` preserves the total while at most 10 candidate details are returned to keep Agent context bounded.
 
 ### Feishu
 

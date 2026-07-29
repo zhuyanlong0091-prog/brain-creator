@@ -31,6 +31,7 @@ import {
   type SystemBrain,
   type SystemObservationDraft
 } from "./systemBrain.js";
+import { planWorkflowPath } from "./workflowPathPlanner.js";
 
 export class KnowledgeService {
   constructor(
@@ -494,23 +495,57 @@ export class KnowledgeService {
       ? [this.createGap(requirementSet.knowledgeProjectId, requirementSet.id, "multiple workflow paths require user selection")]
       : [];
     let steps = gaps.length > 0 ? [] : compileSteps(executionContent, sourceRefs);
+    let pathPlan: ExecutableCase["pathPlan"];
     if (systemId) {
       const project = this.getProject(requirementSet.knowledgeProjectId);
       if (!project.systemIds.includes(systemId)) {
         throw new Error("Business system must be bound before compiling executable cases");
       }
-      const bound = bindStepsToSystemBrain(
-        steps,
-        buildSystemBrain(this.repository, project.id, systemId),
-        `${intent.module} ${intent.title} ${intent.objective}`
-      );
-      steps = bound.steps;
-      const reasons = [...new Set(bound.missingEvidence.map((item) => item.reason))];
-      gaps.push(
-        ...reasons.map((reason) =>
-          this.createGap(project.id, requirementSet.id, reason, "system-brain")
-        )
-      );
+      if (gaps.length === 0) {
+        const brain = buildSystemBrain(this.repository, project.id, systemId);
+        const contextQuery = `${intent.module} ${intent.title} ${intent.objective}`;
+        const planned = planWorkflowPath(steps, brain, contextQuery);
+        pathPlan = {
+          verdict: planned.verdict,
+          reason: planned.reason,
+          startPageModelId: planned.startPageModelId,
+          targetPageModelId: planned.targetPageModelId,
+          pageModelIds: planned.pageModelIds,
+          navigationSourceRefs: planned.navigationSourceRefs,
+          candidatePathCount: planned.candidatePathCount,
+          candidatePaths: planned.candidatePaths
+        };
+        if (planned.verdict === "ambiguous" || planned.verdict === "missing") {
+          gaps.push(
+            this.createGap(
+              project.id,
+              requirementSet.id,
+              planned.reason ?? "System Brain could not plan a unique workflow path",
+              "system-brain"
+            )
+          );
+        } else {
+          const bound = bindStepsToSystemBrain(
+            planned.steps,
+            brain,
+            contextQuery
+          );
+          steps = bound.steps;
+          const reasons = [
+            ...new Set(bound.missingEvidence.map((item) => item.reason))
+          ];
+          gaps.push(
+            ...reasons.map((reason) =>
+              this.createGap(
+                project.id,
+                requirementSet.id,
+                reason,
+                "system-brain"
+              )
+            )
+          );
+        }
+      }
     }
     const now = timestamp();
     const executableCase: ExecutableCase = {
@@ -523,6 +558,7 @@ export class KnowledgeService {
       status: gaps.length > 0 ? "blocked" : "ready",
       preconditions: intent.preconditions,
       steps,
+      pathPlan,
       dataProfileIds: this.repository.testDataProfiles
         .filter((profile) => profile.requirementSetId === requirementSet.id)
         .map((profile) => profile.id),

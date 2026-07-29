@@ -47,7 +47,7 @@ Fine-grained tools remain available with `BRAIN_CREATOR_TOOL_PROFILE=full` for c
 | Explore a real system | `bc_prepare action=explore-system` | Link-only by default; explicit `interactionMode=safe` probes bounded tabs, disclosures, and native selects |
 | Submit page/training evidence | `bc_prepare action=record-page-evidence` / `record-training-evidence` | Use real host-browser evidence inside the selected system allowlist |
 | Refresh System Brain | `bc_prepare action=refresh-system-brain` | Preserve system isolation and evidence references |
-| Compile against a system | `bc_prepare action=compile-cases` with `systemId` | Missing page or locator evidence creates a Gap |
+| Compile against a system | `bc_prepare action=compile-cases` with `systemId` | Only a unique shortest observed path is compiled; ambiguous, unreachable, or missing evidence creates a Gap |
 | Configure auth | `bc_configure target=auth` or `bc_configure target=checkpoint` | Never expose secrets |
 | Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true` |
 | Execute an existing test document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` | Explicit confirmation required |
@@ -70,11 +70,13 @@ When the user provides a requirement path or URL:
 7. Only after the Eval gate passes, call `bc_prepare action=approve-baseline confirm=true`.
 8. Create or select a runtime system with `bc_configure target=system`, bind it with `bc_configure target=system-binding`, and configure verified auth.
 9. Call `bc_prepare action=explore-system` to discover allowlisted pages, controls, and navigation links. Keep `interactionMode=off` unless safe state evidence is needed. With explicit user approval, use `interactionMode=safe` and a small `maxInteractionsPerPage` to observe tabs, disclosure controls, and native-select cascades. Use `record-page-evidence` and `record-training-evidence` for complex menus, data entry, and business workflows.
-10. Compile approved TestIntents with `bc_prepare action=compile-cases` and the selected `systemId`. Missing page or locator evidence must block with a Gap.
+10. Compile approved TestIntents with `bc_prepare action=compile-cases` and the selected `systemId`. Inspect `workflowPath`: only `unique` or `not-required` may continue. For `ambiguous`, present `candidatePathCount` and the returned candidate details, then ask for evidence or selection; for `missing`, collect more System Brain evidence. Candidate details are capped at 10 to keep context bounded. Never select a path on the user's behalf.
 11. Preview with `bc_run mode=requirement-suite confirm=false`; execute only after confirmation with `bc_run mode=requirement-suite confirm=true`.
 12. Use `bc_review target=requirement-eval-accuracy`, `bc_review target=system-brain`, and `bc_review target=system-exploration` alongside evidence, BugReport, and Gap reviews.
 
 Do not let observed system behavior overwrite approved requirements. Prefer `explore-system` before compilation, then use `refresh-system-brain` to derive observed pages, fields, navigation, state transitions, workflows, cascades, and API integrations from existing assets. Safe interaction mode must reject write-like labels and unstable selectors, block non-read HTTP methods and dangerous URLs, restore the page after every probe, and stay within the allowlist and interaction budget. Never submit forms, approve, delete, or publish. Disclose the residual risk that a misdesigned GET endpoint may have side effects. Submit additional observed rules or workflows with `bc_prepare action=record-observation`, including evidence `sourceRefs`. Conflicts must remain visible and block execution until resolved.
+
+Workflow path planning is deterministic and evidence-only. Brain Creator may generate `origin=observed` navigation clicks from recorded navigation edges only when one shortest path connects an observed entry page to the selected target page. Equal shortest paths, target-page score ties, disconnected targets, and missing edge locators must remain blocked as Gaps.
 
 Historical Requirement Eval accuracy is an estimate, not a fabricated model score. Passed evidence and failed evidence linked to a BugReport validate the requirement expectation; unclassified semantic failures contradict it pending review; blocked, console, and network failures remain inconclusive. Report system conformance and traceability separately.
 
