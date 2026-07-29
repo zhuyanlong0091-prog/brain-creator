@@ -5,8 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryBrainCreatorRepository } from "../domain/repository.js";
-import type { RequirementContentPackage } from "../domain/types.js";
+import type {
+  ExecutableCaseStep,
+  RequirementContentPackage
+} from "../domain/types.js";
 import { KnowledgeService } from "./service.js";
+import {
+  type SystemBrain,
+  type SystemBrainPage
+} from "./systemBrain.js";
+import { planWorkflowPath } from "./workflowPathPlanner.js";
 
 const tempDirs: string[] = [];
 
@@ -15,6 +23,226 @@ afterEach(async () => {
 });
 
 describe("System Brain", () => {
+  it("compiles the unique shortest navigation path into evidence-bound steps", () => {
+    const steps = workflowSteps();
+    const result = planWorkflowPath(
+      steps,
+      workflowBrain([
+        edge("page-dashboard", "page-recruiting", "Recruiting"),
+        edge("page-recruiting", "page-create", "Create Request")
+      ]),
+      "Fill the recruiting request form"
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        verdict: "unique",
+        startPageModelId: "page-dashboard",
+        targetPageModelId: "page-create",
+        pageModelIds: ["page-dashboard", "page-recruiting", "page-create"]
+      })
+    );
+    expect(result.steps.map((step) => step.action)).toEqual([
+      "navigate",
+      "click",
+      "click",
+      "fill",
+      "assert"
+    ]);
+    expect(result.steps.slice(0, 3)).toEqual([
+      expect.objectContaining({ pageModelId: "page-dashboard" }),
+      expect.objectContaining({
+        pageModelId: "page-dashboard",
+        targetSemantic: "Recruiting",
+        origin: "observed",
+        sourceRefs: expect.arrayContaining([
+          "system-navigation:exploration-path:page-dashboard:page-recruiting:recruiting"
+        ])
+      }),
+      expect.objectContaining({
+        pageModelId: "page-recruiting",
+        targetSemantic: "Create Request",
+        origin: "observed"
+      })
+    ]);
+    expect(result.steps.slice(3)).toEqual([
+      expect.objectContaining({ pageModelId: "page-create" }),
+      expect.objectContaining({ pageModelId: "page-create" })
+    ]);
+  });
+
+  it("blocks equal shortest navigation paths instead of choosing one", () => {
+    const brain = workflowBrain([
+      edge("page-dashboard", "page-recruiting", "Recruiting"),
+      edge("page-recruiting", "page-create", "Create Request"),
+      edge("page-dashboard", "page-shortcut", "Recruiting Shortcut"),
+      edge("page-shortcut", "page-create", "Create From Shortcut")
+    ]);
+    brain.pages.push(
+      page("page-shortcut", "Recruiting Shortcut", "/shortcut", [
+        locator("locator-shortcut-create", "Create From Shortcut", "link")
+      ])
+    );
+
+    const result = planWorkflowPath(
+      workflowSteps(),
+      brain,
+      "Fill the recruiting request form"
+    );
+
+    expect(result.verdict).toBe("ambiguous");
+    expect(result.reason).toContain("multiple equally short navigation paths");
+    expect(result.candidatePaths).toHaveLength(2);
+    expect(result.candidatePaths.map((path) => path.navigationLabels)).toEqual(
+      expect.arrayContaining([
+        ["Recruiting", "Create Request"],
+        ["Recruiting Shortcut", "Create From Shortcut"]
+      ])
+    );
+  });
+
+  it("treats parallel controls between the same pages as distinct paths", () => {
+    const result = planWorkflowPath(
+      workflowSteps(),
+      workflowBrain([
+        edge("page-dashboard", "page-recruiting", "Recruiting"),
+        edge("page-dashboard", "page-recruiting", "Recruiting Menu"),
+        edge("page-recruiting", "page-create", "Create Request")
+      ]),
+      "Fill the recruiting request form"
+    );
+
+    expect(result.verdict).toBe("ambiguous");
+    expect(result.candidatePaths.map((path) => path.navigationLabels)).toEqual(
+      expect.arrayContaining([
+        ["Recruiting", "Create Request"],
+        ["Recruiting Menu", "Create Request"]
+      ])
+    );
+  });
+
+  it("blocks when navigation path enumeration exceeds its safety budget", () => {
+    const result = planWorkflowPath(
+      workflowSteps(),
+      workflowBrain(
+        Array.from({ length: 1_001 }, (_, index) =>
+          edge("page-dashboard", "page-create", `Create Request ${index}`)
+        )
+      ),
+      "Fill the recruiting request form"
+    );
+
+    expect(result.verdict).toBe("missing");
+    expect(result.reason).toContain("exceeded the safety budget");
+    expect(result.candidatePathCount).toBe(1_000);
+    expect(result.candidatePaths).toHaveLength(10);
+  });
+
+  it("blocks when navigation evidence cannot reach the target page", () => {
+    const brain = workflowBrain([
+      edge("page-dashboard", "page-recruiting", "Recruiting")
+    ]);
+
+    const result = planWorkflowPath(
+      workflowSteps(),
+      brain,
+      "Fill the recruiting request form"
+    );
+
+    expect(result.verdict).toBe("missing");
+    expect(result.reason).toContain("no navigation path");
+    expect(result.targetPageModelId).toBe("page-create");
+  });
+
+  it("keeps single-page compilation compatible when no path is required", () => {
+    const brain = workflowBrain([]);
+    brain.pages = [brain.pages[2]];
+
+    const result = planWorkflowPath(
+      workflowSteps(),
+      brain,
+      "Fill the recruiting request form"
+    );
+
+    expect(result.verdict).toBe("not-required");
+    expect(result.steps).toEqual(workflowSteps());
+  });
+
+  it("persists a unique path plan and creates a Gap when the graph becomes ambiguous", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({
+      name: "Workflow Planning",
+      key: "workflow-planning",
+      defaultLocale: "en-US"
+    });
+    addSystem(repository, "system-path");
+    service.bindSystem(project.id, "system-path");
+    addWorkflowGraphAssets(repository, project.id, false);
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "workflow-path",
+        "Users fill the recruiting request form."
+      )
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+
+    const unique = service.compileExecutableCases(
+      design.testIntents[0].id,
+      "system-path"
+    );
+
+    expect(unique.executableCase.status).toBe("ready");
+    expect(unique.executableCase.pathPlan).toEqual(
+      expect.objectContaining({
+        verdict: "unique",
+        pageModelIds: ["page-dashboard", "page-recruiting", "page-create"]
+      })
+    );
+    expect(unique.executableCase.steps.map((step) => step.action)).toEqual([
+      "navigate",
+      "click",
+      "click",
+      "fill",
+      "assert"
+    ]);
+
+    addWorkflowGraphAssets(repository, project.id, true);
+    const ambiguous = service.compileExecutableCases(
+      design.testIntents[0].id,
+      "system-path"
+    );
+
+    expect(ambiguous.executableCase.status).toBe("blocked");
+    expect(ambiguous.executableCase.pathPlan).toEqual(
+      expect.objectContaining({
+        verdict: "ambiguous",
+        candidatePaths: expect.arrayContaining([
+          expect.objectContaining({
+            pageModelIds: [
+              "page-dashboard",
+              "page-recruiting",
+              "page-create"
+            ]
+          }),
+          expect.objectContaining({
+            pageModelIds: ["page-dashboard", "page-shortcut", "page-create"]
+          })
+        ])
+      })
+    );
+    expect(ambiguous.gaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceType: "system-brain",
+          reason: expect.stringContaining("multiple equally short navigation paths")
+        })
+      ])
+    );
+  });
+
   it("builds an isolated, idempotent system view from page, training, cascade, and API evidence", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const knowledgeDir = await tempDir();
@@ -263,6 +491,208 @@ describe("System Brain", () => {
     );
   });
 });
+
+function workflowSteps(): ExecutableCaseStep[] {
+  return [
+    {
+      id: "step-navigate",
+      order: 1,
+      action: "navigate",
+      instruction: "Open the target module entry page",
+      targetSemantic: "module entry",
+      origin: "derived",
+      sourceRefs: ["requirement:path"]
+    },
+    {
+      id: "step-fill",
+      order: 2,
+      action: "fill",
+      instruction: "Fill the recruiting request form",
+      targetSemantic: "Request Name",
+      origin: "source",
+      sourceRefs: ["requirement:path"]
+    },
+    {
+      id: "step-assert",
+      order: 3,
+      action: "assert",
+      instruction: "Verify the request is ready",
+      targetSemantic: "Request Name",
+      expected: "The form accepts the request name",
+      origin: "source",
+      sourceRefs: ["requirement:path"]
+    }
+  ];
+}
+
+function workflowBrain(navigationEdges: SystemBrain["navigationEdges"]): SystemBrain {
+  return {
+    knowledgeProjectId: "knowledge-path",
+    systemId: "system-path",
+    pages: [
+      page("page-dashboard", "Dashboard", "/", [
+        locator("locator-recruiting", "Recruiting", "link")
+      ]),
+      page("page-recruiting", "Recruiting Requests", "/recruiting", [
+        locator("locator-create-request", "Create Request", "link")
+      ]),
+      page("page-create", "Create Recruiting Request", "/recruiting/new", [
+        locator("locator-request-name", "Request Name", "textbox")
+      ])
+    ],
+    workflows: [],
+    behaviorRules: [],
+    apiFlows: [],
+    navigationEdges,
+    states: [],
+    stateTransitions: [],
+    observations: [],
+    conflicts: [],
+    readiness: {
+      pageEvidence: true,
+      locatorEvidence: true,
+      workflowEvidence: false,
+      apiEvidence: false,
+      navigationEvidence: navigationEdges.length > 0,
+      stateEvidence: false,
+      readyForCompilation: true
+    }
+  };
+}
+
+function page(
+  pageModelId: string,
+  name: string,
+  route: string,
+  locators: SystemBrainPage["locators"]
+): SystemBrainPage {
+  return {
+    pageModelId,
+    name,
+    route,
+    version: 1,
+    screenshotId: `shot-${pageModelId}`,
+    locatorCount: locators.length,
+    probeIssueCount: 0,
+    locators,
+    probeResultIds: [],
+    sourceRefs: [`page-model:${pageModelId}`]
+  };
+}
+
+function locator(id: string, name: string, role: string) {
+  return {
+    id,
+    pageModelId:
+      id.includes("request-name")
+        ? "page-create"
+        : id.includes("create-request")
+          ? "page-recruiting"
+          : id.includes("shortcut")
+            ? "page-shortcut"
+            : "page-dashboard",
+    name,
+    selector: `[data-testid=${id}]`,
+    role,
+    text: name,
+    fallbackSelectors: [`text=${name}`],
+    confidence: 0.99
+  };
+}
+
+function edge(
+  fromPageModelId: string,
+  toPageModelId: string,
+  text: string
+): SystemBrain["navigationEdges"][number] {
+  return {
+    explorationId: "exploration-path",
+    fromPageModelId,
+    toPageModelId,
+    fromUrl: `https://example.test/${fromPageModelId}`,
+    toUrl: `https://example.test/${toPageModelId}`,
+    text,
+    sourceRefs: [
+      `system-exploration:exploration-path`,
+      `page-model:${fromPageModelId}`,
+      `page-model:${toPageModelId}`,
+      `system-navigation:exploration-path:${fromPageModelId}:${toPageModelId}:${text
+        .replace(/\s+/g, "")
+        .toLowerCase()}`
+    ]
+  };
+}
+
+function addWorkflowGraphAssets(
+  repository: InMemoryBrainCreatorRepository,
+  knowledgeProjectId: string,
+  includeShortcut: boolean
+) {
+  const brain = workflowBrain([
+    edge("page-dashboard", "page-recruiting", "Recruiting"),
+    edge("page-recruiting", "page-create", "Create Request"),
+    ...(includeShortcut
+      ? [
+          edge("page-dashboard", "page-shortcut", "Recruiting Shortcut"),
+          edge("page-shortcut", "page-create", "Create From Shortcut")
+        ]
+      : [])
+  ]);
+  if (includeShortcut) {
+    brain.pages.push(
+      page("page-shortcut", "Recruiting Shortcut", "/shortcut", [
+        locator("locator-shortcut-create", "Create From Shortcut", "link")
+      ])
+    );
+  }
+  const existingPageIds = new Set(repository.pageModels.map((item) => item.id));
+  for (const brainPage of brain.pages.filter(
+    (candidate) => !existingPageIds.has(candidate.pageModelId)
+  )) {
+    repository.pageModels.push({
+      id: brainPage.pageModelId,
+      projectId: "system-path",
+      route: brainPage.route,
+      name: brainPage.name,
+      version: 1,
+      domSnapshotId: `dom-${brainPage.pageModelId}`,
+      screenshotId: brainPage.screenshotId,
+      status: "succeeded",
+      createdAt: now(),
+      updatedAt: now()
+    });
+    repository.locatorPoints.push(...brainPage.locators);
+  }
+  repository.systemExplorations.push({
+    id: includeShortcut ? "exploration-shortcut" : "exploration-path",
+    knowledgeProjectId,
+    systemId: "system-path",
+    startUrl: "https://system-path.example.test/",
+    status: "completed",
+    interactionMode: "off",
+    budget: {
+      maxPages: 5,
+      maxDepth: 2,
+      maxDurationMs: 60_000,
+      maxInteractionsPerPage: 0
+    },
+    pageModelIds: brain.pages.map((item) => item.pageModelId),
+    navigationEdges: brain.navigationEdges.map((item) => ({
+      fromUrl: item.fromUrl,
+      toUrl: item.toUrl,
+      text: item.text,
+      fromPageModelId: item.fromPageModelId,
+      toPageModelId: item.toPageModelId
+    })),
+    interactionTransitions: [],
+    warnings: [],
+    gapIds: [],
+    artifactDir: ".brain-creator/system-explorations/workflow-path",
+    createdAt: now(),
+    updatedAt: now(),
+    completedAt: now()
+  });
+}
 
 function addSystem(repository: InMemoryBrainCreatorRepository, systemId: string) {
   repository.systemProfiles.push({

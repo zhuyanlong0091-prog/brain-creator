@@ -63,7 +63,7 @@ The exploration creates versioned PageModels, LocatorPoints, ProbeResults, navig
 
 ### 6. Compile Executable Cases
 
-The Agent calls `bc_prepare action=compile-cases` with `systemId`. Brain Creator binds steps to real PageModel, LocatorPoint, and ProbeResult evidence. It may add an implicit action only when confirmed workflow knowledge provides one unique path. Multiple plausible paths or missing page/locator evidence create a Gap.
+The Agent calls `bc_prepare action=compile-cases` with `systemId`. Brain Creator selects the target page from semantic and role-compatible evidence, computes shortest paths from observed graph entry pages, and binds steps to real PageModel, navigation-edge, LocatorPoint, state-transition, and ProbeResult evidence. It compiles implicit navigation only when the shortest path is unique and records the result in `workflowPath`/`pathPlan`. Equally short alternatives, an ambiguous or unreachable target, exhausted search budget, and missing locator evidence create a Gap. The Agent must present `candidatePathCount` plus the returned candidate details instead of choosing one; details are capped at 10 to protect context.
 
 ### 7. Preview And Execute
 

@@ -243,7 +243,8 @@ export function buildSystemBrain(
             sourceRefs: [
               `system-exploration:${exploration.id}`,
               `page-model:${edge.fromPageModelId}`,
-              ...(edge.toPageModelId ? [`page-model:${edge.toPageModelId}`] : [])
+              ...(edge.toPageModelId ? [`page-model:${edge.toPageModelId}`] : []),
+              navigationSourceRef(exploration.id, edge)
             ]
           })
         )
@@ -498,13 +499,17 @@ export function bindStepsToSystemBrain(
   steps: ExecutableCaseStep[];
   missingEvidence: Array<{ stepId: string; action: ExecutableCaseStep["action"]; reason: string }>;
 } {
-  const page = selectPage(brain.pages, `${contextQuery} ${steps.map((step) => step.instruction).join(" ")}`);
+  const page = selectPage(
+    brain.pages,
+    `${contextQuery} ${steps.map((step) => step.instruction).join(" ")}`
+  );
+  const hasUnpinnedSteps = steps.some((step) => !step.pageModelId);
   const missingEvidence: Array<{
     stepId: string;
     action: ExecutableCaseStep["action"];
     reason: string;
   }> = [];
-  if (!page) {
+  if (!page && hasUnpinnedSteps) {
     return {
       steps,
       missingEvidence: steps.map((step) => ({
@@ -519,42 +524,85 @@ export function bindStepsToSystemBrain(
   }
 
   const bound = steps.map((step) => {
-    const sourceRefs = new Set([...step.sourceRefs, `page-model:${page.pageModelId}`]);
+    const stepPage = step.pageModelId
+      ? brain.pages.find((candidate) => candidate.pageModelId === step.pageModelId)
+      : page;
+    if (!stepPage) {
+      missingEvidence.push({
+        stepId: step.id,
+        action: step.action,
+        reason: `System Brain has no page evidence for planned step: ${step.targetSemantic}`
+      });
+      return step;
+    }
+    const sourceRefs = new Set([
+      ...step.sourceRefs,
+      `page-model:${stepPage.pageModelId}`
+    ]);
     if (step.action === "navigate") {
-      page.probeResultIds.forEach((probeId) => sourceRefs.add(`probe-result:${probeId}`));
-      return { ...step, pageModelId: page.pageModelId, sourceRefs: [...sourceRefs] };
+      stepPage.probeResultIds.forEach((probeId) =>
+        sourceRefs.add(`probe-result:${probeId}`)
+      );
+      return {
+        ...step,
+        pageModelId: stepPage.pageModelId,
+        sourceRefs: [...sourceRefs]
+      };
     }
     if (step.action === "assert") {
-      page.probeResultIds.forEach((probeId) => sourceRefs.add(`probe-result:${probeId}`));
-      matchingStateTransitions(step, page.pageModelId, brain, contextQuery).forEach(
+      stepPage.probeResultIds.forEach((probeId) =>
+        sourceRefs.add(`probe-result:${probeId}`)
+      );
+      matchingStateTransitions(
+        step,
+        stepPage.pageModelId,
+        brain,
+        contextQuery
+      ).forEach(
         (transition) =>
           transition.sourceRefs.forEach((sourceRef) => sourceRefs.add(sourceRef))
       );
-      return { ...step, pageModelId: page.pageModelId, sourceRefs: [...sourceRefs] };
+      return {
+        ...step,
+        pageModelId: stepPage.pageModelId,
+        sourceRefs: [...sourceRefs]
+      };
     }
     if (step.action === "api") {
       brain.apiFlows.forEach((flow) =>
         flow.sourceRefs.forEach((sourceRef) => sourceRefs.add(sourceRef))
       );
-      return { ...step, pageModelId: page.pageModelId, sourceRefs: [...sourceRefs] };
+      return {
+        ...step,
+        pageModelId: stepPage.pageModelId,
+        sourceRefs: [...sourceRefs]
+      };
     }
     if (step.action === "wait") {
-      return { ...step, pageModelId: page.pageModelId, sourceRefs: [...sourceRefs] };
+      return {
+        ...step,
+        pageModelId: stepPage.pageModelId,
+        sourceRefs: [...sourceRefs]
+      };
     }
-    const locator = selectLocator(step, page.locators, contextQuery);
+    const locator = selectLocator(step, stepPage.locators, contextQuery);
     if (!locator) {
       missingEvidence.push({
         stepId: step.id,
         action: step.action,
         reason: `System Brain has no locator evidence for ${step.action}: ${step.targetSemantic}`
       });
-      return { ...step, pageModelId: page.pageModelId, sourceRefs: [...sourceRefs] };
+      return {
+        ...step,
+        pageModelId: stepPage.pageModelId,
+        sourceRefs: [...sourceRefs]
+      };
     }
     sourceRefs.add(`locator-point:${locator.id}`);
     brain.stateTransitions
       .filter(
         (transition) =>
-          transition.pageModelId === page.pageModelId &&
+          transition.pageModelId === stepPage.pageModelId &&
           (transition.targetSelector === locator.selector ||
             normalizeSemantic(transition.targetName) === normalizeSemantic(locator.name))
       )
@@ -563,7 +611,7 @@ export function bindStepsToSystemBrain(
       );
     return {
       ...step,
-      pageModelId: page.pageModelId,
+      pageModelId: stepPage.pageModelId,
       locatorPointId: locator.id,
       sourceRefs: [...sourceRefs]
     };
@@ -704,4 +752,18 @@ function uniqueStates(states: SystemBrainState[]) {
     });
   }
   return [...unique.values()];
+}
+
+function navigationSourceRef(
+  explorationId: string,
+  edge: {
+    fromPageModelId: string;
+    toPageModelId?: string;
+    toUrl: string;
+    text: string;
+  }
+) {
+  return `system-navigation:${explorationId}:${edge.fromPageModelId}:${
+    edge.toPageModelId ?? normalizeSemantic(edge.toUrl)
+  }:${normalizeSemantic(edge.text)}`;
 }
