@@ -146,6 +146,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       maxPages: z.number().int().min(1).max(25).optional(),
       maxDepth: z.number().int().min(0).max(4).optional(),
       maxDurationMs: z.number().int().min(5_000).max(300_000).optional(),
+      interactionMode: z.enum(["off", "safe"]).default("off"),
+      maxInteractionsPerPage: z.number().int().min(0).max(10).optional(),
       actionIds: z.array(z.string()).default([]),
       confirmationNote: z.string().optional(),
       systemId: z.string().optional(),

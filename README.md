@@ -45,7 +45,7 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
 - 需求 hash 幂等、版本修订、影响节点、受影响回归范围和旧版本追溯。
 - TestIntent、TestDataProfile、ExecutableCase、隐含唯一动作补全与歧义 Gap。
 - 多系统绑定、鉴权、AuthCheckpoint、Claude/Codex/host-agent Bridge。
-- System Brain 将 PageModel、LocatorPoint、ProbeResult、TrainingSession、ActionStep 和 ApiFlow 聚合为按系统隔离的页面、流程、级联行为和 API 证据；重复刷新幂等，需求预期与系统观察冲突单独保留。
+- System Brain 将 PageModel、LocatorPoint、ProbeResult、SystemExploration、TrainingSession、ActionStep 和 ApiFlow 聚合为按系统隔离的页面、状态转换、流程、级联行为和 API 证据；重复刷新幂等，需求预期与系统观察冲突单独保留。
 - 指定 `systemId` 编译 ExecutableCase 时，步骤会绑定真实 PageModel/LocatorPoint/ProbeResult 证据；缺少页面或定位证据时阻塞并创建 Gap。
 - Generator、真实 Playwright、有限 Healer、Suite、BugReport、Gap 和证据复盘。
 - 旧版 `.xlsx` / `.md` 测试用例文档的预览、确认、执行、续跑、回归和可选 Excel 回写。
@@ -150,7 +150,7 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 | 确认 Requirement Eval 动作 | `bc_prepare action=confirm-eval-actions confirm=true`，必须提交 `confirmationNote` |
 | 审批需求基线 | `bc_prepare action=approve-baseline` |
 | 创建/绑定系统 | `bc_configure target=system` / `bc_configure target=system-binding` |
-| 自动探索真实系统 | `bc_prepare action=explore-system`，只读访问 allowlist 内链接并受页数、深度和时长预算约束 |
+| 自动探索真实系统 | `bc_prepare action=explore-system`；默认只访问 allowlist 内链接，显式设置 `interactionMode=safe` 才探测受限安全交互 |
 | 提交页面/训练证据 | 宿主 Agent 浏览真实系统后使用 `bc_prepare action=record-page-evidence` / `record-training-evidence` |
 | 刷新系统知识 | `bc_prepare action=refresh-system-brain`，内部聚合页面建模和训练证据 |
 | 按系统编译 | `bc_prepare action=compile-cases` 并传入 `systemId` |
@@ -183,12 +183,12 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 4. 展示条款覆盖率、无依据内容、风险、矛盾、缺失条件分支、Gap 和测试数据。
 5. 展示每个 Eval action；可澄清项和缺失分支使用 `confirm-eval-actions` 保存用户说明，直接矛盾必须修订需求源，不能通过确认绕过。
 6. 所有 Eval action 通过门禁后，用户再次明确确认并审批 baseline。
-7. 创建并绑定 SystemProfile，配置鉴权；优先调用 `bc_prepare action=explore-system` 自动发现 allowlist 内页面、交互元素和导航关系。需要菜单点击、级联操作或训练轨迹时，再由宿主 Agent 补充页面/训练证据。
+7. 创建并绑定 SystemProfile，配置鉴权；优先调用 `bc_prepare action=explore-system` 自动发现 allowlist 内页面、交互元素和导航关系。需要观察 Tab、展开控件或原生下拉的级联变化时，可由用户显式批准 `interactionMode=safe`；更复杂菜单和业务流程仍由宿主 Agent 补充页面/训练证据。
 8. 指定 `systemId` 编译 ExecutableCase；只补全唯一且有页面、流程或定位证据的动作，缺证据时创建 Gap。
 9. `bc_run mode=requirement-suite confirm=false` 预览，用户确认后执行。
 10. 用 `bc_review` 查看证据、Bug、Gap、Requirement Eval 历史准确率和需求/观察冲突。
 
-系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。探索器不点击按钮、不提交表单，并过滤登出、删除、审批、发布等危险链接。SPA 菜单、弹窗、级联字段和真实业务流程仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
+系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。`interactionMode` 默认为 `off`，此时不点击控件。显式设置 `safe` 后，每页默认最多探测 3 个、硬上限 10 个 Tab、展开控件或原生下拉，并记录前后状态、可见字段、弹窗、URL、截图与被拦截请求。危险名称、无稳定 selector、提交类控件、非 GET/HEAD/OPTIONS 请求和危险 URL 会被跳过或拦截；该模式不会提交表单，也不能证明设计错误的 GET 接口绝无副作用。复杂菜单、需要输入的数据流程和真实业务提交仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
 
 ### 飞书需求接入
 
@@ -287,7 +287,7 @@ The source checkout mode is for contributors. The repo-local plugin installation
 | Confirm Requirement Eval actions | `bc_prepare action=confirm-eval-actions confirm=true` with a resolution note |
 | Approve the requirement baseline | `bc_prepare action=approve-baseline` |
 | Create and bind a real system | `bc_configure target=system`, then `bc_configure target=system-binding` |
-| Explore a real system | `bc_prepare action=explore-system` with bounded, read-only allowlisted navigation |
+| Explore a real system | `bc_prepare action=explore-system`; link-only by default, with opt-in `interactionMode=safe` for bounded safe probes |
 | Submit page/training evidence | `bc_prepare action=record-page-evidence` / `record-training-evidence` after host browser exploration |
 | Refresh system knowledge | `bc_prepare action=refresh-system-brain` |
 | Compile against real evidence | `bc_prepare action=compile-cases` with `systemId` |
@@ -319,18 +319,18 @@ Brain Creator creates a BugReport only when evidence supports a business expecta
 4. Review clause coverage, unsupported claims, contradictions, missing branches, risks, Gaps, and TestDataProfiles.
 5. Present each Eval action. Confirm clarification and missing-branch actions with a durable resolution note; revise the source for blocked contradictions.
 6. After the Eval gate passes, approve the requirement baseline explicitly.
-7. Bind a real system and verified auth. Run `bc_prepare action=explore-system` to discover allowlisted pages, controls, and navigation links; use host-browser evidence only for interactive menus, cascades, and trained workflows that read-only link exploration cannot observe.
+7. Bind a real system and verified auth. Run `bc_prepare action=explore-system` to discover allowlisted pages, controls, and navigation links. Explicitly opt in to `interactionMode=safe` to observe bounded tab, disclosure, and native-select state changes; use host-browser evidence for more complex menus and business workflows.
 8. Compile ExecutableCases with `systemId`; missing PageModel or LocatorPoint evidence blocks compilation with a Gap.
 9. Preview and confirm `requirement-suite` execution.
 10. Review step evidence, BugReports, Gaps, historical Requirement Eval accuracy, and requirement-versus-observation conflicts.
 
-System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. It does not click buttons or submit forms, and filters logout, delete, approval, and publish links. SPA menus, dialogs, cascades, and business workflows still require supplemental host-Agent page or training evidence.
+System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. `interactionMode` defaults to `off`. Opt-in `safe` mode probes at most 3 controls per page by default, with a hard limit of 10, and only considers tabs, disclosure controls, and native selects with stable selectors. It records before/after states and blocks write methods, dangerous URLs, and write-like labels. It never submits forms, but cannot prove that a misdesigned GET endpoint has no side effect. Complex menus, data-entry flows, and business submissions still require supplemental host-Agent page or training evidence.
 
 ### Requirement Eval And System Brain
 
 `npm run verify:requirement-eval` evaluates seven cross-domain golden samples, including complex Markdown rule tables, cross-module workflows, and permission matrices. `bc_review target=requirement-eval-accuracy` then estimates historical accuracy from traceable execution: passed evidence and business mismatches linked to BugReports validate the requirement expectation, unclassified semantic failures require review, and blocked or technical failures remain inconclusive.
 
-System Brain is a derived, system-isolated view over PageModel, LocatorPoint, ProbeResult, SystemExploration, TrainingSession, ActionStep, and ApiFlow assets. `explore-system` performs a bounded breadth-first scan using Playwright: it only navigates HTTP(S) links inside the system allowlist, never submits forms, and stops on login, CAPTCHA, budget, or scope boundaries. `refresh-system-brain` writes `.brain-creator/knowledge/<project>/systems/<system-id>/brain.md`, including the navigation graph, while preserving separate expected, observed, and conflict layers.
+System Brain is a derived, system-isolated view over PageModel, LocatorPoint, ProbeResult, SystemExploration, TrainingSession, ActionStep, and ApiFlow assets. `explore-system` performs a bounded breadth-first scan using Playwright and can optionally capture safe interaction state transitions. `refresh-system-brain` writes `.brain-creator/knowledge/<project>/systems/<system-id>/brain.md`, including navigation and state graphs, while preserving separate expected, observed, and conflict layers.
 
 ### Feishu
 

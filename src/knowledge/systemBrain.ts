@@ -57,6 +57,36 @@ export type SystemBrainNavigationEdge = {
   sourceRefs: string[];
 };
 
+export type SystemBrainState = {
+  id: string;
+  url: string;
+  visibleElements: string[];
+  dialogs: string[];
+  sourceRefs: string[];
+};
+
+export type SystemBrainStateTransition = {
+  id: string;
+  explorationId: string;
+  pageModelId: string;
+  pageUrl: string;
+  targetName: string;
+  targetRole: string;
+  targetSelector: string;
+  targetKind: "tab" | "disclosure" | "select";
+  action: "click" | "select";
+  inputValue?: string;
+  beforeStateId: string;
+  afterStateId: string;
+  visibleAdded: string[];
+  visibleRemoved: string[];
+  dialogAdded: string[];
+  dialogRemoved: string[];
+  urlChanged: boolean;
+  screenshotPath?: string;
+  sourceRefs: string[];
+};
+
 export type SystemBrain = {
   knowledgeProjectId: string;
   systemId: string;
@@ -65,6 +95,8 @@ export type SystemBrain = {
   behaviorRules: SystemBrainBehaviorRule[];
   apiFlows: SystemBrainApiFlow[];
   navigationEdges: SystemBrainNavigationEdge[];
+  states: SystemBrainState[];
+  stateTransitions: SystemBrainStateTransition[];
   observations: Array<{
     id: string;
     type: KnowledgeNodeType;
@@ -89,6 +121,7 @@ export type SystemBrain = {
     workflowEvidence: boolean;
     apiEvidence: boolean;
     navigationEvidence: boolean;
+    stateEvidence: boolean;
     readyForCompilation: boolean;
   };
 };
@@ -216,6 +249,74 @@ export function buildSystemBrain(
         )
       )
   );
+  const stateTransitions = repository.systemExplorations
+    .filter(
+      (exploration) =>
+        exploration.knowledgeProjectId === knowledgeProjectId &&
+        exploration.systemId === systemId &&
+        (exploration.status === "completed" || exploration.status === "partial")
+    )
+    .flatMap((exploration) =>
+      (exploration.interactionTransitions ?? [])
+        .filter((transition) => transition.status === "observed")
+        .map(
+          (transition): SystemBrainStateTransition => ({
+            id: transition.id,
+            explorationId: exploration.id,
+            pageModelId: transition.pageModelId,
+            pageUrl: transition.pageUrl,
+            targetName: transition.targetName,
+            targetRole: transition.targetRole,
+            targetSelector: transition.targetSelector,
+            targetKind: transition.targetKind,
+            action: transition.action,
+            inputValue: transition.inputValue,
+            beforeStateId: transition.before.id,
+            afterStateId: transition.after.id,
+            visibleAdded: transition.visibleAdded,
+            visibleRemoved: transition.visibleRemoved,
+            dialogAdded: transition.dialogAdded,
+            dialogRemoved: transition.dialogRemoved,
+            urlChanged: transition.urlChanged,
+            screenshotPath: transition.screenshotPath,
+            sourceRefs: [
+              `system-exploration:${exploration.id}`,
+              `system-interaction:${transition.id}`,
+              `page-model:${transition.pageModelId}`,
+              `system-state:${transition.before.id}`,
+              `system-state:${transition.after.id}`
+            ]
+          })
+        )
+    );
+  const states = uniqueStates(
+    repository.systemExplorations
+      .filter(
+        (exploration) =>
+          exploration.knowledgeProjectId === knowledgeProjectId &&
+          exploration.systemId === systemId
+      )
+      .flatMap((exploration) =>
+        (exploration.interactionTransitions ?? [])
+          .filter((transition) => transition.status === "observed")
+          .flatMap((transition) => [
+            {
+              ...transition.before,
+              sourceRefs: [
+                `system-exploration:${exploration.id}`,
+                `system-interaction:${transition.id}`
+              ]
+            },
+            {
+              ...transition.after,
+              sourceRefs: [
+                `system-exploration:${exploration.id}`,
+                `system-interaction:${transition.id}`
+              ]
+            }
+          ])
+      )
+  );
   const observations = repository.knowledgeNodes
     .filter(
       (node) =>
@@ -242,6 +343,7 @@ export function buildSystemBrain(
     workflowEvidence: workflows.some((workflow) => workflow.actionStepIds.length > 0),
     apiEvidence: normalizedApiFlows.length > 0,
     navigationEvidence: navigationEdges.length > 0,
+    stateEvidence: stateTransitions.length > 0,
     readyForCompilation:
       pages.length > 0 && pages.some((page) => page.locatorCount > 0)
   };
@@ -254,6 +356,8 @@ export function buildSystemBrain(
     behaviorRules,
     apiFlows: normalizedApiFlows,
     navigationEdges,
+    states,
+    stateTransitions,
     observations,
     conflicts,
     readiness
@@ -310,6 +414,53 @@ export function systemObservationDrafts(brain: SystemBrain): SystemObservationDr
       sourceRefs: edge.sourceRefs,
       confidence: edge.toPageModelId ? 0.96 : 0.85
     });
+  }
+  for (const transition of brain.stateTransitions) {
+    const changeSummary = [
+      transition.visibleAdded.length > 0
+        ? `visible +${transition.visibleAdded.join(", ")}`
+        : "",
+      transition.visibleRemoved.length > 0
+        ? `visible -${transition.visibleRemoved.join(", ")}`
+        : "",
+      transition.dialogAdded.length > 0
+        ? `dialogs +${transition.dialogAdded.join(", ")}`
+        : "",
+      transition.dialogRemoved.length > 0
+        ? `dialogs -${transition.dialogRemoved.join(", ")}`
+        : "",
+      transition.urlChanged ? "URL changed" : ""
+    ].filter(Boolean);
+    drafts.push({
+      type: "workflow",
+      title: `${transition.targetName} state transition`,
+      content: `${transition.action} ${transition.targetName}${
+        transition.inputValue ? ` with ${transition.inputValue}` : ""
+      } changes state: ${changeSummary.join("; ") || "state changed"}`,
+      module: pageModule(
+        brain.pages.find((page) => page.pageModelId === transition.pageModelId)?.name ??
+          "General"
+      ),
+      sourceRefs: transition.sourceRefs,
+      confidence: 0.97
+    });
+    if (transition.visibleAdded.length > 0 || transition.visibleRemoved.length > 0) {
+      drafts.push({
+        type: "rule",
+        title: `${transition.targetName} visibility behavior`,
+        content: `${transition.action} ${transition.targetName}${
+          transition.inputValue ? ` with ${transition.inputValue}` : ""
+        } results in visible fields +[${transition.visibleAdded.join(", ")}] -[${
+          transition.visibleRemoved.join(", ")
+        }]`,
+        module: pageModule(
+          brain.pages.find((page) => page.pageModelId === transition.pageModelId)?.name ??
+            "General"
+        ),
+        sourceRefs: transition.sourceRefs,
+        confidence: 0.97
+      });
+    }
   }
   for (const rule of brain.behaviorRules) {
     drafts.push({
@@ -369,8 +520,16 @@ export function bindStepsToSystemBrain(
 
   const bound = steps.map((step) => {
     const sourceRefs = new Set([...step.sourceRefs, `page-model:${page.pageModelId}`]);
-    if (step.action === "navigate" || step.action === "assert") {
+    if (step.action === "navigate") {
       page.probeResultIds.forEach((probeId) => sourceRefs.add(`probe-result:${probeId}`));
+      return { ...step, pageModelId: page.pageModelId, sourceRefs: [...sourceRefs] };
+    }
+    if (step.action === "assert") {
+      page.probeResultIds.forEach((probeId) => sourceRefs.add(`probe-result:${probeId}`));
+      matchingStateTransitions(step, page.pageModelId, brain, contextQuery).forEach(
+        (transition) =>
+          transition.sourceRefs.forEach((sourceRef) => sourceRefs.add(sourceRef))
+      );
       return { ...step, pageModelId: page.pageModelId, sourceRefs: [...sourceRefs] };
     }
     if (step.action === "api") {
@@ -382,7 +541,7 @@ export function bindStepsToSystemBrain(
     if (step.action === "wait") {
       return { ...step, pageModelId: page.pageModelId, sourceRefs: [...sourceRefs] };
     }
-    const locator = selectLocator(step, page.locators);
+    const locator = selectLocator(step, page.locators, contextQuery);
     if (!locator) {
       missingEvidence.push({
         stepId: step.id,
@@ -392,6 +551,16 @@ export function bindStepsToSystemBrain(
       return { ...step, pageModelId: page.pageModelId, sourceRefs: [...sourceRefs] };
     }
     sourceRefs.add(`locator-point:${locator.id}`);
+    brain.stateTransitions
+      .filter(
+        (transition) =>
+          transition.pageModelId === page.pageModelId &&
+          (transition.targetSelector === locator.selector ||
+            normalizeSemantic(transition.targetName) === normalizeSemantic(locator.name))
+      )
+      .forEach((transition) =>
+        transition.sourceRefs.forEach((sourceRef) => sourceRefs.add(sourceRef))
+      );
     return {
       ...step,
       pageModelId: page.pageModelId,
@@ -403,7 +572,11 @@ export function bindStepsToSystemBrain(
   return { steps: bound, missingEvidence };
 }
 
-function selectLocator(step: ExecutableCaseStep, locators: LocatorPoint[]) {
+function selectLocator(
+  step: ExecutableCaseStep,
+  locators: LocatorPoint[],
+  contextQuery = ""
+) {
   const preferredRoles =
     step.action === "click"
       ? /button|link|menuitem/i
@@ -412,7 +585,7 @@ function selectLocator(step: ExecutableCaseStep, locators: LocatorPoint[]) {
         : /combobox|select|listbox|radio|checkbox/i;
   const roleMatches = locators.filter((locator) => preferredRoles.test(locator.role));
   const candidates = roleMatches;
-  const query = `${step.instruction} ${step.targetSemantic}`.toLowerCase();
+  const query = `${contextQuery} ${step.instruction} ${step.targetSemantic}`.toLowerCase();
   const scored = candidates
     .map((locator) => ({
       locator,
@@ -429,6 +602,29 @@ function selectLocator(step: ExecutableCaseStep, locators: LocatorPoint[]) {
         right.locator.confidence - left.locator.confidence
     );
   return scored[0]?.score > 0 ? scored[0].locator : undefined;
+}
+
+function matchingStateTransitions(
+  step: ExecutableCaseStep,
+  pageModelId: string,
+  brain: SystemBrain,
+  contextQuery: string
+) {
+  const query = `${contextQuery} ${step.instruction} ${step.targetSemantic} ${
+    step.expected ?? ""
+  }`.toLowerCase();
+  return brain.stateTransitions.filter((transition) => {
+    if (transition.pageModelId !== pageModelId) return false;
+    const evidence = [
+      transition.targetName,
+      transition.inputValue ?? "",
+      ...transition.visibleAdded,
+      ...transition.visibleRemoved,
+      ...transition.dialogAdded,
+      ...transition.dialogRemoved
+    ].join(" ");
+    return tokenOverlap(query, evidence.toLowerCase()) > 0;
+  });
 }
 
 function selectPage(pages: SystemBrainPage[], query: string) {
@@ -457,6 +653,10 @@ function tokenOverlap(left: string, right: string) {
       ? 3
       : 0;
   return tokenScore + substringScore;
+}
+
+function normalizeSemantic(value: string) {
+  return value.replace(/\s+/g, "").trim().toLowerCase();
 }
 
 function actionTrigger(type: string, locatorName: string, inputValue: string) {
@@ -490,6 +690,18 @@ function uniqueNavigationEdges(edges: SystemBrainNavigationEdge[]) {
   for (const edge of edges) {
     const key = `${edge.fromUrl}\u0000${edge.toUrl}\u0000${edge.text}`;
     unique.set(key, edge);
+  }
+  return [...unique.values()];
+}
+
+function uniqueStates(states: SystemBrainState[]) {
+  const unique = new Map<string, SystemBrainState>();
+  for (const state of states) {
+    const existing = unique.get(state.id);
+    unique.set(state.id, {
+      ...state,
+      sourceRefs: [...new Set([...(existing?.sourceRefs ?? []), ...state.sourceRefs])]
+    });
   }
   return [...unique.values()];
 }

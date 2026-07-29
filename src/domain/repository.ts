@@ -34,7 +34,7 @@ import type {
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 3;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 4;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
@@ -164,7 +164,24 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     const snapshot = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<RepositorySnapshot>;
     this.schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
     this.systemProfiles = snapshot.systemProfiles ?? [];
-    this.systemExplorations = snapshot.systemExplorations ?? [];
+    this.systemExplorations = (snapshot.systemExplorations ?? []).map((exploration) => ({
+      ...exploration,
+      interactionMode: exploration.interactionMode ?? "off",
+      budget: {
+        ...exploration.budget,
+        maxInteractionsPerPage: exploration.budget.maxInteractionsPerPage ?? 0
+      },
+      interactionTransitions: (exploration.interactionTransitions ?? []).map((transition) => ({
+        ...transition,
+        targetKind:
+          transition.targetKind ??
+          (transition.action === "select"
+            ? "select"
+            : transition.targetRole.toLowerCase() === "tab"
+              ? "tab"
+              : "disclosure")
+      }))
+    }));
     this.authProfiles = snapshot.authProfiles ?? [];
     this.authCheckpoints = snapshot.authCheckpoints ?? [];
     this.pageModels = snapshot.pageModels ?? [];

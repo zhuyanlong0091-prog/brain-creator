@@ -1321,6 +1321,7 @@ export class KnowledgeService {
         `- Workflow evidence: ${brain.readiness.workflowEvidence}`,
         `- API evidence: ${brain.readiness.apiEvidence}`,
         `- Navigation evidence: ${brain.readiness.navigationEvidence}`,
+        `- State evidence: ${brain.readiness.stateEvidence}`,
         `- Ready for compilation: ${brain.readiness.readyForCompilation}`,
         "",
         "## Pages",
@@ -1352,6 +1353,20 @@ export class KnowledgeService {
           ? brain.behaviorRules.map(
               (rule) =>
                 `- ${rule.trigger} -> ${rule.effect} [${rule.sourceRefs.join(", ")}]`
+            )
+          : ["- None"]),
+        "",
+        "## State Transitions",
+        ...(brain.stateTransitions.length > 0
+          ? brain.stateTransitions.map(
+              (transition) =>
+                `- ${transition.action} ${transition.targetName}${
+                  transition.inputValue ? `=${transition.inputValue}` : ""
+                }: ${transition.beforeStateId} -> ${transition.afterStateId}; visible +[${
+                  transition.visibleAdded.join(", ")
+                }] -[${transition.visibleRemoved.join(", ")}] [${transition.sourceRefs.join(
+                  ", "
+                )}]`
             )
           : ["- None"]),
         "",
