@@ -10,6 +10,7 @@ import type {
   TestDataLease
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
+import { buildContextPack } from "./retriever.js";
 
 type PrepareExecutionInput = {
   knowledgeProjectId: string;
@@ -24,6 +25,15 @@ export type ExecutionPreflightResult = {
   persisted: boolean;
   draft: ExecutionPlanDraft;
   executionPlan?: ExecutionPlan;
+};
+
+export type ExecutionPlanValidationResult = {
+  status: "valid" | "stale" | "blocked";
+  valid: boolean;
+  executionPlan: ExecutionPlan;
+  currentSnapshotHash: string;
+  reasons: string[];
+  draft: ExecutionPlanDraft;
 };
 
 export class ExecutionPreflightService {
@@ -74,6 +84,60 @@ export class ExecutionPreflightService {
       persisted: true,
       draft,
       executionPlan
+    };
+  }
+
+  validatePlan(executionPlanId: string): ExecutionPlanValidationResult {
+    const executionPlan = this.repository.executionPlans.find(
+      (item) => item.id === executionPlanId
+    );
+    if (!executionPlan) throw new Error("Execution plan not found");
+    const executableCase = this.resolveCase({
+      knowledgeProjectId: executionPlan.knowledgeProjectId,
+      systemId: executionPlan.systemId,
+      executableCaseId: executionPlan.executableCaseId,
+      authProfileId: executionPlan.auth?.profileId,
+      confirm: false
+    });
+    const draft = this.buildDraft(
+      executableCase,
+      executionPlan.systemId,
+      executionPlan.auth?.profileId
+    );
+    if (draft.verdict !== "ready") {
+      return {
+        status: "blocked",
+        valid: false,
+        executionPlan,
+        currentSnapshotHash: draft.snapshotHash,
+        reasons:
+          draft.blockers.length > 0
+            ? draft.blockers
+            : draft.checks
+                .filter((item) => item.status === "action-required")
+                .map((item) => item.message),
+        draft
+      };
+    }
+    if (draft.snapshotHash !== executionPlan.snapshotHash) {
+      return {
+        status: "stale",
+        valid: false,
+        executionPlan,
+        currentSnapshotHash: draft.snapshotHash,
+        reasons: [
+          "Execution plan snapshot no longer matches the current requirement, system, case, context, auth, or test data."
+        ],
+        draft
+      };
+    }
+    return {
+      status: "valid",
+      valid: true,
+      executionPlan,
+      currentSnapshotHash: draft.snapshotHash,
+      reasons: [],
+      draft
     };
   }
 
@@ -195,6 +259,22 @@ export class ExecutionPreflightService {
       this.authCheck(systemId, authProfileId, authProfile)
     ];
     const dataBindings = this.dataBindings(executableCase, systemId);
+    const retrievedContextPack = buildContextPack(this.repository, {
+      knowledgeProjectId: executableCase.knowledgeProjectId,
+      query: [
+        executableCase.title,
+        ...executableCase.steps.map(
+          (step) =>
+            `${step.action} ${step.instruction} ${step.targetSemantic}`
+        )
+      ].join("\n"),
+      purpose: "generator",
+      maxChars: 20_000
+    });
+    const contextPack = {
+      ...retrievedContextPack,
+      purpose: "generator" as const
+    };
     const blockers = checks
       .filter((item) => item.status === "blocked")
       .map((item) => item.message);
@@ -230,7 +310,8 @@ export class ExecutionPreflightService {
         baseUrl: system.baseUrl,
         status: system.status
       },
-      executableCase: executableCaseSnapshot(executableCase),
+      executableCase: executableCaseSnapshot(executableCase, systemId),
+      contextPack,
       auth: authProfile
         ? {
             id: authProfile.id,
@@ -259,6 +340,8 @@ export class ExecutionPreflightService {
       requirementSetId: executableCase.requirementSetId,
       systemId,
       executableCaseId: executableCase.id,
+      title: executableCase.title,
+      preconditions: clone(executableCase.preconditions),
       auth:
         authProfile?.status === "succeeded"
           ? {
@@ -272,6 +355,7 @@ export class ExecutionPreflightService {
       pathPlan: clone(executableCase.pathPlan),
       statePlan: clone(executableCase.statePlan),
       dataBindings,
+      contextPack,
       checks,
       verdict,
       blockers,
@@ -469,13 +553,16 @@ function safeLeaseSnapshot(lease: TestDataLease) {
   };
 }
 
-function executableCaseSnapshot(executableCase: ExecutableCase) {
+function executableCaseSnapshot(
+  executableCase: ExecutableCase,
+  systemId: string
+) {
   const {
     createdAt: _createdAt,
     updatedAt: _updatedAt,
     ...snapshot
   } = executableCase;
-  return clone(snapshot);
+  return clone({ ...snapshot, systemId });
 }
 
 function stableStringify(value: unknown): string {

@@ -47,6 +47,12 @@ describe("ExecutionPreflightService", () => {
     );
     expect(first.executionPlan).toEqual(
       expect.objectContaining({
+        title: fixture.executableCase.title,
+        preconditions: fixture.executableCase.preconditions,
+        contextPack: expect.objectContaining({
+          knowledgeProjectId: fixture.project.id,
+          purpose: "generator"
+        }),
         verdict: "ready",
         snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/)
       })
@@ -73,6 +79,80 @@ describe("ExecutionPreflightService", () => {
     expect(changed.executionPlan?.id).not.toBe(first.executionPlan?.id);
     expect(fixture.repository.executionPlans).toHaveLength(2);
     expect(first.executionPlan!.steps[0].instruction).toBe("Open the form");
+  });
+
+  it("validates a frozen plan and rejects semantic or blocking changes", () => {
+    const fixture = preflightFixture();
+    const prepared = fixture.service.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true
+    });
+    const executionPlanId = prepared.executionPlan!.id;
+
+    expect(fixture.service.validatePlan(executionPlanId)).toEqual(
+      expect.objectContaining({
+        status: "valid",
+        valid: true,
+        currentSnapshotHash: prepared.executionPlan!.snapshotHash
+      })
+    );
+
+    fixture.executableCase.updatedAt = "2026-07-30T02:00:00.000Z";
+    expect(fixture.service.validatePlan(executionPlanId).status).toBe("valid");
+
+    fixture.executableCase.steps[0].instruction = "Open another form";
+    const stale = fixture.service.validatePlan(executionPlanId);
+    expect(stale).toEqual(
+      expect.objectContaining({
+        status: "stale",
+        valid: false,
+        reasons: [expect.stringContaining("snapshot")]
+      })
+    );
+
+    fixture.executableCase.steps[0].instruction = "Open the form";
+    fixture.repository.knowledgeNodes.push({
+      id: "knowledge-after-plan",
+      knowledgeProjectId: fixture.project.id,
+      requirementSetId: fixture.requirementSet.id,
+      type: "rule",
+      title: "Create order validation",
+      content: "Create order requires a newly confirmed validation rule.",
+      module: "Orders",
+      sourceRefs: ["requirement:orders-rule"],
+      origin: "source",
+      confidence: 1,
+      status: "confirmed",
+      createdAt: now(),
+      updatedAt: now()
+    });
+    expect(fixture.service.validatePlan(executionPlanId).status).toBe("stale");
+    fixture.repository.knowledgeNodes.pop();
+
+    const gap: Gap = {
+      id: "gap-after-plan",
+      projectId: fixture.project.id,
+      sourceType: "system-observation",
+      sourceId: fixture.executableCase.id,
+      reason: "The observed workflow changed.",
+      severity: "high",
+      owner: "qa",
+      status: "open",
+      createdAt: now(),
+      updatedAt: now()
+    };
+    fixture.repository.gaps.push(gap);
+    fixture.executableCase.gapIds.push(gap.id);
+    const blocked = fixture.service.validatePlan(executionPlanId);
+    expect(blocked).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        valid: false,
+        reasons: [expect.stringContaining("open Gap")]
+      })
+    );
   });
 
   it("blocks unapproved requirements, open case gaps, and cross-system execution", () => {

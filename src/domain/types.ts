@@ -863,11 +863,26 @@ export type ExecutionDataBinding = {
   sourceRefs: string[];
 };
 
+export type ExecutionContextPack = {
+  knowledgeProjectId: string;
+  purpose: "generator";
+  query: string;
+  content: string;
+  references: Array<{
+    nodeId: string;
+    sourceRefs: string[];
+    type: KnowledgeNodeType;
+  }>;
+  truncated: boolean;
+};
+
 export type ExecutionPlanDraft = {
   knowledgeProjectId: string;
   requirementSetId: string;
   systemId: string;
   executableCaseId: string;
+  title: string;
+  preconditions: string[];
   auth?: {
     profileId: string;
     role: string;
@@ -878,6 +893,7 @@ export type ExecutionPlanDraft = {
   pathPlan?: ExecutableCasePathPlan;
   statePlan?: ExecutableCaseStatePlan;
   dataBindings: ExecutionDataBinding[];
+  contextPack: ExecutionContextPack;
   checks: ExecutionPreflightCheck[];
   verdict: "ready" | "needs-confirmation" | "blocked";
   blockers: string[];

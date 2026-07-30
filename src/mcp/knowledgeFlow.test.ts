@@ -1348,6 +1348,55 @@ describe("Brain Creator requirement-first facade", () => {
       secrets: { token: "secret-token" }
     });
 
+    const primaryCase = context.repository.executableCases[0];
+    const blockedCase = {
+      ...JSON.parse(JSON.stringify(primaryCase)),
+      id: "executable-orders-blocked",
+      title: "Blocked sibling scenario",
+      gapIds: ["gap-orders-blocked"]
+    };
+    context.repository.executableCases.push(blockedCase);
+    context.repository.gaps.push({
+      id: "gap-orders-blocked",
+      projectId: project.id,
+      sourceType: "execution-preflight-test",
+      sourceId: blockedCase.id,
+      reason: "A sibling scenario still lacks execution evidence.",
+      severity: "high",
+      owner: "qa",
+      status: "open",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    const testCaseCount = context.repository.testCases.length;
+    const agentTaskCount = context.repository.agentTasks.length;
+    const evidenceCount = context.repository.executionEvidence.length;
+    const batchBlocked = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        confirm: true,
+        maxHealAttempts: 0
+      })
+    );
+
+    expect(batchBlocked).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        executionPreflights: expect.arrayContaining([
+          expect.objectContaining({
+            executableCaseId: blockedCase.id,
+            status: "blocked"
+          })
+        ])
+      })
+    );
+    expect(context.repository.testCases).toHaveLength(testCaseCount);
+    expect(context.repository.agentTasks).toHaveLength(agentTaskCount);
+    expect(context.repository.executionEvidence).toHaveLength(evidenceCount);
+    blockedCase.status = "blocked";
+
     const result = dataOf(
       await handleBrainCreatorTool(context, "bc_run", {
         mode: "requirement-suite",
@@ -1379,6 +1428,30 @@ describe("Brain Creator requirement-first facade", () => {
         contextPackPath: result.contextPackPath
       })
     ]);
+
+    const executableCase = context.repository.executableCases.find(
+      (item) => item.id === result.executableCaseId
+    )!;
+    const originalInstruction = executableCase.steps[0].instruction;
+    const agentRunCount = context.repository.agentRuns.length;
+    executableCase.steps[0].instruction = "Use a changed mutable instruction";
+    const staleSubmission = envelopeOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: result.task.id,
+        status: "succeeded",
+        stdout: "generator output created",
+        stderr: "",
+        outputPaths: [result.testPath]
+      })
+    );
+
+    expect(staleSubmission.success).toBe(false);
+    expect(staleSubmission.errors).toEqual([
+      expect.stringContaining("Execution plan is stale")
+    ]);
+    expect(result.task.status).toBe("pending");
+    expect(context.repository.agentRuns).toHaveLength(agentRunCount);
+    executableCase.steps[0].instruction = originalInstruction;
 
     await writeFile(
       result.testPath,

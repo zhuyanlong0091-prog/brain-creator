@@ -300,7 +300,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_run",
     title: "Brain Creator run",
     description:
-      "Facade execution entry for approved cases, requirement suites with mandatory execution preflight, document case suites, and bug regression.",
+      "Facade execution entry for approved cases, requirement suites that preflight every candidate and consume frozen execution plans, document case suites, and bug regression.",
     inputSchema: z.object({
       mode: z.enum(["approved-case", "full-workflow", "case-source-suite", "bug-regression", "requirement-suite"]),
       systemId: z.string().optional(),
@@ -674,7 +674,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
   {
     name: "bc_submit_agent_output",
     title: "Submit host-agent output",
-    description: "Submit the result of a prepared host-agent task and record an AgentRun.",
+    description:
+      "Submit a prepared host-agent result. Requirement tasks revalidate the frozen ExecutionPlan before recording any AgentRun or executing generated output.",
     inputSchema: z.object({
       taskId: z.string(),
       status: z.enum(["succeeded", "failed"]),

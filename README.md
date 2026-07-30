@@ -195,8 +195,8 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 8. 指定 `systemId` 编译 ExecutableCase；系统保存可审计的 `pathPlan`，只补全唯一最短且有页面、导航边和定位证据的动作。同长多路径、目标页不明确或不可达时创建 Gap。
 9. 检查 `testDataPlan`。对既有数据先调用 `prepare-test-data confirm=false` 展示查询条件；用户确认后再次调用并派发任务。默认只允许复用，只有用户明确允许时才传 `allowCreate=true`。
 10. Host Agent 在当前系统中查询或创建数据，并通过 `submit-test-data` 回传稳定引用、非敏感值和 `sourceRefs`。创建数据必须配置 `delete-created` 或 `restore` 清理策略；失败写入数据 Gap。
-11. 调用 `bc_prepare action=prepare-execution confirm=false` 展示 Requirement、System、Auth、Path、State、Data、Gap 和 Cleanup 检查；确认后持久化不可变 ExecutionPlan。blocked 或 needs-confirmation 不得启动 Generator。
-12. `bc_run mode=requirement-suite confirm=false` 也会返回 Preflight；用户确认后仅执行 ready 快照。执行达到通过、失败或阻塞终态后，再调用 `prepare-test-data` 获取清理或续跑数据任务。
+11. 调用 `bc_prepare action=prepare-execution confirm=false` 展示 Requirement、System、Auth、Path、State、Data、Gap 和 Cleanup 检查；确认后冻结标题、前置条件、ContextPack、步骤、数据绑定和鉴权引用。blocked 或 needs-confirmation 不得启动 Generator。
+12. `bc_run mode=requirement-suite confirm=false` 也会返回 Preflight；确认时先独立预检全部候选用例，任意一条阻塞都不会创建 TestCase、AgentTask 或 Evidence。Generator、Seed 和 Evidence 只消费 ready ExecutionPlan；提交 Host Agent 输出时会再次校验 hash，过期计划必须重新确认。
 13. 用 `bc_review target=execution-plan` 和其他 review 入口查看计划、证据、Bug、Gap、Requirement Eval 历史准确率和需求/观察冲突。
 
 系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。`interactionMode` 默认为 `off`，此时不点击控件。显式设置 `safe` 后，每页默认最多探测 3 个、硬上限 10 个 Tab、展开控件或原生下拉，并记录前后状态、可见字段、弹窗、URL、截图与被拦截请求。危险名称、无稳定 selector、提交类控件、非 GET/HEAD/OPTIONS 请求和危险 URL 会被跳过或拦截；该模式不会提交表单，也不能证明设计错误的 GET 接口绝无副作用。复杂菜单、需要输入的数据流程和真实业务提交仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
@@ -337,8 +337,8 @@ Brain Creator creates a BugReport only when evidence supports a business expecta
 8. Compile ExecutableCases with `systemId`; missing PageModel or LocatorPoint evidence blocks compilation with a Gap.
 9. Inspect `testDataPlan`. Preview `prepare-test-data` before dispatch. It is read-only by default; set `allowCreate=true` only after explicit approval.
 10. The host Agent queries or creates data in the bound system and submits the reference plus evidence through `submit-test-data`. Created data requires `delete-created` or `restore`.
-11. Preview and confirm `prepare-execution`. It validates the requirement baseline, system, optional explicit auth, path, state actions, data leases, open Gaps, and prior cleanup. Only a ready immutable ExecutionPlan may continue.
-12. Preview and confirm `requirement-suite` execution. ExecutionEvidence and Generator context reference the selected ExecutionPlan. After terminal evidence, prepare and submit any cleanup or reacquisition task.
+11. Preview and confirm `prepare-execution`. It freezes the title, preconditions, generator ContextPack, steps, data bindings, and optional auth reference after all readiness checks pass.
+12. Preview and confirm `requirement-suite` execution. Confirmation preflights every candidate before starting any case. Generator, Seed, and ExecutionEvidence consume only the ready ExecutionPlan. Host Agent submission revalidates its hash and rejects stale plans without submitting the task.
 13. Review ExecutionPlans, step evidence, BugReports, Gaps, historical Requirement Eval accuracy, and requirement-versus-observation conflicts.
 
 System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. `interactionMode` defaults to `off`. Opt-in `safe` mode probes at most 3 controls per page by default, with a hard limit of 10, and only considers tabs, disclosure controls, and native selects with stable selectors. It records before/after states and blocks write methods, dangerous URLs, and write-like labels. It never submits forms, but cannot prove that a misdesigned GET endpoint has no side effect. Complex menus, data-entry flows, and business submissions still require supplemental host-Agent page or training evidence.
@@ -355,7 +355,7 @@ State-action compilation is data-driven from `SystemBrainStateTransition`: it ma
 
 Test-data compilation is scoped to the current TestIntent and stored as `dataPlan`. It deterministically orders declared dependencies and supports fixed, generated, unique, existing-reference, runtime-captured, and secret-reference strategies. `prepare-test-data` creates an idempotent, auditable Host Agent task for unresolved references. Reuse is the default; creation requires explicit authorization and a cleanup policy. `submit-test-data` records evidence-backed `TestDataLease` assets, while terminal execution triggers cleanup work for created data. Provider and cleanup failures create separate Gaps. Duplicate fields, missing dependencies, and cycles remain structural Gaps, and secret references never become executable step values.
 
-Execution Preflight compiles approved requirement state, the bound system, optional explicit auth, path/state plans, data bindings and leases, open Gaps, and cleanup obligations into a SHA-256-addressed immutable ExecutionPlan. Timestamp-only changes do not create a new snapshot; semantic changes do. Blocked and needs-confirmation drafts are diagnostic only and are never persisted as approved plans. Generator tasks and ExecutionEvidence retain the ready plan ID, while secrets remain references.
+Execution Preflight compiles approved requirement state, the bound system, optional explicit auth, path/state plans, data bindings and leases, open Gaps, cleanup obligations, and the bounded generator ContextPack into a SHA-256-addressed immutable ExecutionPlan. Timestamp-only changes do not create a new snapshot; semantic or retrieved-context changes do. Blocked and needs-confirmation drafts are diagnostic only and are never persisted as approved plans. Requirement Suite confirmation validates every candidate before creating execution side effects. Generator, Seed, host-agent continuation, and ExecutionEvidence retain and revalidate the ready plan, while secrets remain references.
 
 ### Feishu
 

@@ -1766,62 +1766,67 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       nextAction: "Resolve requirement or observed-system conflicts before execution."
     };
   }
-  const executableCase = candidates[0];
-  if (executableCase.systemId && executableCase.systemId !== systemId) {
-    throw new Error("Executable case was compiled for another business system");
+  for (const candidate of candidates) {
+    if (candidate.systemId && candidate.systemId !== systemId) {
+      throw new Error(
+        `Executable case ${candidate.id} was compiled for another business system`
+      );
+    }
+    if (
+      candidate.dataPlan?.requiresConfirmation &&
+      !candidate.dataPlan.confirmedAt
+    ) {
+      context.knowledgeService.confirmExecutableCaseTestData(candidate.id);
+    }
   }
-  if (
-    executableCase.dataPlan?.requiresConfirmation &&
-    !executableCase.dataPlan.confirmedAt
-  ) {
-    context.knowledgeService.confirmExecutableCaseTestData(executableCase.id);
-  }
-  const preflight = context.executionPreflight.prepare({
-    knowledgeProjectId: projectId,
-    systemId,
-    executableCaseId: executableCase.id,
-    authProfileId,
-    confirm: true
-  });
-  if (preflight.status !== "ready" || !preflight.executionPlan) {
+  const executionPreflights = candidates.map((candidate) => ({
+    executableCaseId: candidate.id,
+    ...context.executionPreflight.prepare({
+      knowledgeProjectId: projectId,
+      systemId,
+      executableCaseId: candidate.id,
+      authProfileId,
+      confirm: true
+    })
+  }));
+  const blockedPreflights = executionPreflights.filter(
+    (item) => item.status !== "ready" || !item.executionPlan
+  );
+  if (blockedPreflights.length > 0) {
     return {
       mode: "requirement-suite",
       status: "blocked",
       knowledgeProjectId: projectId,
       systemId,
-      executionPreflight: preflight,
+      executionPreflight: executionPreflights[0],
+      executionPreflights,
       nextAction:
-        preflight.status === "needs-confirmation"
+        blockedPreflights.some(
+          (item) => item.status === "needs-confirmation"
+        )
           ? "Confirm proposed execution inputs before retrying."
           : "Resolve execution preflight blockers before retrying."
     };
   }
-  const executionPlan = preflight.executionPlan;
+  const executableCase = candidates[0];
+  const executionPlan = executionPreflights[0].executionPlan!;
   executableCase.systemId = systemId;
   executableCase.updatedAt = new Date().toISOString();
   context.repository.persist();
-  const contextPack = buildContextPack(context.repository, {
-    knowledgeProjectId: projectId,
-    query: [
-      executableCase.title,
-      ...executableCase.steps.map((step) => `${step.action} ${step.instruction} ${step.targetSemantic}`)
-    ].join("\n"),
-    purpose: "generator",
-    maxChars: 20_000
-  });
+  const contextPack = executionPlan.contextPack;
   const contextPackPath = join(
     context.workDir,
     ".brain-creator",
     "knowledge-context",
-    `${executableCase.id}.json`
+    `${executionPlan.id}.json`
   );
   await mkdir(dirname(contextPackPath), { recursive: true });
   await writeFile(contextPackPath, `${JSON.stringify(contextPack, null, 2)}\n`, "utf8");
   const scenario: TestCaseScenario = {
     id: id("scenario"),
-    title: executableCase.title,
+    title: executionPlan.title,
     priority: "high",
-    steps: executableCase.steps.map((step) => ({
+    steps: executionPlan.steps.map((step) => ({
       action: step.action === "api" ? "wait" : step.action,
       target: step.targetSemantic,
       value: step.value,
@@ -1830,7 +1835,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   };
   const testCase = context.service.createTestCase({
     systemId,
-    requirement: executableCase.title,
+    requirement: executionPlan.title,
     scenarios: [scenario],
     newTerms: [],
     ruleCheckResult: { passed: true, checks: [] }
@@ -1845,7 +1850,6 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     contextPackPath
   });
   const knowledgeContext = formatRequirementGeneratorContext(
-    executableCase,
     executionPlan,
     contextPack,
     executionEvidence.id,
@@ -1917,7 +1921,6 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
 }
 
 function formatRequirementGeneratorContext(
-  executableCase: ExecutableCase,
   executionPlan: ExecutionPlan,
   contextPack: ReturnType<typeof buildContextPack>,
   evidenceId: string,
@@ -1939,7 +1942,12 @@ function formatRequirementGeneratorContext(
     "",
     "## Executable Step Traceability",
     "",
-    ...executableCase.steps.map(
+    ...(executionPlan.preconditions.length > 0
+      ? executionPlan.preconditions.map(
+          (precondition) => `- Precondition: ${precondition}`
+        )
+      : ["- Preconditions: none"]),
+    ...executionPlan.steps.map(
       (step) =>
         `- Step ${step.order} ${step.action}: ${step.instruction}; target=${step.targetSemantic}; dataProfile=${step.dataProfileId ?? "none"}; origin=${step.origin}; sources=${step.sourceRefs.join(",")}`
     ),
@@ -1956,16 +1964,15 @@ function formatRequirementGeneratorContext(
     "",
     "## Test Data Plan",
     "",
-    ...(executableCase.dataPlan?.operations.length
-      ? executableCase.dataPlan.operations.map((operation) =>
+    ...(executionPlan.dataBindings.length
+      ? executionPlan.dataBindings.map((binding) =>
           [
-            `- ${operation.field}: decision=${operation.decision}`,
-            `status=${operation.status}`,
-            `value=${operation.decision === "resolve-secret" ? "[secret-reference]" : operation.value ?? "runtime"}`,
-            `reference=${operation.reference ?? operation.secretRef ?? "none"}`,
-            `cleanup=${operation.cleanup}`,
-            `dependsOn=${operation.dependsOnProfileIds.join(",") || "none"}`,
-            `sources=${operation.sourceRefs.join(",")}`
+            `- ${binding.field}: decision=${binding.decision}`,
+            `value=${binding.decision === "resolve-secret" ? "[secret-reference]" : binding.value ?? "runtime"}`,
+            `reference=${binding.reference ?? binding.secretRef ?? "none"}`,
+            `lease=${binding.leaseId ?? "none"}`,
+            `cleanup=${binding.cleanup}`,
+            `sources=${binding.sourceRefs.join(",")}`
           ].join("; ")
         )
       : ["- No planned test data"]),
@@ -1973,7 +1980,7 @@ function formatRequirementGeneratorContext(
     "## Evidence Contract",
     "",
     "- Wrap each executable step in Playwright test.step with its step number and instruction.",
-    ...executableCase.steps.map(
+    ...executionPlan.steps.map(
       (step) =>
         `- After step ${step.order}, capture a screenshot at ${join(
           evidenceDir,
@@ -2426,6 +2433,10 @@ async function generatePlan(context: BrainCreatorMcpContext, input: Record<strin
 }
 
 async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const executionPlanId = optionalStringArg(input, "executionPlanId");
+  const executionPlan = executionPlanId
+    ? assertExecutionPlanIsCurrent(context, executionPlanId)
+    : undefined;
   const bridgeCheck = await preflightAgentBridge(context.agentBridge);
   if (!bridgeCheck.ok) {
     throw new Error(`Agent bridge unavailable: ${bridgeCheck.error}`);
@@ -2438,7 +2449,22 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   if (!system) {
     throw new Error("Business system not found");
   }
-  const authProfile = findAuthProfile(context, testCase.systemId);
+  if (executionPlan && executionPlan.systemId !== testCase.systemId) {
+    throw new Error("Execution plan belongs to another business system");
+  }
+  const authProfile = executionPlan?.auth
+    ? findAuthProfileById(
+        context,
+        testCase.systemId,
+        executionPlan.auth.profileId
+      )
+    : optionalStringArg(input, "authProfileId")
+      ? findAuthProfileById(
+          context,
+          testCase.systemId,
+          optionalStringArg(input, "authProfileId")!
+        )
+      : findAuthProfile(context, testCase.systemId);
   if (context.agentBridge?.provider === "host-agent") {
     const specsDir = join(context.workDir, "specs");
     const generatedDir = join(context.workDir, "tests", "generated");
@@ -2724,8 +2750,22 @@ function taskPackageFromStoredTask(task: AgentTask): HostAgentTaskPackage {
 }
 
 async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
+  const taskId = stringArg(input, "taskId");
+  const pendingTask = context.repository.agentTasks.find(
+    (item) => item.id === taskId
+  );
+  if (!pendingTask) throw new Error("Agent task not found");
+  if (pendingTask.status !== "pending") {
+    throw new Error("Agent task already submitted");
+  }
+  if (pendingTask.chainContext?.executionPlanId) {
+    assertExecutionPlanIsCurrent(
+      context,
+      pendingTask.chainContext.executionPlanId
+    );
+  }
   const result = context.service.submitAgentTask({
-    taskId: stringArg(input, "taskId"),
+    taskId,
     status: agentOutputStatusArg(input, "status"),
     stdout: optionalStringArg(input, "stdout") ?? "",
     stderr: optionalStringArg(input, "stderr") ?? "",
@@ -2938,6 +2978,19 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     };
   }
   return { ...result, chainRun, testResult };
+}
+
+function assertExecutionPlanIsCurrent(
+  context: BrainCreatorMcpContext,
+  executionPlanId: string
+) {
+  const validation = context.executionPreflight.validatePlan(executionPlanId);
+  if (!validation.valid) {
+    throw new Error(
+      `Execution plan is ${validation.status}: ${validation.reasons.join("; ")}`
+    );
+  }
+  return validation.executionPlan;
 }
 
 async function finalizeHostAgentPlan(
