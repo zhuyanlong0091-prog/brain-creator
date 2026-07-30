@@ -79,15 +79,23 @@ After terminal ExecutionEvidence, call `prepare-test-data` again. Created leases
 
 Duplicate fields, missing dependencies, and cycles require profile corrections and cannot be bypassed by submitting a value. Secret references are never copied into executable step values. `resolve-test-data` remains available only for compatibility and explicit manual resolution.
 
-### 8. Preview And Execute
+### 8. Prepare Execution
+
+Call `bc_prepare action=prepare-execution confirm=false` with the knowledge project, system, ExecutableCase, and optional explicit AuthProfile. Present all Requirement, System, Auth, Path, State, Data, Gap, and Cleanup checks. On confirmation, call it again with `confirm=true`.
+
+Brain Creator persists only a ready immutable ExecutionPlan. A blocked or needs-confirmation draft remains diagnostic and must not start Generator. Identical semantic inputs reuse the same snapshot hash and plan; timestamps alone do not create a new plan. Changed steps, requirement content, system binding, auth verification, data leases, or blockers produce a new snapshot. Secret values are never copied into the plan.
+
+Use `bc_review target=execution-plan` for audit. `bc_run mode=requirement-suite` performs the same Preflight, so direct confirmation cannot bypass it.
+
+### 9. Preview And Execute
 
 The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`.
 
-The Generator writes a Playwright test, Playwright executes it, and the Healer performs bounded repairs. Business mismatches create BugReports. Auth, environment, network, locator, or missing evidence creates Gaps.
+The Generator writes a Playwright test only for a ready ExecutionPlan. Playwright executes it, and the Healer performs bounded repairs. ExecutionEvidence records `executionPlanId`. Business mismatches create BugReports. Auth, environment, network, locator, or missing evidence creates Gaps.
 
-### 9. Review Evidence
+### 10. Review Evidence
 
-The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.
+The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, ExecutionPlans, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.
 
 ## User Entrypoints
 

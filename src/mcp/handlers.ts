@@ -32,6 +32,7 @@ import {
   type SystemExplorer
 } from "../knowledge/systemExplorer.js";
 import { TestDataProviderService } from "../knowledge/testDataProvider.js";
+import { ExecutionPreflightService } from "../knowledge/executionPreflight.js";
 import {
   commandRunnerAgentBridge,
   generatePlanDraft,
@@ -59,6 +60,7 @@ import type {
   ChainRun,
   DocumentCase,
   ExecutableCase,
+  ExecutionPlan,
   Gap,
   RequirementContentPackage,
   TestArtifact,
@@ -73,6 +75,7 @@ export type BrainCreatorMcpContext = {
   service: BrainCreatorService;
   knowledgeService: KnowledgeService;
   testDataProvider: TestDataProviderService;
+  executionPreflight: ExecutionPreflightService;
   systemExploration: SystemExplorationCoordinator;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
@@ -119,11 +122,13 @@ export function createBrainCreatorMcpContext(
     knowledgeService,
     join(workDir, ".brain-creator")
   );
+  const executionPreflight = new ExecutionPreflightService(repository);
   return {
     repository,
     service,
     knowledgeService,
     testDataProvider,
+    executionPreflight,
     systemExploration: new SystemExplorationCoordinator({
       repository,
       service,
@@ -703,6 +708,29 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       value: optionalStringArg(input, "dataValue"),
       sourceRefs: stringArrayArg(input, "sourceRefs"),
       error: optionalStringArg(input, "error")
+    });
+  }
+  if (action === "prepare-execution") {
+    const executableCaseId = stringArg(input, "executableCaseId");
+    const confirm = optionalBooleanArg(input, "confirm");
+    const executableCase = context.repository.executableCases.find(
+      (item) => item.id === executableCaseId
+    );
+    if (!executableCase) throw new Error("Executable case not found");
+    if (
+      confirm &&
+      executableCase.dataPlan?.verdict === "ready" &&
+      executableCase.dataPlan.requiresConfirmation &&
+      !executableCase.dataPlan.confirmedAt
+    ) {
+      context.knowledgeService.confirmExecutableCaseTestData(executableCase.id);
+    }
+    return context.executionPreflight.prepare({
+      knowledgeProjectId: stringArg(input, "knowledgeProjectId"),
+      systemId: stringArg(input, "systemId"),
+      executableCaseId,
+      authProfileId: optionalStringArg(input, "authProfileId"),
+      confirm
     });
   }
   if (action === "explore-system") {
@@ -1687,12 +1715,28 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     .listExecutableCases(projectId)
     .filter((item) => item.status === "ready")
     .filter((item) => !requestedCaseId || item.id === requestedCaseId);
+  const selectedSystemId =
+    optionalStringArg(input, "systemId") ?? project.systemIds[0];
+  const authProfileId = optionalStringArg(input, "authProfileId");
   if (!optionalBooleanArg(input, "confirm")) {
+    const executionPreflights = selectedSystemId
+      ? candidates.map((executableCase) => ({
+          executableCaseId: executableCase.id,
+          ...context.executionPreflight.prepare({
+            knowledgeProjectId: projectId,
+            systemId: selectedSystemId,
+            executableCaseId: executableCase.id,
+            authProfileId,
+            confirm: false
+          })
+        }))
+      : [];
     return {
       mode: "requirement-suite",
       status: "preview",
       project,
       executableCases: candidates,
+      executionPreflights,
       boundSystemIds: project.systemIds,
       requiresConfirmation: true,
       nextAction:
@@ -1702,7 +1746,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     };
   }
   if (candidates.length === 0) throw new Error("No ready executable cases were selected");
-  const systemId = optionalStringArg(input, "systemId") ?? project.systemIds[0];
+  const systemId = selectedSystemId;
   if (!systemId || !project.systemIds.includes(systemId)) {
     throw new Error("Requirement suite must use a system bound to the knowledge project");
   }
@@ -1726,13 +1770,34 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   if (executableCase.systemId && executableCase.systemId !== systemId) {
     throw new Error("Executable case was compiled for another business system");
   }
-  executableCase.systemId = systemId;
   if (
     executableCase.dataPlan?.requiresConfirmation &&
     !executableCase.dataPlan.confirmedAt
   ) {
     context.knowledgeService.confirmExecutableCaseTestData(executableCase.id);
   }
+  const preflight = context.executionPreflight.prepare({
+    knowledgeProjectId: projectId,
+    systemId,
+    executableCaseId: executableCase.id,
+    authProfileId,
+    confirm: true
+  });
+  if (preflight.status !== "ready" || !preflight.executionPlan) {
+    return {
+      mode: "requirement-suite",
+      status: "blocked",
+      knowledgeProjectId: projectId,
+      systemId,
+      executionPreflight: preflight,
+      nextAction:
+        preflight.status === "needs-confirmation"
+          ? "Confirm proposed execution inputs before retrying."
+          : "Resolve execution preflight blockers before retrying."
+    };
+  }
+  const executionPlan = preflight.executionPlan;
+  executableCase.systemId = systemId;
   executableCase.updatedAt = new Date().toISOString();
   context.repository.persist();
   const contextPack = buildContextPack(context.repository, {
@@ -1775,11 +1840,13 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     projectId,
     systemId,
     executableCaseId: executableCase.id,
+    executionPlanId: executionPlan.id,
     testCaseId: testCase.id,
     contextPackPath
   });
   const knowledgeContext = formatRequirementGeneratorContext(
     executableCase,
+    executionPlan,
     contextPack,
     executionEvidence.id,
     context.workDir
@@ -1791,6 +1858,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       caseId: testCase.id,
       knowledgeProjectId: projectId,
       executableCaseId: executableCase.id,
+      executionPlanId: executionPlan.id,
       executionEvidenceId: executionEvidence.id,
       contextPackPath,
       knowledgeContext
@@ -1840,6 +1908,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     mode: "requirement-suite",
     knowledgeProjectId: projectId,
     executableCaseId: executableCase.id,
+    executionPlan,
     contextPackPath,
     executionEvidence: completedEvidence,
     bugReport: requirementBug,
@@ -1849,6 +1918,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
 
 function formatRequirementGeneratorContext(
   executableCase: ExecutableCase,
+  executionPlan: ExecutionPlan,
   contextPack: ReturnType<typeof buildContextPack>,
   evidenceId: string,
   workDir: string
@@ -1872,6 +1942,16 @@ function formatRequirementGeneratorContext(
     ...executableCase.steps.map(
       (step) =>
         `- Step ${step.order} ${step.action}: ${step.instruction}; target=${step.targetSemantic}; dataProfile=${step.dataProfileId ?? "none"}; origin=${step.origin}; sources=${step.sourceRefs.join(",")}`
+    ),
+    "",
+    "## Execution Plan",
+    "",
+    `- Plan ID: ${executionPlan.id}`,
+    `- Snapshot hash: ${executionPlan.snapshotHash}`,
+    `- System: ${executionPlan.systemId}`,
+    `- Auth profile: ${executionPlan.auth?.profileId ?? "public-or-host-managed"}`,
+    ...executionPlan.checks.map(
+      (check) => `- ${check.id}: ${check.status}; ${check.message}`
     ),
     "",
     "## Test Data Plan",
@@ -1961,6 +2041,9 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     (item) => item.dataPlan?.verdict === "blocked"
   );
   const executionEvidence = context.knowledgeService.listExecutionEvidence(projectId);
+  const executionPlans = context.repository.executionPlans.filter(
+    (item) => item.knowledgeProjectId === projectId
+  );
   const testDataTasks = context.repository.testDataTasks.filter(
     (item) => item.knowledgeProjectId === projectId
   );
@@ -2081,6 +2164,10 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         total: executionEvidence.length,
         byStatus: countBy(executionEvidence, (item) => item.status)
       },
+      executionPlans: {
+        total: executionPlans.length,
+        recent: executionPlans.slice(-5)
+      },
       testData: {
         tasks: {
           total: testDataTasks.length,
@@ -2141,6 +2228,16 @@ function knowledgeReview(
       items: context.knowledgeService
         .listExecutableCases(projectId)
         .filter((item) => !idValue || item.id === idValue)
+    };
+  }
+  if (target === "execution-plan") {
+    return {
+      project,
+      items: context.repository.executionPlans.filter(
+        (item) =>
+          item.knowledgeProjectId === projectId &&
+          (!idValue || item.id === idValue)
+      )
     };
   }
   if (target === "coverage") {
@@ -2377,6 +2474,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
         healAttempts: 0,
         knowledgeProjectId: optionalStringArg(input, "knowledgeProjectId"),
         executableCaseId: optionalStringArg(input, "executableCaseId"),
+        executionPlanId: optionalStringArg(input, "executionPlanId"),
         executionEvidenceId: optionalStringArg(input, "executionEvidenceId"),
         contextPackPath: optionalStringArg(input, "contextPackPath")
       },
@@ -4320,6 +4418,7 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   const healAttempts = candidate.healAttempts;
   const knowledgeProjectId = candidate.knowledgeProjectId;
   const executableCaseId = candidate.executableCaseId;
+  const executionPlanId = candidate.executionPlanId;
   const executionEvidenceId = candidate.executionEvidenceId;
   const contextPackPath = candidate.contextPackPath;
   if (typeof testCaseId !== "string" || typeof specPath !== "string" || typeof testPath !== "string") {
@@ -4340,6 +4439,7 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   for (const [name, value] of Object.entries({
     knowledgeProjectId,
     executableCaseId,
+    executionPlanId,
     executionEvidenceId,
     contextPackPath
   })) {
@@ -4357,6 +4457,7 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
     healAttempts,
     knowledgeProjectId: knowledgeProjectId as string | undefined,
     executableCaseId: executableCaseId as string | undefined,
+    executionPlanId: executionPlanId as string | undefined,
     executionEvidenceId: executionEvidenceId as string | undefined,
     contextPackPath: contextPackPath as string | undefined
   };
@@ -4447,6 +4548,7 @@ type KnowledgeReviewTarget =
   | "system-exploration"
   | "test-intent"
   | "executable-case"
+  | "execution-plan"
   | "evidence";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
@@ -4466,6 +4568,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "system-exploration",
       "test-intent",
       "executable-case",
+      "execution-plan",
       "evidence"
     ].includes(value)
   ) {
@@ -4490,6 +4593,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "system-exploration",
     "test-intent",
     "executable-case",
+    "execution-plan",
     "evidence"
   ].includes(value);
 }
@@ -4998,6 +5102,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "resolve-test-data",
       "prepare-test-data",
       "submit-test-data",
+      "prepare-execution",
       "record-observation",
       "record-page-evidence",
       "record-training-evidence",
@@ -5018,6 +5123,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "resolve-test-data"
     | "prepare-test-data"
     | "submit-test-data"
+    | "prepare-execution"
     | "record-observation"
     | "record-page-evidence"
     | "record-training-evidence"

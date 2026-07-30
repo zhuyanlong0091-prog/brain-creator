@@ -205,6 +205,8 @@ export class TestDataProviderService {
       }]
     });
     const now = timestamp();
+    this.resolveProviderGaps(task, now);
+    this.refreshCaseStatus(resolved.executableCase, now);
     const lease = this.createOrReuseLease({
       task,
       decision: input.decision,
@@ -243,8 +245,18 @@ export class TestDataProviderService {
     if (!executableCase.dataPlan) return [];
     return executableCase.dataPlan.operations.filter(
       (operation) =>
-        operation.decision === "lookup" &&
-        operation.status === "needs-resolution"
+        (operation.decision === "lookup" &&
+          operation.status === "needs-resolution") ||
+        ((operation.decision === "reuse" || operation.decision === "create") &&
+          !this.repository.testDataLeases.some(
+            (lease) =>
+              lease.knowledgeProjectId === executableCase.knowledgeProjectId &&
+              lease.systemId === executableCase.systemId &&
+              lease.executableCaseId === executableCase.id &&
+              lease.profileId === operation.profileId &&
+              lease.reference === operation.reference &&
+              lease.status === "active"
+          ))
     );
   }
 
@@ -475,6 +487,47 @@ export class TestDataProviderService {
         gap.status = "resolved";
         gap.updatedAt = now;
       }
+    }
+  }
+
+  private resolveProviderGaps(task: TestDataTask, now: string) {
+    const relatedTaskIds = new Set(
+      this.repository.testDataTasks
+        .filter(
+          (item) =>
+            item.action === "lookup-or-create" &&
+            item.executableCaseId === task.executableCaseId &&
+            item.profileId === task.profileId
+        )
+        .map((item) => item.id)
+    );
+    for (const gap of this.repository.gaps) {
+      if (
+        gap.sourceType === "test-data-provider" &&
+        gap.status === "open" &&
+        relatedTaskIds.has(gap.sourceId)
+      ) {
+        gap.status = "resolved";
+        gap.updatedAt = now;
+      }
+    }
+  }
+
+  private refreshCaseStatus(executableCase: ExecutableCase, now: string) {
+    if (executableCase.dataPlan?.verdict !== "ready") return;
+    const hasOpenGap = executableCase.gapIds.some((gapId) =>
+      this.repository.gaps.some(
+        (gap) => gap.id === gapId && gap.status === "open"
+      )
+    );
+    executableCase.status = hasOpenGap ? "blocked" : "ready";
+    executableCase.updatedAt = now;
+    const intent = this.repository.testIntents.find(
+      (item) => item.id === executableCase.testIntentId
+    );
+    if (intent) {
+      intent.status = hasOpenGap ? "blocked" : "compiled";
+      intent.updatedAt = now;
     }
   }
 

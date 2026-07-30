@@ -4,7 +4,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ExecutableCase, Gap, TestIntent } from "../domain/types.js";
+import type {
+  ExecutableCase,
+  Gap,
+  RequirementSet,
+  TestIntent
+} from "../domain/types.js";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
 
 const tempDirs: string[] = [];
@@ -787,6 +792,20 @@ describe("Brain Creator requirement-first facade", () => {
       createdAt: now,
       updatedAt: now
     };
+    const requirementSet: RequirementSet = {
+      id: intent.requirementSetId,
+      knowledgeProjectId: project.id,
+      sourceId: "source-provider-facade",
+      version: 1,
+      title: "Customer reference",
+      summary: "Use an active customer.",
+      contentHash: "customer-provider-v1",
+      status: "approved",
+      affectedNodeIds: [],
+      approvedAt: now,
+      createdAt: now,
+      updatedAt: now
+    };
     const gap: Gap = {
       id: "gap-provider-facade",
       projectId: project.id,
@@ -844,6 +863,7 @@ describe("Brain Creator requirement-first facade", () => {
       updatedAt: now
     };
     context.repository.testIntents.push(intent);
+    context.repository.requirementSets.push(requirementSet);
     context.repository.gaps.push(gap);
     context.repository.executableCases.push(executableCase);
     context.repository.persist();
@@ -912,6 +932,91 @@ describe("Brain Creator requirement-first facade", () => {
     expect(resolvedStatus.knowledge.testData.leases).toEqual(
       expect.objectContaining({ total: 1, byStatus: { active: 1 } })
     );
+
+    const executionPreview = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "prepare-execution",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        executableCaseId: executableCase.id,
+        confirm: false
+      })
+    );
+    const executionConfirmed = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "prepare-execution",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        executableCaseId: executableCase.id,
+        confirm: true
+      })
+    );
+    const reviewed = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "execution-plan",
+        knowledgeProjectId: project.id,
+        id: executionConfirmed.executionPlan.id
+      })
+    );
+
+    expect(executionPreview).toEqual(
+      expect.objectContaining({
+        status: "preview",
+        draft: expect.objectContaining({ verdict: "needs-confirmation" })
+      })
+    );
+    expect(executionConfirmed).toEqual(
+      expect.objectContaining({
+        status: "ready",
+        persisted: true,
+        executionPlan: expect.objectContaining({
+          systemId: system.id,
+          dataBindings: [
+            expect.objectContaining({ leaseId: submitted.lease.id })
+          ]
+        })
+      })
+    );
+    expect(reviewed.items).toEqual([
+      expect.objectContaining({ id: executionConfirmed.executionPlan.id })
+    ]);
+
+    const storedTask = context.repository.testDataTasks.find(
+      (item) => item.id === prepared.task.id
+    )!;
+    storedTask.status = "pending";
+    const testCaseCount = context.repository.testCases.length;
+    const agentTaskCount = context.repository.agentTasks.length;
+    const evidenceCount = context.repository.executionEvidence.length;
+    const blockedRun = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        executableCaseId: executableCase.id,
+        confirm: true
+      })
+    );
+    expect(blockedRun).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        executionPreflight: expect.objectContaining({
+          status: "blocked",
+          draft: expect.objectContaining({
+            checks: expect.arrayContaining([
+              expect.objectContaining({
+                id: "test-data-tasks",
+                status: "blocked"
+              })
+            ])
+          })
+        })
+      })
+    );
+    expect(context.repository.testCases).toHaveLength(testCaseCount);
+    expect(context.repository.agentTasks).toHaveLength(agentTaskCount);
+    expect(context.repository.executionEvidence).toHaveLength(evidenceCount);
+    storedTask.status = "submitted";
   });
 
   it("does not let a superseded blocked Eval gate poison the revised baseline status", async () => {
@@ -1258,10 +1363,21 @@ describe("Brain Creator requirement-first facade", () => {
     expect(result.status).toBe("needs_agent_execution");
     expect(spec).toContain("Brain Creator Knowledge Context");
     expect(spec).toContain("Executable Step Traceability");
+    expect(spec).toContain("Execution Plan");
     expect(spec).toContain("Evidence Contract");
+    expect(result.executionPlan).toEqual(
+      expect.objectContaining({ verdict: "ready", systemId: system.id })
+    );
+    expect(taskContext.chainContext.executionPlanId).toBe(
+      result.executionPlan.id
+    );
     expect(taskContext.chainContext.executionEvidenceId).toBe(result.executionEvidence.id);
     expect(context.repository.executionEvidence).toEqual([
-      expect.objectContaining({ status: "running", contextPackPath: result.contextPackPath })
+      expect.objectContaining({
+        status: "running",
+        executionPlanId: result.executionPlan.id,
+        contextPackPath: result.contextPackPath
+      })
     ]);
 
     await writeFile(

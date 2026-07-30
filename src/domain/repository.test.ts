@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(5);
+    expect(second.schemaVersion).toBe(6);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -242,16 +242,35 @@ describe("JsonFileBrainCreatorRepository", () => {
       createdAt: "2026-07-30T00:01:00.000Z",
       updatedAt: "2026-07-30T00:01:00.000Z"
     });
+    first.executionPlans.push({
+      id: "executionPlan_1",
+      knowledgeProjectId: "knowledge_1",
+      requirementSetId: "requirement_1",
+      systemId: "system_1",
+      executableCaseId: "executableCase_1",
+      steps: [],
+      dataBindings: [],
+      checks: [],
+      verdict: "ready",
+      blockers: [],
+      sourceRefs: ["requirement:1"],
+      snapshotHash: "a".repeat(64),
+      generatedAt: "2026-07-30T00:01:00.000Z",
+      confirmedAt: "2026-07-30T00:01:00.000Z"
+    });
     first.persist();
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(5);
+    expect(second.schemaVersion).toBe(6);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);
     expect(second.testDataLeases).toEqual([
       expect.objectContaining({ id: "testDataLease_1", status: "active" })
+    ]);
+    expect(second.executionPlans).toEqual([
+      expect.objectContaining({ id: "executionPlan_1", verdict: "ready" })
     ]);
   });
 });
