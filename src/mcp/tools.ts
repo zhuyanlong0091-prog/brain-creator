@@ -121,7 +121,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, generating and confirming Requirement Eval, approving a baseline, running bounded read-only system exploration, submitting page/training evidence, refreshing System Brain, and compiling evidence-bound executable cases.",
+      "Requirement-first facade for ingesting sources, confirming Requirement Eval, approving a baseline, exploring System Brain, compiling evidence-bound executable cases, and resolving approved test-data decisions.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
@@ -131,6 +131,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "confirm-eval-actions",
         "approve-baseline",
         "compile-cases",
+        "resolve-test-data",
         "record-observation",
         "record-page-evidence",
         "record-training-evidence",
@@ -149,6 +150,23 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       interactionMode: z.enum(["off", "safe"]).default("off"),
       maxInteractionsPerPage: z.number().int().min(0).max(10).optional(),
       actionIds: z.array(z.string()).default([]),
+      executableCaseId: z.string().optional(),
+      testDataResolutions: z
+        .array(
+          z.object({
+            profileId: z.string(),
+            decision: z.enum([
+              "use-value",
+              "reuse",
+              "create",
+              "capture",
+              "secret-reference"
+            ]),
+            value: z.string().optional(),
+            reference: z.string().optional()
+          })
+        )
+        .default([]),
       confirmationNote: z.string().optional(),
       systemId: z.string().optional(),
       observationType: z.enum([

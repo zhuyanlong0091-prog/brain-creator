@@ -32,6 +32,12 @@ import {
   type SystemObservationDraft
 } from "./systemBrain.js";
 import { planStateActions } from "./stateActionPlanner.js";
+import {
+  applyTestDataResolutions,
+  confirmTestDataPlan,
+  planTestData,
+  type TestDataResolution
+} from "./testDataPlanner.js";
 import { planWorkflowPath } from "./workflowPathPlanner.js";
 
 export class KnowledgeService {
@@ -579,6 +585,27 @@ export class KnowledgeService {
         }
       }
     }
+    const dataProfiles = this.repository.testDataProfiles.filter(
+      (profile) =>
+        profile.requirementSetId === requirementSet.id &&
+        profile.sourceRefs.some((sourceRef) =>
+          intent.requirementRefs.includes(sourceRef)
+        )
+    );
+    const dataPlanned = planTestData(dataProfiles, steps);
+    steps = dataPlanned.steps;
+    if (dataPlanned.plan.verdict === "blocked") {
+      gaps.push(
+        ...dataPlanned.plan.reasons.map((reason) =>
+          this.createGap(
+            requirementSet.knowledgeProjectId,
+            requirementSet.id,
+            reason,
+            "test-data-plan"
+          )
+        )
+      );
+    }
     const now = timestamp();
     const executableCase: ExecutableCase = {
       id: id("executableCase"),
@@ -592,9 +619,8 @@ export class KnowledgeService {
       steps,
       pathPlan,
       statePlan,
-      dataProfileIds: this.repository.testDataProfiles
-        .filter((profile) => profile.requirementSetId === requirementSet.id)
-        .map((profile) => profile.id),
+      dataPlan: dataPlanned.plan,
+      dataProfileIds: dataProfiles.map((profile) => profile.id),
       gapIds: gaps.map((gap) => gap.id),
       createdAt: now,
       updatedAt: now
@@ -604,6 +630,68 @@ export class KnowledgeService {
     intent.updatedAt = now;
     this.repository.persist();
     return { executableCase, gaps };
+  }
+
+  resolveExecutableCaseTestData(input: {
+    executableCaseId: string;
+    resolutions: TestDataResolution[];
+  }) {
+    const executableCase = this.repository.executableCases.find(
+      (item) => item.id === input.executableCaseId
+    );
+    if (!executableCase) throw new Error("Executable case not found");
+    if (!executableCase.dataPlan) {
+      throw new Error("Executable case has no test data plan");
+    }
+    const resolved = applyTestDataResolutions(
+      executableCase.dataPlan,
+      executableCase.steps,
+      input.resolutions
+    );
+    executableCase.dataPlan = resolved.plan;
+    executableCase.steps = resolved.steps;
+    const resolvedGaps = this.repository.gaps.filter(
+      (gap) =>
+        executableCase.gapIds.includes(gap.id) &&
+        gap.sourceType === "test-data-plan" &&
+        gap.status === "open"
+    );
+    if (resolved.plan.verdict === "ready") {
+      const now = timestamp();
+      for (const gap of resolvedGaps) {
+        gap.status = "resolved";
+        gap.updatedAt = now;
+      }
+      const hasOpenGap = executableCase.gapIds.some((gapId) =>
+        this.repository.gaps.some(
+          (gap) => gap.id === gapId && gap.status === "open"
+        )
+      );
+      executableCase.status = hasOpenGap ? "blocked" : "ready";
+      executableCase.updatedAt = now;
+      const intent = this.getTestIntent(executableCase.testIntentId);
+      intent.status = hasOpenGap ? "blocked" : "compiled";
+      intent.updatedAt = now;
+    }
+    this.repository.persist();
+    return { executableCase, resolvedGaps };
+  }
+
+  confirmExecutableCaseTestData(executableCaseId: string) {
+    const executableCase = this.repository.executableCases.find(
+      (item) => item.id === executableCaseId
+    );
+    if (!executableCase) throw new Error("Executable case not found");
+    if (!executableCase.dataPlan) {
+      throw new Error("Executable case has no test data plan");
+    }
+    executableCase.dataPlan = confirmTestDataPlan(
+      executableCase.dataPlan,
+      timestamp()
+    );
+    executableCase.updatedAt = timestamp();
+    this.repository.persist();
+    return executableCase;
   }
 
   listTestIntents(projectId: string) {

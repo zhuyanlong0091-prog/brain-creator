@@ -656,6 +656,27 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     }
     return context.knowledgeService.approveRequirementSet(stringArg(input, "requirementSetId"));
   }
+  if (action === "resolve-test-data") {
+    const executableCaseId = stringArg(input, "executableCaseId");
+    const executableCase = context.repository.executableCases.find(
+      (item) => item.id === executableCaseId
+    );
+    if (!executableCase) throw new Error("Executable case not found");
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        executableCaseId,
+        testDataPlan: executableCase.dataPlan,
+        requiresConfirmation: true,
+        nextAction:
+          "Present lookup, reuse, create, cleanup, and value decisions before resolving test data."
+      };
+    }
+    return context.knowledgeService.resolveExecutableCaseTestData({
+      executableCaseId,
+      resolutions: testDataResolutionsArg(input, "testDataResolutions")
+    });
+  }
   if (action === "explore-system") {
     return context.systemExploration.explore({
       knowledgeProjectId: stringArg(input, "knowledgeProjectId"),
@@ -762,10 +783,13 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     ...compiled,
     workflowPath: compiled.executableCase.pathPlan,
     stateActions: compiled.executableCase.statePlan,
+    testDataPlan: compiled.executableCase.dataPlan,
     nextAction:
       compiled.executableCase.status === "ready"
         ? "preview-requirement-suite"
-        : "review-system-brain-gaps"
+        : compiled.executableCase.dataPlan?.verdict === "blocked"
+          ? "resolve-test-data"
+          : "review-system-brain-gaps"
   };
 }
 
@@ -1675,6 +1699,12 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     throw new Error("Executable case was compiled for another business system");
   }
   executableCase.systemId = systemId;
+  if (
+    executableCase.dataPlan?.requiresConfirmation &&
+    !executableCase.dataPlan.confirmedAt
+  ) {
+    context.knowledgeService.confirmExecutableCaseTestData(executableCase.id);
+  }
   executableCase.updatedAt = new Date().toISOString();
   context.repository.persist();
   const contextPack = buildContextPack(context.repository, {
@@ -1813,8 +1843,24 @@ function formatRequirementGeneratorContext(
     "",
     ...executableCase.steps.map(
       (step) =>
-        `- Step ${step.order} ${step.action}: ${step.instruction}; target=${step.targetSemantic}; origin=${step.origin}; sources=${step.sourceRefs.join(",")}`
+        `- Step ${step.order} ${step.action}: ${step.instruction}; target=${step.targetSemantic}; dataProfile=${step.dataProfileId ?? "none"}; origin=${step.origin}; sources=${step.sourceRefs.join(",")}`
     ),
+    "",
+    "## Test Data Plan",
+    "",
+    ...(executableCase.dataPlan?.operations.length
+      ? executableCase.dataPlan.operations.map((operation) =>
+          [
+            `- ${operation.field}: decision=${operation.decision}`,
+            `status=${operation.status}`,
+            `value=${operation.decision === "resolve-secret" ? "[secret-reference]" : operation.value ?? "runtime"}`,
+            `reference=${operation.reference ?? operation.secretRef ?? "none"}`,
+            `cleanup=${operation.cleanup}`,
+            `dependsOn=${operation.dependsOnProfileIds.join(",") || "none"}`,
+            `sources=${operation.sourceRefs.join(",")}`
+          ].join("; ")
+        )
+      : ["- No planned test data"]),
     "",
     "## Evidence Contract",
     "",
@@ -1883,6 +1929,9 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   );
   const testIntents = context.knowledgeService.listTestIntents(projectId);
   const executableCases = context.knowledgeService.listExecutableCases(projectId);
+  const blockedDataPlans = executableCases.filter(
+    (item) => item.dataPlan?.verdict === "blocked"
+  );
   const executionEvidence = context.knowledgeService.listExecutionEvidence(projectId);
   const gaps = context.service.listGaps({ projectId, status: "open" });
   const evaluationGates = activeRequirementSets.flatMap((item) =>
@@ -1928,6 +1977,8 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     nextAction = "review_and_approve_baseline";
   } else if (executableCases.some((item) => item.status === "ready")) {
     nextAction = project.systemIds.length > 0 ? "run_requirement_suite" : "bind_system";
+  } else if (blockedDataPlans.length > 0) {
+    nextAction = "resolve_test_data";
   } else if (testIntents.some((item) => item.status === "approved")) {
     if (project.systemIds.length === 0) nextAction = "bind_system";
     else if (runningExplorations.length > 0) nextAction = "review_system_exploration";
@@ -1962,7 +2013,17 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       testIntents: { total: testIntents.length, byStatus: countBy(testIntents, (item) => item.status) },
       executableCases: {
         total: executableCases.length,
-        byStatus: countBy(executableCases, (item) => item.status)
+        byStatus: countBy(executableCases, (item) => item.status),
+        dataPlans: {
+          byVerdict: countBy(
+            executableCases.flatMap((item) => item.dataPlan ? [item.dataPlan] : []),
+            (item) => item.verdict
+          ),
+          blocked: blockedDataPlans.map((item) => ({
+            executableCaseId: item.id,
+            reasons: item.dataPlan?.reasons ?? []
+          }))
+        }
       },
       executionEvidence: {
         total: executionEvidence.length,
@@ -4870,6 +4931,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "confirm-eval-actions",
       "approve-baseline",
       "compile-cases",
+      "resolve-test-data",
       "record-observation",
       "record-page-evidence",
       "record-training-evidence",
@@ -4887,11 +4949,54 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "confirm-eval-actions"
     | "approve-baseline"
     | "compile-cases"
+    | "resolve-test-data"
     | "record-observation"
     | "record-page-evidence"
     | "record-training-evidence"
     | "explore-system"
     | "refresh-system-brain";
+}
+
+function testDataResolutionsArg(
+  input: Record<string, unknown>,
+  key: string
+) {
+  const value = input[key] ?? [];
+  if (!Array.isArray(value)) throw new Error(`${key} must be an array`);
+  const decisions = new Set([
+    "use-value",
+    "reuse",
+    "create",
+    "capture",
+    "secret-reference"
+  ]);
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`${key}[${index}] must be an object`);
+    }
+    const resolution = item as Record<string, unknown>;
+    if (
+      typeof resolution.profileId !== "string" ||
+      typeof resolution.decision !== "string" ||
+      !decisions.has(resolution.decision) ||
+      (resolution.value !== undefined && typeof resolution.value !== "string") ||
+      (resolution.reference !== undefined &&
+        typeof resolution.reference !== "string")
+    ) {
+      throw new Error(`${key}[${index}] is invalid`);
+    }
+    return {
+      profileId: resolution.profileId,
+      decision: resolution.decision as
+        | "use-value"
+        | "reuse"
+        | "create"
+        | "capture"
+        | "secret-reference",
+      value: resolution.value as string | undefined,
+      reference: resolution.reference as string | undefined
+    };
+  });
 }
 
 function knowledgeNodeTypeArg(input: Record<string, unknown>, key: string): KnowledgeNodeType {

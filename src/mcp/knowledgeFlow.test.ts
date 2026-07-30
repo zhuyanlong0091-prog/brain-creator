@@ -542,6 +542,130 @@ describe("Brain Creator requirement-first facade", () => {
     expect(compiled.nextAction).toBe("preview-requirement-suite");
   });
 
+  it("surfaces and resolves a test data plan through the prepare facade", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = dataOf(
+      await handleBrainCreatorTool(context, "bc_configure", {
+        target: "knowledge-project",
+        name: "Customer Data",
+        key: "customer-data-facade"
+      })
+    );
+    const source = join(workDir, "customer-data.md");
+    await writeFile(source, "# Customer\n\nFill Customer form.", "utf8");
+    const ingested = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "ingest-requirement",
+        knowledgeProjectId: project.id,
+        source
+      })
+    );
+    const designed = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "generate-test-design",
+        requirementSetId: ingested.requirementSet.id
+      })
+    );
+    const pendingActionIds = designed.evaluationGate.actions
+      .filter((action: { status: string }) => action.status === "pending")
+      .map((action: { id: string }) => action.id);
+    if (pendingActionIds.length > 0) {
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "confirm-eval-actions",
+        requirementSetId: ingested.requirementSet.id,
+        actionIds: pendingActionIds,
+        confirmationNote: "The customer data requirement is confirmed.",
+        confirm: true
+      });
+    }
+    await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "approve-baseline",
+      requirementSetId: ingested.requirementSet.id,
+      confirm: true
+    });
+    const profile = designed.dataProfiles[0];
+    const selectedIntent = designed.testIntents.find(
+      (intent: { requirementRefs: string[] }) =>
+        profile.sourceRefs.some((sourceRef: string) =>
+          intent.requirementRefs.includes(sourceRef)
+        )
+    );
+    expect(selectedIntent).toBeDefined();
+    if (!selectedIntent) throw new Error("Related TestIntent was not generated");
+    const storedProfile = context.repository.testDataProfiles.find(
+      (item) => item.id === profile.id
+    );
+    if (!storedProfile) throw new Error("TestDataProfile was not persisted");
+    storedProfile.field = "Customer";
+    storedProfile.strategy = "existing-reference";
+    storedProfile.seed = "status=active";
+
+    const compiled = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "compile-cases",
+        testIntentId: selectedIntent.id
+      })
+    );
+    const blockedStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+    const preview = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "resolve-test-data",
+        executableCaseId: compiled.executableCase.id,
+        confirm: false
+      })
+    );
+
+    expect(compiled.executableCase.status).toBe("blocked");
+    expect(compiled.testDataPlan).toEqual(
+      expect.objectContaining({ verdict: "blocked" })
+    );
+    expect(compiled.nextAction).toBe("resolve-test-data");
+    expect(blockedStatus.nextAction).toBe("resolve_test_data");
+    expect(preview).toEqual(
+      expect.objectContaining({
+        status: "preview",
+        requiresConfirmation: true
+      })
+    );
+
+    const resolved = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "resolve-test-data",
+        executableCaseId: compiled.executableCase.id,
+        testDataResolutions: [
+          {
+            profileId: profile.id,
+            decision: "reuse",
+            reference: "customer:42",
+            value: "Existing Customer"
+          }
+        ],
+        confirm: true
+      })
+    );
+    const readyStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+
+    expect(resolved.executableCase).toEqual(
+      expect.objectContaining({
+        status: "ready",
+        dataPlan: expect.objectContaining({ verdict: "ready" })
+      })
+    );
+    expect(readyStatus.nextAction).toBe("bind_system");
+  });
+
   it("requires a separate Facade confirmation for Requirement Eval actions", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
