@@ -791,6 +791,48 @@ export type ExecutableCaseDataPlan = {
   sourceRefs: string[];
 };
 
+export type TestDataTask = {
+  id: string;
+  knowledgeProjectId: string;
+  systemId: string;
+  executableCaseId: string;
+  profileId: string;
+  field: string;
+  action: "lookup-or-create" | "cleanup";
+  status: "pending" | "submitted" | "failed" | "cancelled";
+  idempotencyKey: string;
+  allowCreate: boolean;
+  cleanup: "none" | "delete-created" | "restore";
+  lookupQuery?: string;
+  leaseId?: string;
+  contextPath: string;
+  promptPath: string;
+  sourceRefs: string[];
+  outputSourceRefs: string[];
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt?: string;
+};
+
+export type TestDataLease = {
+  id: string;
+  knowledgeProjectId: string;
+  systemId: string;
+  executableCaseId: string;
+  profileId: string;
+  taskId: string;
+  decision: "reuse" | "create";
+  reference: string;
+  value?: string;
+  cleanup: "none" | "delete-created" | "restore";
+  status: "active" | "released" | "cleanup-failed";
+  sourceRefs: string[];
+  createdAt: string;
+  updatedAt: string;
+  releasedAt?: string;
+};
+
 export type ExecutableCase = {
   id: string;
   knowledgeProjectId: string;

@@ -31,6 +31,7 @@ import {
   SystemExplorationCoordinator,
   type SystemExplorer
 } from "../knowledge/systemExplorer.js";
+import { TestDataProviderService } from "../knowledge/testDataProvider.js";
 import {
   commandRunnerAgentBridge,
   generatePlanDraft,
@@ -71,6 +72,7 @@ export type BrainCreatorMcpContext = {
   repository: JsonFileBrainCreatorRepository;
   service: BrainCreatorService;
   knowledgeService: KnowledgeService;
+  testDataProvider: TestDataProviderService;
   systemExploration: SystemExplorationCoordinator;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
@@ -112,10 +114,16 @@ export function createBrainCreatorMcpContext(
     repository,
     input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir)
   );
+  const testDataProvider = new TestDataProviderService(
+    repository,
+    knowledgeService,
+    join(workDir, ".brain-creator")
+  );
   return {
     repository,
     service,
     knowledgeService,
+    testDataProvider,
     systemExploration: new SystemExplorationCoordinator({
       repository,
       service,
@@ -675,6 +683,26 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     return context.knowledgeService.resolveExecutableCaseTestData({
       executableCaseId,
       resolutions: testDataResolutionsArg(input, "testDataResolutions")
+    });
+  }
+  if (action === "prepare-test-data") {
+    return context.testDataProvider.prepare({
+      knowledgeProjectId: stringArg(input, "knowledgeProjectId"),
+      systemId: stringArg(input, "systemId"),
+      executableCaseId: stringArg(input, "executableCaseId"),
+      confirm: optionalBooleanArg(input, "confirm"),
+      allowCreate: optionalBooleanArg(input, "allowCreate")
+    });
+  }
+  if (action === "submit-test-data") {
+    return context.testDataProvider.submit({
+      taskId: stringArg(input, "taskId"),
+      status: testDataTaskResultStatusArg(input, "taskStatus"),
+      decision: optionalTestDataProviderDecisionArg(input, "dataDecision"),
+      reference: optionalStringArg(input, "dataReference"),
+      value: optionalStringArg(input, "dataValue"),
+      sourceRefs: stringArrayArg(input, "sourceRefs"),
+      error: optionalStringArg(input, "error")
     });
   }
   if (action === "explore-system") {
@@ -1933,6 +1961,26 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     (item) => item.dataPlan?.verdict === "blocked"
   );
   const executionEvidence = context.knowledgeService.listExecutionEvidence(projectId);
+  const testDataTasks = context.repository.testDataTasks.filter(
+    (item) => item.knowledgeProjectId === projectId
+  );
+  const testDataLeases = context.repository.testDataLeases.filter(
+    (item) => item.knowledgeProjectId === projectId
+  );
+  const pendingTestDataTasks = testDataTasks.filter(
+    (item) => item.status === "pending"
+  );
+  const cleanupDue = testDataLeases.filter(
+    (lease) =>
+      lease.decision === "create" &&
+      lease.cleanup !== "none" &&
+      (lease.status === "active" || lease.status === "cleanup-failed") &&
+      executionEvidence.some(
+        (evidence) =>
+          evidence.executableCaseId === lease.executableCaseId &&
+          evidence.status !== "running"
+      )
+  );
   const gaps = context.service.listGaps({ projectId, status: "open" });
   const evaluationGates = activeRequirementSets.flatMap((item) =>
     item.evaluationGate ? [item.evaluationGate] : []
@@ -1970,7 +2018,11 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       )
   );
   let nextAction = "generate_test_design";
-  if (sources.length === 0) nextAction = "ingest_requirement";
+  if (pendingTestDataTasks.length > 0) {
+    nextAction = "complete_test_data_task";
+  } else if (cleanupDue.length > 0) {
+    nextAction = "prepare_test_data_cleanup";
+  } else if (sources.length === 0) nextAction = "ingest_requirement";
   else if (blockedEvalActions.length > 0) nextAction = "revise_blocked_requirement";
   else if (pendingEvalActions.length > 0) nextAction = "confirm_requirement_eval";
   else if (activeRequirementSets.some((item) => item.status === "draft")) {
@@ -1978,7 +2030,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   } else if (executableCases.some((item) => item.status === "ready")) {
     nextAction = project.systemIds.length > 0 ? "run_requirement_suite" : "bind_system";
   } else if (blockedDataPlans.length > 0) {
-    nextAction = "resolve_test_data";
+    nextAction = project.systemIds.length > 0 ? "prepare_test_data" : "resolve_test_data";
   } else if (testIntents.some((item) => item.status === "approved")) {
     if (project.systemIds.length === 0) nextAction = "bind_system";
     else if (runningExplorations.length > 0) nextAction = "review_system_exploration";
@@ -2028,6 +2080,18 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       executionEvidence: {
         total: executionEvidence.length,
         byStatus: countBy(executionEvidence, (item) => item.status)
+      },
+      testData: {
+        tasks: {
+          total: testDataTasks.length,
+          byStatus: countBy(testDataTasks, (item) => item.status),
+          pending: pendingTestDataTasks
+        },
+        leases: {
+          total: testDataLeases.length,
+          byStatus: countBy(testDataLeases, (item) => item.status),
+          cleanupDue
+        }
       },
       requirementEvalHistory: context.knowledgeService.requirementEvalAccuracy(projectId),
       explorations: {
@@ -4932,6 +4996,8 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "approve-baseline",
       "compile-cases",
       "resolve-test-data",
+      "prepare-test-data",
+      "submit-test-data",
       "record-observation",
       "record-page-evidence",
       "record-training-evidence",
@@ -4950,11 +5016,36 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "approve-baseline"
     | "compile-cases"
     | "resolve-test-data"
+    | "prepare-test-data"
+    | "submit-test-data"
     | "record-observation"
     | "record-page-evidence"
     | "record-training-evidence"
     | "explore-system"
     | "refresh-system-brain";
+}
+
+function testDataTaskResultStatusArg(
+  input: Record<string, unknown>,
+  key: string
+) {
+  const value = stringArg(input, key);
+  if (value !== "succeeded" && value !== "failed") {
+    throw new Error(`${key} is invalid`);
+  }
+  return value;
+}
+
+function optionalTestDataProviderDecisionArg(
+  input: Record<string, unknown>,
+  key: string
+) {
+  const value = optionalStringArg(input, key);
+  if (value === undefined) return undefined;
+  if (value !== "reuse" && value !== "create") {
+    throw new Error(`${key} is invalid`);
+  }
+  return value;
 }
 
 function testDataResolutionsArg(

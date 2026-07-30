@@ -132,6 +132,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "approve-baseline",
         "compile-cases",
         "resolve-test-data",
+        "prepare-test-data",
+        "submit-test-data",
         "record-observation",
         "record-page-evidence",
         "record-training-evidence",
@@ -151,6 +153,13 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       maxInteractionsPerPage: z.number().int().min(0).max(10).optional(),
       actionIds: z.array(z.string()).default([]),
       executableCaseId: z.string().optional(),
+      taskId: z.string().optional(),
+      taskStatus: z.enum(["succeeded", "failed"]).optional(),
+      dataDecision: z.enum(["reuse", "create"]).optional(),
+      dataReference: z.string().optional(),
+      dataValue: z.string().optional(),
+      error: z.string().optional(),
+      allowCreate: z.boolean().default(false),
       testDataResolutions: z
         .array(
           z.object({

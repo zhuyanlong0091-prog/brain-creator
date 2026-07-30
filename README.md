@@ -45,6 +45,7 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
 - 需求 hash 幂等、版本修订、影响节点、受影响回归范围和旧版本追溯。
 - TestIntent、TestDataProfile、ExecutableCase、隐含唯一动作补全与歧义 Gap。
 - Test Data Planner 只选取当前 TestIntent 的数据配置，生成依赖顺序、候选值、查找/复用/创建决策、secret 引用和清理策略；重复字段、缺失依赖和循环依赖会阻塞，不能通过填写任意值绕过。
+- Test Data Provider 将既有数据查找、显式授权创建和执行后清理封装为幂等 Host Agent 任务；`TestDataLease` 保存引用、证据和清理状态，准备失败与清理失败分别创建 Gap。
 - 多系统绑定、鉴权、AuthCheckpoint、Claude/Codex/host-agent Bridge。
 - System Brain 将 PageModel、LocatorPoint、ProbeResult、SystemExploration、TrainingSession、ActionStep 和 ApiFlow 聚合为按系统隔离的页面、状态转换、流程、级联行为和 API 证据；重复刷新幂等，需求预期与系统观察冲突单独保留。
 - 用例编译会在 System Brain 导航图上计算入口到目标页面的最短证据路径；只有唯一最短路径才会补全为 `origin=observed` 的导航步骤，同长多路径或目标不可达会阻塞并创建 Gap。
@@ -157,7 +158,8 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 | 提交页面/训练证据 | 宿主 Agent 浏览真实系统后使用 `bc_prepare action=record-page-evidence` / `record-training-evidence` |
 | 刷新系统知识 | `bc_prepare action=refresh-system-brain`，内部聚合页面建模和训练证据 |
 | 按系统编译 | `bc_prepare action=compile-cases` 并传入 `systemId` |
-| 解决测试数据 | 检查编译结果中的 `testDataPlan`；宿主完成查找或创建后使用 `bc_prepare action=resolve-test-data confirm=true` 回填引用和值 |
+| 准备测试数据 | `bc_prepare action=prepare-test-data` 先预览，确认后派发 Host Agent 任务；创建数据必须显式设置 `allowCreate=true` |
+| 回传数据证据 | Host Agent 使用 `bc_prepare action=submit-test-data` 回传复用/创建引用与 `sourceRefs`；旧 `resolve-test-data` 仅保留兼容 |
 | 配置鉴权 | `bc_configure target=auth` |
 | 等待人工登录 | `bc_configure target=checkpoint` |
 | 查看知识或系统状态 | `bc_status`，优先展示 `statusMarkdown` |
@@ -189,9 +191,10 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 6. 所有 Eval action 通过门禁后，用户再次明确确认并审批 baseline。
 7. 创建并绑定 SystemProfile，配置鉴权；优先调用 `bc_prepare action=explore-system` 自动发现 allowlist 内页面、交互元素和导航关系。需要观察 Tab、展开控件或原生下拉的级联变化时，可由用户显式批准 `interactionMode=safe`；更复杂菜单和业务流程仍由宿主 Agent 补充页面/训练证据。
 8. 指定 `systemId` 编译 ExecutableCase；系统保存可审计的 `pathPlan`，只补全唯一最短且有页面、导航边和定位证据的动作。同长多路径、目标页不明确或不可达时创建 Gap。
-9. 检查 `testDataPlan`。生成候选值在 Suite 预览中展示并随执行确认审批；既有数据引用必须由宿主 Agent 查找或创建后，通过 `resolve-test-data` 回填。结构性依赖错误必须修订 TestDataProfile。
-10. `bc_run mode=requirement-suite confirm=false` 预览，用户确认后执行。
-11. 用 `bc_review` 查看证据、Bug、Gap、Requirement Eval 历史准确率和需求/观察冲突。
+9. 检查 `testDataPlan`。对既有数据先调用 `prepare-test-data confirm=false` 展示查询条件；用户确认后再次调用并派发任务。默认只允许复用，只有用户明确允许时才传 `allowCreate=true`。
+10. Host Agent 在当前系统中查询或创建数据，并通过 `submit-test-data` 回传稳定引用、非敏感值和 `sourceRefs`。创建数据必须配置 `delete-created` 或 `restore` 清理策略；失败写入数据 Gap。
+11. `bc_run mode=requirement-suite confirm=false` 预览，用户确认后执行。执行达到通过、失败或阻塞终态后，再调用 `prepare-test-data` 获取清理任务并以 `submit-test-data` 回传清理证据。
+12. 用 `bc_review` 查看证据、Bug、Gap、Requirement Eval 历史准确率和需求/观察冲突。
 
 系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。`interactionMode` 默认为 `off`，此时不点击控件。显式设置 `safe` 后，每页默认最多探测 3 个、硬上限 10 个 Tab、展开控件或原生下拉，并记录前后状态、可见字段、弹窗、URL、截图与被拦截请求。危险名称、无稳定 selector、提交类控件、非 GET/HEAD/OPTIONS 请求和危险 URL 会被跳过或拦截；该模式不会提交表单，也不能证明设计错误的 GET 接口绝无副作用。复杂菜单、需要输入的数据流程和真实业务提交仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
 
@@ -296,6 +299,8 @@ The source checkout mode is for contributors. The repo-local plugin installation
 | Submit page/training evidence | `bc_prepare action=record-page-evidence` / `record-training-evidence` after host browser exploration |
 | Refresh system knowledge | `bc_prepare action=refresh-system-brain` |
 | Compile against real evidence | `bc_prepare action=compile-cases` with `systemId` |
+| Prepare test data | Preview and confirm `bc_prepare action=prepare-test-data`; creation additionally requires explicit `allowCreate=true` |
+| Submit data evidence | `bc_prepare action=submit-test-data` with a stable reference and `sourceRefs`; legacy `resolve-test-data` remains compatible |
 | Configure auth | `bc_configure target=auth` |
 | Wait for protected login | `bc_configure target=checkpoint` |
 | Preview and run approved requirement cases | `bc_run mode=requirement-suite` |
@@ -326,9 +331,10 @@ Brain Creator creates a BugReport only when evidence supports a business expecta
 6. After the Eval gate passes, approve the requirement baseline explicitly.
 7. Bind a real system and verified auth. Run `bc_prepare action=explore-system` to discover allowlisted pages, controls, and navigation links. Explicitly opt in to `interactionMode=safe` to observe bounded tab, disclosure, and native-select state changes; use host-browser evidence for more complex menus and business workflows.
 8. Compile ExecutableCases with `systemId`; missing PageModel or LocatorPoint evidence blocks compilation with a Gap.
-9. Inspect `testDataPlan`. Generated candidates are approved with the suite confirmation; existing references require an explicit host-Agent reuse or create resolution. Structural dependency errors require profile corrections.
-10. Preview and confirm `requirement-suite` execution.
-11. Review step evidence, BugReports, Gaps, historical Requirement Eval accuracy, and requirement-versus-observation conflicts.
+9. Inspect `testDataPlan`. Preview `prepare-test-data` before dispatch. It is read-only by default; set `allowCreate=true` only after explicit approval.
+10. The host Agent queries or creates data in the bound system and submits the reference plus evidence through `submit-test-data`. Created data requires `delete-created` or `restore`.
+11. Preview and confirm `requirement-suite` execution. After terminal evidence, prepare and submit any pending cleanup task.
+12. Review step evidence, BugReports, Gaps, historical Requirement Eval accuracy, and requirement-versus-observation conflicts.
 
 System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. `interactionMode` defaults to `off`. Opt-in `safe` mode probes at most 3 controls per page by default, with a hard limit of 10, and only considers tabs, disclosure controls, and native selects with stable selectors. It records before/after states and blocks write methods, dangerous URLs, and write-like labels. It never submits forms, but cannot prove that a misdesigned GET endpoint has no side effect. Complex menus, data-entry flows, and business submissions still require supplemental host-Agent page or training evidence.
 
@@ -342,7 +348,7 @@ During case compilation, Brain Creator finds the shortest evidence-backed route 
 
 State-action compilation is data-driven from `SystemBrainStateTransition`: it matches generic control targets, actions, input values, and before/after effects, then stores an auditable `statePlan`. No product-domain rule is encoded in the planner; recruiting, settings, and other examples are fixtures that validate the same orchestration contract. Equal candidates, missing input values, or missing locator evidence block with a Gap.
 
-Test-data compilation is scoped to the current TestIntent and stored as `dataPlan`. It deterministically orders declared dependencies and supports fixed, generated, unique, existing-reference, runtime-captured, and secret-reference strategies. Existing references remain blocked until the host Agent reports an explicit reuse or create result through `bc_prepare action=resolve-test-data`; duplicate fields, missing dependencies, and cycles are structural Gaps that values cannot bypass. Secret references never become executable step values.
+Test-data compilation is scoped to the current TestIntent and stored as `dataPlan`. It deterministically orders declared dependencies and supports fixed, generated, unique, existing-reference, runtime-captured, and secret-reference strategies. `prepare-test-data` creates an idempotent, auditable Host Agent task for unresolved references. Reuse is the default; creation requires explicit authorization and a cleanup policy. `submit-test-data` records evidence-backed `TestDataLease` assets, while terminal execution triggers cleanup work for created data. Provider and cleanup failures create separate Gaps. Duplicate fields, missing dependencies, and cycles remain structural Gaps, and secret references never become executable step values.
 
 ### Feishu
 
