@@ -196,9 +196,62 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(4);
+    expect(second.schemaVersion).toBe(5);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
+    ]);
+  });
+
+  it("restores test data tasks and leases after recreation", async () => {
+    const filePath = join(await tempDir(), "assets.json");
+    const first = new JsonFileBrainCreatorRepository(filePath);
+    first.testDataTasks.push({
+      id: "testDataTask_1",
+      knowledgeProjectId: "knowledge_1",
+      systemId: "system_1",
+      executableCaseId: "executableCase_1",
+      profileId: "profile_1",
+      field: "Customer",
+      action: "lookup-or-create",
+      status: "submitted",
+      idempotencyKey: "system_1:executableCase_1:profile_1:lookup-or-create:none",
+      allowCreate: false,
+      cleanup: "none",
+      lookupQuery: "status=active",
+      leaseId: "testDataLease_1",
+      contextPath: ".brain-creator/test-data/testDataTask_1/input.context.json",
+      promptPath: ".brain-creator/test-data/testDataTask_1/input.prompt.md",
+      sourceRefs: ["requirement:customer"],
+      outputSourceRefs: ["api:customers/42"],
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:01:00.000Z",
+      submittedAt: "2026-07-30T00:01:00.000Z"
+    });
+    first.testDataLeases.push({
+      id: "testDataLease_1",
+      knowledgeProjectId: "knowledge_1",
+      systemId: "system_1",
+      executableCaseId: "executableCase_1",
+      profileId: "profile_1",
+      taskId: "testDataTask_1",
+      decision: "reuse",
+      reference: "customer:42",
+      cleanup: "none",
+      status: "active",
+      sourceRefs: ["api:customers/42"],
+      createdAt: "2026-07-30T00:01:00.000Z",
+      updatedAt: "2026-07-30T00:01:00.000Z"
+    });
+    first.persist();
+
+    const second = new JsonFileBrainCreatorRepository(filePath);
+
+    expect(second.schemaVersion).toBe(5);
+    expect(second.testDataTasks).toEqual([
+      expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
+    ]);
+    expect(second.testDataLeases).toEqual([
+      expect.objectContaining({ id: "testDataLease_1", status: "active" })
     ]);
   });
 });

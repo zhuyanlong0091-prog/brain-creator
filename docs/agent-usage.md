@@ -69,7 +69,15 @@ After navigation planning, Brain Creator evaluates generic `SystemBrainStateTran
 
 ### 7. Plan Test Data
 
-Compilation returns `testDataPlan`/`dataPlan` for profiles linked to the current TestIntent only. The plan records dependency order, proposed values, lookup queries, reuse/create decisions, secret references, and cleanup policy. Generated candidates remain visible for suite confirmation. An `existing-reference` remains blocked until the host Agent looks up or creates data and calls `bc_prepare action=resolve-test-data confirm=true` with the resulting reference. Duplicate fields, missing dependencies, and cycles require profile corrections and cannot be bypassed by submitting a value. Secret references are never copied into executable step values.
+Compilation returns `testDataPlan`/`dataPlan` for profiles linked to the current TestIntent only. The plan records dependency order, proposed values, lookup queries, reuse/create decisions, secret references, and cleanup policy. Generated candidates remain visible for suite confirmation.
+
+For an `existing-reference`, call `bc_prepare action=prepare-test-data confirm=false` first. Present the lookup query and allowed decisions. After approval, call it again with `confirm=true`. The returned task package points to auditable prompt and context files. Reuse is the default. Pass `allowCreate=true` only when the user explicitly authorizes data creation.
+
+The host Agent performs the lookup or creation in the bound system, then calls `bc_prepare action=submit-test-data` with `taskId`, `taskStatus=succeeded`, `dataDecision`, `dataReference`, an optional non-secret `dataValue`, and non-empty `sourceRefs`. Created data is rejected unless the TestDataProfile has `delete-created` or `restore`. Failures use `taskStatus=failed`, `error`, and available evidence; Brain Creator creates a provider Gap instead of inventing data.
+
+After terminal ExecutionEvidence, call `prepare-test-data` again. Created leases produce a cleanup task, while reused leases are released automatically. Submit cleanup evidence through `submit-test-data`. Cleanup failure is a `test-data-cleanup` Gap and must not be classified as a product Bug.
+
+Duplicate fields, missing dependencies, and cycles require profile corrections and cannot be bypassed by submitting a value. Secret references are never copied into executable step values. `resolve-test-data` remains available only for compatibility and explicit manual resolution.
 
 ### 8. Preview And Execute
 

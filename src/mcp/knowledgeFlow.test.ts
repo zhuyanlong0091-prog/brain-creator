@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ExecutableCase, Gap, TestIntent } from "../domain/types.js";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
 
 const tempDirs: string[] = [];
@@ -747,6 +748,170 @@ describe("Brain Creator requirement-first facade", () => {
     );
     expect(confirmed.evaluationGate.status).toBe("confirmed");
     expect(approved.status).toBe("approved");
+  });
+
+  it("prepares and submits test data through the requirement Facade", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const system = context.service.createSystemProfile({
+      name: "Customer Portal",
+      environment: "test",
+      baseUrl: "https://customer.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://customer.example.test"]
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Customer Knowledge",
+      key: "customer-provider-facade",
+      defaultLocale: "en-US"
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const now = new Date(0).toISOString();
+    const intent: TestIntent = {
+      id: "intent-provider-facade",
+      knowledgeProjectId: project.id,
+      requirementSetId: "requirement-provider-facade",
+      title: "Use an active customer",
+      module: "Customer",
+      priority: "P1",
+      objective: "Use an existing active customer.",
+      preconditions: [],
+      expectedResults: ["The customer is accepted."],
+      requirementRefs: ["requirement:customer"],
+      knowledgeNodeRefs: [],
+      techniques: ["scenario"],
+      status: "blocked",
+      createdAt: now,
+      updatedAt: now
+    };
+    const gap: Gap = {
+      id: "gap-provider-facade",
+      projectId: project.id,
+      sourceType: "test-data-plan",
+      sourceId: "executable-provider-facade",
+      reason: "Customer reference needs lookup.",
+      severity: "high",
+      owner: "qa",
+      status: "open",
+      createdAt: now,
+      updatedAt: now
+    };
+    const executableCase: ExecutableCase = {
+      id: "executable-provider-facade",
+      knowledgeProjectId: project.id,
+      requirementSetId: intent.requirementSetId,
+      testIntentId: intent.id,
+      systemId: system.id,
+      title: intent.title,
+      status: "blocked",
+      preconditions: [],
+      steps: [{
+        id: "step-provider-facade",
+        order: 1,
+        action: "select",
+        instruction: "Select Customer",
+        targetSemantic: "Customer",
+        dataProfileId: "profile-provider-facade",
+        origin: "source",
+        sourceRefs: ["requirement:customer"]
+      }],
+      dataProfileIds: ["profile-provider-facade"],
+      dataPlan: {
+        verdict: "blocked",
+        reasons: ["Customer reference needs lookup."],
+        operations: [{
+          profileId: "profile-provider-facade",
+          field: "Customer",
+          strategy: "existing-reference",
+          decision: "lookup",
+          status: "needs-resolution",
+          lookupQuery: "status=active",
+          dependsOnProfileIds: [],
+          cleanup: "delete-created",
+          constraints: ["status must be active"],
+          sourceRefs: ["requirement:customer"]
+        }],
+        dependencyOrder: ["profile-provider-facade"],
+        requiresConfirmation: true,
+        requiresCleanup: false,
+        sourceRefs: ["requirement:customer"]
+      },
+      gapIds: [gap.id],
+      createdAt: now,
+      updatedAt: now
+    };
+    context.repository.testIntents.push(intent);
+    context.repository.gaps.push(gap);
+    context.repository.executableCases.push(executableCase);
+    context.repository.persist();
+
+    const preview = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "prepare-test-data",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        executableCaseId: executableCase.id,
+        confirm: false
+      })
+    );
+    const prepared = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "prepare-test-data",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        executableCaseId: executableCase.id,
+        confirm: true,
+        allowCreate: true
+      })
+    );
+    const pendingStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+
+    expect(preview.status).toBe("preview");
+    expect(prepared.task).toEqual(
+      expect.objectContaining({
+        action: "lookup-or-create",
+        status: "pending",
+        allowCreate: true
+      })
+    );
+    expect(pendingStatus.nextAction).toBe("complete_test_data_task");
+
+    const submitted = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "submit-test-data",
+        taskId: prepared.task.id,
+        taskStatus: "succeeded",
+        dataDecision: "create",
+        dataReference: "customer:new-42",
+        dataValue: "New Customer",
+        sourceRefs: ["api:customers/new-42"]
+      })
+    );
+
+    expect(submitted.executableCase).toEqual(
+      expect.objectContaining({
+        status: "ready",
+        dataPlan: expect.objectContaining({ verdict: "ready" })
+      })
+    );
+    expect(submitted.lease).toEqual(
+      expect.objectContaining({ decision: "create", status: "active" })
+    );
+    const resolvedStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+    expect(resolvedStatus.knowledge.testData.leases).toEqual(
+      expect.objectContaining({ total: 1, byStatus: { active: 1 } })
+    );
   });
 
   it("does not let a superseded blocked Eval gate poison the revised baseline status", async () => {

@@ -28,13 +28,15 @@ import type {
   RequirementSource,
   SystemProfile,
   SystemExploration,
+  TestDataLease,
   TestDataProfile,
+  TestDataTask,
   TestIntent,
   TestCase,
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 4;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 5;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
@@ -67,6 +69,8 @@ export class InMemoryBrainCreatorRepository {
   knowledgeEdges: KnowledgeEdge[] = [];
   testIntents: TestIntent[] = [];
   testDataProfiles: TestDataProfile[] = [];
+  testDataTasks: TestDataTask[] = [];
+  testDataLeases: TestDataLease[] = [];
   executableCases: ExecutableCase[] = [];
   executionEvidence: ExecutionEvidence[] = [];
 
@@ -104,6 +108,8 @@ export class InMemoryBrainCreatorRepository {
     this.knowledgeEdges = [];
     this.testIntents = [];
     this.testDataProfiles = [];
+    this.testDataTasks = [];
+    this.testDataLeases = [];
     this.executableCases = [];
     this.executionEvidence = [];
     this.persist();
@@ -142,6 +148,8 @@ type RepositorySnapshot = Pick<
   | "knowledgeEdges"
   | "testIntents"
   | "testDataProfiles"
+  | "testDataTasks"
+  | "testDataLeases"
   | "executableCases"
   | "executionEvidence"
 >;
@@ -209,6 +217,8 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     this.knowledgeEdges = snapshot.knowledgeEdges ?? [];
     this.testIntents = snapshot.testIntents ?? [];
     this.testDataProfiles = snapshot.testDataProfiles ?? [];
+    this.testDataTasks = snapshot.testDataTasks ?? [];
+    this.testDataLeases = snapshot.testDataLeases ?? [];
     this.executableCases = snapshot.executableCases ?? [];
     this.executionEvidence = snapshot.executionEvidence ?? [];
   }
@@ -245,6 +255,8 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       knowledgeEdges: this.knowledgeEdges,
       testIntents: this.testIntents,
       testDataProfiles: this.testDataProfiles,
+      testDataTasks: this.testDataTasks,
+      testDataLeases: this.testDataLeases,
       executableCases: this.executableCases,
       executionEvidence: this.executionEvidence
     };
