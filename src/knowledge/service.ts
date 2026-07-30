@@ -706,6 +706,7 @@ export class KnowledgeService {
     projectId: string;
     systemId: string;
     executableCaseId: string;
+    executionPlanId?: string;
     testCaseId: string;
     contextPackPath: string;
   }) {
@@ -722,6 +723,7 @@ export class KnowledgeService {
       knowledgeProjectId: project.id,
       systemId: input.systemId,
       executableCaseId: executableCase.id,
+      executionPlanId: input.executionPlanId,
       testCaseId: input.testCaseId,
       contextPackPath: input.contextPackPath,
       status: "running",

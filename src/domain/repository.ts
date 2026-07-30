@@ -17,6 +17,7 @@ import type {
   GeneratedCase,
   GlossaryTerm,
   ExecutableCase,
+  ExecutionPlan,
   ExecutionEvidence,
   KnowledgeEdge,
   KnowledgeNode,
@@ -36,7 +37,7 @@ import type {
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 5;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 6;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
@@ -72,6 +73,7 @@ export class InMemoryBrainCreatorRepository {
   testDataTasks: TestDataTask[] = [];
   testDataLeases: TestDataLease[] = [];
   executableCases: ExecutableCase[] = [];
+  executionPlans: ExecutionPlan[] = [];
   executionEvidence: ExecutionEvidence[] = [];
 
   persist() {
@@ -111,6 +113,7 @@ export class InMemoryBrainCreatorRepository {
     this.testDataTasks = [];
     this.testDataLeases = [];
     this.executableCases = [];
+    this.executionPlans = [];
     this.executionEvidence = [];
     this.persist();
   }
@@ -151,6 +154,7 @@ type RepositorySnapshot = Pick<
   | "testDataTasks"
   | "testDataLeases"
   | "executableCases"
+  | "executionPlans"
   | "executionEvidence"
 >;
 
@@ -220,6 +224,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     this.testDataTasks = snapshot.testDataTasks ?? [];
     this.testDataLeases = snapshot.testDataLeases ?? [];
     this.executableCases = snapshot.executableCases ?? [];
+    this.executionPlans = snapshot.executionPlans ?? [];
     this.executionEvidence = snapshot.executionEvidence ?? [];
   }
 
@@ -258,6 +263,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       testDataTasks: this.testDataTasks,
       testDataLeases: this.testDataLeases,
       executableCases: this.executableCases,
+      executionPlans: this.executionPlans,
       executionEvidence: this.executionEvidence
     };
   }

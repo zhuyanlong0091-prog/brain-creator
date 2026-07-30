@@ -363,6 +363,7 @@ export type AgentTask = {
     healAttempts?: number;
     knowledgeProjectId?: string;
     executableCaseId?: string;
+    executionPlanId?: string;
     executionEvidenceId?: string;
     contextPackPath?: string;
   };
@@ -833,6 +834,64 @@ export type TestDataLease = {
   releasedAt?: string;
 };
 
+export type ExecutionPreflightCheck = {
+  id:
+    | "requirement"
+    | "system"
+    | "executable-case"
+    | "open-gaps"
+    | "workflow-path"
+    | "state-actions"
+    | "test-data-tasks"
+    | "test-data"
+    | "test-data-cleanup"
+    | "auth";
+  status: "pass" | "action-required" | "blocked";
+  message: string;
+  sourceRefs: string[];
+};
+
+export type ExecutionDataBinding = {
+  profileId: string;
+  field: string;
+  decision: ExecutableCaseDataOperation["decision"];
+  value?: string;
+  reference?: string;
+  secretRef?: string;
+  leaseId?: string;
+  cleanup: ExecutableCaseDataOperation["cleanup"];
+  sourceRefs: string[];
+};
+
+export type ExecutionPlanDraft = {
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  systemId: string;
+  executableCaseId: string;
+  auth?: {
+    profileId: string;
+    role: string;
+    method: AuthProfile["loginMethod"];
+    verifiedAt?: string;
+  };
+  steps: ExecutableCaseStep[];
+  pathPlan?: ExecutableCasePathPlan;
+  statePlan?: ExecutableCaseStatePlan;
+  dataBindings: ExecutionDataBinding[];
+  checks: ExecutionPreflightCheck[];
+  verdict: "ready" | "needs-confirmation" | "blocked";
+  blockers: string[];
+  sourceRefs: string[];
+  snapshotHash: string;
+  generatedAt: string;
+};
+
+export type ExecutionPlan = Omit<ExecutionPlanDraft, "verdict"> & {
+  id: string;
+  verdict: "ready";
+  confirmedAt: string;
+};
+
 export type ExecutableCase = {
   id: string;
   knowledgeProjectId: string;
@@ -870,6 +929,7 @@ export type ExecutionEvidence = {
   knowledgeProjectId: string;
   systemId: string;
   executableCaseId: string;
+  executionPlanId?: string;
   testCaseId: string;
   chainRunId?: string;
   contextPackPath: string;

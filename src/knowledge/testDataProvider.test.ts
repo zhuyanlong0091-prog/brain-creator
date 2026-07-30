@@ -131,6 +131,41 @@ describe("TestDataProviderService", () => {
     );
     expect(result.executableCase.status).toBe("ready");
     expect(fixture.repository.gaps[0].status).toBe("resolved");
+
+    fixture.repository.executionEvidence.push({
+      id: "evidence-reuse-terminal",
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      testCaseId: "case-reuse-terminal",
+      contextPackPath: "context.json",
+      status: "passed",
+      steps: [],
+      tracePaths: [],
+      artifactPaths: [],
+      consoleErrors: [],
+      networkFailures: [],
+      createdAt: new Date().toISOString(),
+      completedAt: new Date().toISOString()
+    });
+    const reacquire = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true
+    });
+
+    expect(result.lease!.status).toBe("released");
+    expect(reacquire).toEqual(
+      expect.objectContaining({
+        status: "needs-agent-execution",
+        task: expect.objectContaining({
+          action: "lookup-or-create",
+          profileId: "profile-customer",
+          status: "pending"
+        })
+      })
+    );
   });
 
   it("requires cleanup policy and evidence for created data", async () => {
@@ -188,6 +223,23 @@ describe("TestDataProviderService", () => {
       })
     );
     expect(fixture.executableCase.status).toBe("blocked");
+
+    const retry = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true
+    });
+    const recovered = fixture.provider.submit({
+      taskId: retry.task!.id,
+      status: "succeeded",
+      decision: "reuse",
+      reference: "customer:42",
+      sourceRefs: ["api:customers/42"]
+    });
+
+    expect(result.gap!.status).toBe("resolved");
+    expect(recovered.executableCase.status).toBe("ready");
   });
 
   it("prepares cleanup after terminal execution and releases created data", async () => {

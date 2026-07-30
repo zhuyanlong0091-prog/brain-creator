@@ -121,7 +121,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, confirming Requirement Eval, approving a baseline, exploring System Brain, compiling evidence-bound executable cases, and resolving approved test-data decisions.",
+      "Requirement-first facade for ingesting sources, confirming Requirement Eval, approving a baseline, exploring System Brain, compiling evidence-bound cases, preparing test data, and confirming immutable execution preflight snapshots.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
@@ -134,6 +134,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "resolve-test-data",
         "prepare-test-data",
         "submit-test-data",
+        "prepare-execution",
         "record-observation",
         "record-page-evidence",
         "record-training-evidence",
@@ -299,7 +300,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_run",
     title: "Brain Creator run",
     description:
-      "Facade execution entry for approved cases, full workflow, document case suites, and bug regression.",
+      "Facade execution entry for approved cases, requirement suites with mandatory execution preflight, document case suites, and bug regression.",
     inputSchema: z.object({
       mode: z.enum(["approved-case", "full-workflow", "case-source-suite", "bug-regression", "requirement-suite"]),
       systemId: z.string().optional(),
@@ -319,14 +320,15 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       maxHealAttempts: z.number().int().min(0).max(10).optional(),
       bugIds: z.array(z.string()).default([]),
       knowledgeProjectId: z.string().optional(),
-      executableCaseId: z.string().optional()
+      executableCaseId: z.string().optional(),
+      authProfileId: z.string().optional()
     })
   },
   {
     name: "bc_review",
     title: "Brain Creator review",
     description:
-      "Facade review entry for suite runs, cases, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
+      "Facade review entry for suite runs, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
     inputSchema: z.object({
       target: z.enum([
         "suite-run",
@@ -342,6 +344,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "system-exploration",
         "test-intent",
         "executable-case",
+        "execution-plan",
         "evidence"
       ]),
       knowledgeProjectId: z.string().optional(),
