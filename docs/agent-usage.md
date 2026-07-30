@@ -65,6 +65,8 @@ The exploration creates versioned PageModels, LocatorPoints, ProbeResults, navig
 
 The Agent calls `bc_prepare action=compile-cases` with `systemId`. Brain Creator selects the target page from semantic and role-compatible evidence, computes shortest paths from observed graph entry pages, and binds steps to real PageModel, navigation-edge, LocatorPoint, state-transition, and ProbeResult evidence. It compiles implicit navigation only when the shortest path is unique and records the result in `workflowPath`/`pathPlan`. Equally short alternatives, an ambiguous or unreachable target, exhausted search budget, and missing locator evidence create a Gap. The Agent must present `candidatePathCount` plus the returned candidate details instead of choosing one; details are capped at 10 to protect context.
 
+After navigation planning, Brain Creator evaluates generic `SystemBrainStateTransition` evidence and returns `stateActions`/`statePlan`. A single relevant transition may enrich an existing click/select step or insert one observed step before its assertion, including the captured input value and LocatorPoint. Equal transitions, multiple reusable source steps, missing values, or missing locators block with a Gap. Business examples are validation fixtures only and must never become planner conditionals.
+
 ### 7. Preview And Execute
 
 The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`.

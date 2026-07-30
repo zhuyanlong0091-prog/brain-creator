@@ -738,6 +738,22 @@ export type ExecutableCasePathPlan = {
   }>;
 };
 
+export type ExecutableCaseStatePlan = {
+  verdict: "not-required" | "unique" | "ambiguous" | "missing";
+  reason?: string;
+  pageModelId?: string;
+  candidateCount: number;
+  candidates: Array<{
+    transitionId: string;
+    targetName: string;
+    action: "click" | "select";
+    inputValue?: string;
+    effects: string[];
+    sourceRefs: string[];
+  }>;
+  transitionSourceRefs: string[];
+};
+
 export type ExecutableCase = {
   id: string;
   knowledgeProjectId: string;
@@ -749,6 +765,7 @@ export type ExecutableCase = {
   preconditions: string[];
   steps: ExecutableCaseStep[];
   pathPlan?: ExecutableCasePathPlan;
+  statePlan?: ExecutableCaseStatePlan;
   dataProfileIds: string[];
   gapIds: string[];
   createdAt: string;

@@ -31,6 +31,7 @@ import {
   type SystemBrain,
   type SystemObservationDraft
 } from "./systemBrain.js";
+import { planStateActions } from "./stateActionPlanner.js";
 import { planWorkflowPath } from "./workflowPathPlanner.js";
 
 export class KnowledgeService {
@@ -496,6 +497,7 @@ export class KnowledgeService {
       : [];
     let steps = gaps.length > 0 ? [] : compileSteps(executionContent, sourceRefs);
     let pathPlan: ExecutableCase["pathPlan"];
+    let statePlan: ExecutableCase["statePlan"];
     if (systemId) {
       const project = this.getProject(requirementSet.knowledgeProjectId);
       if (!project.systemIds.includes(systemId)) {
@@ -525,25 +527,55 @@ export class KnowledgeService {
             )
           );
         } else {
-          const bound = bindStepsToSystemBrain(
+          const statePlanned = planStateActions(
             planned.steps,
             brain,
-            contextQuery
+            contextQuery,
+            planned.targetPageModelId
           );
-          steps = bound.steps;
-          const reasons = [
-            ...new Set(bound.missingEvidence.map((item) => item.reason))
-          ];
-          gaps.push(
-            ...reasons.map((reason) =>
+          statePlan = {
+            verdict: statePlanned.verdict,
+            reason: statePlanned.reason,
+            pageModelId: statePlanned.pageModelId,
+            candidateCount: statePlanned.candidateCount,
+            candidates: statePlanned.candidates,
+            transitionSourceRefs: statePlanned.transitionSourceRefs
+          };
+          if (
+            statePlanned.verdict === "ambiguous" ||
+            statePlanned.verdict === "missing"
+          ) {
+            steps = statePlanned.steps;
+            gaps.push(
               this.createGap(
                 project.id,
                 requirementSet.id,
-                reason,
+                statePlanned.reason ??
+                  "System Brain could not plan a unique state action",
                 "system-brain"
               )
-            )
-          );
+            );
+          } else {
+            const bound = bindStepsToSystemBrain(
+              statePlanned.steps,
+              brain,
+              contextQuery
+            );
+            steps = bound.steps;
+            const reasons = [
+              ...new Set(bound.missingEvidence.map((item) => item.reason))
+            ];
+            gaps.push(
+              ...reasons.map((reason) =>
+                this.createGap(
+                  project.id,
+                  requirementSet.id,
+                  reason,
+                  "system-brain"
+                )
+              )
+            );
+          }
         }
       }
     }
@@ -559,6 +591,7 @@ export class KnowledgeService {
       preconditions: intent.preconditions,
       steps,
       pathPlan,
+      statePlan,
       dataProfileIds: this.repository.testDataProfiles
         .filter((profile) => profile.requirementSetId === requirementSet.id)
         .map((profile) => profile.id),
