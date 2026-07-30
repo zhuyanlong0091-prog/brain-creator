@@ -718,6 +718,19 @@ export class KnowledgeService {
       (item) => item.id === input.executableCaseId && item.knowledgeProjectId === project.id
     );
     if (!executableCase) throw new Error("Executable case not found");
+    const executionPlan = input.executionPlanId
+      ? this.repository.executionPlans.find(
+          (item) =>
+            item.id === input.executionPlanId &&
+            item.knowledgeProjectId === project.id &&
+            item.systemId === input.systemId &&
+            item.executableCaseId === executableCase.id
+        )
+      : undefined;
+    if (input.executionPlanId && !executionPlan) {
+      throw new Error("Execution plan does not match the evidence context");
+    }
+    const executionSteps = executionPlan?.steps ?? executableCase.steps;
     const evidence: ExecutionEvidence = {
       id: id("executionEvidence"),
       knowledgeProjectId: project.id,
@@ -727,7 +740,7 @@ export class KnowledgeService {
       testCaseId: input.testCaseId,
       contextPackPath: input.contextPackPath,
       status: "running",
-      steps: executableCase.steps.map((step) => ({
+      steps: executionSteps.map((step) => ({
         stepId: step.id,
         order: step.order,
         action: step.action,

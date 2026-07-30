@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(6);
+    expect(second.schemaVersion).toBe(7);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -248,8 +248,18 @@ describe("JsonFileBrainCreatorRepository", () => {
       requirementSetId: "requirement_1",
       systemId: "system_1",
       executableCaseId: "executableCase_1",
+      title: "Create order",
+      preconditions: [],
       steps: [],
       dataBindings: [],
+      contextPack: {
+        knowledgeProjectId: "knowledge_1",
+        purpose: "generator",
+        query: "Create order",
+        content: "",
+        references: [],
+        truncated: false
+      },
       checks: [],
       verdict: "ready",
       blockers: [],
@@ -262,7 +272,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(6);
+    expect(second.schemaVersion).toBe(7);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);

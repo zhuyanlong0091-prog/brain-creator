@@ -83,15 +83,15 @@ Duplicate fields, missing dependencies, and cycles require profile corrections a
 
 Call `bc_prepare action=prepare-execution confirm=false` with the knowledge project, system, ExecutableCase, and optional explicit AuthProfile. Present all Requirement, System, Auth, Path, State, Data, Gap, and Cleanup checks. On confirmation, call it again with `confirm=true`.
 
-Brain Creator persists only a ready immutable ExecutionPlan. A blocked or needs-confirmation draft remains diagnostic and must not start Generator. Identical semantic inputs reuse the same snapshot hash and plan; timestamps alone do not create a new plan. Changed steps, requirement content, system binding, auth verification, data leases, or blockers produce a new snapshot. Secret values are never copied into the plan.
+Brain Creator persists only a ready immutable ExecutionPlan. It freezes the case title, preconditions, bounded generator ContextPack, steps, data bindings, and optional auth reference. A blocked or needs-confirmation draft remains diagnostic and must not start Generator. Identical semantic inputs reuse the same snapshot hash and plan; timestamps alone do not create a new plan. Changed steps, requirement content, retrieved context, system binding, auth verification, data leases, or blockers make an existing plan stale. Secret values are never copied into the plan.
 
 Use `bc_review target=execution-plan` for audit. `bc_run mode=requirement-suite` performs the same Preflight, so direct confirmation cannot bypass it.
 
 ### 9. Preview And Execute
 
-The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`.
+The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`. Confirmation independently preflights every selected ExecutableCase before creating a TestCase, AgentTask, or ExecutionEvidence. If any candidate is blocked, none starts.
 
-The Generator writes a Playwright test only for a ready ExecutionPlan. Playwright executes it, and the Healer performs bounded repairs. ExecutionEvidence records `executionPlanId`. Business mismatches create BugReports. Auth, environment, network, locator, or missing evidence creates Gaps.
+The Generator, selected auth seed, and ExecutionEvidence consume the frozen plan instead of rereading mutable ExecutableCase fields. Before initial chain execution and every `bc_submit_agent_output` continuation, Brain Creator recomputes the semantic hash. A stale or newly blocked plan is rejected before task submission and must be prepared again. Playwright then executes the generated test, and the Healer performs bounded repairs. Business mismatches create BugReports. Auth, environment, network, locator, or missing evidence creates Gaps.
 
 ### 10. Review Evidence
 
