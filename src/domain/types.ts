@@ -704,6 +704,8 @@ export type TestDataProfile = {
     | "secret-reference";
   constraints: string[];
   seed: string;
+  dependsOnFields?: string[];
+  cleanup?: "none" | "delete-created" | "restore";
   sourceRefs: string[];
   createdAt: string;
 };
@@ -754,6 +756,41 @@ export type ExecutableCaseStatePlan = {
   transitionSourceRefs: string[];
 };
 
+export type ExecutableCaseDataOperation = {
+  profileId: string;
+  field: string;
+  strategy: TestDataProfile["strategy"];
+  decision:
+    | "use-fixed"
+    | "generate"
+    | "lookup"
+    | "reuse"
+    | "create"
+    | "capture"
+    | "resolve-secret";
+  status: "proposed" | "ready" | "needs-resolution" | "blocked";
+  value?: string;
+  reference?: string;
+  lookupQuery?: string;
+  secretRef?: string;
+  dependsOnProfileIds: string[];
+  cleanup: "none" | "delete-created" | "restore";
+  constraints: string[];
+  reason?: string;
+  sourceRefs: string[];
+};
+
+export type ExecutableCaseDataPlan = {
+  verdict: "not-required" | "ready" | "blocked";
+  reasons: string[];
+  operations: ExecutableCaseDataOperation[];
+  dependencyOrder: string[];
+  requiresConfirmation: boolean;
+  confirmedAt?: string;
+  requiresCleanup: boolean;
+  sourceRefs: string[];
+};
+
 export type ExecutableCase = {
   id: string;
   knowledgeProjectId: string;
@@ -766,6 +803,7 @@ export type ExecutableCase = {
   steps: ExecutableCaseStep[];
   pathPlan?: ExecutableCasePathPlan;
   statePlan?: ExecutableCaseStatePlan;
+  dataPlan?: ExecutableCaseDataPlan;
   dataProfileIds: string[];
   gapIds: string[];
   createdAt: string;

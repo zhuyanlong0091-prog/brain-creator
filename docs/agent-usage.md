@@ -67,13 +67,17 @@ The Agent calls `bc_prepare action=compile-cases` with `systemId`. Brain Creator
 
 After navigation planning, Brain Creator evaluates generic `SystemBrainStateTransition` evidence and returns `stateActions`/`statePlan`. A single relevant transition may enrich an existing click/select step or insert one observed step before its assertion, including the captured input value and LocatorPoint. Equal transitions, multiple reusable source steps, missing values, or missing locators block with a Gap. Business examples are validation fixtures only and must never become planner conditionals.
 
-### 7. Preview And Execute
+### 7. Plan Test Data
+
+Compilation returns `testDataPlan`/`dataPlan` for profiles linked to the current TestIntent only. The plan records dependency order, proposed values, lookup queries, reuse/create decisions, secret references, and cleanup policy. Generated candidates remain visible for suite confirmation. An `existing-reference` remains blocked until the host Agent looks up or creates data and calls `bc_prepare action=resolve-test-data confirm=true` with the resulting reference. Duplicate fields, missing dependencies, and cycles require profile corrections and cannot be bypassed by submitting a value. Secret references are never copied into executable step values.
+
+### 8. Preview And Execute
 
 The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`.
 
 The Generator writes a Playwright test, Playwright executes it, and the Healer performs bounded repairs. Business mismatches create BugReports. Auth, environment, network, locator, or missing evidence creates Gaps.
 
-### 8. Review Evidence
+### 9. Review Evidence
 
 The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.
 
