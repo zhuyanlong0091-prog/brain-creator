@@ -300,7 +300,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_run",
     title: "Brain Creator run",
     description:
-      "Facade execution entry for approved cases, resumable requirement suites that sequence frozen execution plans, document case suites, and bug regression.",
+      "Facade execution entry for approved cases, resumable requirement suites with per-case test-data preparation and cleanup, document case suites, and bug regression.",
     inputSchema: z.object({
       mode: z.enum(["approved-case", "full-workflow", "case-source-suite", "bug-regression", "requirement-suite"]),
       systemId: z.string().optional(),
@@ -311,6 +311,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       suiteId: z.string().optional(),
       resume: z.boolean().default(false),
       continueOnBlocked: z.boolean().default(false),
+      allowCreateTestData: z.boolean().default(false),
       caseNos: z.array(z.string()).default([]),
       modules: z.array(z.string()).default([]),
       priorities: z.array(z.string()).default([]),

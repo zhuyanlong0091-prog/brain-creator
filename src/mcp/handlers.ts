@@ -31,7 +31,10 @@ import {
   SystemExplorationCoordinator,
   type SystemExplorer
 } from "../knowledge/systemExplorer.js";
-import { TestDataProviderService } from "../knowledge/testDataProvider.js";
+import {
+  TestDataProviderService,
+  type TestDataSubmitResult
+} from "../knowledge/testDataProvider.js";
 import { ExecutionPreflightService } from "../knowledge/executionPreflight.js";
 import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js";
 import {
@@ -62,11 +65,15 @@ import type {
   DocumentCase,
   ExecutableCase,
   ExecutionPlan,
+  ExecutionPreflightCheck,
   Gap,
+  RequirementSuiteCaseOutcome,
+  RequirementSuiteRun,
   RequirementContentPackage,
   TestArtifact,
   TestCaseScenario,
   TestCaseStep,
+  TestDataTask,
   KnowledgeNodeType
 } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
@@ -704,7 +711,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     });
   }
   if (action === "submit-test-data") {
-    return context.testDataProvider.submit({
+    const submitted = context.testDataProvider.submit({
       taskId: stringArg(input, "taskId"),
       status: testDataTaskResultStatusArg(input, "taskStatus"),
       decision: optionalTestDataProviderDecisionArg(input, "dataDecision"),
@@ -713,6 +720,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       sourceRefs: stringArrayArg(input, "sourceRefs"),
       error: optionalStringArg(input, "error")
     });
+    return continueRequirementSuiteAfterTestData(context, submitted);
   }
   if (action === "prepare-execution") {
     const executableCaseId = stringArg(input, "executableCaseId");
@@ -1710,6 +1718,62 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
   });
 }
 
+function isRequirementSuiteCandidate(
+  context: BrainCreatorMcpContext,
+  executableCase: ExecutableCase
+) {
+  if (executableCase.status === "ready") return true;
+  if (
+    executableCase.status !== "blocked" ||
+    executableCase.dataPlan?.verdict !== "blocked"
+  ) {
+    return false;
+  }
+  const openGaps = context.repository.gaps.filter(
+    (gap) =>
+      executableCase.gapIds.includes(gap.id) && gap.status === "open"
+  );
+  return (
+    openGaps.length > 0 &&
+    openGaps.every((gap) => gap.sourceType === "test-data-plan") &&
+    executableCase.dataPlan.operations.some(
+      (operation) =>
+        operation.decision === "lookup" &&
+        operation.status === "needs-resolution"
+    ) &&
+    executableCase.dataPlan.operations.every(
+      (operation) => operation.status !== "blocked"
+    )
+  );
+}
+
+function requirementSuitePreflightBlockers(
+  context: BrainCreatorMcpContext,
+  executableCase: ExecutableCase,
+  checks: ExecutionPreflightCheck[]
+) {
+  const dataResolutionCandidate =
+    executableCase.status === "blocked" &&
+    isRequirementSuiteCandidate(context, executableCase);
+  return checks.filter((check) => {
+    if (check.status === "pass") return false;
+    if (
+      check.id === "test-data" ||
+      check.id === "test-data-tasks" ||
+      check.id === "test-data-cleanup"
+    ) {
+      return false;
+    }
+    if (
+      dataResolutionCandidate &&
+      (check.id === "executable-case" || check.id === "open-gaps")
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 async function runRequirementSuite(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const projectId = stringArg(input, "knowledgeProjectId");
   const project = context.repository.knowledgeProjects.find((item) => item.id === projectId);
@@ -1717,7 +1781,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   const requestedCaseId = optionalStringArg(input, "executableCaseId");
   const candidates = context.knowledgeService
     .listExecutableCases(projectId)
-    .filter((item) => item.status === "ready")
+    .filter((item) => isRequirementSuiteCandidate(context, item))
     .filter((item) => !requestedCaseId || item.id === requestedCaseId);
   const selectedSystemId =
     optionalStringArg(input, "systemId") ?? project.systemIds[0];
@@ -1757,6 +1821,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
         .filter(
           (item) =>
             item.status === "running" ||
+            item.status === "waiting-for-test-data" ||
             item.status === "waiting-for-agent" ||
             item.status === "blocked"
         )
@@ -1784,6 +1849,14 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     ) {
       throw new Error(
         "Requirement suite run cannot change its selected auth profile"
+      );
+    }
+    if (
+      optionalBooleanArg(input, "allowCreateTestData") &&
+      !activeRequirementSuiteRun.allowCreateTestData
+    ) {
+      context.requirementSuiteRuns.authorizeTestDataCreation(
+        activeRequirementSuiteRun.id
       );
     }
     if (activeRequirementSuiteRun.status === "blocked") {
@@ -1840,18 +1913,29 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       context.knowledgeService.confirmExecutableCaseTestData(candidate.id);
     }
   }
-  const executionPreflights = candidates.map((candidate) => ({
-    executableCaseId: candidate.id,
-    ...context.executionPreflight.prepare({
+  const executionPreflights = candidates.map((candidate) => {
+    const prepared = context.executionPreflight.prepare({
       knowledgeProjectId: projectId,
       systemId,
       executableCaseId: candidate.id,
       authProfileId,
-      confirm: true
-    })
-  }));
+      confirm: false
+    });
+    return {
+      executableCaseId: candidate.id,
+      ...prepared,
+      status: prepared.draft.verdict
+    };
+  });
   const blockedPreflights = executionPreflights.filter(
-    (item) => item.status !== "ready" || !item.executionPlan
+    (item) =>
+      requirementSuitePreflightBlockers(
+        context,
+        candidates.find(
+          (candidate) => candidate.id === item.executableCaseId
+        )!,
+        item.draft.checks
+      ).length > 0
   );
   if (blockedPreflights.length > 0) {
     return {
@@ -1863,7 +1947,14 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       executionPreflights,
       nextAction:
         blockedPreflights.some(
-          (item) => item.status === "needs-confirmation"
+          (item) =>
+            requirementSuitePreflightBlockers(
+              context,
+              candidates.find(
+                (candidate) => candidate.id === item.executableCaseId
+              )!,
+              item.draft.checks
+            ).some((check) => check.status === "action-required")
         )
           ? "Confirm proposed execution inputs before retrying."
           : "Resolve execution preflight blockers before retrying."
@@ -1873,8 +1964,13 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     knowledgeProjectId: projectId,
     systemId,
     authProfileId,
-    executionPlans: executionPreflights.map((item) => item.executionPlan!),
-    continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked")
+    cases: candidates.map((candidate) => ({
+      executableCaseId: candidate.id,
+      title: candidate.title
+    })),
+    continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked"),
+    allowCreateTestData: optionalBooleanArg(input, "allowCreateTestData"),
+    maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
   });
   if (optionalBooleanArg(input, "resume")) {
     requirementSuiteRun = context.requirementSuiteRuns.resume(
@@ -1899,9 +1995,27 @@ async function executeNextRequirementSuiteCase(
   );
   const activeCase = requirementSuiteRun.caseRuns.find(
     (item) =>
-      item.status === "running" || item.status === "waiting-for-agent"
+      item.status === "running" ||
+      item.status === "waiting-for-test-data" ||
+      item.status === "waiting-for-agent"
   );
   if (activeCase) {
+    if (activeCase.status === "waiting-for-test-data") {
+      const testDataTask = context.repository.testDataTasks.find(
+        (task) => task.id === activeCase.testDataTaskId
+      );
+      if (!testDataTask || testDataTask.status !== "pending") {
+        throw new Error(
+          "Requirement suite is waiting for test data, but no pending TestDataTask exists"
+        );
+      }
+      return requirementSuiteTestDataTaskPackage(
+        requirementSuiteRun,
+        activeCase.executableCaseId,
+        testDataTask,
+        activeCase.testDataPhase ?? "prepare"
+      );
+    }
     const pendingTask = context.repository.agentTasks.find(
       (task) =>
         task.status === "pending" &&
@@ -1956,16 +2070,121 @@ async function executeNextRequirementSuiteCase(
       requirementSuiteRun
     };
   }
-  const executionPlan = assertExecutionPlanIsCurrent(
-    context,
-    started.caseRun.executionPlanId
-  );
   const executableCase = context.repository.executableCases.find(
     (item) =>
       item.id === started.caseRun!.executableCaseId &&
       item.knowledgeProjectId === requirementSuiteRun.knowledgeProjectId
   );
   if (!executableCase) throw new Error("Executable case not found");
+  if (!executableCase.systemId) {
+    executableCase.systemId = requirementSuiteRun.systemId;
+    executableCase.updatedAt = new Date().toISOString();
+    context.repository.persist();
+  }
+  const testDataPhase =
+    started.caseRun.testDataPhase === "cleanup" &&
+    started.caseRun.pendingOutcome
+      ? "cleanup"
+      : "prepare";
+  const testDataPreparation = await context.testDataProvider.prepare({
+    knowledgeProjectId: requirementSuiteRun.knowledgeProjectId,
+    systemId: requirementSuiteRun.systemId,
+    executableCaseId: executableCase.id,
+    confirm: true,
+    allowCreate: requirementSuiteRun.allowCreateTestData,
+    phase: testDataPhase
+  });
+  if (testDataPreparation.task) {
+    const waitingRun =
+      context.requirementSuiteRuns.markWaitingForTestData(
+        requirementSuiteRun.id,
+        executableCase.id,
+        {
+          taskId: testDataPreparation.task.id,
+          phase: testDataPhase,
+          pendingOutcome: started.caseRun.pendingOutcome
+        }
+      );
+    return requirementSuiteTestDataTaskPackage(
+      waitingRun,
+      executableCase.id,
+      testDataPreparation.task,
+      testDataPhase
+    );
+  }
+  if (testDataPhase === "cleanup" && started.caseRun.pendingOutcome) {
+    const cleanedRun = context.requirementSuiteRuns.completeCase(
+      requirementSuiteRun.id,
+      executableCase.id,
+      started.caseRun.pendingOutcome
+    );
+    if (cleanedRun.status === "running") {
+      return executeNextRequirementSuiteCase(context, cleanedRun.id, {
+        maxHealAttempts: input.maxHealAttempts
+      });
+    }
+    return {
+      mode: "requirement-suite",
+      status: cleanedRun.status,
+      requirementSuiteRun: cleanedRun
+    };
+  }
+  if (
+    executableCase.dataPlan?.verdict === "ready" &&
+    executableCase.dataPlan.requiresConfirmation &&
+    !executableCase.dataPlan.confirmedAt
+  ) {
+    context.knowledgeService.confirmExecutableCaseTestData(
+      executableCase.id
+    );
+  }
+  const executionPreflight = context.executionPreflight.prepare({
+    knowledgeProjectId: requirementSuiteRun.knowledgeProjectId,
+    systemId: requirementSuiteRun.systemId,
+    executableCaseId: executableCase.id,
+    authProfileId: requirementSuiteRun.authProfileId,
+    confirm: true
+  });
+  if (
+    executionPreflight.status !== "ready" ||
+    !executionPreflight.executionPlan
+  ) {
+    const reason =
+      executionPreflight.draft.blockers.join("; ") ||
+      "Execution preflight did not produce a ready execution plan";
+    const gap = context.service.reportGap({
+      projectId: requirementSuiteRun.systemId,
+      sourceType: "requirement-suite-preflight",
+      sourceId: requirementSuiteRun.id,
+      reason,
+      severity: "high",
+      owner: "qa"
+    });
+    const blockedRun = context.requirementSuiteRuns.completeCase(
+      requirementSuiteRun.id,
+      executableCase.id,
+      {
+        status: "blocked",
+        gapIds: [gap.id],
+        error: reason
+      }
+    );
+    return {
+      mode: "requirement-suite",
+      status: "blocked",
+      executionPreflight,
+      gap,
+      requirementSuiteRun: blockedRun,
+      nextAction:
+        "Resolve the execution preflight Gap, then explicitly resume the requirement suite."
+    };
+  }
+  const executionPlan = executionPreflight.executionPlan;
+  context.requirementSuiteRuns.bindExecutionPlan(
+    requirementSuiteRun.id,
+    executableCase.id,
+    executionPlan.id
+  );
   return executeRequirementSuiteCase(context, {
     requirementSuiteRunId: requirementSuiteRun.id,
     executableCase,
@@ -2063,49 +2282,29 @@ async function executeRequirementSuiteCase(
       severity: "high",
       owner: "qa"
     });
-    const blockedRun = context.requirementSuiteRuns.completeCase(
-      requirementSuiteRun.id,
-      executableCase.id,
-      {
+    return finalizeRequirementSuiteCase(context, {
+      requirementSuiteRunId: requirementSuiteRun.id,
+      executableCase,
+      outcome: {
         status: "blocked",
         gapIds: [gap.id],
         error: reason
-      }
-    );
-    if (blockedRun.status === "running") {
-      const next = await executeNextRequirementSuiteCase(
-        context,
-        blockedRun.id,
-        { maxHealAttempts: input.maxHealAttempts }
-      );
-      return {
-        ...next,
-        blockedCase: {
-          executableCaseId: executableCase.id,
-          executionPlan,
-          executionEvidence: context.repository.executionEvidence.find(
-            (item) => item.id === executionEvidence.id
-          ),
-          gap
-        },
-        requirementSuiteRun: context.requirementSuiteRuns.get(blockedRun.id)
-      };
-    }
-    return {
-      mode: "requirement-suite",
-      status: "blocked",
-      knowledgeProjectId: projectId,
-      executableCaseId: executableCase.id,
-      executionPlan,
-      contextPackPath,
-      executionEvidence: context.repository.executionEvidence.find(
-        (item) => item.id === executionEvidence.id
-      ),
-      gap,
-      requirementSuiteRun: blockedRun,
-      nextAction:
-        "Resolve the execution Gap, then resume with continueOnBlocked only when skipping this case is acceptable."
-    };
+      },
+      completedCase: {
+        mode: "requirement-suite",
+        status: "blocked",
+        knowledgeProjectId: projectId,
+        executableCaseId: executableCase.id,
+        executionPlan,
+        contextPackPath,
+        executionEvidence: context.repository.executionEvidence.find(
+          (item) => item.id === executionEvidence.id
+        ),
+        gap
+      },
+      completionField: "completedCase",
+      maxHealAttempts: input.maxHealAttempts
+    });
   }
   if (
     "task" in result &&
@@ -2173,21 +2372,17 @@ async function executeRequirementSuiteCase(
       : requirementBug
         ? "failed"
         : "blocked";
-  const updatedRun = context.requirementSuiteRuns.completeCase(
-    requirementSuiteRun.id,
-    executableCase.id,
-    {
-      status: caseStatus,
-      chainRunId:
-        "chainRun" in result ? result.chainRun?.id : undefined,
-      bugReportId: requirementBug?.id,
-      gapIds:
-        "chainRun" in result
-          ? result.chainRun?.gaps.map((gap) => gap.id) ?? []
-          : [],
-      error: requirementFailure
-    }
-  );
+  const outcome: RequirementSuiteCaseOutcome = {
+    status: caseStatus,
+    chainRunId:
+      "chainRun" in result ? result.chainRun?.id : undefined,
+    bugReportId: requirementBug?.id,
+    gapIds:
+      "chainRun" in result
+        ? result.chainRun?.gaps.map((gap) => gap.id) ?? []
+        : [],
+    error: requirementFailure
+  };
   const completedCase = {
     ...result,
     executableCaseId: executableCase.id,
@@ -2196,23 +2391,109 @@ async function executeRequirementSuiteCase(
     executionEvidence: completedEvidence,
     bugReport: requirementBug
   };
+  return finalizeRequirementSuiteCase(context, {
+    requirementSuiteRunId: requirementSuiteRun.id,
+    executableCase,
+    outcome,
+    completedCase,
+    completionField: "completedCase",
+    maxHealAttempts: input.maxHealAttempts
+  });
+}
+
+async function finalizeRequirementSuiteCase(
+  context: BrainCreatorMcpContext,
+  input: {
+    requirementSuiteRunId: string;
+    executableCase: ExecutableCase;
+    outcome: RequirementSuiteCaseOutcome;
+    completedCase: Record<string, unknown>;
+    completionField: "completedCase" | "submittedCase";
+    maxHealAttempts?: number;
+  }
+): Promise<Record<string, unknown>> {
+  const run = context.requirementSuiteRuns.get(
+    input.requirementSuiteRunId
+  );
+  let cleanup;
+  try {
+    cleanup = await context.testDataProvider.prepare({
+      knowledgeProjectId: run.knowledgeProjectId,
+      systemId: run.systemId,
+      executableCaseId: input.executableCase.id,
+      confirm: true,
+      phase: "cleanup"
+    });
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : String(error);
+    const gap = context.service.reportGap({
+      projectId: run.systemId,
+      sourceType: "test-data-cleanup",
+      sourceId: run.id,
+      reason: `Could not prepare test-data cleanup: ${reason}`,
+      severity: "high",
+      owner: "qa"
+    });
+    const blockedRun = context.requirementSuiteRuns.completeCase(
+      run.id,
+      input.executableCase.id,
+      {
+        status: "blocked",
+        gapIds: [...input.outcome.gapIds, gap.id],
+        error: reason
+      }
+    );
+    return {
+      ...input.completedCase,
+      mode: "requirement-suite",
+      status: "blocked",
+      gap,
+      requirementSuiteRun: blockedRun
+    };
+  }
+  if (cleanup.task) {
+    const waitingRun =
+      context.requirementSuiteRuns.markWaitingForTestData(
+        run.id,
+        input.executableCase.id,
+        {
+          taskId: cleanup.task.id,
+          phase: "cleanup",
+          pendingOutcome: input.outcome
+        }
+      );
+    return {
+      ...requirementSuiteTestDataTaskPackage(
+        waitingRun,
+        input.executableCase.id,
+        cleanup.task,
+        "cleanup"
+      ),
+      [input.completionField]: input.completedCase
+    };
+  }
+
+  const updatedRun = context.requirementSuiteRuns.completeCase(
+    run.id,
+    input.executableCase.id,
+    input.outcome
+  );
   if (updatedRun.status === "running") {
-    const next: Record<string, unknown> =
-      await executeNextRequirementSuiteCase(
+    const next = await executeNextRequirementSuiteCase(
       context,
       updatedRun.id,
       { maxHealAttempts: input.maxHealAttempts }
-      );
+    );
     return {
       ...next,
-      completedCase,
+      [input.completionField]: input.completedCase,
       requirementSuiteRun: context.requirementSuiteRuns.get(updatedRun.id)
     };
   }
   return {
-    ...completedCase,
+    ...input.completedCase,
     mode: "requirement-suite",
-    knowledgeProjectId: projectId,
     status: updatedRun.status,
     requirementSuiteRun: updatedRun,
     remainingExecutableCaseIds: updatedRun.caseRuns
@@ -2357,6 +2638,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     .filter(
       (item) =>
         item.status === "running" ||
+        item.status === "waiting-for-test-data" ||
         item.status === "waiting-for-agent" ||
         item.status === "blocked"
     )
@@ -2418,7 +2700,9 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       )
   );
   let nextAction = "generate_test_design";
-  if (activeRequirementSuiteRun?.status === "waiting-for-agent") {
+  if (activeRequirementSuiteRun?.status === "waiting-for-test-data") {
+    nextAction = "complete_requirement_suite_test_data_task";
+  } else if (activeRequirementSuiteRun?.status === "waiting-for-agent") {
     nextAction = "complete_requirement_suite_agent_task";
   } else if (activeRequirementSuiteRun?.status === "blocked") {
     nextAction = "review_and_resume_requirement_suite";
@@ -3083,6 +3367,98 @@ function taskPackageFromStoredTask(task: AgentTask): HostAgentTaskPackage {
   };
 }
 
+function requirementSuiteTestDataTaskPackage(
+  requirementSuiteRun: RequirementSuiteRun,
+  executableCaseId: string,
+  task: TestDataTask,
+  phase: "prepare" | "cleanup"
+): Record<string, unknown> {
+  return {
+    mode: "requirement-suite",
+    status: "needs_test_data",
+    stage:
+      phase === "cleanup"
+        ? "test-data-cleanup"
+        : "test-data-prepare",
+    task,
+    contextPath: task.contextPath,
+    promptPath: task.promptPath,
+    submitTool: "bc_prepare",
+    submitInput: {
+      action: "submit-test-data",
+      taskId: task.id
+    },
+    currentExecutableCaseId: executableCaseId,
+    requirementSuiteRun,
+    nextAction:
+      phase === "cleanup"
+        ? "Complete the cleanup task and submit evidence before the suite advances."
+        : "Complete the test-data task and submit its decision and evidence before generation."
+  };
+}
+
+async function continueRequirementSuiteAfterTestData(
+  context: BrainCreatorMcpContext,
+  submitted: TestDataSubmitResult
+): Promise<Record<string, unknown>> {
+  const matched = context.repository.requirementSuiteRuns
+    .flatMap((run) =>
+      run.caseRuns.map((caseRun) => ({ run, caseRun }))
+    )
+    .find(({ caseRun }) => caseRun.testDataTaskId === submitted.task.id);
+  if (!matched) return submitted as unknown as Record<string, unknown>;
+
+  if (submitted.task.status === "failed") {
+    const gapIds = submitted.gap ? [submitted.gap.id] : [];
+    const blockedRun = context.requirementSuiteRuns.failTestDataTask(
+      matched.run.id,
+      matched.caseRun.executableCaseId,
+      {
+        gapIds,
+        error:
+          submitted.task.error ??
+          "Requirement suite test-data task failed"
+      }
+    );
+    return {
+      mode: "requirement-suite",
+      status: "blocked",
+      stage:
+        matched.caseRun.testDataPhase === "cleanup"
+          ? "test-data-cleanup"
+          : "test-data-prepare",
+      submittedTestData: submitted,
+      gap: submitted.gap,
+      requirementSuiteRun: blockedRun,
+      nextAction:
+        "Resolve the test-data Gap, then explicitly resume the requirement suite to retry the same case."
+    };
+  }
+
+  const continuedRun = context.requirementSuiteRuns.completeTestDataTask(
+    matched.run.id,
+    matched.caseRun.executableCaseId
+  );
+  if (continuedRun.status === "running") {
+    const next = await executeNextRequirementSuiteCase(
+      context,
+      continuedRun.id,
+      { maxHealAttempts: continuedRun.maxHealAttempts }
+    );
+    return {
+      ...next,
+      submittedTestData: submitted,
+      requirementSuiteRun: context.requirementSuiteRuns.get(continuedRun.id)
+    };
+  }
+  return {
+    mode: "requirement-suite",
+    status: continuedRun.status,
+    submittedTestData: submitted,
+    requirementSuiteRun: continuedRun
+  };
+}
+
 async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const taskId = stringArg(input, "taskId");
   const pendingTask = context.repository.agentTasks.find(
@@ -3252,17 +3628,6 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         : bugReport
           ? "failed"
           : "blocked";
-    const requirementSuiteRun = context.requirementSuiteRuns.completeCase(
-      chainContext.requirementSuiteRunId,
-      chainContext.executableCaseId,
-      {
-        status: requirementCaseStatus,
-        chainRunId: chainRun.id,
-        bugReportId: bugReport?.id,
-        gapIds: gaps.map((gap) => gap.id),
-        error: failureReason
-      }
-    );
     const completedCase = {
       task: result.task,
       agentRun: result.agentRun,
@@ -3271,29 +3636,26 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       bugReport,
       gaps
     };
-    if (requirementSuiteRun.status === "running") {
-      const next = await executeNextRequirementSuiteCase(
-        context,
-        requirementSuiteRun.id,
-        { maxHealAttempts: chainContext.maxHealAttempts }
-      );
-      return {
-        ...next,
-        submittedCase: completedCase,
-        requirementSuiteRun: context.requirementSuiteRuns.get(
-          requirementSuiteRun.id
-        )
-      };
+    const executableCase = context.repository.executableCases.find(
+      (item) => item.id === chainContext.executableCaseId
+    );
+    if (!executableCase) {
+      throw new Error("Requirement suite executable case not found");
     }
-    return {
-      ...result,
-      status: requirementSuiteRun.status,
-      chainRun,
-      testResult,
-      bugReport,
-      gaps,
-      requirementSuiteRun
-    };
+    return finalizeRequirementSuiteCase(context, {
+      requirementSuiteRunId: chainContext.requirementSuiteRunId,
+      executableCase,
+      outcome: {
+        status: requirementCaseStatus,
+        chainRunId: chainRun.id,
+        bugReportId: bugReport?.id,
+        gapIds: gaps.map((gap) => gap.id),
+        error: failureReason
+      },
+      completedCase,
+      completionField: "submittedCase",
+      maxHealAttempts: chainContext.maxHealAttempts
+    });
   }
   const suiteRun = result.task.suiteContext
     ? context.service.recordCaseSuiteRun({

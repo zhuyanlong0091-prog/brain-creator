@@ -17,6 +17,7 @@ type PrepareInput = {
   executableCaseId: string;
   confirm: boolean;
   allowCreate?: boolean;
+  phase?: "prepare" | "cleanup";
 };
 
 type SubmitInput = {
@@ -83,6 +84,9 @@ export class TestDataProviderService {
         leaseId: cleanupLease.id
       });
       return { status: "needs-agent-execution", operations: [operation], task };
+    }
+    if (input.phase === "cleanup") {
+      return { status: "ready", operations: [] };
     }
 
     const operations = this.unresolvedOperations(executableCase).map((operation) =>

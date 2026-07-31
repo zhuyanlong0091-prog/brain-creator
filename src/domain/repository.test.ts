@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(8);
+    expect(second.schemaVersion).toBe(9);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -274,6 +274,7 @@ describe("JsonFileBrainCreatorRepository", () => {
       systemId: "system_1",
       status: "waiting-for-agent",
       continueOnBlocked: false,
+      allowCreateTestData: true,
       total: 1,
       passed: 0,
       failed: 0,
@@ -298,7 +299,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(8);
+    expect(second.schemaVersion).toBe(9);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);
@@ -311,9 +312,55 @@ describe("JsonFileBrainCreatorRepository", () => {
     expect(second.requirementSuiteRuns).toEqual([
       expect.objectContaining({
         id: "requirementSuiteRun_1",
-        status: "waiting-for-agent"
+        status: "waiting-for-agent",
+        allowCreateTestData: true
       })
     ]);
+  });
+
+  it("defaults legacy requirement suite runs to read-only test-data reuse", async () => {
+    const filePath = join(await tempDir(), "assets.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        schemaVersion: 8,
+        requirementSuiteRuns: [
+          {
+            id: "legacy-suite",
+            knowledgeProjectId: "knowledge-legacy",
+            systemId: "system-legacy",
+            status: "running",
+            continueOnBlocked: false,
+            total: 1,
+            passed: 0,
+            failed: 0,
+            blocked: 0,
+            caseRuns: [
+              {
+                executableCaseId: "case-legacy",
+                title: "Legacy case",
+                order: 1,
+                status: "queued",
+                gapIds: []
+              }
+            ],
+            createdAt: "2026-07-30T00:00:00.000Z",
+            updatedAt: "2026-07-30T00:00:00.000Z"
+          }
+        ]
+      }),
+      "utf8"
+    );
+
+    const repository = new JsonFileBrainCreatorRepository(filePath);
+
+    expect(repository.schemaVersion).toBe(9);
+    expect(repository.requirementSuiteRuns[0]).toEqual(
+      expect.objectContaining({
+        id: "legacy-suite",
+        allowCreateTestData: false
+      })
+    );
   });
 });
 

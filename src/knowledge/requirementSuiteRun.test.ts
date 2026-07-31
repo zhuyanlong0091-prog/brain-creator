@@ -131,6 +131,174 @@ describe("RequirementSuiteRunService", () => {
       })
     );
   });
+
+  it("waits for test data preparation before binding the execution plan", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      cases: fixture.plans.map((plan) => ({
+        executableCaseId: plan.executableCaseId,
+        title: plan.title
+      })),
+      continueOnBlocked: false,
+      allowCreateTestData: true
+    });
+    const started = fixture.service.beginNext(run.id);
+
+    fixture.service.markWaitingForTestData(
+      run.id,
+      started.caseRun!.executableCaseId,
+      {
+        taskId: "test-data-task-1",
+        phase: "prepare"
+      }
+    );
+    const resumed = fixture.service.completeTestDataTask(
+      run.id,
+      started.caseRun!.executableCaseId
+    );
+    const bound = fixture.service.bindExecutionPlan(
+      run.id,
+      started.caseRun!.executableCaseId,
+      fixture.plans[0].id
+    );
+
+    expect(resumed).toEqual(
+      expect.objectContaining({
+        status: "running",
+        currentExecutableCaseId: "executable-case-1"
+      })
+    );
+    expect(bound.caseRuns[0]).toEqual(
+      expect.objectContaining({
+        status: "running",
+        executionPlanId: "execution-plan-1"
+      })
+    );
+    expect(bound.allowCreateTestData).toBe(true);
+  });
+
+  it("holds a completed case until cleanup succeeds, then advances", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 2),
+      continueOnBlocked: false,
+      allowCreateTestData: true
+    });
+    const started = fixture.service.beginNext(run.id);
+
+    fixture.service.markWaitingForTestData(
+      run.id,
+      started.caseRun!.executableCaseId,
+      {
+        taskId: "cleanup-task-1",
+        phase: "cleanup",
+        pendingOutcome: {
+          status: "passed",
+          chainRunId: "chain-1",
+          gapIds: []
+        }
+      }
+    );
+    const completed = fixture.service.completeTestDataTask(
+      run.id,
+      started.caseRun!.executableCaseId
+    );
+
+    expect(completed).toEqual(
+      expect.objectContaining({
+        status: "running",
+        passed: 1,
+        currentExecutableCaseId: undefined
+      })
+    );
+    expect(completed.caseRuns[0]).toEqual(
+      expect.objectContaining({
+        status: "passed",
+        chainRunId: "chain-1",
+        testDataPhase: undefined,
+        testDataTaskId: undefined
+      })
+    );
+    const next = fixture.service.beginNext(run.id);
+    expect(next.caseRun?.executableCaseId).toBe("executable-case-2");
+  });
+
+  it("retries a blocked test-data task on the same case", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 2),
+      continueOnBlocked: false,
+      allowCreateTestData: true
+    });
+    const started = fixture.service.beginNext(run.id);
+    fixture.service.markWaitingForTestData(
+      run.id,
+      started.caseRun!.executableCaseId,
+      {
+        taskId: "cleanup-task-1",
+        phase: "cleanup",
+        pendingOutcome: {
+          status: "failed",
+          chainRunId: "chain-1",
+          bugReportId: "bug-1",
+          gapIds: []
+        }
+      }
+    );
+    fixture.service.failTestDataTask(
+      run.id,
+      started.caseRun!.executableCaseId,
+      {
+        gapIds: ["gap-cleanup-1"],
+        error: "Cleanup API unavailable"
+      }
+    );
+
+    const resumed = fixture.service.resume(run.id, {
+      continueOnBlocked: true
+    });
+
+    expect(resumed).toEqual(
+      expect.objectContaining({
+        status: "running",
+        currentExecutableCaseId: "executable-case-1"
+      })
+    );
+    expect(resumed.caseRuns[0]).toEqual(
+      expect.objectContaining({
+        status: "running",
+        testDataPhase: "cleanup",
+        testDataTaskId: undefined,
+        pendingOutcome: expect.objectContaining({
+          status: "failed",
+          bugReportId: "bug-1"
+        })
+      })
+    );
+  });
+
+  it("allows an explicit one-way upgrade to test-data creation", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false
+    });
+
+    const authorized = fixture.service.authorizeTestDataCreation(run.id);
+    const repeated = fixture.service.authorizeTestDataCreation(run.id);
+
+    expect(authorized.allowCreateTestData).toBe(true);
+    expect(repeated.id).toBe(run.id);
+    expect(fixture.repository.requirementSuiteRuns).toHaveLength(1);
+  });
 });
 
 function suiteFixture() {

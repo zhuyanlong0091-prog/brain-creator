@@ -911,16 +911,20 @@ export type ExecutionPlan = Omit<ExecutionPlanDraft, "verdict"> & {
 
 export type RequirementSuiteCaseRun = {
   executableCaseId: string;
-  executionPlanId: string;
+  executionPlanId?: string;
   title: string;
   order: number;
   status:
     | "queued"
     | "running"
+    | "waiting-for-test-data"
     | "waiting-for-agent"
     | "passed"
     | "failed"
     | "blocked";
+  testDataTaskId?: string;
+  testDataPhase?: "prepare" | "cleanup";
+  pendingOutcome?: RequirementSuiteCaseOutcome;
   testCaseId?: string;
   agentTaskId?: string;
   executionEvidenceId?: string;
@@ -932,6 +936,14 @@ export type RequirementSuiteCaseRun = {
   completedAt?: string;
 };
 
+export type RequirementSuiteCaseOutcome = {
+  status: "passed" | "failed" | "blocked";
+  chainRunId?: string;
+  bugReportId?: string;
+  gapIds: string[];
+  error?: string;
+};
+
 export type RequirementSuiteRun = {
   id: string;
   knowledgeProjectId: string;
@@ -939,12 +951,15 @@ export type RequirementSuiteRun = {
   authProfileId?: string;
   status:
     | "running"
+    | "waiting-for-test-data"
     | "waiting-for-agent"
     | "blocked"
     | "completed"
     | "failed"
     | "cancelled";
   continueOnBlocked: boolean;
+  allowCreateTestData: boolean;
+  maxHealAttempts?: number;
   total: number;
   passed: number;
   failed: number;
