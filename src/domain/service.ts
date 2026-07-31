@@ -198,6 +198,7 @@ type CreateBugReportInput = {
   reproductionSteps: string[];
   evidencePaths: string[];
   chainRunId?: string;
+  diagnosisId?: string;
   gapIds: string[];
 };
 
@@ -213,6 +214,7 @@ type CreateAgentTaskInput = {
   planContext?: AgentTask["planContext"];
   chainContext?: AgentTask["chainContext"];
   suiteContext?: AgentTask["suiteContext"];
+  regressionContext?: AgentTask["regressionContext"];
 };
 
 type SubmitAgentTaskInput = {
@@ -372,6 +374,7 @@ export class BrainCreatorService {
       reproductionSteps: input.reproductionSteps,
       evidencePaths: input.evidencePaths,
       chainRunId: input.chainRunId,
+      diagnosisId: input.diagnosisId,
       gapIds: input.gapIds,
       status: "open",
       createdAt: now,
@@ -1070,6 +1073,7 @@ export class BrainCreatorService {
       planContext: input.planContext,
       chainContext: input.chainContext,
       suiteContext: input.suiteContext,
+      regressionContext: input.regressionContext,
       submitTool: "bc_submit_agent_output",
       createdAt: now,
       updatedAt: now

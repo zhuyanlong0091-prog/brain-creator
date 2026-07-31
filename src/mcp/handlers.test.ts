@@ -3406,7 +3406,11 @@ describe("handleBrainCreatorTool", () => {
       runner: async () => {
         runCount += 1;
         return runCount === 2
-          ? { exitCode: 1, stdout: "", stderr: "TC-002 failed" }
+          ? {
+              exitCode: 1,
+              stdout: "",
+              stderr: "Expected offer to be sent, actual offer remained draft"
+            }
           : { exitCode: 0, stdout: "passed", stderr: "" };
       }
     });
@@ -4032,6 +4036,22 @@ describe("handleBrainCreatorTool", () => {
         })
       );
       expect(context.service.listBugReports({ systemId: system.id })).toEqual([]);
+      expect(context.repository.executionDiagnoses).toEqual([
+        expect.objectContaining({
+          caseSourceId: firstRun.source.id,
+          caseSuiteId: firstRun.suite.id,
+          caseNo: "TC-001",
+          verdict: "automation_gap",
+          failureType: "locator_failure"
+        })
+      ]);
+      expect(blocked.suiteRun.caseResults).toEqual([
+        expect.objectContaining({
+          caseNo: "TC-001",
+          status: "blocked",
+          diagnosisId: context.repository.executionDiagnoses[0].id
+        })
+      ]);
       expect(context.service.listGaps({ projectId: system.id, status: "open" })).toEqual([
         expect.objectContaining({
           sourceType: "host-agent-healer",
@@ -4053,9 +4073,10 @@ describe("handleBrainCreatorTool", () => {
         workDir
       });
       let runCount = 0;
+      let hostFailureReason = "expected result was not visible";
       context.runner = async () => {
         runCount += 1;
-        return { exitCode: 1, stdout: "", stderr: "expected result was not visible" };
+        return { exitCode: 1, stdout: "", stderr: hostFailureReason };
       };
       const source = join(workDir, "cases.xlsx");
       await writeFile(
@@ -4161,10 +4182,144 @@ describe("handleBrainCreatorTool", () => {
           caseTitle: "Create recruitment request",
           expectedResult: "Created successfully",
           actualResult: expect.stringContaining("expected result was not visible"),
+          diagnosisId: context.repository.executionDiagnoses[0].id,
           status: "open"
         })
       ]);
+      expect(context.repository.executionDiagnoses).toEqual([
+        expect.objectContaining({
+          caseSourceId: firstRun.source.id,
+          caseSuiteId: firstRun.suite.id,
+          caseNo: "TC-001",
+          verdict: "product_bug",
+          bugReportId: bugReview.bugs[0].id
+        })
+      ]);
       expect(context.service.listGaps({ projectId: system.id, status: "open" })).toEqual([]);
+
+      const secondBug = context.service.createBugReport({
+        systemId: system.id,
+        sourceId: firstRun.source.id,
+        caseNo: "TC-001",
+        caseTitle: "Create recruitment request follow-up",
+        module: "Recruitment",
+        priority: "P1",
+        expectedResult: "Created successfully",
+        actualResult: "Expected created, actual pending",
+        reproductionSteps: ["Click New"],
+        evidencePaths: [],
+        gapIds: []
+      });
+      const regressionStart = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "bug-regression",
+          systemId: system.id,
+          bugIds: [bugReview.bugs[0].id, secondBug.id],
+          maxHealAttempts: 1
+        })
+      );
+      await writeFile(
+        regressionStart.task.outputPaths[0],
+        "import { test, expect } from '@playwright/test';\n",
+        "utf8"
+      );
+      const regressionHealing = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: regressionStart.task.id,
+          status: "succeeded",
+          stdout: "generated regression test",
+          stderr: "",
+          outputPaths: regressionStart.task.outputPaths
+        })
+      );
+      const regressionFailed = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: regressionHealing.task.id,
+          status: "succeeded",
+          stdout: "healed regression test",
+          stderr: "",
+          outputPaths: regressionHealing.task.outputPaths
+        })
+      );
+
+      expect(regressionStart).toEqual(
+        expect.objectContaining({
+          mode: "bug-regression",
+          status: "needs_agent_execution",
+          currentBug: expect.objectContaining({ id: bugReview.bugs[0].id })
+        })
+      );
+      expect(regressionFailed).toEqual(
+        expect.objectContaining({
+          mode: "bug-regression",
+          status: "needs_agent_execution",
+          currentBug: expect.objectContaining({ id: secondBug.id }),
+          completedRegression: expect.objectContaining({
+            status: "failed",
+            result: expect.objectContaining({
+              caseNo: "TC-001",
+              status: "failed",
+              bugReportId: bugReview.bugs[0].id,
+              diagnosisId: expect.any(String),
+              gapIds: []
+            }),
+            bug: expect.objectContaining({
+              id: bugReview.bugs[0].id,
+              status: "retest-failed"
+            }),
+            executionDiagnosis: expect.objectContaining({
+              verdict: "product_bug",
+              bugReportId: bugReview.bugs[0].id
+            })
+          }),
+        })
+      );
+
+      hostFailureReason = "SyntaxError in generated regression test";
+      await writeFile(
+        regressionFailed.task.outputPaths[0],
+        "import { test } from '@playwright/test';\n",
+        "utf8"
+      );
+      const technicalNeedsHealing = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: regressionFailed.task.id,
+          status: "succeeded",
+          stdout: "generated regression test",
+          stderr: "",
+          outputPaths: regressionFailed.task.outputPaths
+        })
+      );
+      const technicalBlocked = dataOf(
+        await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+          taskId: technicalNeedsHealing.task.id,
+          status: "succeeded",
+          stdout: "healed regression test",
+          stderr: "",
+          outputPaths: technicalNeedsHealing.task.outputPaths
+        })
+      );
+
+      expect(technicalBlocked).toEqual(
+        expect.objectContaining({
+          mode: "bug-regression",
+          status: "blocked",
+          result: expect.objectContaining({
+            status: "blocked",
+            bugReportId: secondBug.id,
+            gapIds: [expect.any(String)]
+          }),
+          bug: expect.objectContaining({
+            id: secondBug.id,
+            status: "open"
+          }),
+          executionDiagnosis: expect.objectContaining({
+            verdict: "automation_gap",
+            failureType: "automation_failure",
+            bugReportId: secondBug.id
+          })
+        })
+      );
     } finally {
       restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
     }
@@ -4255,7 +4410,7 @@ describe("handleBrainCreatorTool", () => {
 
   it("creates BugReport assets when a confirmed document case fails expectations", async () => {
     const workDir = await tempDir();
-    let shouldFail = true;
+    let failureReason: string | undefined = "expected result was not visible";
     const context = createBrainCreatorMcpContext({
       dataFilePath: join(workDir, "assets.json"),
       workDir,
@@ -4267,8 +4422,8 @@ describe("handleBrainCreatorTool", () => {
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
       runner: async () =>
-        shouldFail
-          ? { exitCode: 1, stdout: "", stderr: "expected result was not visible" }
+        failureReason
+          ? { exitCode: 1, stdout: "", stderr: failureReason }
           : { exitCode: 0, stdout: "fixed", stderr: "" }
     });
     const source = join(workDir, "cases.xlsx");
@@ -4325,8 +4480,104 @@ describe("handleBrainCreatorTool", () => {
         status: "open"
       })
     ]);
+    expect(result.suiteRun.caseResults).toEqual([
+      expect.objectContaining({
+        caseNo: "TC-001",
+        status: "failed",
+        diagnosisId: context.repository.executionDiagnoses[0].id
+      })
+    ]);
+    expect(context.repository.executionDiagnoses[0]).toEqual(
+      expect.objectContaining({
+        caseSourceId: result.source.id,
+        caseSuiteId: result.suite.id,
+        caseNo: "TC-001",
+        verdict: "product_bug",
+        bugReportId: bugs[0].id
+      })
+    );
 
-    shouldFail = false;
+    failureReason = "SyntaxError in generated regression test";
+    const blockedRegression = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "bug-regression",
+        systemId: system.id,
+        bugIds: [bugs[0].id],
+        maxHealAttempts: 0
+      })
+    );
+    const blockedBugReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "bug",
+        systemId: system.id
+      })
+    );
+    const diagnosisStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        systemId: system.id
+      })
+    );
+    const diagnosisReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "execution-diagnosis",
+        systemId: system.id,
+        failureTypes: ["automation_failure"]
+      })
+    );
+
+    expect(blockedRegression).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        passed: 0,
+        failed: 0,
+        blocked: 1,
+        results: [
+          expect.objectContaining({
+            caseNo: "TC-001",
+            status: "blocked",
+            bugReportId: bugs[0].id,
+            diagnosisId: expect.any(String)
+          })
+        ]
+      })
+    );
+    expect(blockedBugReview.bugs).toEqual([
+      expect.objectContaining({ id: bugs[0].id, status: "open" })
+    ]);
+    expect(context.repository.executionDiagnoses.at(-1)).toEqual(
+      expect.objectContaining({
+        verdict: "automation_gap",
+        failureType: "automation_failure"
+      })
+    );
+    expect(diagnosisStatus.executionDiagnoses).toEqual(
+      expect.objectContaining({
+        total: 2,
+        routing: expect.objectContaining({
+          bugEligible: 1,
+          gapRouted: 1
+        })
+      })
+    );
+    expect(diagnosisReview).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          total: 2,
+          routing: expect.objectContaining({
+            bugEligible: 1,
+            gapRouted: 1
+          })
+        }),
+        items: [
+          expect.objectContaining({
+            verdict: "automation_gap",
+            failureType: "automation_failure"
+          })
+        ]
+      })
+    );
+
+    failureReason = undefined;
     const regression = dataOf(
       await handleBrainCreatorTool(context, "bc_run", {
         mode: "bug-regression",
@@ -4372,11 +4623,19 @@ describe("handleBrainCreatorTool", () => {
       },
       runner: async () => {
         if (!regressionRun) {
-          return { exitCode: 1, stdout: "", stderr: "initial suite failed" };
+          return {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Expected documented result, actual result differed"
+          };
         }
         retestCount += 1;
         return retestCount === 2
-          ? { exitCode: 1, stdout: "", stderr: "offer still failed" }
+          ? {
+              exitCode: 1,
+              stdout: "",
+              stderr: "Expected offer sent, actual offer remained draft"
+            }
           : { exitCode: 0, stdout: "fixed", stderr: "" };
       }
     });
@@ -4463,7 +4722,11 @@ describe("handleBrainCreatorTool", () => {
       },
       runner: async () => {
         if (!regressionRun) {
-          return { exitCode: 1, stdout: "", stderr: "initial suite failed" };
+          return {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Expected documented result, actual result differed"
+          };
         }
         retestCount += 1;
         return { exitCode: 0, stdout: "fixed", stderr: "" };

@@ -40,9 +40,7 @@ import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js"
 import { RunLedgerService } from "../knowledge/runLedger.js";
 import { ExecutionDiagnosisService } from "../knowledge/executionDiagnosis.js";
 import {
-  classifyExecutionFailure as classifyFailure,
-  isEnvironmentConfigurationFailure,
-  isGeneratedTestImplementationFailure
+  classifyExecutionFailure as classifyFailure
 } from "../knowledge/failureClassifier.js";
 import {
   commandRunnerAgentBridge,
@@ -907,6 +905,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const suites = context.service.listCaseSuites(systemId);
   const suiteRuns = context.service.listCaseSuiteRuns(systemId);
   const bugs = context.service.listBugReports({ systemId });
+  const executionDiagnoses = context.executionDiagnosis.list({ systemId });
   const openBugs = bugs.filter((bug) => bug.status === "open" || bug.status === "retest-failed");
   const unfinishedSuites = unfinishedCaseSuites(context, systemId);
   const pendingAgentTasks = context.service
@@ -961,6 +960,10 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       total: bugs.length,
       open: openBugs.length,
       recent: bugs.slice(-5)
+    },
+    executionDiagnoses: {
+      ...context.executionDiagnosis.summary({ systemId }),
+      recent: executionDiagnoses.slice(-10)
     },
     facadeNextAction: nextAction,
     userSummary,
@@ -1375,6 +1378,8 @@ async function executeDocumentCase(
     documentCase: DocumentCase;
     maxHealAttempts?: number;
     createBugOnFailure?: boolean;
+    regressionBug?: BugReport;
+    remainingBugIds?: string[];
   }
 ): Promise<{
   caseResult: CaseSuiteCaseResult;
@@ -1397,6 +1402,20 @@ async function executeDocumentCase(
             sourceId: input.sourceId,
             caseNo: input.documentCase.caseNo,
             title: input.documentCase.title
+          }
+        : undefined,
+      regressionContext: input.regressionBug
+        ? {
+            bugReportId: input.regressionBug.id,
+            sourceId: input.regressionBug.sourceId,
+            caseNo: input.regressionBug.caseNo,
+            title: input.regressionBug.caseTitle,
+            previousStatus:
+              input.regressionBug.status === "retest-failed"
+                ? "retest-failed"
+                : "open",
+            remainingBugIds: input.remainingBugIds ?? [],
+            maxHealAttempts: input.maxHealAttempts
           }
         : undefined
     });
@@ -1430,46 +1449,68 @@ async function executeDocumentCase(
         artifactPaths
       };
     }
-    if (input.createBugOnFailure === false) {
-      return {
-        caseResult: {
-          caseNo: input.documentCase.caseNo,
-          title: input.documentCase.title,
-          status: "failed",
-          testCaseId: testCase.id,
-          chainRunId: result.chainRun.id,
-          gapIds: result.chainRun.gaps.map((gap) => gap.id),
-          error: chainFailureReason(result.chainRun)
-        },
-        artifactPaths
-      };
-    }
-    const bug = context.service.createBugReport({
+    const failureReason =
+      [result.testResult?.stderr, result.testResult?.stdout]
+        .find((value): value is string => Boolean(value?.trim())) ??
+      chainFailureReason(result.chainRun);
+    const diagnosis = context.executionDiagnosis.create({
       systemId: input.systemId,
-      sourceId: input.sourceId,
+      caseSourceId: input.sourceId,
+      caseSuiteId: input.suiteId,
       caseNo: input.documentCase.caseNo,
-      caseTitle: input.documentCase.title,
-      module: input.documentCase.module,
-      priority: input.documentCase.priority,
-      expectedResult: input.documentCase.expectedResult,
-      actualResult: chainFailureReason(result.chainRun),
-      reproductionSteps: reproductionSteps(input.documentCase),
-      evidencePaths: artifactPaths,
+      testCaseId: testCase.id,
       chainRunId: result.chainRun.id,
-      gapIds: result.chainRun.gaps.map((gap) => gap.id)
+      status: "failed",
+      failureReason,
+      sourceType: "case-source-suite",
+      healAttempts: result.healerRuns.length,
+      maxHealAttempts: input.maxHealAttempts ?? 3,
+      evidenceRefs: [
+        result.chainRun.id,
+        input.sourceId,
+        input.suiteId
+      ].filter((value): value is string => Boolean(value))
     });
+    const isProductBug = diagnosis.verdict === "product_bug";
+    if (isProductBug) {
+      result.chainRun.gaps = [];
+      context.repository.persist();
+    }
+    const bug =
+      isProductBug && input.createBugOnFailure !== false
+        ? context.service.createBugReport({
+            systemId: input.systemId,
+            sourceId: input.sourceId,
+            caseNo: input.documentCase.caseNo,
+            caseTitle: input.documentCase.title,
+            module: input.documentCase.module,
+            priority: input.documentCase.priority,
+            expectedResult: input.documentCase.expectedResult,
+            actualResult: failureReason,
+            reproductionSteps: reproductionSteps(input.documentCase),
+            evidencePaths: artifactPaths,
+            chainRunId: result.chainRun.id,
+            diagnosisId: diagnosis.id,
+            gapIds: []
+          })
+        : undefined;
+    if (bug) {
+      context.executionDiagnosis.linkBugReport(diagnosis.id, bug.id);
+    }
     return {
       caseResult: {
         caseNo: input.documentCase.caseNo,
         title: input.documentCase.title,
-        status: "failed",
+        status: isProductBug ? "failed" : "blocked",
         testCaseId: testCase.id,
         chainRunId: result.chainRun.id,
-        bugReportId: bug.id,
-        gapIds: result.chainRun.gaps.map((gap) => gap.id)
+        diagnosisId: diagnosis.id,
+        bugReportId: bug?.id,
+        gapIds: result.chainRun.gaps.map((gap) => gap.id),
+        error: failureReason
       },
       artifactPaths,
-      bugReportId: bug.id
+      bugReportId: bug?.id
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -1520,7 +1561,8 @@ async function runBugRegression(context: BrainCreatorMcpContext, input: Record<s
   }
 
   const results: CaseSuiteCaseResult[] = [];
-  for (const bug of candidates) {
+  for (const [candidateIndex, bug] of candidates.entries()) {
+    const previousStatus = bug.status;
     context.service.updateBugReportStatus(bug.id, "retest-running");
     try {
       const source = context.service
@@ -1539,13 +1581,37 @@ async function runBugRegression(context: BrainCreatorMcpContext, input: Record<s
         sourceId: source.id,
         documentCase,
         maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
-        createBugOnFailure: false
+        createBugOnFailure: false,
+        regressionBug: { ...bug, status: previousStatus },
+        remainingBugIds: candidates
+          .slice(candidateIndex + 1)
+          .map((item) => item.id)
       });
+      if (result.taskPackage) {
+        return {
+          ...result.taskPackage,
+          mode: "bug-regression",
+          stage: result.taskPackage.task.agent,
+          status: "needs_agent_execution",
+          currentBug: bug,
+          completedResults: results
+        };
+      }
+      if (result.caseResult.diagnosisId) {
+        context.executionDiagnosis.linkBugReport(
+          result.caseResult.diagnosisId,
+          bug.id
+        );
+      }
+      result.caseResult.bugReportId = bug.id;
       results.push(result.caseResult);
-      context.service.updateBugReportStatus(
-        bug.id,
-        result.caseResult.status === "passed" ? "retest-passed" : "retest-failed"
-      );
+      if (result.caseResult.status === "passed") {
+        context.service.updateBugReportStatus(bug.id, "retest-passed");
+      } else if (result.caseResult.status === "failed") {
+        context.service.updateBugReportStatus(bug.id, "retest-failed");
+      } else {
+        context.service.updateBugReportStatus(bug.id, previousStatus);
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const gap = context.service.reportGap({
@@ -1564,7 +1630,7 @@ async function runBugRegression(context: BrainCreatorMcpContext, input: Record<s
         gapIds: [gap.id],
         error: reason
       });
-      context.service.updateBugReportStatus(bug.id, "retest-failed");
+      context.service.updateBugReportStatus(bug.id, previousStatus);
     }
   }
   const counts = countBy(results, (result) => result.status);
@@ -1599,13 +1665,33 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
         : optionalStringArg(input, "id")
     );
   }
-  if (isKnowledgeReviewTarget(requestedTarget)) {
+  if (
+    isKnowledgeReviewTarget(requestedTarget) &&
+    requestedTarget !== "execution-diagnosis"
+  ) {
     throw new Error("knowledgeProjectId is required for knowledge review targets");
   }
   const resolution = resolveSystemReference(context, input);
   const systemId = resolution.systemId;
   const target = requestedTarget;
   const failureTypes = failureTypeFilters(input);
+  if (target === "execution-diagnosis") {
+    const items = context.executionDiagnosis
+      .list({ systemId })
+      .filter(
+        (item) =>
+          (!optionalStringArg(input, "id") ||
+            item.id === optionalStringArg(input, "id")) &&
+          (failureTypes.size === 0 ||
+            (item.failureType !== undefined &&
+              failureTypes.has(item.failureType)))
+      );
+    return {
+      summary: context.executionDiagnosis.summary({ systemId }),
+      items,
+      systemResolution: resolution
+    };
+  }
   if (target === "bug") {
     const bugs = context.service
       .listBugReports({
@@ -2482,9 +2568,13 @@ async function executeRequirementSuiteCase(
           failureReason: requirementFailure,
           artifactPaths: [contextPackPath, result.specPath, result.testPath].filter(
             (path): path is string => typeof path === "string"
-          )
+          ),
+          diagnosisId: diagnosis.id
         })
       : undefined;
+  if (requirementBug && diagnosis) {
+    context.executionDiagnosis.linkBugReport(diagnosis.id, requirementBug.id);
+  }
   if (requirementBug && "chainRun" in result) result.chainRun.gaps = [];
   const completedEvidence =
     "chainRun" in result && result.chainRun?.status !== "partial"
@@ -3316,7 +3406,8 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
         executionEvidenceId: optionalStringArg(input, "executionEvidenceId"),
         contextPackPath: optionalStringArg(input, "contextPackPath")
       },
-      suiteContext: suiteContextArg(input)
+      suiteContext: suiteContextArg(input),
+      regressionContext: regressionContextArg(input)
     });
     return {
       ...taskPackage,
@@ -3500,6 +3591,7 @@ async function prepareAgentTask(
   const planContext = planContextArg(input);
   const chainContext = chainContextArg(input);
   const suiteContext = suiteContextArg(input);
+  const regressionContext = regressionContextArg(input);
   const task = context.service.createAgentTask({
     id: taskId,
     systemId,
@@ -3511,7 +3603,8 @@ async function prepareAgentTask(
     contextPath,
     planContext,
     chainContext,
-    suiteContext
+    suiteContext,
+    regressionContext
   });
   await mkdir(taskDir, { recursive: true });
   await writeFile(promptPath, hostAgentPrompt({ systemId, agent, inputSummary, args, outputPaths }), "utf8");
@@ -3529,6 +3622,7 @@ async function prepareAgentTask(
         planContext,
         chainContext,
         suiteContext,
+        regressionContext,
         workDir: context.workDir,
         submitTool: "bc_submit_agent_output"
       },
@@ -3729,7 +3823,8 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
           result.task.agent === "generator" ? result.agentRun.id : chainContext.generateRunId,
         healAttempts: healAttempts + 1
       },
-      suiteContext: result.task.suiteContext
+      suiteContext: result.task.suiteContext,
+      regressionContext: result.task.regressionContext
     });
     if (
       chainContext.requirementSuiteRunId &&
@@ -3764,15 +3859,24 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       : undefined;
   const chainRunId = id("chain");
   const artifactPaths = [chainContext.specPath, chainContext.testPath];
-  const requirementDiagnosis =
+  const terminalDiagnosis =
     status === "failed" &&
     failureReason &&
-    chainContext.executableCaseId
+    (chainContext.executableCaseId ||
+      result.task.suiteContext ||
+      result.task.regressionContext)
       ? context.executionDiagnosis.create({
           knowledgeProjectId: chainContext.knowledgeProjectId,
           systemId: result.task.systemId,
           requirementSuiteRunId: chainContext.requirementSuiteRunId,
           executableCaseId: chainContext.executableCaseId,
+          caseSourceId:
+            result.task.suiteContext?.sourceId ??
+            result.task.regressionContext?.sourceId,
+          caseSuiteId: result.task.suiteContext?.suiteId,
+          caseNo:
+            result.task.suiteContext?.caseNo ??
+            result.task.regressionContext?.caseNo,
           executionEvidenceId: chainContext.executionEvidenceId,
           chainRunId,
           testCaseId: chainContext.testCaseId,
@@ -3798,11 +3902,30 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
           chainRunId,
           failureReason,
           artifactPaths,
-          requirementDiagnosisVerdict: requirementDiagnosis?.verdict
+          diagnosisId: terminalDiagnosis?.id,
+          diagnosisVerdict: terminalDiagnosis?.verdict
         })
       : undefined;
+  if (bugReport && terminalDiagnosis) {
+    context.executionDiagnosis.linkBugReport(
+      terminalDiagnosis.id,
+      bugReport.id
+    );
+  }
+  if (result.task.regressionContext && terminalDiagnosis) {
+    context.executionDiagnosis.linkBugReport(
+      terminalDiagnosis.id,
+      result.task.regressionContext.bugReportId
+    );
+  }
+  const productRegressionFailure =
+    Boolean(result.task.regressionContext) &&
+    terminalDiagnosis?.verdict === "product_bug";
   const gaps =
-    status === "failed" && !bugReport && failureReason
+    status === "failed" &&
+    !bugReport &&
+    !productRegressionFailure &&
+    failureReason
       ? [
           context.service.reportGap({
             projectId: result.task.systemId,
@@ -3856,7 +3979,7 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       chainRun,
       testResult,
       bugReport,
-      executionDiagnosis: requirementDiagnosis,
+      executionDiagnosis: terminalDiagnosis,
       gaps
     };
     const executableCase = context.repository.executableCases.find(
@@ -3871,10 +3994,10 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       outcome: {
         status: requirementCaseStatus,
         chainRunId: chainRun.id,
-        diagnosisId: requirementDiagnosis?.id,
+        diagnosisId: terminalDiagnosis?.id,
         bugReportId: bugReport?.id,
         gapIds: gaps.map((gap) => gap.id),
-        failureType: requirementDiagnosis?.failureType,
+        failureType: terminalDiagnosis?.failureType,
         error: failureReason
       },
       completedCase,
@@ -3899,6 +4022,7 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
             status: status === "succeeded" ? "passed" : bugReport ? "failed" : "blocked",
             testCaseId: chainContext.testCaseId,
             chainRunId: chainRun.id,
+            diagnosisId: terminalDiagnosis?.id,
             bugReportId: bugReport?.id,
             gapIds: gaps.map((gap) => gap.id),
             error: failureReason
@@ -3964,6 +4088,66 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       suiteRun,
       suite: failedSuite,
       testResult
+    };
+  }
+  if (result.task.regressionContext) {
+    const regression = result.task.regressionContext;
+    const bug = context.repository.bugReports.find(
+      (item) =>
+        item.id === regression.bugReportId &&
+        item.systemId === result.task.systemId
+    );
+    if (!bug) throw new Error("Regression BugReport not found");
+    const caseStatus =
+      status === "succeeded"
+        ? "passed"
+        : productRegressionFailure
+          ? "failed"
+          : "blocked";
+    context.service.updateBugReportStatus(
+      bug.id,
+      caseStatus === "passed"
+        ? "retest-passed"
+        : caseStatus === "failed"
+          ? "retest-failed"
+          : regression.previousStatus
+    );
+    const completedRegression = {
+      ...result,
+      mode: "bug-regression",
+      status:
+        caseStatus === "passed"
+          ? "completed"
+          : caseStatus === "failed"
+            ? "failed"
+            : "blocked",
+      chainRun,
+      testResult,
+      executionDiagnosis: terminalDiagnosis,
+      result: {
+        caseNo: regression.caseNo,
+        title: regression.title,
+        status: caseStatus,
+        testCaseId: chainContext.testCaseId,
+        chainRunId: chainRun.id,
+        diagnosisId: terminalDiagnosis?.id,
+        bugReportId: bug.id,
+        gapIds: gaps.map((gap) => gap.id),
+        error: failureReason
+      },
+      bug
+    };
+    if (regression.remainingBugIds.length === 0) {
+      return completedRegression;
+    }
+    const next = await runBugRegression(context, {
+      systemId: result.task.systemId,
+      bugIds: regression.remainingBugIds,
+      maxHealAttempts: regression.maxHealAttempts
+    });
+    return {
+      ...next,
+      completedRegression
     };
   }
   return { ...result, chainRun, testResult };
@@ -4069,12 +4253,13 @@ async function maybeCreateHostAgentBugReport(
     chainRunId: string;
     failureReason: string;
     artifactPaths: string[];
-    requirementDiagnosisVerdict?: ExecutionDiagnosisVerdict;
+    diagnosisId?: string;
+    diagnosisVerdict?: ExecutionDiagnosisVerdict;
   }
 ) {
   if (
     input.task.chainContext?.executableCaseId &&
-    input.requirementDiagnosisVerdict === "product_bug"
+    input.diagnosisVerdict === "product_bug"
   ) {
     const executableCase = context.repository.executableCases.find(
       (item) => item.id === input.task.chainContext?.executableCaseId
@@ -4091,13 +4276,14 @@ async function maybeCreateHostAgentBugReport(
           createdAt: input.task.createdAt
         },
         failureReason: input.failureReason,
-        artifactPaths: input.artifactPaths
+        artifactPaths: input.artifactPaths,
+        diagnosisId: input.diagnosisId
       });
     }
   }
   if (
     !input.task.suiteContext ||
-    !isDocumentExpectationFailure(input.failureReason)
+    input.diagnosisVerdict !== "product_bug"
   ) {
     return undefined;
   }
@@ -4129,20 +4315,9 @@ async function maybeCreateHostAgentBugReport(
     reproductionSteps: reproductionSteps(documentCase),
     evidencePaths: input.artifactPaths,
     chainRunId: input.chainRunId,
+    diagnosisId: input.diagnosisId,
     gapIds: []
   });
-}
-
-function isDocumentExpectationFailure(reason: string) {
-  if (
-    isEnvironmentConfigurationFailure(reason) ||
-    isGeneratedTestImplementationFailure(reason)
-  ) {
-    return false;
-  }
-  return /\b(expected|actual|assert|assertion|toBe|toEqual|toContain|not visible)\b/i.test(
-    reason
-  );
 }
 
 function hostAgentFailureReason(
@@ -5476,6 +5651,7 @@ function createRequirementBugReport(
     chainRun: ChainRun;
     failureReason: string;
     artifactPaths: string[];
+    diagnosisId?: string;
   }
 ) {
   const intent = context.repository.testIntents.find(
@@ -5496,6 +5672,7 @@ function createRequirementBugReport(
     ),
     evidencePaths: input.artifactPaths,
     chainRunId: input.chainRun.id,
+    diagnosisId: input.diagnosisId,
     gapIds: []
   });
 }
@@ -5522,6 +5699,48 @@ function suiteContextArg(input: Record<string, unknown>): AgentTask["suiteContex
     throw new Error("suiteContext requires suiteId, sourceId, caseNo, and title");
   }
   return { suiteId, sourceId, caseNo, title };
+}
+
+function regressionContextArg(
+  input: Record<string, unknown>
+): AgentTask["regressionContext"] | undefined {
+  const value = input.regressionContext;
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object") {
+    throw new Error("regressionContext must be an object");
+  }
+  const candidate = value as Record<string, unknown>;
+  const bugReportId = candidate.bugReportId;
+  const sourceId = candidate.sourceId;
+  const caseNo = candidate.caseNo;
+  const title = candidate.title;
+  const previousStatus = candidate.previousStatus;
+  const remainingBugIds = candidate.remainingBugIds;
+  const maxHealAttempts = candidate.maxHealAttempts;
+  if (
+    typeof bugReportId !== "string" ||
+    typeof sourceId !== "string" ||
+    typeof caseNo !== "string" ||
+    typeof title !== "string" ||
+    (previousStatus !== "open" && previousStatus !== "retest-failed") ||
+    !Array.isArray(remainingBugIds) ||
+    remainingBugIds.some((item) => typeof item !== "string") ||
+    (maxHealAttempts !== undefined &&
+      (typeof maxHealAttempts !== "number" || maxHealAttempts < 0))
+  ) {
+    throw new Error(
+      "regressionContext requires bugReportId, sourceId, caseNo, title, previousStatus, and remainingBugIds"
+    );
+  }
+  return {
+    bugReportId,
+    sourceId,
+    caseNo,
+    title,
+    previousStatus,
+    remainingBugIds: remainingBugIds as string[],
+    maxHealAttempts: maxHealAttempts as number | undefined
+  };
 }
 
 function runModeArg(input: Record<string, unknown>, key: string) {

@@ -321,8 +321,12 @@ describe("JsonFileBrainCreatorRepository", () => {
       systemId: "system_1",
       requirementSuiteRunId: "requirementSuiteRun_1",
       executableCaseId: "executableCase_1",
+      caseSourceId: "caseSource_1",
+      caseSuiteId: "caseSuite_1",
+      caseNo: "TC-001",
       executionEvidenceId: "executionEvidence_1",
       chainRunId: "chainRun_1",
+      bugReportId: "bugReport_1",
       testCaseId: "case_1",
       verdict: "automation_gap",
       failureType: "automation_failure",
@@ -367,7 +371,11 @@ describe("JsonFileBrainCreatorRepository", () => {
     expect(second.executionDiagnoses).toEqual([
       expect.objectContaining({
         id: "executionDiagnosis_1",
-        verdict: "automation_gap"
+        verdict: "automation_gap",
+        caseSourceId: "caseSource_1",
+        caseSuiteId: "caseSuite_1",
+        caseNo: "TC-001",
+        bugReportId: "bugReport_1"
       })
     ]);
   });

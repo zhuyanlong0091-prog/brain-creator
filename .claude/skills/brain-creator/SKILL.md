@@ -122,7 +122,7 @@ When the user supplies `.xlsx` or executable `.md` test cases:
 5. In host-agent mode, execute every returned `needs_agent_execution` package and call `bc_submit_agent_output` until completed, failed, or blocked.
 6. Use `bc_review` for SuiteRun, ChainRun, BugReport, Gap, and artifact evidence.
 
-Document suites stop on the first environment, auth, locator, or evidence Gap unless the user explicitly selects `continueOnBlocked: true`. Do not write results back to Excel unless both `writeBack: true` and `confirmWriteBack: true` are explicit.
+Document suites stop on the first environment, auth, locator, automation, or evidence Gap unless the user explicitly selects `continueOnBlocked: true`. Use the persisted ExecutionDiagnosis for the verdict and never create a BugReport from raw failure text. During bug regression, only `product_bug` becomes `retest-failed`; technical blockers preserve the previous bug status. Do not write results back to Excel unless both `writeBack: true` and `confirmWriteBack: true` are explicit.
 
 ## Host-Agent And Bridge
 
