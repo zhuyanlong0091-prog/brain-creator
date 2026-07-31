@@ -1778,6 +1778,10 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   const projectId = stringArg(input, "knowledgeProjectId");
   const project = context.repository.knowledgeProjects.find((item) => item.id === projectId);
   if (!project) throw new Error("Knowledge project not found");
+  const suiteAction = suiteActionArg(input);
+  if (suiteAction !== "continue") {
+    return controlRequirementSuite(context, projectId, suiteAction, input);
+  }
   const requestedCaseId = optionalStringArg(input, "executableCaseId");
   const candidates = context.knowledgeService
     .listExecutableCases(projectId)
@@ -1983,6 +1987,84 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   return executeNextRequirementSuiteCase(context, requirementSuiteRun.id, {
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
   });
+}
+
+async function controlRequirementSuite(
+  context: BrainCreatorMcpContext,
+  projectId: string,
+  action: "cancel" | "retry" | "skip",
+  input: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const suiteId = optionalStringArg(input, "suiteId");
+  const systemId = optionalStringArg(input, "systemId");
+  const run = suiteId
+    ? context.requirementSuiteRuns.get(suiteId)
+    : context.requirementSuiteRuns
+        .list(projectId)
+        .filter((item) => !systemId || item.systemId === systemId)
+        .at(-1);
+  if (!run) throw new Error("Requirement suite run not found");
+  if (run.knowledgeProjectId !== projectId) {
+    throw new Error("Requirement suite run belongs to another knowledge project");
+  }
+  if (systemId && run.systemId !== systemId) {
+    throw new Error("Requirement suite run belongs to another business system");
+  }
+  const requestedCaseId = optionalStringArg(input, "executableCaseId");
+  const targetCase =
+    requestedCaseId
+      ? run.caseRuns.find((item) => item.executableCaseId === requestedCaseId)
+      : [...run.caseRuns]
+          .reverse()
+          .find((item) =>
+            action === "skip"
+              ? item.status === "blocked"
+              : item.status === "failed" || item.status === "blocked"
+          );
+  if (action !== "cancel" && !targetCase) {
+    throw new Error(
+      action === "retry"
+        ? "No failed or blocked requirement suite case is available to retry"
+        : "No blocked requirement suite case is available to skip"
+    );
+  }
+  if (!optionalBooleanArg(input, "confirm")) {
+    return {
+      mode: "requirement-suite",
+      status: "control-preview",
+      action,
+      requirementSuiteRun: run,
+      targetCase,
+      requiresConfirmation: true,
+      nextAction: `Confirm the requirement suite ${action} action.`
+    };
+  }
+
+  const updated =
+    action === "cancel"
+      ? context.requirementSuiteRuns.cancel(run.id)
+      : action === "retry"
+        ? context.requirementSuiteRuns.retry(
+            run.id,
+            targetCase!.executableCaseId
+          )
+        : context.requirementSuiteRuns.skip(
+            run.id,
+            targetCase!.executableCaseId
+          );
+  if (updated.status === "running") {
+    return executeNextRequirementSuiteCase(context, updated.id, {
+      maxHealAttempts:
+        optionalNumberArg(input, "maxHealAttempts") ??
+        updated.maxHealAttempts
+    });
+  }
+  return {
+    mode: "requirement-suite",
+    status: updated.status,
+    action,
+    requirementSuiteRun: updated
+  };
 }
 
 async function executeNextRequirementSuiteCase(
@@ -5357,6 +5439,14 @@ function runModeArg(input: Record<string, unknown>, key: string) {
     | "case-source-suite"
     | "bug-regression"
     | "requirement-suite";
+}
+
+function suiteActionArg(input: Record<string, unknown>) {
+  const value = optionalStringArg(input, "suiteAction") ?? "continue";
+  if (!["continue", "cancel", "retry", "skip"].includes(value)) {
+    throw new Error("suiteAction is invalid");
+  }
+  return value as "continue" | "cancel" | "retry" | "skip";
 }
 
 type KnowledgeReviewTarget =

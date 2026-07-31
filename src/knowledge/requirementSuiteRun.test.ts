@@ -299,6 +299,225 @@ describe("RequirementSuiteRunService", () => {
     expect(repeated.id).toBe(run.id);
     expect(fixture.repository.requirementSuiteRuns).toHaveLength(1);
   });
+
+  it("cancels unfinished cases and pending work without changing completed results", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans,
+      continueOnBlocked: false
+    });
+    const first = fixture.service.beginNext(run.id).caseRun!;
+    fixture.service.completeCase(run.id, first.executableCaseId, {
+      status: "passed",
+      chainRunId: "chain-1",
+      gapIds: []
+    });
+    const second = fixture.service.beginNext(run.id).caseRun!;
+    fixture.repository.agentTasks.push({
+      id: "agent-task-2",
+      systemId: "system-orders",
+      agent: "generator",
+      status: "pending",
+      inputSummary: "Generate order test",
+      args: [],
+      outputPaths: [],
+      promptPath: "prompt.md",
+      contextPath: "context.json",
+      chainContext: {
+        testCaseId: "test-case-2",
+        specPath: "spec.md",
+        testPath: "test.spec.ts",
+        executableCaseId: second.executableCaseId,
+        requirementSuiteRunId: run.id,
+        executionEvidenceId: "evidence-2"
+      },
+      submitTool: "bc_submit_agent_output",
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z"
+    });
+    fixture.repository.executionEvidence.push({
+      id: "evidence-2",
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executableCaseId: second.executableCaseId,
+      testCaseId: "test-case-2",
+      contextPackPath: "context.json",
+      status: "running",
+      steps: [],
+      tracePaths: [],
+      artifactPaths: [],
+      consoleErrors: [],
+      networkFailures: [],
+      createdAt: "2026-07-30T00:00:00.000Z"
+    });
+    fixture.service.markWaiting(run.id, second.executableCaseId, {
+      testCaseId: "test-case-2",
+      agentTaskId: "agent-task-2",
+      executionEvidenceId: "evidence-2"
+    });
+
+    const cancelled = fixture.service.cancel(run.id);
+
+    expect(cancelled).toEqual(
+      expect.objectContaining({
+        status: "cancelled",
+        passed: 1,
+        cancelled: 2,
+        currentExecutableCaseId: undefined
+      })
+    );
+    expect(cancelled.caseRuns.map((item) => item.status)).toEqual([
+      "passed",
+      "cancelled",
+      "cancelled"
+    ]);
+    expect(fixture.repository.agentTasks[0].status).toBe("cancelled");
+    expect(fixture.repository.executionEvidence[0]).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        actualResult: "Requirement suite cancelled by user"
+      })
+    );
+    expect(fixture.repository.gaps).toHaveLength(0);
+    expect(() => fixture.service.cancel(run.id)).not.toThrow();
+  });
+
+  it("retries a failed case while preserving its previous attempt", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false
+    });
+    const first = fixture.service.beginNext(run.id).caseRun!;
+    fixture.service.markWaiting(run.id, first.executableCaseId, {
+      testCaseId: "test-case-1",
+      agentTaskId: "agent-task-1",
+      executionEvidenceId: "evidence-1"
+    });
+    fixture.service.completeCase(run.id, first.executableCaseId, {
+      status: "failed",
+      chainRunId: "chain-1",
+      bugReportId: "bug-1",
+      gapIds: []
+    });
+
+    const retried = fixture.service.retry(run.id, first.executableCaseId);
+
+    expect(retried).toEqual(
+      expect.objectContaining({
+        status: "running",
+        failed: 0,
+        currentExecutableCaseId: undefined
+      })
+    );
+    expect(retried.caseRuns[0]).toEqual(
+      expect.objectContaining({
+        status: "queued",
+        executionPlanId: undefined,
+        testCaseId: undefined,
+        agentTaskId: undefined,
+        executionEvidenceId: undefined,
+        chainRunId: undefined,
+        bugReportId: undefined,
+        gapIds: [],
+        attempts: [
+          expect.objectContaining({
+            status: "failed",
+            chainRunId: "chain-1",
+            bugReportId: "bug-1"
+          })
+        ]
+      })
+    );
+
+    fixture.service.beginNext(run.id);
+    fixture.service.completeCase(run.id, first.executableCaseId, {
+      status: "passed",
+      gapIds: []
+    });
+    expect(() =>
+      fixture.service.retry(run.id, first.executableCaseId)
+    ).toThrow("Only failed or blocked requirement suite cases can be retried");
+  });
+
+  it("skips a blocked case, preserves its attempt, and advances the suite", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 2),
+      continueOnBlocked: false
+    });
+    const first = fixture.service.beginNext(run.id).caseRun!;
+    fixture.service.completeCase(run.id, first.executableCaseId, {
+      status: "blocked",
+      gapIds: ["gap-1"],
+      error: "Missing observed navigation"
+    });
+
+    const skipped = fixture.service.skip(run.id, first.executableCaseId);
+
+    expect(skipped).toEqual(
+      expect.objectContaining({
+        status: "running",
+        blocked: 0,
+        skipped: 1,
+        currentExecutableCaseId: undefined
+      })
+    );
+    expect(skipped.caseRuns[0]).toEqual(
+      expect.objectContaining({
+        status: "skipped",
+        attempts: [
+          expect.objectContaining({
+            status: "blocked",
+            gapIds: ["gap-1"],
+            error: "Missing observed navigation"
+          })
+        ]
+      })
+    );
+    const next = fixture.service.beginNext(run.id);
+    expect(next.caseRun?.executableCaseId).toBe("executable-case-2");
+  });
+
+  it("does not skip a blocked case while created test data still needs cleanup", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false
+    });
+    const first = fixture.service.beginNext(run.id).caseRun!;
+    fixture.service.completeCase(run.id, first.executableCaseId, {
+      status: "blocked",
+      gapIds: ["gap-1"]
+    });
+    fixture.repository.testDataLeases.push({
+      id: "lease-1",
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executableCaseId: first.executableCaseId,
+      profileId: "profile-1",
+      taskId: "task-1",
+      decision: "create",
+      reference: "order:1",
+      cleanup: "delete-created",
+      status: "active",
+      sourceRefs: [],
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z"
+    });
+
+    expect(() =>
+      fixture.service.skip(run.id, first.executableCaseId)
+    ).toThrow("Created test data must be cleaned up before skipping this case");
+  });
 });
 
 function suiteFixture() {

@@ -95,6 +95,14 @@ After the current case's data is ready, Brain Creator freezes its ExecutionPlan.
 
 Only one RequirementSuiteRun case may prepare data, wait for an Agent, execute, or clean up at a time. A Host Agent terminal submission performs cleanup before starting the next queued case. Business mismatches create BugReports and continue; data, cleanup, and other technical failures create Gaps and stop unless the user explicitly resumes with `resume=true` and `continueOnBlocked=true`. Data-phase resume retries the same phase rather than skipping the case. Repeating a confirmed run returns the current TestDataTask or AgentTask instead of creating a duplicate. Inspect progress with `bc_status` or `bc_review target=requirement-suite-run`.
 
+Use the existing `bc_run` facade for explicit Suite controls. Always preview with `confirm=false`, show the affected run/case, and wait for approval before `confirm=true`:
+
+- `suiteAction=cancel` cancels unfinished cases and pending Agent/TestData tasks. It preserves completed results and does not create a Gap. Any created-data cleanup obligation remains due.
+- `suiteAction=retry` targets a failed or blocked `executableCaseId`. It archives the previous plan/evidence/Bug/Gap references in `attempts`, then builds a fresh execution plan. Never retry a passed case.
+- `suiteAction=skip` targets a blocked `executableCaseId`. It preserves the blocked attempt and advances the Suite, but is rejected while created test data still requires cleanup.
+
+Review `skipped`, `cancelled`, and `attempts` through `bc_status` or `bc_review target=requirement-suite-run`. Cancellation is intentional user control, retry is a new attempt, and skip is not a successful test result.
+
 ### 10. Review Evidence
 
 The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, ExecutionPlans, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.

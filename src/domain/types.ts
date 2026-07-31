@@ -909,6 +909,21 @@ export type ExecutionPlan = Omit<ExecutionPlanDraft, "verdict"> & {
   confirmedAt: string;
 };
 
+export type RequirementSuiteCaseAttempt = {
+  status: "failed" | "blocked";
+  executionPlanId?: string;
+  testCaseId?: string;
+  agentTaskId?: string;
+  executionEvidenceId?: string;
+  chainRunId?: string;
+  bugReportId?: string;
+  gapIds: string[];
+  error?: string;
+  startedAt?: string;
+  completedAt?: string;
+  archivedAt: string;
+};
+
 export type RequirementSuiteCaseRun = {
   executableCaseId: string;
   executionPlanId?: string;
@@ -921,7 +936,9 @@ export type RequirementSuiteCaseRun = {
     | "waiting-for-agent"
     | "passed"
     | "failed"
-    | "blocked";
+    | "blocked"
+    | "skipped"
+    | "cancelled";
   testDataTaskId?: string;
   testDataPhase?: "prepare" | "cleanup";
   pendingOutcome?: RequirementSuiteCaseOutcome;
@@ -931,6 +948,7 @@ export type RequirementSuiteCaseRun = {
   chainRunId?: string;
   bugReportId?: string;
   gapIds: string[];
+  attempts: RequirementSuiteCaseAttempt[];
   error?: string;
   startedAt?: string;
   completedAt?: string;
@@ -964,6 +982,8 @@ export type RequirementSuiteRun = {
   passed: number;
   failed: number;
   blocked: number;
+  skipped: number;
+  cancelled: number;
   currentExecutableCaseId?: string;
   caseRuns: RequirementSuiteCaseRun[];
   createdAt: string;

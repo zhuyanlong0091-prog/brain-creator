@@ -1899,6 +1899,101 @@ describe("Brain Creator requirement-first facade", () => {
       })
     ]);
   });
+
+  it("previews and confirms requirement suite cancellation through bc_run", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Cancellation Knowledge",
+      key: "cancellation-knowledge",
+      defaultLocale: "en-US"
+    });
+    const run = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: "system-cancellation",
+      cases: [
+        {
+          executableCaseId: "executable-cancellation",
+          title: "Cancel pending execution"
+        }
+      ],
+      continueOnBlocked: false
+    });
+    context.requirementSuiteRuns.beginNext(run.id);
+    context.repository.testDataTasks.push({
+      id: "test-data-cancellation",
+      knowledgeProjectId: project.id,
+      systemId: "system-cancellation",
+      executableCaseId: "executable-cancellation",
+      profileId: "profile-cancellation",
+      field: "Order",
+      action: "lookup-or-create",
+      status: "pending",
+      idempotencyKey: "cancel-test-data",
+      allowCreate: false,
+      cleanup: "none",
+      contextPath: "context.json",
+      promptPath: "prompt.md",
+      sourceRefs: [],
+      outputSourceRefs: [],
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z"
+    });
+    context.requirementSuiteRuns.markWaitingForTestData(
+      run.id,
+      "executable-cancellation",
+      {
+        taskId: "test-data-cancellation",
+        phase: "prepare"
+      }
+    );
+
+    const preview = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        knowledgeProjectId: project.id,
+        suiteId: run.id,
+        suiteAction: "cancel",
+        confirm: false
+      })
+    );
+
+    expect(preview).toEqual(
+      expect.objectContaining({
+        status: "control-preview",
+        action: "cancel",
+        requiresConfirmation: true
+      })
+    );
+    expect(context.requirementSuiteRuns.get(run.id).status).toBe(
+      "waiting-for-test-data"
+    );
+
+    const cancelled = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        knowledgeProjectId: project.id,
+        suiteId: run.id,
+        suiteAction: "cancel",
+        confirm: true
+      })
+    );
+
+    expect(cancelled).toEqual(
+      expect.objectContaining({
+        status: "cancelled",
+        action: "cancel",
+        requirementSuiteRun: expect.objectContaining({
+          status: "cancelled",
+          cancelled: 1
+        })
+      })
+    );
+    expect(context.repository.testDataTasks[0].status).toBe("cancelled");
+  });
 });
 
 function dataOf(result: { content: Array<{ type: string; text?: string }> }) {

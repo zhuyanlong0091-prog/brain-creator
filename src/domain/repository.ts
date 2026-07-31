@@ -38,7 +38,7 @@ import type {
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 9;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 10;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
@@ -232,7 +232,13 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     this.requirementSuiteRuns = (snapshot.requirementSuiteRuns ?? []).map(
       (run) => ({
         ...run,
-        allowCreateTestData: run.allowCreateTestData ?? false
+        allowCreateTestData: run.allowCreateTestData ?? false,
+        skipped: run.skipped ?? 0,
+        cancelled: run.cancelled ?? 0,
+        caseRuns: run.caseRuns.map((caseRun) => ({
+          ...caseRun,
+          attempts: caseRun.attempts ?? []
+        }))
       })
     );
     this.executionEvidence = snapshot.executionEvidence ?? [];

@@ -200,6 +200,13 @@ Facade 工具被拒绝或取消后，Agent 不得改用底层同义工具绕过�
 13. 业务失败记录 Bug 后继续；数据、清理和其他技术失败创建 Gap 并默认停止。显式恢复会重试当前数据阶段，而不是跳过或重复执行已经完成的业务步骤。
 14. 用 `bc_review target=requirement-suite-run`、`execution-plan` 和其他 review 入口查看进度、计划、证据、Bug、Gap、Requirement Eval 历史准确率和需求/观察冲突。
 
+Requirement Suite 支持经确认的执行控制，且不新增用户必须记忆的工具：
+
+- 取消：先预览 `bc_run mode=requirement-suite suiteAction=cancel confirm=false`，确认后设为 `confirm=true`。挂起的 Agent/TestData 任务会取消，已完成结果保留；已创建数据的清理义务不会消失。
+- 重试：使用 `suiteAction=retry` 和目标 `executableCaseId`。仅允许重试 failed/blocked 用例，旧 ExecutionPlan、证据、Bug、Gap 会进入 `attempts` 历史；passed 用例不可重试。
+- 跳过：使用 `suiteAction=skip` 和目标 `executableCaseId`。仅允许显式跳过 blocked 用例；存在待清理的创建数据时拒绝跳过。
+- 三种控制都必须先 `confirm=false` 预览，再由用户批准 `confirm=true`。`bc_status` 与 `bc_review target=requirement-suite-run` 返回 passed/failed/blocked/skipped/cancelled 计数和尝试历史。
+
 系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。`interactionMode` 默认为 `off`，此时不点击控件。显式设置 `safe` 后，每页默认最多探测 3 个、硬上限 10 个 Tab、展开控件或原生下拉，并记录前后状态、可见字段、弹窗、URL、截图与被拦截请求。危险名称、无稳定 selector、提交类控件、非 GET/HEAD/OPTIONS 请求和危险 URL 会被跳过或拦截；该模式不会提交表单，也不能证明设计错误的 GET 接口绝无副作用。复杂菜单、需要输入的数据流程和真实业务提交仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
 
 ### 飞书需求接入
@@ -342,6 +349,13 @@ Brain Creator creates a BugReport only when evidence supports a business expecta
 12. Requirement Suite confirmation validates all non-data blockers, then creates one ordered `RequirementSuiteRun`. Only one case may prepare data, run an Agent, or clean up at a time.
 13. Business failures continue after recording a Bug. Data, cleanup, and other technical failures create Gaps and stop by default. Explicit resume retries the current data phase rather than skipping or repeating completed business steps.
 14. Review RequirementSuiteRuns, ExecutionPlans, step evidence, BugReports, Gaps, historical Requirement Eval accuracy, and requirement-versus-observation conflicts.
+
+Requirement Suite controls remain behind the existing `bc_run` facade:
+
+- Cancel: preview with `suiteAction=cancel` and `confirm=false`, then confirm explicitly. Pending Agent/TestData tasks are cancelled and completed results remain. Created-data cleanup obligations remain visible.
+- Retry: use `suiteAction=retry` with `executableCaseId`. Only failed or blocked cases can retry. Previous plans, evidence, Bugs, and Gaps are retained in `attempts`; passed cases cannot retry.
+- Skip: use `suiteAction=skip` with `executableCaseId`. Only blocked cases can be skipped, and cleanup-due created data prevents skipping.
+- Every control requires preview then confirmation. `bc_status` and `bc_review target=requirement-suite-run` expose passed, failed, blocked, skipped, cancelled, and prior-attempt history.
 
 System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. `interactionMode` defaults to `off`. Opt-in `safe` mode probes at most 3 controls per page by default, with a hard limit of 10, and only considers tabs, disclosure controls, and native selects with stable selectors. It records before/after states and blocks write methods, dangerous URLs, and write-like labels. It never submits forms, but cannot prove that a misdesigned GET endpoint has no side effect. Complex menus, data-entry flows, and business submissions still require supplemental host-Agent page or training evidence.
 
