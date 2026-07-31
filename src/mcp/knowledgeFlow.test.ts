@@ -1571,6 +1571,334 @@ describe("Brain Creator requirement-first facade", () => {
       ])
     );
   });
+
+  it("prepares and cleans created test data inside a requirement suite", async () => {
+    const workDir = await tempDir();
+    const bridge = Object.assign(
+      async () => ({ exitCode: 0, stdout: "ok", stderr: "" }),
+      { provider: "host-agent", preflight: async () => ({ ok: true }) }
+    );
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json"),
+      agentBridge: bridge,
+      runner: async () => ({
+        exitCode: 0,
+        stdout: "1 passed",
+        stderr: ""
+      })
+    });
+    const now = new Date().toISOString();
+    context.repository.knowledgeProjects.push({
+      id: "knowledge-data-suite",
+      name: "Orders",
+      key: "orders-data-suite",
+      defaultLocale: "zh-CN",
+      status: "active",
+      systemIds: ["system-data-suite"],
+      createdAt: now,
+      updatedAt: now
+    });
+    context.repository.systemProfiles.push({
+      id: "system-data-suite",
+      name: "Orders Test",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://orders.example.test"],
+      status: "succeeded",
+      createdAt: now,
+      updatedAt: now
+    });
+    context.repository.authProfiles.push({
+      id: "auth-data-suite",
+      projectId: "system-data-suite",
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      encryptedSecrets: { token: "encrypted" },
+      status: "succeeded",
+      createdAt: now,
+      updatedAt: now,
+      lastVerifiedAt: now
+    });
+    context.repository.requirementSets.push({
+      id: "requirement-data-suite",
+      knowledgeProjectId: "knowledge-data-suite",
+      sourceId: "source-data-suite",
+      version: 1,
+      title: "Create order",
+      summary: "Create an order for an existing or new customer.",
+      contentHash: "a".repeat(64),
+      status: "approved",
+      affectedNodeIds: [],
+      approvedAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
+    context.repository.testIntents.push({
+      id: "intent-data-suite",
+      knowledgeProjectId: "knowledge-data-suite",
+      requirementSetId: "requirement-data-suite",
+      title: "Create order with customer",
+      module: "Orders",
+      priority: "P0",
+      objective: "Create an order with a customer reference.",
+      preconditions: [],
+      expectedResults: ["Order is created"],
+      requirementRefs: ["requirement:order-customer"],
+      knowledgeNodeRefs: [],
+      techniques: ["scenario"],
+      status: "blocked",
+      createdAt: now,
+      updatedAt: now
+    });
+    context.repository.executableCases.push({
+      id: "executable-data-suite",
+      knowledgeProjectId: "knowledge-data-suite",
+      requirementSetId: "requirement-data-suite",
+      testIntentId: "intent-data-suite",
+      systemId: "system-data-suite",
+      title: "Create order with customer",
+      status: "blocked",
+      preconditions: [],
+      steps: [
+        {
+          id: "step-data-suite",
+          order: 1,
+          action: "fill",
+          instruction: "Fill the customer field",
+          targetSemantic: "Customer",
+          dataProfileId: "profile-data-suite",
+          origin: "source",
+          sourceRefs: ["requirement:order-customer"]
+        }
+      ],
+      dataPlan: {
+        verdict: "blocked",
+        reasons: [
+          "Test data for Customer requires an explicit reuse or create decision"
+        ],
+        operations: [
+          {
+            profileId: "profile-data-suite",
+            field: "Customer",
+            strategy: "existing-reference",
+            decision: "lookup",
+            status: "needs-resolution",
+            lookupQuery: "status=active",
+            dependsOnProfileIds: [],
+            cleanup: "delete-created",
+            constraints: [],
+            reason:
+              "Test data for Customer requires an explicit reuse or create decision",
+            sourceRefs: ["requirement:order-customer"]
+          }
+        ],
+        dependencyOrder: ["profile-data-suite"],
+        requiresConfirmation: false,
+        requiresCleanup: false,
+        sourceRefs: ["requirement:order-customer"]
+      },
+      dataProfileIds: ["profile-data-suite"],
+      gapIds: ["gap-data-suite"],
+      createdAt: now,
+      updatedAt: now
+    });
+    context.repository.gaps.push({
+      id: "gap-data-suite",
+      projectId: "knowledge-data-suite",
+      sourceType: "test-data-plan",
+      sourceId: "requirement-data-suite",
+      reason:
+        "Test data for Customer requires an explicit reuse or create decision",
+      severity: "high",
+      owner: "qa",
+      status: "open",
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const prepared = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        knowledgeProjectId: "knowledge-data-suite",
+        systemId: "system-data-suite",
+        authProfileId: "auth-data-suite",
+        confirm: true,
+        allowCreateTestData: true,
+        maxHealAttempts: 0
+      })
+    );
+
+    expect(prepared).toEqual(
+      expect.objectContaining({
+        status: "needs_test_data",
+        stage: "test-data-prepare",
+        task: expect.objectContaining({
+          action: "lookup-or-create",
+          allowCreate: true
+        }),
+        requirementSuiteRun: expect.objectContaining({
+          status: "waiting-for-test-data",
+          allowCreateTestData: true
+        })
+      })
+    );
+    const waitingStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: "knowledge-data-suite"
+      })
+    );
+    const repeatedPreparation = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        knowledgeProjectId: "knowledge-data-suite",
+        systemId: "system-data-suite",
+        authProfileId: "auth-data-suite",
+        confirm: true,
+        allowCreateTestData: true
+      })
+    );
+
+    expect(waitingStatus.nextAction).toBe(
+      "complete_requirement_suite_test_data_task"
+    );
+    expect(repeatedPreparation.task.id).toBe(prepared.task.id);
+    expect(context.repository.requirementSuiteRuns).toHaveLength(1);
+    expect(context.repository.testDataTasks).toHaveLength(1);
+
+    const generated = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "submit-test-data",
+        taskId: prepared.task.id,
+        taskStatus: "succeeded",
+        dataDecision: "create",
+        dataReference: "customer:new-1",
+        dataValue: "Suite Customer",
+        sourceRefs: ["browser:create/customer-new-1.json"]
+      })
+    );
+
+    expect(generated).toEqual(
+      expect.objectContaining({
+        status: "needs_agent_execution",
+        stage: "generator",
+        executionPlan: expect.objectContaining({
+          executableCaseId: "executable-data-suite",
+          verdict: "ready"
+        })
+      })
+    );
+    await writeFile(
+      generated.testPath,
+      [
+        `import { test, expect } from "../${basename(generated.seedPath)}";`,
+        'test("created data", async () => { expect(true).toBe(true); });'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const cleanup = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: generated.task.id,
+        status: "succeeded",
+        stdout: "generator output created",
+        stderr: "",
+        outputPaths: [generated.testPath]
+      })
+    );
+
+    expect(cleanup).toEqual(
+      expect.objectContaining({
+        status: "needs_test_data",
+        stage: "test-data-cleanup",
+        task: expect.objectContaining({
+          action: "cleanup",
+          leaseId: expect.any(String)
+        }),
+        requirementSuiteRun: expect.objectContaining({
+          status: "waiting-for-test-data",
+          passed: 0
+        })
+      })
+    );
+
+    const cleanupFailed = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "submit-test-data",
+        taskId: cleanup.task.id,
+        taskStatus: "failed",
+        error: "Cleanup API unavailable",
+        sourceRefs: ["network:cleanup-timeout"]
+      })
+    );
+
+    expect(cleanupFailed).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        stage: "test-data-cleanup",
+        gap: expect.objectContaining({
+          sourceType: "test-data-cleanup",
+          status: "open"
+        }),
+        requirementSuiteRun: expect.objectContaining({
+          status: "blocked",
+          currentExecutableCaseId: "executable-data-suite"
+        })
+      })
+    );
+
+    const cleanupRetry = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        knowledgeProjectId: "knowledge-data-suite",
+        systemId: "system-data-suite",
+        authProfileId: "auth-data-suite",
+        suiteId: cleanup.requirementSuiteRun.id,
+        confirm: true,
+        resume: true,
+        continueOnBlocked: true
+      })
+    );
+
+    expect(cleanupRetry).toEqual(
+      expect.objectContaining({
+        status: "needs_test_data",
+        stage: "test-data-cleanup",
+        task: expect.objectContaining({
+          action: "cleanup",
+          status: "pending"
+        })
+      })
+    );
+    expect(cleanupRetry.task.id).not.toBe(cleanup.task.id);
+
+    const completed = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "submit-test-data",
+        taskId: cleanupRetry.task.id,
+        taskStatus: "succeeded",
+        sourceRefs: ["browser:cleanup/customer-new-1.json"]
+      })
+    );
+
+    expect(completed.requirementSuiteRun).toEqual(
+      expect.objectContaining({
+        status: "completed",
+        passed: 1,
+        failed: 0,
+        blocked: 0
+      })
+    );
+    expect(context.repository.testDataLeases).toEqual([
+      expect.objectContaining({
+        decision: "create",
+        status: "released",
+        releasedAt: expect.any(String)
+      })
+    ]);
+  });
 });
 
 function dataOf(result: { content: Array<{ type: string; text?: string }> }) {

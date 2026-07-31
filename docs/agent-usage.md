@@ -71,11 +71,11 @@ After navigation planning, Brain Creator evaluates generic `SystemBrainStateTran
 
 Compilation returns `testDataPlan`/`dataPlan` for profiles linked to the current TestIntent only. The plan records dependency order, proposed values, lookup queries, reuse/create decisions, secret references, and cleanup policy. Generated candidates remain visible for suite confirmation.
 
-For an `existing-reference`, call `bc_prepare action=prepare-test-data confirm=false` first. Present the lookup query and allowed decisions. After approval, call it again with `confirm=true`. The returned task package points to auditable prompt and context files. Reuse is the default. Pass `allowCreate=true` only when the user explicitly authorizes data creation.
+For an `existing-reference`, manual preparation remains available through `bc_prepare action=prepare-test-data`. The normal Requirement Suite path dispatches the same auditable task automatically when that case becomes current. Reuse is the default. Pass `allowCreateTestData=true` to `bc_run` only when the user explicitly authorizes data creation for that Suite.
 
 The host Agent performs the lookup or creation in the bound system, then calls `bc_prepare action=submit-test-data` with `taskId`, `taskStatus=succeeded`, `dataDecision`, `dataReference`, an optional non-secret `dataValue`, and non-empty `sourceRefs`. Created data is rejected unless the TestDataProfile has `delete-created` or `restore`. Failures use `taskStatus=failed`, `error`, and available evidence; Brain Creator creates a provider Gap instead of inventing data.
 
-After terminal ExecutionEvidence, call `prepare-test-data` again. Created leases produce a cleanup task, while reused leases are released automatically. Submit cleanup evidence through `submit-test-data`. Cleanup failure is a `test-data-cleanup` Gap and must not be classified as a product Bug.
+After terminal ExecutionEvidence, the Requirement Suite automatically releases reused leases or returns a cleanup task for created data. The next case cannot start until cleanup evidence is submitted. Cleanup failure is a `test-data-cleanup` Gap and must not be classified as a product Bug. Explicit Suite resume retries that cleanup task on the same case.
 
 Duplicate fields, missing dependencies, and cycles require profile corrections and cannot be bypassed by submitting a value. Secret references are never copied into executable step values. `resolve-test-data` remains available only for compatibility and explicit manual resolution.
 
@@ -89,11 +89,11 @@ Use `bc_review target=execution-plan` for audit. `bc_run mode=requirement-suite`
 
 ### 9. Preview And Execute
 
-The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`. Confirmation independently preflights every selected ExecutableCase before creating a TestCase, AgentTask, or ExecutionEvidence. If any candidate is blocked, none starts. A successful confirmation persists one ordered RequirementSuiteRun keyed by the frozen ExecutionPlan IDs.
+The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`. Confirmation independently checks every selected ExecutableCase. Requirement, System, Auth, Path, State, and non-data Gaps must pass before any side effect. Resolvable test-data Gaps are admitted into one ordered RequirementSuiteRun and handled when their case becomes current.
 
-The Generator, selected auth seed, and ExecutionEvidence consume the frozen plan instead of rereading mutable ExecutableCase fields. Before initial chain execution and every `bc_submit_agent_output` continuation, Brain Creator recomputes the semantic hash. A stale or newly blocked plan is rejected before task submission and must be prepared again.
+After the current case's data is ready, Brain Creator freezes its ExecutionPlan. The Generator, selected auth seed, and ExecutionEvidence consume that plan instead of rereading mutable ExecutableCase fields. Before initial chain execution and every `bc_submit_agent_output` continuation, Brain Creator recomputes the semantic hash. A stale or newly blocked plan is rejected before task submission.
 
-Only one RequirementSuiteRun case may be running or waiting for an Agent at a time. A Host Agent terminal submission automatically starts the next queued case. Business mismatches create BugReports and continue; technical failures create Gaps and stop unless the user explicitly resumes with `resume=true` and `continueOnBlocked=true`. Repeating the confirmed run while an AgentTask is pending returns that task instead of creating a duplicate. Inspect progress with `bc_status` or `bc_review target=requirement-suite-run`.
+Only one RequirementSuiteRun case may prepare data, wait for an Agent, execute, or clean up at a time. A Host Agent terminal submission performs cleanup before starting the next queued case. Business mismatches create BugReports and continue; data, cleanup, and other technical failures create Gaps and stop unless the user explicitly resumes with `resume=true` and `continueOnBlocked=true`. Data-phase resume retries the same phase rather than skipping the case. Repeating a confirmed run returns the current TestDataTask or AgentTask instead of creating a duplicate. Inspect progress with `bc_status` or `bc_review target=requirement-suite-run`.
 
 ### 10. Review Evidence
 

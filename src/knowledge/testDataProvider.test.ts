@@ -300,6 +300,56 @@ describe("TestDataProviderService", () => {
     );
   });
 
+  it("releases reused data during cleanup without dispatching a new lookup", async () => {
+    const fixture = await providerFixture();
+    const prepared = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true
+    });
+    const submitted = fixture.provider.submit({
+      taskId: prepared.task!.id,
+      status: "succeeded",
+      decision: "reuse",
+      reference: "customer:existing-1",
+      sourceRefs: ["api:customers/existing-1"]
+    });
+    fixture.repository.executionEvidence.push({
+      id: "evidence-reuse-1",
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      testCaseId: "case-reuse-1",
+      contextPackPath: "context.json",
+      status: "passed",
+      steps: [],
+      tracePaths: [],
+      artifactPaths: [],
+      consoleErrors: [],
+      networkFailures: [],
+      completedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    });
+
+    const cleanup = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true,
+      phase: "cleanup"
+    });
+
+    expect(cleanup).toEqual({ status: "ready", operations: [] });
+    expect(submitted.lease).toEqual(
+      expect.objectContaining({
+        status: "released",
+        releasedAt: expect.any(String)
+      })
+    );
+    expect(fixture.repository.testDataTasks).toHaveLength(1);
+  });
+
   it("marks cleanup failures separately from product defects", async () => {
     const fixture = await providerFixture();
     const prepared = await fixture.provider.prepare({
