@@ -33,6 +33,7 @@ import {
 } from "../knowledge/systemExplorer.js";
 import { TestDataProviderService } from "../knowledge/testDataProvider.js";
 import { ExecutionPreflightService } from "../knowledge/executionPreflight.js";
+import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js";
 import {
   commandRunnerAgentBridge,
   generatePlanDraft,
@@ -76,6 +77,7 @@ export type BrainCreatorMcpContext = {
   knowledgeService: KnowledgeService;
   testDataProvider: TestDataProviderService;
   executionPreflight: ExecutionPreflightService;
+  requirementSuiteRuns: RequirementSuiteRunService;
   systemExploration: SystemExplorationCoordinator;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
@@ -123,12 +125,14 @@ export function createBrainCreatorMcpContext(
     join(workDir, ".brain-creator")
   );
   const executionPreflight = new ExecutionPreflightService(repository);
+  const requirementSuiteRuns = new RequirementSuiteRunService(repository);
   return {
     repository,
     service,
     knowledgeService,
     testDataProvider,
     executionPreflight,
+    requirementSuiteRuns,
     systemExploration: new SystemExplorationCoordinator({
       repository,
       service,
@@ -1745,6 +1749,63 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
           : "Ask the user to confirm the requirement suite execution."
     };
   }
+  const requestedSuiteRunId = optionalStringArg(input, "suiteId");
+  const activeRequirementSuiteRun = requestedSuiteRunId
+    ? context.requirementSuiteRuns.get(requestedSuiteRunId)
+    : context.requirementSuiteRuns
+        .list(projectId)
+        .filter(
+          (item) =>
+            item.status === "running" ||
+            item.status === "waiting-for-agent" ||
+            item.status === "blocked"
+        )
+        .filter(
+          (item) => !selectedSystemId || item.systemId === selectedSystemId
+        )
+        .at(-1);
+  if (activeRequirementSuiteRun) {
+    if (activeRequirementSuiteRun.knowledgeProjectId !== projectId) {
+      throw new Error(
+        "Requirement suite run belongs to another knowledge project"
+      );
+    }
+    if (
+      selectedSystemId &&
+      activeRequirementSuiteRun.systemId !== selectedSystemId
+    ) {
+      throw new Error(
+        "Requirement suite run belongs to another business system"
+      );
+    }
+    if (
+      authProfileId &&
+      activeRequirementSuiteRun.authProfileId !== authProfileId
+    ) {
+      throw new Error(
+        "Requirement suite run cannot change its selected auth profile"
+      );
+    }
+    if (activeRequirementSuiteRun.status === "blocked") {
+      if (!optionalBooleanArg(input, "resume")) {
+        return {
+          mode: "requirement-suite",
+          status: "blocked",
+          requirementSuiteRun: activeRequirementSuiteRun,
+          nextAction:
+            "Retry with resume=true and continueOnBlocked=true after reviewing the blocked case."
+        };
+      }
+      context.requirementSuiteRuns.resume(activeRequirementSuiteRun.id, {
+        continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked")
+      });
+    }
+    return executeNextRequirementSuiteCase(
+      context,
+      activeRequirementSuiteRun.id,
+      { maxHealAttempts: optionalNumberArg(input, "maxHealAttempts") }
+    );
+  }
   if (candidates.length === 0) throw new Error("No ready executable cases were selected");
   const systemId = selectedSystemId;
   if (!systemId || !project.systemIds.includes(systemId)) {
@@ -1808,8 +1869,126 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
           : "Resolve execution preflight blockers before retrying."
     };
   }
-  const executableCase = candidates[0];
-  const executionPlan = executionPreflights[0].executionPlan!;
+  let requirementSuiteRun = context.requirementSuiteRuns.create({
+    knowledgeProjectId: projectId,
+    systemId,
+    authProfileId,
+    executionPlans: executionPreflights.map((item) => item.executionPlan!),
+    continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked")
+  });
+  if (optionalBooleanArg(input, "resume")) {
+    requirementSuiteRun = context.requirementSuiteRuns.resume(
+      requirementSuiteRun.id,
+      {
+        continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked")
+      }
+    );
+  }
+  return executeNextRequirementSuiteCase(context, requirementSuiteRun.id, {
+    maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
+  });
+}
+
+async function executeNextRequirementSuiteCase(
+  context: BrainCreatorMcpContext,
+  requirementSuiteRunId: string,
+  input: { maxHealAttempts?: number }
+): Promise<Record<string, unknown>> {
+  let requirementSuiteRun = context.requirementSuiteRuns.get(
+    requirementSuiteRunId
+  );
+  const activeCase = requirementSuiteRun.caseRuns.find(
+    (item) =>
+      item.status === "running" || item.status === "waiting-for-agent"
+  );
+  if (activeCase) {
+    const pendingTask = context.repository.agentTasks.find(
+      (task) =>
+        task.status === "pending" &&
+        task.chainContext?.requirementSuiteRunId === requirementSuiteRun.id &&
+        task.chainContext.executableCaseId === activeCase.executableCaseId
+    );
+    if (pendingTask) {
+      if (activeCase.status === "running") {
+        const executionEvidenceId =
+          pendingTask.chainContext?.executionEvidenceId ??
+          activeCase.executionEvidenceId;
+        if (!executionEvidenceId) {
+          throw new Error(
+            "Requirement suite AgentTask is missing execution evidence"
+          );
+        }
+        requirementSuiteRun = context.requirementSuiteRuns.markWaiting(
+          requirementSuiteRun.id,
+          activeCase.executableCaseId,
+          {
+            testCaseId: pendingTask.chainContext!.testCaseId,
+            agentTaskId: pendingTask.id,
+            executionEvidenceId
+          }
+        );
+      }
+      return {
+        ...taskPackageFromStoredTask(pendingTask),
+        mode: "requirement-suite",
+        stage: pendingTask.agent,
+        specPath: pendingTask.chainContext?.specPath,
+        seedPath: pendingTask.chainContext?.seedPath,
+        testPath: pendingTask.chainContext?.testPath,
+        requirementSuiteRun,
+        currentExecutableCaseId: activeCase.executableCaseId
+      };
+    }
+    if (activeCase.status === "waiting-for-agent") {
+      throw new Error(
+        "Requirement suite is waiting for an agent, but no pending AgentTask exists"
+      );
+    }
+  }
+  const started = context.requirementSuiteRuns.beginNext(
+    requirementSuiteRun.id
+  );
+  requirementSuiteRun = started.run;
+  if (!started.caseRun) {
+    return {
+      mode: "requirement-suite",
+      status: requirementSuiteRun.status,
+      requirementSuiteRun
+    };
+  }
+  const executionPlan = assertExecutionPlanIsCurrent(
+    context,
+    started.caseRun.executionPlanId
+  );
+  const executableCase = context.repository.executableCases.find(
+    (item) =>
+      item.id === started.caseRun!.executableCaseId &&
+      item.knowledgeProjectId === requirementSuiteRun.knowledgeProjectId
+  );
+  if (!executableCase) throw new Error("Executable case not found");
+  return executeRequirementSuiteCase(context, {
+    requirementSuiteRunId: requirementSuiteRun.id,
+    executableCase,
+    executionPlan,
+    maxHealAttempts: input.maxHealAttempts
+  });
+}
+
+async function executeRequirementSuiteCase(
+  context: BrainCreatorMcpContext,
+  input: {
+    requirementSuiteRunId: string;
+    executableCase: ExecutableCase;
+    executionPlan: ExecutionPlan;
+    maxHealAttempts?: number;
+  }
+): Promise<Record<string, unknown>> {
+  const { executableCase, executionPlan } = input;
+  const requirementSuiteRun = context.requirementSuiteRuns.get(
+    input.requirementSuiteRunId
+  );
+  const projectId = requirementSuiteRun.knowledgeProjectId;
+  const systemId = requirementSuiteRun.systemId;
   executableCase.systemId = systemId;
   executableCase.updatedAt = new Date().toISOString();
   context.repository.persist();
@@ -1858,22 +2037,103 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   let result;
   try {
     result = await runApprovedChain(context, {
-      ...input,
       caseId: testCase.id,
+      authProfileId: requirementSuiteRun.authProfileId,
+      maxHealAttempts: input.maxHealAttempts,
       knowledgeProjectId: projectId,
       executableCaseId: executableCase.id,
       executionPlanId: executionPlan.id,
+      requirementSuiteRunId: requirementSuiteRun.id,
       executionEvidenceId: executionEvidence.id,
       contextPackPath,
       knowledgeContext
     });
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     await context.knowledgeService.completeExecutionEvidence(executionEvidence.id, {
       status: "blocked",
-      actualResult: error instanceof Error ? error.message : String(error),
+      actualResult: reason,
       artifactPaths: [contextPackPath]
     });
-    throw error;
+    const gap = context.service.reportGap({
+      projectId: systemId,
+      sourceType: "requirement-suite-run",
+      sourceId: requirementSuiteRun.id,
+      reason,
+      severity: "high",
+      owner: "qa"
+    });
+    const blockedRun = context.requirementSuiteRuns.completeCase(
+      requirementSuiteRun.id,
+      executableCase.id,
+      {
+        status: "blocked",
+        gapIds: [gap.id],
+        error: reason
+      }
+    );
+    if (blockedRun.status === "running") {
+      const next = await executeNextRequirementSuiteCase(
+        context,
+        blockedRun.id,
+        { maxHealAttempts: input.maxHealAttempts }
+      );
+      return {
+        ...next,
+        blockedCase: {
+          executableCaseId: executableCase.id,
+          executionPlan,
+          executionEvidence: context.repository.executionEvidence.find(
+            (item) => item.id === executionEvidence.id
+          ),
+          gap
+        },
+        requirementSuiteRun: context.requirementSuiteRuns.get(blockedRun.id)
+      };
+    }
+    return {
+      mode: "requirement-suite",
+      status: "blocked",
+      knowledgeProjectId: projectId,
+      executableCaseId: executableCase.id,
+      executionPlan,
+      contextPackPath,
+      executionEvidence: context.repository.executionEvidence.find(
+        (item) => item.id === executionEvidence.id
+      ),
+      gap,
+      requirementSuiteRun: blockedRun,
+      nextAction:
+        "Resolve the execution Gap, then resume with continueOnBlocked only when skipping this case is acceptable."
+    };
+  }
+  if (
+    "task" in result &&
+    result.task?.status === "pending" &&
+    !("chainRun" in result)
+  ) {
+    const waitingRun = context.requirementSuiteRuns.markWaiting(
+      requirementSuiteRun.id,
+      executableCase.id,
+      {
+        testCaseId: testCase.id,
+        agentTaskId: result.task.id,
+        executionEvidenceId: executionEvidence.id
+      }
+    );
+    return {
+      ...result,
+      mode: "requirement-suite",
+      knowledgeProjectId: projectId,
+      executableCaseId: executableCase.id,
+      executionPlan,
+      contextPackPath,
+      executionEvidence,
+      requirementSuiteRun: waitingRun,
+      remainingExecutableCaseIds: waitingRun.caseRuns
+        .filter((item) => item.status === "queued")
+        .map((item) => item.executableCaseId)
+    };
   }
   const requirementFailure =
     "chainRun" in result && result.chainRun?.status === "failed"
@@ -1907,16 +2167,57 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
           )
         )
       : executionEvidence;
-  return {
+  const caseStatus =
+    "chainRun" in result && result.chainRun?.status === "succeeded"
+      ? "passed"
+      : requirementBug
+        ? "failed"
+        : "blocked";
+  const updatedRun = context.requirementSuiteRuns.completeCase(
+    requirementSuiteRun.id,
+    executableCase.id,
+    {
+      status: caseStatus,
+      chainRunId:
+        "chainRun" in result ? result.chainRun?.id : undefined,
+      bugReportId: requirementBug?.id,
+      gapIds:
+        "chainRun" in result
+          ? result.chainRun?.gaps.map((gap) => gap.id) ?? []
+          : [],
+      error: requirementFailure
+    }
+  );
+  const completedCase = {
     ...result,
-    mode: "requirement-suite",
-    knowledgeProjectId: projectId,
     executableCaseId: executableCase.id,
     executionPlan,
     contextPackPath,
     executionEvidence: completedEvidence,
-    bugReport: requirementBug,
-    remainingExecutableCaseIds: candidates.slice(1).map((item) => item.id)
+    bugReport: requirementBug
+  };
+  if (updatedRun.status === "running") {
+    const next: Record<string, unknown> =
+      await executeNextRequirementSuiteCase(
+      context,
+      updatedRun.id,
+      { maxHealAttempts: input.maxHealAttempts }
+      );
+    return {
+      ...next,
+      completedCase,
+      requirementSuiteRun: context.requirementSuiteRuns.get(updatedRun.id)
+    };
+  }
+  return {
+    ...completedCase,
+    mode: "requirement-suite",
+    knowledgeProjectId: projectId,
+    status: updatedRun.status,
+    requirementSuiteRun: updatedRun,
+    remainingExecutableCaseIds: updatedRun.caseRuns
+      .filter((item) => item.status === "queued")
+      .map((item) => item.executableCaseId)
   };
 }
 
@@ -2051,6 +2352,15 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const executionPlans = context.repository.executionPlans.filter(
     (item) => item.knowledgeProjectId === projectId
   );
+  const requirementSuiteRuns = context.requirementSuiteRuns.list(projectId);
+  const activeRequirementSuiteRun = requirementSuiteRuns
+    .filter(
+      (item) =>
+        item.status === "running" ||
+        item.status === "waiting-for-agent" ||
+        item.status === "blocked"
+    )
+    .at(-1);
   const testDataTasks = context.repository.testDataTasks.filter(
     (item) => item.knowledgeProjectId === projectId
   );
@@ -2108,7 +2418,13 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       )
   );
   let nextAction = "generate_test_design";
-  if (pendingTestDataTasks.length > 0) {
+  if (activeRequirementSuiteRun?.status === "waiting-for-agent") {
+    nextAction = "complete_requirement_suite_agent_task";
+  } else if (activeRequirementSuiteRun?.status === "blocked") {
+    nextAction = "review_and_resume_requirement_suite";
+  } else if (activeRequirementSuiteRun?.status === "running") {
+    nextAction = "continue_requirement_suite";
+  } else if (pendingTestDataTasks.length > 0) {
     nextAction = "complete_test_data_task";
   } else if (cleanupDue.length > 0) {
     nextAction = "prepare_test_data_cleanup";
@@ -2174,6 +2490,12 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       executionPlans: {
         total: executionPlans.length,
         recent: executionPlans.slice(-5)
+      },
+      requirementSuiteRuns: {
+        total: requirementSuiteRuns.length,
+        byStatus: countBy(requirementSuiteRuns, (item) => item.status),
+        active: activeRequirementSuiteRun,
+        recent: requirementSuiteRuns.slice(-5)
       },
       testData: {
         tasks: {
@@ -2245,6 +2567,14 @@ function knowledgeReview(
           item.knowledgeProjectId === projectId &&
           (!idValue || item.id === idValue)
       )
+    };
+  }
+  if (target === "requirement-suite-run") {
+    return {
+      project,
+      items: context.requirementSuiteRuns
+        .list(projectId)
+        .filter((item) => !idValue || item.id === idValue)
     };
   }
   if (target === "coverage") {
@@ -2501,6 +2831,10 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
         knowledgeProjectId: optionalStringArg(input, "knowledgeProjectId"),
         executableCaseId: optionalStringArg(input, "executableCaseId"),
         executionPlanId: optionalStringArg(input, "executionPlanId"),
+        requirementSuiteRunId: optionalStringArg(
+          input,
+          "requirementSuiteRunId"
+        ),
         executionEvidenceId: optionalStringArg(input, "executionEvidenceId"),
         contextPackPath: optionalStringArg(input, "contextPackPath")
       },
@@ -2827,6 +3161,21 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       },
       suiteContext: result.task.suiteContext
     });
+    if (
+      chainContext.requirementSuiteRunId &&
+      chainContext.executableCaseId &&
+      chainContext.executionEvidenceId
+    ) {
+      context.requirementSuiteRuns.markWaiting(
+        chainContext.requirementSuiteRunId,
+        chainContext.executableCaseId,
+        {
+          testCaseId: chainContext.testCaseId,
+          agentTaskId: healerTaskPackage.task.id,
+          executionEvidenceId: chainContext.executionEvidenceId
+        }
+      );
+    }
     return {
       ...result,
       ...healerTaskPackage,
@@ -2892,6 +3241,59 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         (path): path is string => typeof path === "string"
       )
     );
+  }
+  if (
+    chainContext.requirementSuiteRunId &&
+    chainContext.executableCaseId
+  ) {
+    const requirementCaseStatus =
+      status === "succeeded"
+        ? "passed"
+        : bugReport
+          ? "failed"
+          : "blocked";
+    const requirementSuiteRun = context.requirementSuiteRuns.completeCase(
+      chainContext.requirementSuiteRunId,
+      chainContext.executableCaseId,
+      {
+        status: requirementCaseStatus,
+        chainRunId: chainRun.id,
+        bugReportId: bugReport?.id,
+        gapIds: gaps.map((gap) => gap.id),
+        error: failureReason
+      }
+    );
+    const completedCase = {
+      task: result.task,
+      agentRun: result.agentRun,
+      chainRun,
+      testResult,
+      bugReport,
+      gaps
+    };
+    if (requirementSuiteRun.status === "running") {
+      const next = await executeNextRequirementSuiteCase(
+        context,
+        requirementSuiteRun.id,
+        { maxHealAttempts: chainContext.maxHealAttempts }
+      );
+      return {
+        ...next,
+        submittedCase: completedCase,
+        requirementSuiteRun: context.requirementSuiteRuns.get(
+          requirementSuiteRun.id
+        )
+      };
+    }
+    return {
+      ...result,
+      status: requirementSuiteRun.status,
+      chainRun,
+      testResult,
+      bugReport,
+      gaps,
+      requirementSuiteRun
+    };
   }
   const suiteRun = result.task.suiteContext
     ? context.service.recordCaseSuiteRun({
@@ -4472,6 +4874,7 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   const knowledgeProjectId = candidate.knowledgeProjectId;
   const executableCaseId = candidate.executableCaseId;
   const executionPlanId = candidate.executionPlanId;
+  const requirementSuiteRunId = candidate.requirementSuiteRunId;
   const executionEvidenceId = candidate.executionEvidenceId;
   const contextPackPath = candidate.contextPackPath;
   if (typeof testCaseId !== "string" || typeof specPath !== "string" || typeof testPath !== "string") {
@@ -4493,6 +4896,7 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
     knowledgeProjectId,
     executableCaseId,
     executionPlanId,
+    requirementSuiteRunId,
     executionEvidenceId,
     contextPackPath
   })) {
@@ -4511,6 +4915,7 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
     knowledgeProjectId: knowledgeProjectId as string | undefined,
     executableCaseId: executableCaseId as string | undefined,
     executionPlanId: executionPlanId as string | undefined,
+    requirementSuiteRunId: requirementSuiteRunId as string | undefined,
     executionEvidenceId: executionEvidenceId as string | undefined,
     contextPackPath: contextPackPath as string | undefined
   };
@@ -4602,6 +5007,7 @@ type KnowledgeReviewTarget =
   | "test-intent"
   | "executable-case"
   | "execution-plan"
+  | "requirement-suite-run"
   | "evidence";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
@@ -4622,6 +5028,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "test-intent",
       "executable-case",
       "execution-plan",
+      "requirement-suite-run",
       "evidence"
     ].includes(value)
   ) {
@@ -4647,6 +5054,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "test-intent",
     "executable-case",
     "execution-plan",
+    "requirement-suite-run",
     "evidence"
   ].includes(value);
 }

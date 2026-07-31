@@ -366,6 +366,7 @@ export type AgentTask = {
     executionPlanId?: string;
     executionEvidenceId?: string;
     contextPackPath?: string;
+    requirementSuiteRunId?: string;
   };
   suiteContext?: {
     suiteId: string;
@@ -906,6 +907,53 @@ export type ExecutionPlan = Omit<ExecutionPlanDraft, "verdict"> & {
   id: string;
   verdict: "ready";
   confirmedAt: string;
+};
+
+export type RequirementSuiteCaseRun = {
+  executableCaseId: string;
+  executionPlanId: string;
+  title: string;
+  order: number;
+  status:
+    | "queued"
+    | "running"
+    | "waiting-for-agent"
+    | "passed"
+    | "failed"
+    | "blocked";
+  testCaseId?: string;
+  agentTaskId?: string;
+  executionEvidenceId?: string;
+  chainRunId?: string;
+  bugReportId?: string;
+  gapIds: string[];
+  error?: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export type RequirementSuiteRun = {
+  id: string;
+  knowledgeProjectId: string;
+  systemId: string;
+  authProfileId?: string;
+  status:
+    | "running"
+    | "waiting-for-agent"
+    | "blocked"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  continueOnBlocked: boolean;
+  total: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  currentExecutableCaseId?: string;
+  caseRuns: RequirementSuiteCaseRun[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
 };
 
 export type ExecutableCase = {

@@ -1280,19 +1280,23 @@ describe("Brain Creator requirement-first facade", () => {
       async () => ({ exitCode: 0, stdout: "ok", stderr: "" }),
       { provider: "host-agent", preflight: async () => ({ ok: true }) }
     );
+    let testRunCount = 0;
     const context = createBrainCreatorMcpContext({
       workDir,
       dataFilePath: join(workDir, "assets.json"),
       agentBridge: bridge,
-      runner: async () => ({
-        exitCode: 1,
-        stdout: "",
-        stderr: [
-          "Error: expect(received).toBe(expected)",
-          "Expected: \"approved\"",
-          "Received: \"draft\""
-        ].join("\n")
-      })
+      runner: async () =>
+        ++testRunCount === 1
+          ? {
+              exitCode: 1,
+              stdout: "",
+              stderr: [
+                "Error: expect(received).toBe(expected)",
+                "Expected: \"approved\"",
+                "Received: \"draft\""
+              ].join("\n")
+            }
+          : { exitCode: 0, stdout: "1 passed", stderr: "" }
     });
     const project = dataOf(
       await handleBrainCreatorTool(context, "bc_configure", {
@@ -1395,7 +1399,9 @@ describe("Brain Creator requirement-first facade", () => {
     expect(context.repository.testCases).toHaveLength(testCaseCount);
     expect(context.repository.agentTasks).toHaveLength(agentTaskCount);
     expect(context.repository.executionEvidence).toHaveLength(evidenceCount);
-    blockedCase.status = "blocked";
+    context.repository.gaps.find(
+      (gap) => gap.id === "gap-orders-blocked"
+    )!.status = "resolved";
 
     const result = dataOf(
       await handleBrainCreatorTool(context, "bc_run", {
@@ -1471,14 +1477,99 @@ describe("Brain Creator requirement-first facade", () => {
       })
     );
 
-    expect(completed.chainRun.status).toBe("failed");
+    expect(completed.submittedCase.chainRun.status).toBe("failed");
+    expect(completed.status).toBe("needs_agent_execution");
+    expect(completed.requirementSuiteRun).toEqual(
+      expect.objectContaining({
+        status: "waiting-for-agent",
+        total: 2,
+        passed: 0,
+        failed: 1,
+        blocked: 0,
+        currentExecutableCaseId: blockedCase.id
+      })
+    );
     expect(context.repository.bugReports).toEqual([
       expect.objectContaining({ sourceId: result.executableCaseId, status: "open" })
     ]);
     expect(context.repository.gaps.filter((gap) => gap.projectId === system.id)).toHaveLength(0);
-    expect(context.repository.executionEvidence).toEqual([
-      expect.objectContaining({ status: "failed", chainRunId: completed.chainRun.id })
+    const runningStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+    const reviewedRun = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "requirement-suite-run",
+        knowledgeProjectId: project.id,
+        id: completed.requirementSuiteRun.id
+      })
+    );
+    const repeated = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        confirm: true,
+        maxHealAttempts: 0
+      })
+    );
+
+    expect(runningStatus.nextAction).toBe(
+      "complete_requirement_suite_agent_task"
+    );
+    expect(runningStatus.knowledge.requirementSuiteRuns.active.id).toBe(
+      completed.requirementSuiteRun.id
+    );
+    expect(reviewedRun.items).toEqual([
+      expect.objectContaining({ id: completed.requirementSuiteRun.id })
     ]);
+    expect(repeated.task.id).toBe(completed.task.id);
+    expect(context.repository.requirementSuiteRuns).toHaveLength(1);
+
+    await writeFile(
+      completed.testPath,
+      [
+        `import { test, expect } from "../${basename(completed.seedPath)}";`,
+        'test("sibling scenario", async () => { expect("approved").toBe("approved"); });'
+      ].join("\n"),
+      "utf8"
+    );
+    const finalized = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: completed.task.id,
+        status: "succeeded",
+        stdout: "generator output created",
+        stderr: "",
+        outputPaths: [completed.testPath]
+      })
+    );
+
+    expect(finalized.status).toBe("failed");
+    expect(finalized.requirementSuiteRun).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        total: 2,
+        passed: 1,
+        failed: 1,
+        blocked: 0
+      })
+    );
+    expect(finalized.requirementSuiteRun).not.toHaveProperty(
+      "currentExecutableCaseId"
+    );
+    expect(context.repository.executionEvidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "failed",
+          chainRunId: completed.submittedCase.chainRun.id
+        }),
+        expect.objectContaining({
+          status: "passed",
+          chainRunId: finalized.chainRun.id
+        })
+      ])
+    );
   });
 });
 

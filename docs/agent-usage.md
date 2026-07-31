@@ -89,9 +89,11 @@ Use `bc_review target=execution-plan` for audit. `bc_run mode=requirement-suite`
 
 ### 9. Preview And Execute
 
-The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`. Confirmation independently preflights every selected ExecutableCase before creating a TestCase, AgentTask, or ExecutionEvidence. If any candidate is blocked, none starts.
+The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit approval it runs `bc_run mode=requirement-suite confirm=true`. Confirmation independently preflights every selected ExecutableCase before creating a TestCase, AgentTask, or ExecutionEvidence. If any candidate is blocked, none starts. A successful confirmation persists one ordered RequirementSuiteRun keyed by the frozen ExecutionPlan IDs.
 
-The Generator, selected auth seed, and ExecutionEvidence consume the frozen plan instead of rereading mutable ExecutableCase fields. Before initial chain execution and every `bc_submit_agent_output` continuation, Brain Creator recomputes the semantic hash. A stale or newly blocked plan is rejected before task submission and must be prepared again. Playwright then executes the generated test, and the Healer performs bounded repairs. Business mismatches create BugReports. Auth, environment, network, locator, or missing evidence creates Gaps.
+The Generator, selected auth seed, and ExecutionEvidence consume the frozen plan instead of rereading mutable ExecutableCase fields. Before initial chain execution and every `bc_submit_agent_output` continuation, Brain Creator recomputes the semantic hash. A stale or newly blocked plan is rejected before task submission and must be prepared again.
+
+Only one RequirementSuiteRun case may be running or waiting for an Agent at a time. A Host Agent terminal submission automatically starts the next queued case. Business mismatches create BugReports and continue; technical failures create Gaps and stop unless the user explicitly resumes with `resume=true` and `continueOnBlocked=true`. Repeating the confirmed run while an AgentTask is pending returns that task instead of creating a duplicate. Inspect progress with `bc_status` or `bc_review target=requirement-suite-run`.
 
 ### 10. Review Evidence
 
