@@ -75,13 +75,16 @@ export class RequirementSuiteRunService {
       passed: 0,
       failed: 0,
       blocked: 0,
+      skipped: 0,
+      cancelled: 0,
       caseRuns: cases.map((item, index) => ({
         executableCaseId: item.executableCaseId,
         executionPlanId: item.executionPlanId,
         title: item.title,
         order: index + 1,
         status: "queued",
-        gapIds: []
+        gapIds: [],
+        attempts: []
       })),
       createdAt: now,
       updatedAt: now
@@ -298,6 +301,146 @@ export class RequirementSuiteRunService {
     return run;
   }
 
+  cancel(runId: string): RequirementSuiteRun {
+    const run = this.get(runId);
+    if (run.status === "cancelled") return run;
+    if (run.status === "completed" || run.status === "failed") {
+      throw new Error("Only unfinished requirement suites can be cancelled");
+    }
+    const now = timestamp();
+    for (const caseRun of run.caseRuns) {
+      if (caseRun.status === "blocked") {
+        this.archiveAttempt(caseRun, now);
+      }
+      if (
+        caseRun.status === "queued" ||
+        caseRun.status === "running" ||
+        caseRun.status === "waiting-for-test-data" ||
+        caseRun.status === "waiting-for-agent" ||
+        caseRun.status === "blocked"
+      ) {
+        caseRun.status = "cancelled";
+        caseRun.completedAt = now;
+      }
+    }
+    for (const task of this.repository.agentTasks) {
+      if (
+        task.status === "pending" &&
+        task.chainContext?.requirementSuiteRunId === run.id
+      ) {
+        task.status = "cancelled";
+        task.updatedAt = now;
+      }
+    }
+    for (const task of this.repository.testDataTasks) {
+      if (
+        task.status === "pending" &&
+        run.caseRuns.some((caseRun) => caseRun.testDataTaskId === task.id)
+      ) {
+        task.status = "cancelled";
+        task.updatedAt = now;
+      }
+    }
+    for (const evidence of this.repository.executionEvidence) {
+      if (
+        evidence.status === "running" &&
+        run.caseRuns.some(
+          (caseRun) => caseRun.executionEvidenceId === evidence.id
+        )
+      ) {
+        evidence.status = "blocked";
+        evidence.actualResult = "Requirement suite cancelled by user";
+        evidence.completedAt = now;
+      }
+    }
+    run.status = "cancelled";
+    run.currentExecutableCaseId = undefined;
+    run.completedAt = now;
+    run.updatedAt = now;
+    this.recount(run);
+    this.repository.persist();
+    return run;
+  }
+
+  retry(
+    runId: string,
+    executableCaseId: string
+  ): RequirementSuiteRun {
+    const run = this.get(runId);
+    const caseRun = this.caseById(run, executableCaseId);
+    if (caseRun.status !== "failed" && caseRun.status !== "blocked") {
+      throw new Error(
+        "Only failed or blocked requirement suite cases can be retried"
+      );
+    }
+    if (caseRun.testDataPhase) {
+      return this.resume(runId, { continueOnBlocked: true });
+    }
+    this.archiveAttempt(caseRun);
+    caseRun.status = "queued";
+    caseRun.executionPlanId = undefined;
+    caseRun.testDataTaskId = undefined;
+    caseRun.testDataPhase = undefined;
+    caseRun.pendingOutcome = undefined;
+    caseRun.testCaseId = undefined;
+    caseRun.agentTaskId = undefined;
+    caseRun.executionEvidenceId = undefined;
+    caseRun.chainRunId = undefined;
+    caseRun.bugReportId = undefined;
+    caseRun.gapIds = [];
+    caseRun.error = undefined;
+    caseRun.startedAt = undefined;
+    caseRun.completedAt = undefined;
+    run.status = "running";
+    run.currentExecutableCaseId = undefined;
+    run.completedAt = undefined;
+    run.updatedAt = timestamp();
+    this.recount(run);
+    this.repository.persist();
+    return run;
+  }
+
+  skip(
+    runId: string,
+    executableCaseId: string
+  ): RequirementSuiteRun {
+    const run = this.get(runId);
+    const caseRun = this.caseById(run, executableCaseId);
+    if (caseRun.status !== "blocked") {
+      throw new Error("Only blocked requirement suite cases can be skipped");
+    }
+    const cleanupDue = this.repository.testDataLeases.some(
+      (lease) =>
+        lease.executableCaseId === executableCaseId &&
+        lease.decision === "create" &&
+        lease.cleanup !== "none" &&
+        (lease.status === "active" || lease.status === "cleanup-failed")
+    );
+    if (cleanupDue) {
+      throw new Error(
+        "Created test data must be cleaned up before skipping this case"
+      );
+    }
+    const now = timestamp();
+    this.archiveAttempt(caseRun, now);
+    caseRun.status = "skipped";
+    caseRun.testDataTaskId = undefined;
+    caseRun.testDataPhase = undefined;
+    caseRun.pendingOutcome = undefined;
+    caseRun.completedAt = now;
+    run.currentExecutableCaseId = undefined;
+    run.completedAt = undefined;
+    this.recount(run);
+    if (run.caseRuns.some((item) => item.status === "queued")) {
+      run.status = "running";
+      run.updatedAt = now;
+      this.repository.persist();
+    } else {
+      this.finish(run, now);
+    }
+    return run;
+  }
+
   private currentCase(
     run: RequirementSuiteRun,
     executableCaseId: string
@@ -316,6 +459,42 @@ export class RequirementSuiteRunService {
       throw new Error("Requirement suite case is not active");
     }
     return caseRun;
+  }
+
+  private caseById(
+    run: RequirementSuiteRun,
+    executableCaseId: string
+  ): RequirementSuiteCaseRun {
+    const caseRun = run.caseRuns.find(
+      (item) => item.executableCaseId === executableCaseId
+    );
+    if (!caseRun) {
+      throw new Error("Executable case is not part of the requirement suite");
+    }
+    return caseRun;
+  }
+
+  private archiveAttempt(
+    caseRun: RequirementSuiteCaseRun,
+    archivedAt = timestamp()
+  ) {
+    if (caseRun.status !== "failed" && caseRun.status !== "blocked") {
+      return;
+    }
+    caseRun.attempts.push({
+      status: caseRun.status,
+      executionPlanId: caseRun.executionPlanId,
+      testCaseId: caseRun.testCaseId,
+      agentTaskId: caseRun.agentTaskId,
+      executionEvidenceId: caseRun.executionEvidenceId,
+      chainRunId: caseRun.chainRunId,
+      bugReportId: caseRun.bugReportId,
+      gapIds: [...caseRun.gapIds],
+      error: caseRun.error,
+      startedAt: caseRun.startedAt,
+      completedAt: caseRun.completedAt,
+      archivedAt
+    });
   }
 
   private applyOutcome(
@@ -353,6 +532,12 @@ export class RequirementSuiteRunService {
     run.failed = run.caseRuns.filter((item) => item.status === "failed").length;
     run.blocked = run.caseRuns.filter(
       (item) => item.status === "blocked"
+    ).length;
+    run.skipped = run.caseRuns.filter(
+      (item) => item.status === "skipped"
+    ).length;
+    run.cancelled = run.caseRuns.filter(
+      (item) => item.status === "cancelled"
     ).length;
   }
 

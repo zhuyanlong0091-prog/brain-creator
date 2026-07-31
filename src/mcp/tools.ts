@@ -309,6 +309,9 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       caseId: z.string().optional(),
       source: z.string().optional(),
       suiteId: z.string().optional(),
+      suiteAction: z
+        .enum(["continue", "cancel", "retry", "skip"])
+        .default("continue"),
       resume: z.boolean().default(false),
       continueOnBlocked: z.boolean().default(false),
       allowCreateTestData: z.boolean().default(false),

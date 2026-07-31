@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(9);
+    expect(second.schemaVersion).toBe(10);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -279,6 +279,8 @@ describe("JsonFileBrainCreatorRepository", () => {
       passed: 0,
       failed: 0,
       blocked: 0,
+      skipped: 0,
+      cancelled: 0,
       currentExecutableCaseId: "executableCase_1",
       caseRuns: [{
         executableCaseId: "executableCase_1",
@@ -290,6 +292,7 @@ describe("JsonFileBrainCreatorRepository", () => {
         agentTaskId: "agentTask_1",
         executionEvidenceId: "executionEvidence_1",
         gapIds: [],
+        attempts: [],
         startedAt: "2026-07-30T00:01:00.000Z"
       }],
       createdAt: "2026-07-30T00:01:00.000Z",
@@ -299,7 +302,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(9);
+    expect(second.schemaVersion).toBe(10);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);
@@ -354,13 +357,16 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const repository = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(repository.schemaVersion).toBe(9);
+    expect(repository.schemaVersion).toBe(10);
     expect(repository.requirementSuiteRuns[0]).toEqual(
       expect.objectContaining({
         id: "legacy-suite",
-        allowCreateTestData: false
+        allowCreateTestData: false,
+        skipped: 0,
+        cancelled: 0
       })
     );
+    expect(repository.requirementSuiteRuns[0].caseRuns[0].attempts).toEqual([]);
   });
 });
 
