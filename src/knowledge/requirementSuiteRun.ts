@@ -517,6 +517,7 @@ export class RequirementSuiteRunService {
     caseRun.agentTaskId = undefined;
     caseRun.executionEvidenceId = undefined;
     caseRun.chainRunId = undefined;
+    caseRun.diagnosisId = undefined;
     caseRun.bugReportId = undefined;
     caseRun.gapIds = [];
     caseRun.error = undefined;
@@ -639,6 +640,7 @@ export class RequirementSuiteRunService {
       agentTaskId: caseRun.agentTaskId,
       executionEvidenceId: caseRun.executionEvidenceId,
       chainRunId: caseRun.chainRunId,
+      diagnosisId: caseRun.diagnosisId,
       bugReportId: caseRun.bugReportId,
       gapIds: [...caseRun.gapIds],
       error: caseRun.error,
@@ -656,6 +658,7 @@ export class RequirementSuiteRunService {
     const now = timestamp();
     caseRun.status = input.status;
     caseRun.chainRunId = input.chainRunId;
+    caseRun.diagnosisId = input.diagnosisId;
     caseRun.bugReportId = input.bugReportId;
     caseRun.gapIds = [...new Set([...caseRun.gapIds, ...input.gapIds])];
     caseRun.error = input.error;
@@ -665,6 +668,24 @@ export class RequirementSuiteRunService {
     caseRun.pendingOutcome = undefined;
     run.currentExecutableCaseId = undefined;
     this.recount(run);
+    if (input.diagnosisId) {
+      this.record(run, {
+        executableCaseId: caseRun.executableCaseId,
+        event: "failure-diagnosed",
+        scope: "case",
+        stage: "execution",
+        fromStatus: caseRun.agentTaskId ? "waiting-for-agent" : "running",
+        toStatus: caseRun.status,
+        outcome: input.status,
+        failureType: input.failureType,
+        message: "Terminal execution evidence was classified",
+        references: {
+          executionEvidenceId: caseRun.executionEvidenceId,
+          chainRunId: input.chainRunId,
+          diagnosisId: input.diagnosisId
+        }
+      });
+    }
     this.record(run, {
       executableCaseId: caseRun.executableCaseId,
       event: "case-completed",
@@ -687,6 +708,7 @@ export class RequirementSuiteRunService {
         agentTaskId: caseRun.agentTaskId,
         executionEvidenceId: caseRun.executionEvidenceId,
         chainRunId: input.chainRunId,
+        diagnosisId: input.diagnosisId,
         bugReportId: input.bugReportId,
         gapIds: input.gapIds
       }

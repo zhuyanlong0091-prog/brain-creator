@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(11);
+    expect(second.schemaVersion).toBe(12);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -315,11 +315,33 @@ describe("JsonFileBrainCreatorRepository", () => {
       },
       createdAt: "2026-07-30T00:01:00.000Z"
     });
+    first.executionDiagnoses.push({
+      id: "executionDiagnosis_1",
+      knowledgeProjectId: "knowledge_1",
+      systemId: "system_1",
+      requirementSuiteRunId: "requirementSuiteRun_1",
+      executableCaseId: "executableCase_1",
+      executionEvidenceId: "executionEvidence_1",
+      chainRunId: "chainRun_1",
+      testCaseId: "case_1",
+      verdict: "automation_gap",
+      failureType: "automation_failure",
+      confidence: "high",
+      retry: {
+        attempted: 1,
+        max: 1,
+        exhausted: true,
+        eligible: false
+      },
+      reasons: ["Generated automation or locator evidence is not reliable"],
+      evidenceRefs: ["executionEvidence_1", "chainRun_1"],
+      createdAt: "2026-07-30T00:02:00.000Z"
+    });
     first.persist();
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(11);
+    expect(second.schemaVersion).toBe(12);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);
@@ -340,6 +362,12 @@ describe("JsonFileBrainCreatorRepository", () => {
       expect.objectContaining({
         id: "runLedger_1",
         event: "agent-task-requested"
+      })
+    ]);
+    expect(second.executionDiagnoses).toEqual([
+      expect.objectContaining({
+        id: "executionDiagnosis_1",
+        verdict: "automation_gap"
       })
     ]);
   });
@@ -380,7 +408,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const repository = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(repository.schemaVersion).toBe(11);
+    expect(repository.schemaVersion).toBe(12);
     expect(repository.requirementSuiteRuns[0]).toEqual(
       expect.objectContaining({
         id: "legacy-suite",

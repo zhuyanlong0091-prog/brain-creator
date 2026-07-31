@@ -17,6 +17,7 @@ import type {
   GeneratedCase,
   GlossaryTerm,
   ExecutableCase,
+  ExecutionDiagnosis,
   ExecutionPlan,
   ExecutionEvidence,
   KnowledgeEdge,
@@ -39,7 +40,7 @@ import type {
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 11;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 12;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
@@ -78,6 +79,7 @@ export class InMemoryBrainCreatorRepository {
   executionPlans: ExecutionPlan[] = [];
   requirementSuiteRuns: RequirementSuiteRun[] = [];
   executionEvidence: ExecutionEvidence[] = [];
+  executionDiagnoses: ExecutionDiagnosis[] = [];
   runLedgerEntries: RunLedgerEntry[] = [];
 
   persist() {
@@ -120,6 +122,7 @@ export class InMemoryBrainCreatorRepository {
     this.executionPlans = [];
     this.requirementSuiteRuns = [];
     this.executionEvidence = [];
+    this.executionDiagnoses = [];
     this.runLedgerEntries = [];
     this.persist();
   }
@@ -163,6 +166,7 @@ type RepositorySnapshot = Pick<
   | "executionPlans"
   | "requirementSuiteRuns"
   | "executionEvidence"
+  | "executionDiagnoses"
   | "runLedgerEntries"
 >;
 
@@ -246,6 +250,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       })
     );
     this.executionEvidence = snapshot.executionEvidence ?? [];
+    this.executionDiagnoses = snapshot.executionDiagnoses ?? [];
     this.runLedgerEntries = snapshot.runLedgerEntries ?? [];
   }
 
@@ -287,6 +292,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       executionPlans: this.executionPlans,
       requirementSuiteRuns: this.requirementSuiteRuns,
       executionEvidence: this.executionEvidence,
+      executionDiagnoses: this.executionDiagnoses,
       runLedgerEntries: this.runLedgerEntries
     };
   }

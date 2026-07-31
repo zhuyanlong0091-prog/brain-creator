@@ -1492,6 +1492,33 @@ describe("Brain Creator requirement-first facade", () => {
     expect(context.repository.bugReports).toEqual([
       expect.objectContaining({ sourceId: result.executableCaseId, status: "open" })
     ]);
+    expect(context.repository.executionDiagnoses).toEqual([
+      expect.objectContaining({
+        requirementSuiteRunId: completed.requirementSuiteRun.id,
+        executableCaseId: result.executableCaseId,
+        verdict: "product_bug",
+        failureType: "assertion_failure",
+        retry: expect.objectContaining({ attempted: 0, max: 0, exhausted: true })
+      })
+    ]);
+    expect(completed.submittedCase.executionDiagnosis).toEqual(
+      expect.objectContaining({
+        id: context.repository.executionDiagnoses[0].id,
+        verdict: "product_bug"
+      })
+    );
+    expect(
+      context.repository.runLedgerEntries.find(
+        (entry) => entry.event === "failure-diagnosed"
+      )
+    ).toEqual(
+      expect.objectContaining({
+        failureType: "assertion_failure",
+        references: expect.objectContaining({
+          diagnosisId: context.repository.executionDiagnoses[0].id
+        })
+      })
+    );
     expect(context.repository.gaps.filter((gap) => gap.projectId === system.id)).toHaveLength(0);
     const runningStatus = dataOf(
       await handleBrainCreatorTool(context, "bc_status", {
@@ -1503,6 +1530,13 @@ describe("Brain Creator requirement-first facade", () => {
         target: "requirement-suite-run",
         knowledgeProjectId: project.id,
         id: completed.requirementSuiteRun.id
+      })
+    );
+    const reviewedDiagnosis = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "execution-diagnosis",
+        knowledgeProjectId: project.id,
+        id: context.repository.executionDiagnoses[0].id
       })
     );
     const repeated = dataOf(
@@ -1521,9 +1555,30 @@ describe("Brain Creator requirement-first facade", () => {
     expect(runningStatus.knowledge.requirementSuiteRuns.active.id).toBe(
       completed.requirementSuiteRun.id
     );
+    expect(runningStatus.knowledge.executionDiagnoses).toEqual(
+      expect.objectContaining({
+        total: 1,
+        byVerdict: { product_bug: 1 },
+        byFailureType: { assertion_failure: 1 }
+      })
+    );
     expect(reviewedRun.items).toEqual([
       expect.objectContaining({ id: completed.requirementSuiteRun.id })
     ]);
+    expect(reviewedDiagnosis).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          total: 1,
+          byVerdict: { product_bug: 1 }
+        }),
+        items: [
+          expect.objectContaining({
+            id: context.repository.executionDiagnoses[0].id,
+            verdict: "product_bug"
+          })
+        ]
+      })
+    );
     expect(repeated.task.id).toBe(completed.task.id);
     expect(context.repository.requirementSuiteRuns).toHaveLength(1);
 

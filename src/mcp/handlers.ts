@@ -38,6 +38,7 @@ import {
 import { ExecutionPreflightService } from "../knowledge/executionPreflight.js";
 import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js";
 import { RunLedgerService } from "../knowledge/runLedger.js";
+import { ExecutionDiagnosisService } from "../knowledge/executionDiagnosis.js";
 import {
   classifyExecutionFailure as classifyFailure,
   isEnvironmentConfigurationFailure,
@@ -70,6 +71,7 @@ import type {
   ChainRun,
   DocumentCase,
   ExecutableCase,
+  ExecutionDiagnosisVerdict,
   ExecutionPlan,
   ExecutionFailureType,
   ExecutionPreflightCheck,
@@ -93,6 +95,7 @@ export type BrainCreatorMcpContext = {
   executionPreflight: ExecutionPreflightService;
   requirementSuiteRuns: RequirementSuiteRunService;
   runLedger: RunLedgerService;
+  executionDiagnosis: ExecutionDiagnosisService;
   systemExploration: SystemExplorationCoordinator;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
@@ -141,6 +144,7 @@ export function createBrainCreatorMcpContext(
   );
   const executionPreflight = new ExecutionPreflightService(repository);
   const runLedger = new RunLedgerService(repository);
+  const executionDiagnosis = new ExecutionDiagnosisService(repository);
   const requirementSuiteRuns = new RequirementSuiteRunService(
     repository,
     runLedger
@@ -153,6 +157,7 @@ export function createBrainCreatorMcpContext(
     executionPreflight,
     requirementSuiteRuns,
     runLedger,
+    executionDiagnosis,
     systemExploration: new SystemExplorationCoordinator({
       repository,
       service,
@@ -2442,8 +2447,35 @@ async function executeRequirementSuiteCase(
           result.chainRun.gaps.map((gap) => gap.reason).join("; ")
         ].find((value): value is string => Boolean(value?.trim()))
       : undefined;
+  const diagnosis =
+    "chainRun" in result && result.chainRun?.status === "failed"
+      ? context.executionDiagnosis.create({
+          knowledgeProjectId: projectId,
+          systemId,
+          requirementSuiteRunId: requirementSuiteRun.id,
+          executableCaseId: executableCase.id,
+          executionEvidenceId: executionEvidence.id,
+          chainRunId: result.chainRun.id,
+          testCaseId: testCase.id,
+          status: "failed",
+          failureReason: requirementFailure,
+          sourceType: "requirement-suite-run",
+          healAttempts:
+            "healerRuns" in result && Array.isArray(result.healerRuns)
+              ? result.healerRuns.length
+              : 0,
+          maxHealAttempts: input.maxHealAttempts ?? 3,
+          evidenceRefs: [
+            executionEvidence.id,
+            result.chainRun.id,
+            executionPlan.id
+          ]
+        })
+      : undefined;
   const requirementBug =
-    requirementFailure && isDocumentExpectationFailure(requirementFailure) && "chainRun" in result
+    requirementFailure &&
+    diagnosis?.verdict === "product_bug" &&
+    "chainRun" in result
       ? createRequirementBugReport(context, {
           executableCase,
           chainRun: result.chainRun,
@@ -2476,6 +2508,7 @@ async function executeRequirementSuiteCase(
     status: caseStatus,
     chainRunId:
       "chainRun" in result ? result.chainRun?.id : undefined,
+    diagnosisId: diagnosis?.id,
     bugReportId: requirementBug?.id,
     gapIds:
       "chainRun" in result
@@ -2484,12 +2517,11 @@ async function executeRequirementSuiteCase(
     failureType:
       caseStatus === "passed"
         ? undefined
-        : requirementBug
-          ? "assertion_failure"
-          : classifyFailure(
-              requirementFailure ?? "Requirement suite execution blocked",
-              "requirement-suite-run"
-            ),
+        : diagnosis?.failureType ??
+          classifyFailure(
+            requirementFailure ?? "Requirement suite execution blocked",
+            "requirement-suite-run"
+          ),
     error: requirementFailure
   };
   const completedCase = {
@@ -2498,6 +2530,7 @@ async function executeRequirementSuiteCase(
     executionPlan,
     contextPackPath,
     executionEvidence: completedEvidence,
+    executionDiagnosis: diagnosis,
     bugReport: requirementBug
   };
   return finalizeRequirementSuiteCase(context, {
@@ -2747,6 +2780,9 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const runLedgerEntries = context.runLedger.list({
     knowledgeProjectId: projectId
   });
+  const executionDiagnoses = context.executionDiagnosis.list({
+    knowledgeProjectId: projectId
+  });
   const activeRequirementSuiteRun = requirementSuiteRuns
     .filter(
       (item) =>
@@ -2906,6 +2942,12 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
           : undefined,
         recent: runLedgerEntries.slice(-20)
       },
+      executionDiagnoses: {
+        ...context.executionDiagnosis.summary({
+          knowledgeProjectId: projectId
+        }),
+        recent: executionDiagnoses.slice(-10)
+      },
       testData: {
         tasks: {
           total: testDataTasks.length,
@@ -2999,6 +3041,18 @@ function knowledgeReview(
       project,
       summaries: runIds.map((runId) => context.runLedger.summary(runId)),
       entries
+    };
+  }
+  if (target === "execution-diagnosis") {
+    const items = context.executionDiagnosis
+      .list({ knowledgeProjectId: projectId })
+      .filter((item) => !idValue || item.id === idValue);
+    return {
+      project,
+      summary: context.executionDiagnosis.summary({
+        knowledgeProjectId: projectId
+      }),
+      items
     };
   }
   if (target === "coverage") {
@@ -3710,13 +3764,41 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       : undefined;
   const chainRunId = id("chain");
   const artifactPaths = [chainContext.specPath, chainContext.testPath];
+  const requirementDiagnosis =
+    status === "failed" &&
+    failureReason &&
+    chainContext.executableCaseId
+      ? context.executionDiagnosis.create({
+          knowledgeProjectId: chainContext.knowledgeProjectId,
+          systemId: result.task.systemId,
+          requirementSuiteRunId: chainContext.requirementSuiteRunId,
+          executableCaseId: chainContext.executableCaseId,
+          executionEvidenceId: chainContext.executionEvidenceId,
+          chainRunId,
+          testCaseId: chainContext.testCaseId,
+          status: "failed",
+          failureReason,
+          sourceType:
+            result.task.agent === "healer"
+              ? "host-agent-healer"
+              : "host-agent-generator",
+          healAttempts,
+          maxHealAttempts,
+          evidenceRefs: [
+            chainRunId,
+            chainContext.executionEvidenceId,
+            chainContext.executionPlanId
+          ].filter((value): value is string => Boolean(value))
+        })
+      : undefined;
   const bugReport =
     status === "failed" && failureReason
       ? await maybeCreateHostAgentBugReport(context, {
           task: result.task,
           chainRunId,
           failureReason,
-          artifactPaths
+          artifactPaths,
+          requirementDiagnosisVerdict: requirementDiagnosis?.verdict
         })
       : undefined;
   const gaps =
@@ -3774,6 +3856,7 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       chainRun,
       testResult,
       bugReport,
+      executionDiagnosis: requirementDiagnosis,
       gaps
     };
     const executableCase = context.repository.executableCases.find(
@@ -3788,8 +3871,10 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       outcome: {
         status: requirementCaseStatus,
         chainRunId: chainRun.id,
+        diagnosisId: requirementDiagnosis?.id,
         bugReportId: bugReport?.id,
         gapIds: gaps.map((gap) => gap.id),
+        failureType: requirementDiagnosis?.failureType,
         error: failureReason
       },
       completedCase,
@@ -3984,11 +4069,12 @@ async function maybeCreateHostAgentBugReport(
     chainRunId: string;
     failureReason: string;
     artifactPaths: string[];
+    requirementDiagnosisVerdict?: ExecutionDiagnosisVerdict;
   }
 ) {
   if (
     input.task.chainContext?.executableCaseId &&
-    isDocumentExpectationFailure(input.failureReason)
+    input.requirementDiagnosisVerdict === "product_bug"
   ) {
     const executableCase = context.repository.executableCases.find(
       (item) => item.id === input.task.chainContext?.executableCaseId
@@ -5479,6 +5565,7 @@ type KnowledgeReviewTarget =
   | "execution-plan"
   | "requirement-suite-run"
   | "run-ledger"
+  | "execution-diagnosis"
   | "evidence";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
@@ -5501,6 +5588,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "execution-plan",
       "requirement-suite-run",
       "run-ledger",
+      "execution-diagnosis",
       "evidence"
     ].includes(value)
   ) {
@@ -5528,6 +5616,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "execution-plan",
     "requirement-suite-run",
     "run-ledger",
+    "execution-diagnosis",
     "evidence"
   ].includes(value);
 }

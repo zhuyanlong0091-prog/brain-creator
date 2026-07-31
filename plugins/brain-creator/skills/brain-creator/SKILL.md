@@ -82,7 +82,7 @@ When the user provides a requirement path or URL:
 16. Submit each Host Agent result normally. Reused data is released automatically; created data must finish cleanup before the next case starts. Business failures continue after Bug creation. Data, cleanup, and other technical blockers create Gaps and stop. Explicit resume retries the same data phase; it must not repeat completed business steps.
 17. Use `bc_review target=requirement-suite-run`, `bc_review target=execution-plan`, `bc_review target=requirement-eval-accuracy`, `bc_review target=system-brain`, and `bc_review target=system-exploration` alongside evidence, BugReport, and Gap reviews.
 18. Control an existing Requirement Suite only through `bc_run suiteAction=cancel|retry|skip`. Preview with `confirm=false`, obtain user approval, then use `confirm=true`. Retry only failed/blocked cases, skip only blocked cases, never bypass created-data cleanup, and preserve prior attempts for review.
-19. Use `bc_status` for the bounded active RunLedger summary and `bc_review target=run-ledger` for a complete Suite timeline. Treat Ledger failure types as diagnostics; create a product Bug only from evidence-backed expectation mismatches.
+19. Use `bc_status` for the bounded active RunLedger and ExecutionDiagnosis summaries, `bc_review target=run-ledger` for a complete Suite timeline, and `bc_review target=execution-diagnosis` for terminal failure classification. Create a product Bug only when the diagnosis verdict is `product_bug`.
 
 Do not let observed system behavior overwrite approved requirements. Prefer `explore-system` before compilation, then use `refresh-system-brain` to derive observed pages, fields, navigation, state transitions, workflows, cascades, and API integrations from existing assets. Safe interaction mode must reject write-like labels and unstable selectors, block non-read HTTP methods and dangerous URLs, restore the page after every probe, and stay within the allowlist and interaction budget. Never submit forms, approve, delete, or publish. Disclose the residual risk that a misdesigned GET endpoint may have side effects. Submit additional observed rules or workflows with `bc_prepare action=record-observation`, including evidence `sourceRefs`. Conflicts must remain visible and block execution until resolved.
 
@@ -134,7 +134,7 @@ Generator writes Playwright tests, Playwright executes them, and Healer performs
 
 Treat `bc_status.readiness` as a three-state signal: `ready`, `action-required`, or `blocked`. Pending AgentTasks, unfinished suites, open BugReports, and open Gaps are `action-required`; Bridge or manual auth blockers are `blocked`. When suite progress includes an `activeTask`, continue that task before relying on an older failed case in `remainingCaseNos`.
 
-After the bounded Healer attempt, create a BugReport only when the failure contains reliable business-result evidence. Generated test syntax, parser, index, locator, or missing-element evidence failures are automation/evidence Gaps. Use `automation_failure` and `locator_failure` review filters when diagnosing them.
+After the bounded Healer attempt, rely on the persisted ExecutionDiagnosis verdict. Create a BugReport only for `product_bug`; generated test syntax, parser, index, locator, missing-element, data, auth, environment, network, execution, and unknown failures remain typed Gaps. Review the diagnosis instead of reclassifying raw stderr.
 
 ## System
 
