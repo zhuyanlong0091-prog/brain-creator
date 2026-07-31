@@ -12,6 +12,9 @@ type CreateExecutionDiagnosisInput = {
   systemId: string;
   requirementSuiteRunId?: string;
   executableCaseId?: string;
+  caseSourceId?: string;
+  caseSuiteId?: string;
+  caseNo?: string;
   executionEvidenceId?: string;
   chainRunId?: string;
   testCaseId: string;
@@ -30,6 +33,9 @@ type ExecutionDiagnosisFilter = {
   systemId?: string;
   requirementSuiteRunId?: string;
   executableCaseId?: string;
+  caseSourceId?: string;
+  caseSuiteId?: string;
+  caseNo?: string;
   testCaseId?: string;
   verdict?: ExecutionDiagnosisVerdict;
 };
@@ -62,6 +68,9 @@ export class ExecutionDiagnosisService {
       systemId: input.systemId,
       requirementSuiteRunId: input.requirementSuiteRunId,
       executableCaseId: input.executableCaseId,
+      caseSourceId: input.caseSourceId,
+      caseSuiteId: input.caseSuiteId,
+      caseNo: input.caseNo,
       executionEvidenceId: input.executionEvidenceId,
       chainRunId: input.chainRunId,
       testCaseId: input.testCaseId,
@@ -93,6 +102,11 @@ export class ExecutionDiagnosisService {
           diagnosis.requirementSuiteRunId === filter.requirementSuiteRunId) &&
         (!filter.executableCaseId ||
           diagnosis.executableCaseId === filter.executableCaseId) &&
+        (!filter.caseSourceId ||
+          diagnosis.caseSourceId === filter.caseSourceId) &&
+        (!filter.caseSuiteId ||
+          diagnosis.caseSuiteId === filter.caseSuiteId) &&
+        (!filter.caseNo || diagnosis.caseNo === filter.caseNo) &&
         (!filter.testCaseId || diagnosis.testCaseId === filter.testCaseId) &&
         (!filter.verdict || diagnosis.verdict === filter.verdict)
     );
@@ -107,8 +121,33 @@ export class ExecutionDiagnosisService {
         diagnoses.flatMap((item) =>
           item.failureType ? [item.failureType] : []
         )
-      )
+      ),
+      routing: {
+        bugEligible: diagnoses.filter(
+          (item) => item.verdict === "product_bug"
+        ).length,
+        gapRouted: diagnoses.filter(
+          (item) =>
+            item.verdict !== "passed" && item.verdict !== "product_bug"
+        ).length,
+        lowConfidence: diagnoses.filter(
+          (item) => item.confidence === "low"
+        ).length,
+        retriesExhausted: diagnoses.filter(
+          (item) => item.retry.exhausted
+        ).length
+      }
     };
+  }
+
+  linkBugReport(diagnosisId: string, bugReportId: string) {
+    const diagnosis = this.repository.executionDiagnoses.find(
+      (item) => item.id === diagnosisId
+    );
+    if (!diagnosis) throw new Error("Execution diagnosis not found");
+    diagnosis.bugReportId = bugReportId;
+    this.repository.persist();
+    return diagnosis;
   }
 }
 

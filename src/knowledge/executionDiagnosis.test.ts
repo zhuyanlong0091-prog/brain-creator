@@ -104,7 +104,40 @@ describe("ExecutionDiagnosisService", () => {
     expect(service.summary({ systemId: "system-a" })).toEqual({
       total: 1,
       byVerdict: { automation_gap: 1 },
-      byFailureType: { locator_failure: 1 }
+      byFailureType: { locator_failure: 1 },
+      routing: {
+        bugEligible: 0,
+        gapRouted: 1,
+        lowConfidence: 0,
+        retriesExhausted: 0
+      }
     });
+  });
+
+  it("links document provenance and the gated BugReport", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+    const diagnosis = service.create({
+      systemId: "system-a",
+      caseSourceId: "source-a",
+      caseSuiteId: "suite-a",
+      caseNo: "TC-001",
+      testCaseId: "case-a",
+      status: "failed",
+      failureReason: "Expected approved, actual pending",
+      healAttempts: 1,
+      maxHealAttempts: 1,
+      evidenceRefs: ["chain-a"]
+    });
+
+    service.linkBugReport(diagnosis.id, "bug-a");
+
+    expect(service.list({ caseSuiteId: "suite-a", caseNo: "TC-001" })).toEqual([
+      expect.objectContaining({
+        id: diagnosis.id,
+        caseSourceId: "source-a",
+        bugReportId: "bug-a"
+      })
+    ]);
   });
 });

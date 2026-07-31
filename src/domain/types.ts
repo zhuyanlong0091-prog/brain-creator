@@ -374,6 +374,15 @@ export type AgentTask = {
     caseNo: string;
     title: string;
   };
+  regressionContext?: {
+    bugReportId: string;
+    sourceId: string;
+    caseNo: string;
+    title: string;
+    previousStatus: "open" | "retest-failed";
+    remainingBugIds: string[];
+    maxHealAttempts?: number;
+  };
   submitTool: "bc_submit_agent_output";
   createdAt: string;
   updatedAt: string;
@@ -484,6 +493,7 @@ export type CaseSuiteCaseResult = {
   status: "passed" | "failed" | "blocked" | "waiting-for-agent";
   testCaseId?: string;
   chainRunId?: string;
+  diagnosisId?: string;
   bugReportId?: string;
   gapIds: string[];
   error?: string;
@@ -503,6 +513,7 @@ export type BugReport = {
   reproductionSteps: string[];
   evidencePaths: string[];
   chainRunId?: string;
+  diagnosisId?: string;
   gapIds: string[];
   status: "open" | "retest-running" | "retest-passed" | "retest-failed" | "closed";
   createdAt: string;
@@ -1075,8 +1086,12 @@ export type ExecutionDiagnosis = {
   systemId: string;
   requirementSuiteRunId?: string;
   executableCaseId?: string;
+  caseSourceId?: string;
+  caseSuiteId?: string;
+  caseNo?: string;
   executionEvidenceId?: string;
   chainRunId?: string;
+  bugReportId?: string;
   testCaseId: string;
   verdict: ExecutionDiagnosisVerdict;
   failureType?: ExecutionFailureType;
