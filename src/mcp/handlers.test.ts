@@ -4547,7 +4547,8 @@ describe("handleBrainCreatorTool", () => {
     expect(context.repository.executionDiagnoses.at(-1)).toEqual(
       expect.objectContaining({
         verdict: "automation_gap",
-        failureType: "automation_failure"
+        failureType: "automation_failure",
+        gapIds: blockedRegression.results[0].gapIds
       })
     );
     expect(diagnosisStatus.executionDiagnoses).toEqual(
@@ -4841,6 +4842,80 @@ describe("handleBrainCreatorTool", () => {
       })
     );
     expect(error).toContain("Only draft test cases can be approved");
+  });
+
+  it("exposes a bounded read-only historical diagnosis audit", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+    const system = context.service.createSystemProfile({
+      name: "Legacy Console",
+      environment: "test",
+      baseUrl: "https://legacy.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://legacy.example.test"]
+    });
+    context.repository.bugReports.push({
+      id: "legacy-bug",
+      systemId: system.id,
+      sourceId: "legacy-source",
+      caseNo: "TC-001",
+      caseTitle: "Legacy assertion",
+      module: "Orders",
+      priority: "P1",
+      expectedResult: "approved",
+      actualResult: "Expected approved, actual pending",
+      reproductionSteps: [],
+      evidencePaths: [],
+      gapIds: [],
+      status: "open",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z"
+    });
+    context.repository.gaps.push({
+      id: "legacy-gap",
+      projectId: system.id,
+      sourceType: "legacy-execution",
+      sourceId: "TC-002",
+      reason: "network timeout while opening the target",
+      severity: "high",
+      owner: "qa",
+      status: "open",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z"
+    });
+
+    const before = JSON.stringify({
+      bugs: context.repository.bugReports,
+      gaps: context.repository.gaps
+    });
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", { systemId: system.id })
+    );
+    const review = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "execution-diagnosis",
+        systemId: system.id,
+        limit: 1
+      })
+    );
+
+    expect(status.executionDiagnoses.legacyAudit).toEqual(
+      expect.objectContaining({ totalCandidates: 2, bugs: 1, gaps: 1 })
+    );
+    expect(review.legacyAudit.summary).toEqual(
+      expect.objectContaining({ totalCandidates: 2, truncated: true })
+    );
+    expect(review.legacyAudit.candidates).toHaveLength(1);
+    expect(JSON.stringify(review.legacyAudit)).not.toContain(
+      "Expected approved, actual pending"
+    );
+    expect(
+      JSON.stringify({
+        bugs: context.repository.bugReports,
+        gaps: context.repository.gaps
+      })
+    ).toBe(before);
   });
 });
 

@@ -2127,6 +2127,64 @@ describe("Brain Creator requirement-first facade", () => {
     });
     expect(status.nextAction).toBe("continue_requirement_suite");
   });
+
+  it("limits historical diagnosis audit to systems bound to the knowledge project", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Audit Knowledge",
+      key: "audit-knowledge",
+      defaultLocale: "en-US"
+    });
+    const bound = context.service.createSystemProfile({
+      name: "Bound Console",
+      environment: "test",
+      baseUrl: "https://bound.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://bound.example.test"]
+    });
+    const other = context.service.createSystemProfile({
+      name: "Other Console",
+      environment: "test",
+      baseUrl: "https://other.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://other.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, bound.id);
+    for (const systemId of [bound.id, other.id]) {
+      context.repository.gaps.push({
+        id: `gap-${systemId}`,
+        projectId: systemId,
+        sourceType: "legacy-execution",
+        sourceId: "TC-001",
+        reason: "network timeout",
+        severity: "high",
+        owner: "qa",
+        status: "open",
+        createdAt: "2026-07-31T00:00:00.000Z",
+        updatedAt: "2026-07-31T00:00:00.000Z"
+      });
+    }
+
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+    const review = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "execution-diagnosis",
+        knowledgeProjectId: project.id
+      })
+    );
+
+    expect(status.knowledge.executionDiagnoses.legacyAudit.totalCandidates).toBe(1);
+    expect(review.legacyAudit.summary.totalCandidates).toBe(1);
+    expect(review.legacyAudit.candidates).toEqual([
+      expect.objectContaining({ systemId: bound.id, assetId: `gap-${bound.id}` })
+    ]);
+  });
 });
 
 function dataOf(result: { content: Array<{ type: string; text?: string }> }) {

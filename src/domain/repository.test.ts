@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(12);
+    expect(second.schemaVersion).toBe(13);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -327,6 +327,7 @@ describe("JsonFileBrainCreatorRepository", () => {
       executionEvidenceId: "executionEvidence_1",
       chainRunId: "chainRun_1",
       bugReportId: "bugReport_1",
+      gapIds: ["gap_1"],
       testCaseId: "case_1",
       verdict: "automation_gap",
       failureType: "automation_failure",
@@ -345,7 +346,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(12);
+    expect(second.schemaVersion).toBe(13);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);
@@ -375,7 +376,8 @@ describe("JsonFileBrainCreatorRepository", () => {
         caseSourceId: "caseSource_1",
         caseSuiteId: "caseSuite_1",
         caseNo: "TC-001",
-        bugReportId: "bugReport_1"
+        bugReportId: "bugReport_1",
+        gapIds: ["gap_1"]
       })
     ]);
   });
@@ -409,6 +411,24 @@ describe("JsonFileBrainCreatorRepository", () => {
             createdAt: "2026-07-30T00:00:00.000Z",
             updatedAt: "2026-07-30T00:00:00.000Z"
           }
+        ],
+        executionDiagnoses: [
+          {
+            id: "legacy-diagnosis",
+            systemId: "system-legacy",
+            testCaseId: "case-legacy",
+            verdict: "unknown_gap",
+            confidence: "low",
+            retry: {
+              attempted: 0,
+              max: 0,
+              exhausted: true,
+              eligible: false
+            },
+            reasons: ["Failure evidence is insufficient for a reliable conclusion"],
+            evidenceRefs: [],
+            createdAt: "2026-07-30T00:00:00.000Z"
+          }
         ]
       }),
       "utf8"
@@ -416,7 +436,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const repository = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(repository.schemaVersion).toBe(12);
+    expect(repository.schemaVersion).toBe(13);
     expect(repository.requirementSuiteRuns[0]).toEqual(
       expect.objectContaining({
         id: "legacy-suite",
@@ -426,6 +446,7 @@ describe("JsonFileBrainCreatorRepository", () => {
       })
     );
     expect(repository.requirementSuiteRuns[0].caseRuns[0].attempts).toEqual([]);
+    expect(repository.executionDiagnoses[0].gapIds).toEqual([]);
   });
 });
 

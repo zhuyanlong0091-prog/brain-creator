@@ -360,6 +360,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       environment: z.string().optional(),
       status: z.string().optional(),
       id: z.string().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
       failureTypes: z
         .array(
           z.enum([

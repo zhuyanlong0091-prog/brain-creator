@@ -136,6 +136,8 @@ Treat `bc_status.readiness` as a three-state signal: `ready`, `action-required`,
 
 After the bounded Healer attempt, rely on the persisted ExecutionDiagnosis verdict. Create a BugReport only for `product_bug`; generated test syntax, parser, index, locator, missing-element, data, auth, environment, network, execution, and unknown failures remain typed Gaps. Review the diagnosis instead of reclassifying raw stderr.
 
+Historical diagnosis `legacyAudit` is read-only and bounded. Use the status summary first and request `bc_review target=execution-diagnosis` only when candidate details are needed. Present `confirm_bug`, `review_bug_as_gap`, `confirm_gap`, and `needs_evidence` as suggestions. Never close a Bug or create/resolve a Gap from an audit candidate without explicit user confirmation and a dedicated migration action.
+
 ## System
 
 - Use `bc_list_systems` only in full-profile discovery or debugging.
