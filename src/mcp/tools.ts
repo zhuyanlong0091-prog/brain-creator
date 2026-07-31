@@ -300,7 +300,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_run",
     title: "Brain Creator run",
     description:
-      "Facade execution entry for approved cases, requirement suites that preflight every candidate and consume frozen execution plans, document case suites, and bug regression.",
+      "Facade execution entry for approved cases, resumable requirement suites that sequence frozen execution plans, document case suites, and bug regression.",
     inputSchema: z.object({
       mode: z.enum(["approved-case", "full-workflow", "case-source-suite", "bug-regression", "requirement-suite"]),
       systemId: z.string().optional(),
@@ -328,7 +328,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_review",
     title: "Brain Creator review",
     description:
-      "Facade review entry for suite runs, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
+      "Facade review entry for document and requirement suite runs, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
     inputSchema: z.object({
       target: z.enum([
         "suite-run",
@@ -345,6 +345,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "test-intent",
         "executable-case",
         "execution-plan",
+        "requirement-suite-run",
         "evidence"
       ]),
       knowledgeProjectId: z.string().optional(),

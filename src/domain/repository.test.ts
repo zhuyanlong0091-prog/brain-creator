@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(7);
+    expect(second.schemaVersion).toBe(8);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -268,11 +268,37 @@ describe("JsonFileBrainCreatorRepository", () => {
       generatedAt: "2026-07-30T00:01:00.000Z",
       confirmedAt: "2026-07-30T00:01:00.000Z"
     });
+    first.requirementSuiteRuns.push({
+      id: "requirementSuiteRun_1",
+      knowledgeProjectId: "knowledge_1",
+      systemId: "system_1",
+      status: "waiting-for-agent",
+      continueOnBlocked: false,
+      total: 1,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+      currentExecutableCaseId: "executableCase_1",
+      caseRuns: [{
+        executableCaseId: "executableCase_1",
+        executionPlanId: "executionPlan_1",
+        title: "Create order",
+        order: 1,
+        status: "waiting-for-agent",
+        testCaseId: "case_1",
+        agentTaskId: "agentTask_1",
+        executionEvidenceId: "executionEvidence_1",
+        gapIds: [],
+        startedAt: "2026-07-30T00:01:00.000Z"
+      }],
+      createdAt: "2026-07-30T00:01:00.000Z",
+      updatedAt: "2026-07-30T00:01:00.000Z"
+    });
     first.persist();
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(7);
+    expect(second.schemaVersion).toBe(8);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);
@@ -281,6 +307,12 @@ describe("JsonFileBrainCreatorRepository", () => {
     ]);
     expect(second.executionPlans).toEqual([
       expect.objectContaining({ id: "executionPlan_1", verdict: "ready" })
+    ]);
+    expect(second.requirementSuiteRuns).toEqual([
+      expect.objectContaining({
+        id: "requirementSuiteRun_1",
+        status: "waiting-for-agent"
+      })
     ]);
   });
 });
