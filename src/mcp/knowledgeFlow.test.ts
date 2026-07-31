@@ -1993,6 +1993,84 @@ describe("Brain Creator requirement-first facade", () => {
       })
     );
     expect(context.repository.testDataTasks[0].status).toBe("cancelled");
+
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+    const review = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "run-ledger",
+        knowledgeProjectId: project.id,
+        id: run.id
+      })
+    );
+
+    expect(status.knowledge.runLedger).toEqual(
+      expect.objectContaining({
+        total: 4,
+        recent: expect.arrayContaining([
+          expect.objectContaining({ event: "suite-cancelled" })
+        ])
+      })
+    );
+    expect(review).toEqual(
+      expect.objectContaining({
+        summaries: [
+          expect.objectContaining({
+            requirementSuiteRunId: run.id,
+            currentStatus: "cancelled",
+            latestEvent: "suite-cancelled"
+          })
+        ],
+        entries: expect.arrayContaining([
+          expect.objectContaining({ event: "suite-created" }),
+          expect.objectContaining({ event: "test-data-task-requested" }),
+          expect.objectContaining({ event: "suite-cancelled" })
+        ])
+      })
+    );
+  });
+
+  it("restores status for a legacy active requirement suite without ledger events", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Legacy Suite Knowledge",
+      key: "legacy-suite-knowledge",
+      defaultLocale: "en-US"
+    });
+    const run = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: "system-legacy-suite",
+      cases: [
+        {
+          executableCaseId: "executable-legacy-suite",
+          title: "Resume a legacy suite"
+        }
+      ],
+      continueOnBlocked: false
+    });
+    context.repository.runLedgerEntries = [];
+    context.repository.persist();
+
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+
+    expect(status.knowledge.requirementSuiteRuns.active.id).toBe(run.id);
+    expect(status.knowledge.runLedger).toEqual({
+      total: 0,
+      activeSummary: undefined,
+      recent: []
+    });
+    expect(status.nextAction).toBe("continue_requirement_suite");
   });
 });
 

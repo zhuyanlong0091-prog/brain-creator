@@ -65,6 +65,15 @@ describe("RequirementSuiteRunService", () => {
     expect(afterFailure.status).toBe("running");
     expect(second.caseRun?.executableCaseId).toBe("executable-case-2");
     expect(second.run.failed).toBe(1);
+    expect(
+      fixture.repository.runLedgerEntries.map((entry) => entry.event)
+    ).toEqual([
+      "suite-created",
+      "case-started",
+      "agent-task-requested",
+      "case-completed",
+      "case-started"
+    ]);
   });
 
   it("stops on a blocked case and resumes only with explicit continuation", () => {
@@ -225,6 +234,16 @@ describe("RequirementSuiteRunService", () => {
     );
     const next = fixture.service.beginNext(run.id);
     expect(next.caseRun?.executableCaseId).toBe("executable-case-2");
+    expect(
+      fixture.repository.runLedgerEntries.map((entry) => entry.event)
+    ).toEqual([
+      "suite-created",
+      "case-started",
+      "test-data-task-requested",
+      "test-data-task-completed",
+      "case-completed",
+      "case-started"
+    ]);
   });
 
   it("retries a blocked test-data task on the same case", () => {
@@ -260,9 +279,10 @@ describe("RequirementSuiteRunService", () => {
       }
     );
 
-    const resumed = fixture.service.resume(run.id, {
-      continueOnBlocked: true
-    });
+    const resumed = fixture.service.retry(
+      run.id,
+      started.caseRun!.executableCaseId
+    );
 
     expect(resumed).toEqual(
       expect.objectContaining({
@@ -281,6 +301,11 @@ describe("RequirementSuiteRunService", () => {
         })
       })
     );
+    expect(
+      fixture.repository.runLedgerEntries
+        .slice(-2)
+        .map((entry) => entry.event)
+    ).toEqual(["suite-resumed", "case-retried"]);
   });
 
   it("allows an explicit one-way upgrade to test-data creation", () => {

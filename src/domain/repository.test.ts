@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(10);
+    expect(second.schemaVersion).toBe(11);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -298,11 +298,28 @@ describe("JsonFileBrainCreatorRepository", () => {
       createdAt: "2026-07-30T00:01:00.000Z",
       updatedAt: "2026-07-30T00:01:00.000Z"
     });
+    first.runLedgerEntries.push({
+      id: "runLedger_1",
+      knowledgeProjectId: "knowledge_1",
+      systemId: "system_1",
+      requirementSuiteRunId: "requirementSuiteRun_1",
+      executableCaseId: "executableCase_1",
+      event: "agent-task-requested",
+      scope: "case",
+      stage: "generator",
+      fromStatus: "running",
+      toStatus: "waiting-for-agent",
+      references: {
+        agentTaskId: "agentTask_1",
+        executionEvidenceId: "executionEvidence_1"
+      },
+      createdAt: "2026-07-30T00:01:00.000Z"
+    });
     first.persist();
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(10);
+    expect(second.schemaVersion).toBe(11);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);
@@ -317,6 +334,12 @@ describe("JsonFileBrainCreatorRepository", () => {
         id: "requirementSuiteRun_1",
         status: "waiting-for-agent",
         allowCreateTestData: true
+      })
+    ]);
+    expect(second.runLedgerEntries).toEqual([
+      expect.objectContaining({
+        id: "runLedger_1",
+        event: "agent-task-requested"
       })
     ]);
   });
@@ -357,7 +380,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const repository = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(repository.schemaVersion).toBe(10);
+    expect(repository.schemaVersion).toBe(11);
     expect(repository.requirementSuiteRuns[0]).toEqual(
       expect.objectContaining({
         id: "legacy-suite",

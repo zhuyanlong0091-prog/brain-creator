@@ -959,6 +959,7 @@ export type RequirementSuiteCaseOutcome = {
   chainRunId?: string;
   bugReportId?: string;
   gapIds: string[];
+  failureType?: ExecutionFailureType;
   error?: string;
 };
 
@@ -1041,4 +1042,60 @@ export type ExecutionEvidence = {
   actualResult?: string;
   createdAt: string;
   completedAt?: string;
+};
+
+export type ExecutionFailureType =
+  | "assertion_failure"
+  | "auth_failure"
+  | "locator_failure"
+  | "network_failure"
+  | "automation_failure"
+  | "test_data_failure"
+  | "environment_failure"
+  | "execution_failure"
+  | "unknown_failure";
+
+export type RunLedgerEntry = {
+  id: string;
+  knowledgeProjectId: string;
+  systemId: string;
+  requirementSuiteRunId: string;
+  executableCaseId?: string;
+  event:
+    | "suite-created"
+    | "case-started"
+    | "test-data-task-requested"
+    | "test-data-task-completed"
+    | "test-data-task-failed"
+    | "execution-plan-frozen"
+    | "agent-task-requested"
+    | "case-completed"
+    | "suite-resumed"
+    | "case-retried"
+    | "case-skipped"
+    | "suite-cancelled"
+    | "suite-completed";
+  scope: "suite" | "case";
+  stage:
+    | "suite"
+    | "test-data-prepare"
+    | "test-data-cleanup"
+    | "preflight"
+    | "generator"
+    | "execution";
+  fromStatus?: string;
+  toStatus: string;
+  outcome?: "passed" | "failed" | "blocked" | "skipped" | "cancelled";
+  failureType?: ExecutionFailureType;
+  message?: string;
+  references?: {
+    executionPlanId?: string;
+    testDataTaskId?: string;
+    agentTaskId?: string;
+    executionEvidenceId?: string;
+    chainRunId?: string;
+    bugReportId?: string;
+    gapIds?: string[];
+  };
+  createdAt: string;
 };

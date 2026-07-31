@@ -332,7 +332,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_review",
     title: "Brain Creator review",
     description:
-      "Facade review entry for document and requirement suite runs, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
+      "Facade review entry for document and requirement suite runs, run-ledger timelines, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
     inputSchema: z.object({
       target: z.enum([
         "suite-run",
@@ -350,6 +350,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "executable-case",
         "execution-plan",
         "requirement-suite-run",
+        "run-ledger",
         "evidence"
       ]),
       knowledgeProjectId: z.string().optional(),
@@ -366,6 +367,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
             "locator_failure",
             "network_failure",
             "automation_failure",
+            "test_data_failure",
+            "environment_failure",
             "execution_failure",
             "unknown_failure"
           ])
