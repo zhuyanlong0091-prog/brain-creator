@@ -27,6 +27,7 @@ import type {
   ProbeResult,
   RequirementSet,
   RequirementSuiteRun,
+  RunLedgerEntry,
   RequirementSource,
   SystemProfile,
   SystemExploration,
@@ -38,7 +39,7 @@ import type {
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 10;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 11;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
@@ -77,6 +78,7 @@ export class InMemoryBrainCreatorRepository {
   executionPlans: ExecutionPlan[] = [];
   requirementSuiteRuns: RequirementSuiteRun[] = [];
   executionEvidence: ExecutionEvidence[] = [];
+  runLedgerEntries: RunLedgerEntry[] = [];
 
   persist() {
     return;
@@ -118,6 +120,7 @@ export class InMemoryBrainCreatorRepository {
     this.executionPlans = [];
     this.requirementSuiteRuns = [];
     this.executionEvidence = [];
+    this.runLedgerEntries = [];
     this.persist();
   }
 }
@@ -160,6 +163,7 @@ type RepositorySnapshot = Pick<
   | "executionPlans"
   | "requirementSuiteRuns"
   | "executionEvidence"
+  | "runLedgerEntries"
 >;
 
 export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorRepository {
@@ -242,6 +246,7 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       })
     );
     this.executionEvidence = snapshot.executionEvidence ?? [];
+    this.runLedgerEntries = snapshot.runLedgerEntries ?? [];
   }
 
   private snapshot(): RepositorySnapshot {
@@ -281,7 +286,8 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       executableCases: this.executableCases,
       executionPlans: this.executionPlans,
       requirementSuiteRuns: this.requirementSuiteRuns,
-      executionEvidence: this.executionEvidence
+      executionEvidence: this.executionEvidence,
+      runLedgerEntries: this.runLedgerEntries
     };
   }
 }

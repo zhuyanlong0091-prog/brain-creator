@@ -37,6 +37,12 @@ import {
 } from "../knowledge/testDataProvider.js";
 import { ExecutionPreflightService } from "../knowledge/executionPreflight.js";
 import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js";
+import { RunLedgerService } from "../knowledge/runLedger.js";
+import {
+  classifyExecutionFailure as classifyFailure,
+  isEnvironmentConfigurationFailure,
+  isGeneratedTestImplementationFailure
+} from "../knowledge/failureClassifier.js";
 import {
   commandRunnerAgentBridge,
   generatePlanDraft,
@@ -65,6 +71,7 @@ import type {
   DocumentCase,
   ExecutableCase,
   ExecutionPlan,
+  ExecutionFailureType,
   ExecutionPreflightCheck,
   Gap,
   RequirementSuiteCaseOutcome,
@@ -85,6 +92,7 @@ export type BrainCreatorMcpContext = {
   testDataProvider: TestDataProviderService;
   executionPreflight: ExecutionPreflightService;
   requirementSuiteRuns: RequirementSuiteRunService;
+  runLedger: RunLedgerService;
   systemExploration: SystemExplorationCoordinator;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
@@ -132,7 +140,11 @@ export function createBrainCreatorMcpContext(
     join(workDir, ".brain-creator")
   );
   const executionPreflight = new ExecutionPreflightService(repository);
-  const requirementSuiteRuns = new RequirementSuiteRunService(repository);
+  const runLedger = new RunLedgerService(repository);
+  const requirementSuiteRuns = new RequirementSuiteRunService(
+    repository,
+    runLedger
+  );
   return {
     repository,
     service,
@@ -140,6 +152,7 @@ export function createBrainCreatorMcpContext(
     testDataProvider,
     executionPreflight,
     requirementSuiteRuns,
+    runLedger,
     systemExploration: new SystemExplorationCoordinator({
       repository,
       service,
@@ -2248,6 +2261,10 @@ async function executeNextRequirementSuiteCase(
       {
         status: "blocked",
         gapIds: [gap.id],
+        failureType: classifyFailure(
+          reason,
+          "requirement-suite-preflight"
+        ),
         error: reason
       }
     );
@@ -2370,6 +2387,7 @@ async function executeRequirementSuiteCase(
       outcome: {
         status: "blocked",
         gapIds: [gap.id],
+        failureType: classifyFailure(reason, "requirement-suite-run"),
         error: reason
       },
       completedCase: {
@@ -2463,6 +2481,15 @@ async function executeRequirementSuiteCase(
       "chainRun" in result
         ? result.chainRun?.gaps.map((gap) => gap.id) ?? []
         : [],
+    failureType:
+      caseStatus === "passed"
+        ? undefined
+        : requirementBug
+          ? "assertion_failure"
+          : classifyFailure(
+              requirementFailure ?? "Requirement suite execution blocked",
+              "requirement-suite-run"
+            ),
     error: requirementFailure
   };
   const completedCase = {
@@ -2523,6 +2550,7 @@ async function finalizeRequirementSuiteCase(
       {
         status: "blocked",
         gapIds: [...input.outcome.gapIds, gap.id],
+        failureType: classifyFailure(reason, "test-data-cleanup"),
         error: reason
       }
     );
@@ -2716,6 +2744,9 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     (item) => item.knowledgeProjectId === projectId
   );
   const requirementSuiteRuns = context.requirementSuiteRuns.list(projectId);
+  const runLedgerEntries = context.runLedger.list({
+    knowledgeProjectId: projectId
+  });
   const activeRequirementSuiteRun = requirementSuiteRuns
     .filter(
       (item) =>
@@ -2863,6 +2894,18 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         active: activeRequirementSuiteRun,
         recent: requirementSuiteRuns.slice(-5)
       },
+      runLedger: {
+        total: runLedgerEntries.length,
+        activeSummary:
+          activeRequirementSuiteRun &&
+          runLedgerEntries.some(
+            (entry) =>
+              entry.requirementSuiteRunId === activeRequirementSuiteRun.id
+          )
+          ? context.runLedger.summary(activeRequirementSuiteRun.id)
+          : undefined,
+        recent: runLedgerEntries.slice(-20)
+      },
       testData: {
         tasks: {
           total: testDataTasks.length,
@@ -2941,6 +2984,21 @@ function knowledgeReview(
       items: context.requirementSuiteRuns
         .list(projectId)
         .filter((item) => !idValue || item.id === idValue)
+    };
+  }
+  if (target === "run-ledger") {
+    const entries = context.runLedger
+      .list({ knowledgeProjectId: projectId })
+      .filter(
+        (entry) => !idValue || entry.requirementSuiteRunId === idValue
+      );
+    const runIds = [...new Set(
+      entries.map((entry) => entry.requirementSuiteRunId)
+    )];
+    return {
+      project,
+      summaries: runIds.map((runId) => context.runLedger.summary(runId)),
+      entries
     };
   }
   if (target === "coverage") {
@@ -4001,18 +4059,6 @@ function isDocumentExpectationFailure(reason: string) {
   );
 }
 
-function isGeneratedTestImplementationFailure(reason: string) {
-  return /\b(?:syntaxerror|typeerror|referenceerror|cannot find module|module not found|no tests found|strict mode violation|target page, context or browser has been closed|sharedstrings|decodexml|index out of bounds)\b|expect\(locator\)[\s\S]*element\(s\) not found/i.test(
-    reason
-  );
-}
-
-function isEnvironmentConfigurationFailure(reason: string) {
-  return /\b(?:process definition key(?: is)? not configured|missing (?:environment )?configuration|configuration missing|required test data is unavailable|missing required test data|test data (?:is )?(?:missing|unavailable)|precondition(?: data)? (?:is )?(?:missing|unavailable))\b|未配置流程定义|环境配置缺失|测试数据(?:缺失|不存在|不可用)|前置数据(?:缺失|不存在|不可用)/i.test(
-    reason
-  );
-}
-
 function hostAgentFailureReason(
   agent: AgentRun["agent"],
   agentError: string | undefined,
@@ -4982,37 +5028,7 @@ function bugReviewSummary(bugs: Array<{ status: string; actualResult: string }>)
   };
 }
 
-type FailureType =
-  | "assertion_failure"
-  | "auth_failure"
-  | "locator_failure"
-  | "network_failure"
-  | "automation_failure"
-  | "execution_failure"
-  | "unknown_failure";
-
-function classifyFailure(reason: string, sourceType = ""): FailureType {
-  const text = `${sourceType} ${reason}`.toLowerCase();
-  if (/\b(auth|login|token|cookie|password|captcha|2fa|unauthorized|forbidden|403|401)\b/.test(text)) {
-    return "auth_failure";
-  }
-  if (/\b(selector|locator|element|dom|stable selector)\b/.test(text)) {
-    return "locator_failure";
-  }
-  if (isGeneratedTestImplementationFailure(text)) {
-    return "automation_failure";
-  }
-  if (/\b(network|net::|econn|timeout|timed out|dns|socket|connection|http 5\d\d)\b/.test(text)) {
-    return "network_failure";
-  }
-  if (/\b(expected|actual|assert|assertion|tobe|toequal|tocontain|not visible)\b/.test(text)) {
-    return "assertion_failure";
-  }
-  if (/\b(playwright|process|command|exit code|failed after|host-agent|generator|healer|suite failure)\b/.test(text)) {
-    return "execution_failure";
-  }
-  return "unknown_failure";
-}
+type FailureType = ExecutionFailureType;
 
 function failureTypeCounts(types: FailureType[]) {
   return countBy(types, (type) => type);
@@ -5029,6 +5045,8 @@ function failureTypeArg(value: string): FailureType {
     "locator_failure",
     "network_failure",
     "automation_failure",
+    "test_data_failure",
+    "environment_failure",
     "execution_failure",
     "unknown_failure"
   ];
@@ -5460,6 +5478,7 @@ type KnowledgeReviewTarget =
   | "executable-case"
   | "execution-plan"
   | "requirement-suite-run"
+  | "run-ledger"
   | "evidence";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
@@ -5481,6 +5500,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "executable-case",
       "execution-plan",
       "requirement-suite-run",
+      "run-ledger",
       "evidence"
     ].includes(value)
   ) {
@@ -5507,6 +5527,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "executable-case",
     "execution-plan",
     "requirement-suite-run",
+    "run-ledger",
     "evidence"
   ].includes(value);
 }

@@ -207,6 +207,8 @@ Requirement Suite 支持经确认的执行控制，且不新增用户必须记�
 - 跳过：使用 `suiteAction=skip` 和目标 `executableCaseId`。仅允许显式跳过 blocked 用例；存在待清理的创建数据时拒绝跳过。
 - 三种控制都必须先 `confirm=false` 预览，再由用户批准 `confirm=true`。`bc_status` 与 `bc_review target=requirement-suite-run` 返回 passed/failed/blocked/skipped/cancelled 计数和尝试历史。
 
+每个 Requirement Suite 还会写入持久化 RunLedger。它按时间记录 Suite 创建、用例开始、数据准备/清理、ExecutionPlan 冻结、Agent 等待、用例结果、重试、跳过、取消与 Suite 结束，并关联 task、plan、evidence、chain、Bug 和 Gap ID。`bc_status` 返回当前运行摘要和最近事件；`bc_review target=run-ledger` 可按 Suite ID 复盘完整时间线。Ledger 只记录已经发生的事实，不替代 RequirementSuiteRun 的控制状态。
+
 系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。`interactionMode` 默认为 `off`，此时不点击控件。显式设置 `safe` 后，每页默认最多探测 3 个、硬上限 10 个 Tab、展开控件或原生下拉，并记录前后状态、可见字段、弹窗、URL、截图与被拦截请求。危险名称、无稳定 selector、提交类控件、非 GET/HEAD/OPTIONS 请求和危险 URL 会被跳过或拦截；该模式不会提交表单，也不能证明设计错误的 GET 接口绝无副作用。复杂菜单、需要输入的数据流程和真实业务提交仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
 
 ### 飞书需求接入
@@ -356,6 +358,8 @@ Requirement Suite controls remain behind the existing `bc_run` facade:
 - Retry: use `suiteAction=retry` with `executableCaseId`. Only failed or blocked cases can retry. Previous plans, evidence, Bugs, and Gaps are retained in `attempts`; passed cases cannot retry.
 - Skip: use `suiteAction=skip` with `executableCaseId`. Only blocked cases can be skipped, and cleanup-due created data prevents skipping.
 - Every control requires preview then confirmation. `bc_status` and `bc_review target=requirement-suite-run` expose passed, failed, blocked, skipped, cancelled, and prior-attempt history.
+
+Every Requirement Suite also writes a persistent RunLedger. It records Suite creation, case start, data preparation/cleanup, ExecutionPlan freezing, Agent waits, case outcomes, retries, skips, cancellation, and Suite completion while linking task, plan, evidence, chain, Bug, and Gap IDs. `bc_status` exposes the active summary and recent events; `bc_review target=run-ledger` replays a Suite timeline by ID. The ledger records facts and does not replace RequirementSuiteRun as the control state.
 
 System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. `interactionMode` defaults to `off`. Opt-in `safe` mode probes at most 3 controls per page by default, with a hard limit of 10, and only considers tabs, disclosure controls, and native selects with stable selectors. It records before/after states and blocks write methods, dangerous URLs, and write-like labels. It never submits forms, but cannot prove that a misdesigned GET endpoint has no side effect. Complex menus, data-entry flows, and business submissions still require supplemental host-Agent page or training evidence.
 

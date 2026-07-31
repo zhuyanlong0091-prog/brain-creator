@@ -1,11 +1,13 @@
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
+  ExecutionFailureType,
   ExecutionPlan,
   RequirementSuiteCaseOutcome,
   RequirementSuiteCaseRun,
   RequirementSuiteRun
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
+import { RunLedgerService } from "./runLedger.js";
 
 type CreateRequirementSuiteRunInput = {
   knowledgeProjectId: string;
@@ -25,7 +27,14 @@ type CreateRequirementSuiteRunInput = {
 type CompleteRequirementSuiteCaseInput = RequirementSuiteCaseOutcome;
 
 export class RequirementSuiteRunService {
-  constructor(private readonly repository: InMemoryBrainCreatorRepository) {}
+  private readonly runLedger: RunLedgerService;
+
+  constructor(
+    private readonly repository: InMemoryBrainCreatorRepository,
+    runLedger?: RunLedgerService
+  ) {
+    this.runLedger = runLedger ?? new RunLedgerService(repository);
+  }
 
   create(input: CreateRequirementSuiteRunInput): RequirementSuiteRun {
     const executionPlans = input.executionPlans ?? [];
@@ -91,6 +100,12 @@ export class RequirementSuiteRunService {
     };
     this.repository.requirementSuiteRuns.push(run);
     this.repository.persist();
+    this.record(run, {
+      event: "suite-created",
+      scope: "suite",
+      stage: "suite",
+      toStatus: run.status
+    });
     return run;
   }
 
@@ -150,6 +165,14 @@ export class RequirementSuiteRunService {
     run.currentExecutableCaseId = next.executableCaseId;
     run.updatedAt = now;
     this.repository.persist();
+    this.record(run, {
+      executableCaseId: next.executableCaseId,
+      event: "case-started",
+      scope: "case",
+      stage: "suite",
+      fromStatus: "queued",
+      toStatus: next.status
+    });
     return { run, caseRun: next };
   }
 
@@ -172,6 +195,18 @@ export class RequirementSuiteRunService {
     run.currentExecutableCaseId = executableCaseId;
     run.updatedAt = timestamp();
     this.repository.persist();
+    this.record(run, {
+      executableCaseId,
+      event: "agent-task-requested",
+      scope: "case",
+      stage: "generator",
+      fromStatus: "running",
+      toStatus: caseRun.status,
+      references: {
+        agentTaskId: input.agentTaskId,
+        executionEvidenceId: input.executionEvidenceId
+      }
+    });
     return run;
   }
 
@@ -194,6 +229,18 @@ export class RequirementSuiteRunService {
     run.currentExecutableCaseId = executableCaseId;
     run.updatedAt = timestamp();
     this.repository.persist();
+    this.record(run, {
+      executableCaseId,
+      event: "test-data-task-requested",
+      scope: "case",
+      stage:
+        input.phase === "cleanup"
+          ? "test-data-cleanup"
+          : "test-data-prepare",
+      fromStatus: "running",
+      toStatus: caseRun.status,
+      references: { testDataTaskId: input.taskId }
+    });
     return run;
   }
 
@@ -207,9 +254,23 @@ export class RequirementSuiteRunService {
       throw new Error("Requirement suite case is not waiting for test data");
     }
     const pendingOutcome = caseRun.pendingOutcome;
+    const phase = caseRun.testDataPhase;
+    const testDataTaskId = caseRun.testDataTaskId;
     caseRun.testDataTaskId = undefined;
     caseRun.testDataPhase = undefined;
     caseRun.pendingOutcome = undefined;
+    this.record(run, {
+      executableCaseId,
+      event: "test-data-task-completed",
+      scope: "case",
+      stage:
+        phase === "cleanup"
+          ? "test-data-cleanup"
+          : "test-data-prepare",
+      fromStatus: "waiting-for-test-data",
+      toStatus: pendingOutcome?.status ?? "running",
+      references: { testDataTaskId }
+    });
     if (pendingOutcome) {
       this.applyOutcome(run, caseRun, pendingOutcome);
     } else {
@@ -241,6 +302,27 @@ export class RequirementSuiteRunService {
     run.updatedAt = timestamp();
     this.recount(run);
     this.repository.persist();
+    this.record(run, {
+      executableCaseId,
+      event: "test-data-task-failed",
+      scope: "case",
+      stage:
+        caseRun.testDataPhase === "cleanup"
+          ? "test-data-cleanup"
+          : "test-data-prepare",
+      fromStatus: "waiting-for-test-data",
+      toStatus: caseRun.status,
+      outcome: "blocked",
+      failureType: "test_data_failure",
+      message:
+        caseRun.testDataPhase === "cleanup"
+          ? "Test data cleanup failed"
+          : "Test data preparation failed",
+      references: {
+        testDataTaskId: caseRun.testDataTaskId,
+        gapIds: input.gapIds
+      }
+    });
     return run;
   }
 
@@ -254,6 +336,14 @@ export class RequirementSuiteRunService {
     caseRun.executionPlanId = executionPlanId;
     run.updatedAt = timestamp();
     this.repository.persist();
+    this.record(run, {
+      executableCaseId,
+      event: "execution-plan-frozen",
+      scope: "case",
+      stage: "preflight",
+      toStatus: caseRun.status,
+      references: { executionPlanId }
+    });
     return run;
   }
 
@@ -290,6 +380,17 @@ export class RequirementSuiteRunService {
       run.updatedAt = timestamp();
       this.recount(run);
       this.repository.persist();
+      this.record(run, {
+        executableCaseId: blockedDataCase.executableCaseId,
+        event: "suite-resumed",
+        scope: "suite",
+        stage:
+          blockedDataCase.testDataPhase === "cleanup"
+            ? "test-data-cleanup"
+            : "test-data-prepare",
+        fromStatus: "blocked",
+        toStatus: run.status
+      });
       return run;
     }
     if (!run.caseRuns.some((item) => item.status === "queued")) return run;
@@ -298,6 +399,13 @@ export class RequirementSuiteRunService {
     run.currentExecutableCaseId = undefined;
     run.updatedAt = timestamp();
     this.repository.persist();
+    this.record(run, {
+      event: "suite-resumed",
+      scope: "suite",
+      stage: "suite",
+      fromStatus: "blocked",
+      toStatus: run.status
+    });
     return run;
   }
 
@@ -359,6 +467,14 @@ export class RequirementSuiteRunService {
     run.updatedAt = now;
     this.recount(run);
     this.repository.persist();
+    this.record(run, {
+      event: "suite-cancelled",
+      scope: "suite",
+      stage: "suite",
+      toStatus: run.status,
+      outcome: "cancelled",
+      message: "Requirement suite cancelled by user"
+    });
     return run;
   }
 
@@ -374,7 +490,22 @@ export class RequirementSuiteRunService {
       );
     }
     if (caseRun.testDataPhase) {
-      return this.resume(runId, { continueOnBlocked: true });
+      const phase = caseRun.testDataPhase;
+      const previousTaskId = caseRun.testDataTaskId;
+      const resumed = this.resume(runId, { continueOnBlocked: true });
+      this.record(resumed, {
+        executableCaseId,
+        event: "case-retried",
+        scope: "case",
+        stage:
+          phase === "cleanup"
+            ? "test-data-cleanup"
+            : "test-data-prepare",
+        fromStatus: "blocked",
+        toStatus: "running",
+        references: { testDataTaskId: previousTaskId }
+      });
+      return resumed;
     }
     this.archiveAttempt(caseRun);
     caseRun.status = "queued";
@@ -397,6 +528,14 @@ export class RequirementSuiteRunService {
     run.updatedAt = timestamp();
     this.recount(run);
     this.repository.persist();
+    this.record(run, {
+      executableCaseId,
+      event: "case-retried",
+      scope: "case",
+      stage: "suite",
+      fromStatus: caseRun.attempts.at(-1)?.status,
+      toStatus: caseRun.status
+    });
     return run;
   }
 
@@ -431,6 +570,18 @@ export class RequirementSuiteRunService {
     run.currentExecutableCaseId = undefined;
     run.completedAt = undefined;
     this.recount(run);
+    this.record(run, {
+      executableCaseId,
+      event: "case-skipped",
+      scope: "case",
+      stage: "suite",
+      fromStatus: "blocked",
+      toStatus: caseRun.status,
+      outcome: "skipped",
+      references: {
+        gapIds: caseRun.attempts.at(-1)?.gapIds
+      }
+    });
     if (run.caseRuns.some((item) => item.status === "queued")) {
       run.status = "running";
       run.updatedAt = now;
@@ -514,6 +665,32 @@ export class RequirementSuiteRunService {
     caseRun.pendingOutcome = undefined;
     run.currentExecutableCaseId = undefined;
     this.recount(run);
+    this.record(run, {
+      executableCaseId: caseRun.executableCaseId,
+      event: "case-completed",
+      scope: "case",
+      stage: "execution",
+      fromStatus:
+        caseRun.agentTaskId
+          ? "waiting-for-agent"
+          : "running",
+      toStatus: caseRun.status,
+      outcome: input.status,
+      failureType:
+        input.failureType ?? defaultFailureType(input.status),
+      message:
+        input.status === "passed"
+          ? undefined
+          : "Requirement suite case did not complete successfully",
+      references: {
+        executionPlanId: caseRun.executionPlanId,
+        agentTaskId: caseRun.agentTaskId,
+        executionEvidenceId: caseRun.executionEvidenceId,
+        chainRunId: input.chainRunId,
+        bugReportId: input.bugReportId,
+        gapIds: input.gapIds
+      }
+    });
     const queued = run.caseRuns.some((item) => item.status === "queued");
     if (input.status === "blocked" && !run.continueOnBlocked) {
       run.status = "blocked";
@@ -524,6 +701,21 @@ export class RequirementSuiteRunService {
     }
     run.updatedAt = now;
     this.repository.persist();
+  }
+
+  private record(
+    run: RequirementSuiteRun,
+    input: Omit<
+      Parameters<RunLedgerService["append"]>[0],
+      "knowledgeProjectId" | "systemId" | "requirementSuiteRunId"
+    >
+  ) {
+    this.runLedger.append({
+      knowledgeProjectId: run.knowledgeProjectId,
+      systemId: run.systemId,
+      requirementSuiteRunId: run.id,
+      ...input
+    });
   }
 
   private recount(run: RequirementSuiteRun) {
@@ -553,7 +745,27 @@ export class RequirementSuiteRunService {
     run.completedAt = now;
     run.updatedAt = now;
     this.repository.persist();
+    this.record(run, {
+      event: "suite-completed",
+      scope: "suite",
+      stage: "suite",
+      toStatus: run.status,
+      outcome:
+        run.status === "completed"
+          ? "passed"
+          : run.status === "failed"
+            ? "failed"
+            : "blocked"
+    });
   }
+}
+
+function defaultFailureType(
+  status: RequirementSuiteCaseOutcome["status"]
+): ExecutionFailureType | undefined {
+  if (status === "failed") return "assertion_failure";
+  if (status === "blocked") return "unknown_failure";
+  return undefined;
 }
 
 function sameItems(left: string[], right: string[]) {
