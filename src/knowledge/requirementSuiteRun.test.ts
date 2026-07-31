@@ -53,8 +53,10 @@ describe("RequirementSuiteRunService", () => {
       {
         status: "failed",
         chainRunId: "chain-1",
+        diagnosisId: "diagnosis-1",
         bugReportId: "bug-1",
-        gapIds: []
+        gapIds: [],
+        failureType: "assertion_failure"
       }
     );
     const second = fixture.service.beginNext(run.id);
@@ -71,9 +73,18 @@ describe("RequirementSuiteRunService", () => {
       "suite-created",
       "case-started",
       "agent-task-requested",
+      "failure-diagnosed",
       "case-completed",
       "case-started"
     ]);
+    expect(afterFailure.caseRuns[0]).toEqual(
+      expect.objectContaining({ diagnosisId: "diagnosis-1" })
+    );
+    expect(
+      fixture.repository.runLedgerEntries.find(
+        (entry) => entry.event === "failure-diagnosed"
+      )?.references
+    ).toEqual(expect.objectContaining({ diagnosisId: "diagnosis-1" }));
   });
 
   it("stops on a blocked case and resumes only with explicit continuation", () => {

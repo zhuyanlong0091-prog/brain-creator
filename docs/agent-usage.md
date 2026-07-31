@@ -105,6 +105,8 @@ Review `skipped`, `cancelled`, and `attempts` through `bc_status` or `bc_review 
 
 Use `bc_review target=run-ledger` with `knowledgeProjectId` and an optional Suite `id` when the user asks what happened, where execution is waiting, or why it stopped. The timeline links TestDataTask, ExecutionPlan, AgentTask, ExecutionEvidence, ChainRun, BugReport, and Gap references without copying artifact contents into status context. `bc_status` returns only the active summary and the 20 most recent events to keep routine context bounded.
 
+For a terminal Requirement Suite failure, read `bc_status.knowledge.executionDiagnoses` first and use `bc_review target=execution-diagnosis` when detail is needed. The diagnosis gate records the normalized failure class, controlled Healer budget, verdict, and evidence IDs. Only `product_bug` may create a BugReport; automation, locator, data, auth, environment, network, execution, and unknown verdicts remain Gaps. Do not infer a product defect from raw Playwright text after Brain Creator has classified it.
+
 Failure classification is shared between Ledger and review filters: assertion, auth, locator, network, generated-automation, test-data, environment, execution, or unknown. Classification is diagnostic evidence, not permission to create a Bug. Product Bug creation still requires an expectation mismatch supported by execution evidence.
 
 ### 10. Review Evidence

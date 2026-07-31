@@ -916,6 +916,7 @@ export type RequirementSuiteCaseAttempt = {
   agentTaskId?: string;
   executionEvidenceId?: string;
   chainRunId?: string;
+  diagnosisId?: string;
   bugReportId?: string;
   gapIds: string[];
   error?: string;
@@ -946,6 +947,7 @@ export type RequirementSuiteCaseRun = {
   agentTaskId?: string;
   executionEvidenceId?: string;
   chainRunId?: string;
+  diagnosisId?: string;
   bugReportId?: string;
   gapIds: string[];
   attempts: RequirementSuiteCaseAttempt[];
@@ -957,6 +959,7 @@ export type RequirementSuiteCaseRun = {
 export type RequirementSuiteCaseOutcome = {
   status: "passed" | "failed" | "blocked";
   chainRunId?: string;
+  diagnosisId?: string;
   bugReportId?: string;
   gapIds: string[];
   failureType?: ExecutionFailureType;
@@ -1055,6 +1058,40 @@ export type ExecutionFailureType =
   | "execution_failure"
   | "unknown_failure";
 
+export type ExecutionDiagnosisVerdict =
+  | "passed"
+  | "product_bug"
+  | "automation_gap"
+  | "test_data_gap"
+  | "auth_gap"
+  | "environment_gap"
+  | "network_gap"
+  | "execution_gap"
+  | "unknown_gap";
+
+export type ExecutionDiagnosis = {
+  id: string;
+  knowledgeProjectId?: string;
+  systemId: string;
+  requirementSuiteRunId?: string;
+  executableCaseId?: string;
+  executionEvidenceId?: string;
+  chainRunId?: string;
+  testCaseId: string;
+  verdict: ExecutionDiagnosisVerdict;
+  failureType?: ExecutionFailureType;
+  confidence: "high" | "medium" | "low";
+  retry: {
+    attempted: number;
+    max: number;
+    exhausted: boolean;
+    eligible: boolean;
+  };
+  reasons: string[];
+  evidenceRefs: string[];
+  createdAt: string;
+};
+
 export type RunLedgerEntry = {
   id: string;
   knowledgeProjectId: string;
@@ -1069,6 +1106,7 @@ export type RunLedgerEntry = {
     | "test-data-task-failed"
     | "execution-plan-frozen"
     | "agent-task-requested"
+    | "failure-diagnosed"
     | "case-completed"
     | "suite-resumed"
     | "case-retried"
@@ -1094,6 +1132,7 @@ export type RunLedgerEntry = {
     agentTaskId?: string;
     executionEvidenceId?: string;
     chainRunId?: string;
+    diagnosisId?: string;
     bugReportId?: string;
     gapIds?: string[];
   };
