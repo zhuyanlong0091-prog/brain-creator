@@ -1132,20 +1132,31 @@ export type ExecutionDiagnosisReview = {
   confirmedVerdict?: ExecutionDiagnosisVerdict;
   matchesSuggestion?: boolean;
   note: string;
-  status: "recorded" | "migrated";
+  status: "recorded" | "migrated" | "rolled-back";
   priorAssetStatus: string;
   resultingAssetStatus: string;
   diagnosisId?: string;
   createdGapId?: string;
+  rollback?: {
+    note: string;
+    diagnosisId?: string;
+    removedGapId?: string;
+    restoredAssetStatus: string;
+    rolledBackAt: string;
+  };
   createdAt: string;
 };
 
 export type RunLedgerEntry = {
   id: string;
-  knowledgeProjectId: string;
+  runType?: "requirement-suite" | "document-suite";
+  knowledgeProjectId?: string;
   systemId: string;
-  requirementSuiteRunId: string;
+  requirementSuiteRunId?: string;
+  caseSuiteId?: string;
+  caseSourceId?: string;
   executableCaseId?: string;
+  caseNo?: string;
   event:
     | "suite-created"
     | "case-started"
@@ -1175,6 +1186,7 @@ export type RunLedgerEntry = {
   failureType?: ExecutionFailureType;
   message?: string;
   references?: {
+    testCaseId?: string;
     executionPlanId?: string;
     testDataTaskId?: string;
     agentTaskId?: string;

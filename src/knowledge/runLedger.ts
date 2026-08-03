@@ -7,10 +7,13 @@ import { id } from "../shared/id.js";
 type AppendRunLedgerEntryInput = Omit<RunLedgerEntry, "id" | "createdAt">;
 
 type RunLedgerFilter = {
+  runType?: "requirement-suite" | "document-suite";
   knowledgeProjectId?: string;
   systemId?: string;
   requirementSuiteRunId?: string;
+  caseSuiteId?: string;
   executableCaseId?: string;
+  caseNo?: string;
 };
 
 export class RunLedgerService {
@@ -20,9 +23,13 @@ export class RunLedgerService {
   ) {}
 
   append(input: AppendRunLedgerEntryInput): RunLedgerEntry {
+    assertRunIdentity(input);
     const entry: RunLedgerEntry = {
       id: id("runLedger"),
       ...input,
+      runType:
+        input.runType ??
+        (input.caseSuiteId ? "document-suite" : "requirement-suite"),
       createdAt: this.now()
     };
     this.repository.runLedgerEntries.push(entry);
@@ -33,30 +40,40 @@ export class RunLedgerService {
   list(filter: RunLedgerFilter = {}): RunLedgerEntry[] {
     return this.repository.runLedgerEntries.filter(
       (entry) =>
+        (!filter.runType || runTypeOf(entry) === filter.runType) &&
         (!filter.knowledgeProjectId ||
           entry.knowledgeProjectId === filter.knowledgeProjectId) &&
         (!filter.systemId || entry.systemId === filter.systemId) &&
         (!filter.requirementSuiteRunId ||
           entry.requirementSuiteRunId === filter.requirementSuiteRunId) &&
+        (!filter.caseSuiteId || entry.caseSuiteId === filter.caseSuiteId) &&
         (!filter.executableCaseId ||
-          entry.executableCaseId === filter.executableCaseId)
+          entry.executableCaseId === filter.executableCaseId) &&
+        (!filter.caseNo || entry.caseNo === filter.caseNo)
     );
   }
 
-  summary(requirementSuiteRunId: string) {
-    const entries = this.list({ requirementSuiteRunId });
+  summary(runId: string) {
+    const entries = this.repository.runLedgerEntries.filter(
+      (entry) => runIdOf(entry) === runId
+    );
     if (entries.length === 0) {
       throw new Error("Run ledger not found");
     }
     const first = entries[0];
     const latest = entries.at(-1)!;
     return {
-      requirementSuiteRunId,
+      runType: runTypeOf(first),
+      runId,
+      requirementSuiteRunId: first.requirementSuiteRunId,
+      caseSuiteId: first.caseSuiteId,
+      caseSourceId: first.caseSourceId,
       knowledgeProjectId: first.knowledgeProjectId,
       systemId: first.systemId,
       currentStage: latest.stage,
       currentStatus: latest.toStatus,
       currentExecutableCaseId: latest.executableCaseId,
+      currentCaseNo: latest.caseNo,
       latestEvent: latest.event,
       eventCount: entries.length,
       startedAt: first.createdAt,
@@ -78,6 +95,29 @@ export class RunLedgerService {
       )
     };
   }
+}
+
+function assertRunIdentity(input: AppendRunLedgerEntryInput) {
+  const requirementRun = Boolean(input.requirementSuiteRunId);
+  const documentRun = Boolean(input.caseSuiteId);
+  if (requirementRun === documentRun) {
+    throw new Error("Run ledger entry requires exactly one suite run identity");
+  }
+  if (input.runType === "requirement-suite" && !requirementRun) {
+    throw new Error("Requirement suite ledger entry requires requirementSuiteRunId");
+  }
+  if (input.runType === "document-suite" && !documentRun) {
+    throw new Error("Document suite ledger entry requires caseSuiteId");
+  }
+}
+
+function runTypeOf(entry: RunLedgerEntry) {
+  return entry.runType ??
+    (entry.caseSuiteId ? "document-suite" : "requirement-suite");
+}
+
+function runIdOf(entry: RunLedgerEntry) {
+  return entry.caseSuiteId ?? entry.requirementSuiteRunId;
 }
 
 function countBy(values: string[]) {

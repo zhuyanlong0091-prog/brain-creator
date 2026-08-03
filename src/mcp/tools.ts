@@ -121,7 +121,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, confirming Requirement Eval, reviewing historical execution diagnoses, approving a baseline, exploring System Brain, compiling evidence-bound cases, preparing test data, and confirming immutable execution preflight snapshots.",
+      "Requirement-first facade for ingesting sources, confirming Requirement Eval, reviewing or rolling back historical execution diagnoses, approving a baseline, exploring System Brain, compiling evidence-bound cases, preparing test data, and confirming immutable execution preflight snapshots.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
@@ -130,6 +130,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "generate-test-design",
         "confirm-eval-actions",
         "review-legacy-diagnosis",
+        "rollback-legacy-diagnosis",
         "approve-baseline",
         "compile-cases",
         "resolve-test-data",
@@ -181,6 +182,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       confirmationNote: z.string().min(1).max(500).optional(),
       diagnosisAssetType: z.enum(["bug", "gap"]).optional(),
       diagnosisAssetId: z.string().optional(),
+      diagnosisReviewId: z.string().optional(),
       diagnosisDecision: z
         .enum([
           "confirm_bug",
@@ -398,6 +400,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       status: z.string().optional(),
       id: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
+      minSampleSize: z.number().int().min(1).max(10_000).optional(),
       failureTypes: z
         .array(
           z.enum([

@@ -1,6 +1,6 @@
 {
   "name": "brain-creator",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -40,6 +40,7 @@
     "verify:codex-plugin-install": "node --loader ts-node/esm scripts/codexPluginInstallSmoke.ts",
     "verify:installed-mcp": "node --loader ts-node/esm scripts/verifyInstalledMcpSmoke.ts",
     "verify:requirement-eval": "node --loader ts-node/esm scripts/requirementEval.ts",
+    "verify:historical-diagnosis-eval": "node --loader ts-node/esm scripts/historicalDiagnosisEval.ts",
     "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts",
     "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
     "release:check": "node --loader ts-node/esm scripts/releaseReadiness.ts"

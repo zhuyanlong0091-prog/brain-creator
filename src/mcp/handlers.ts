@@ -590,6 +590,32 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
 
 async function prepareFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const action = prepareActionArg(input, "action");
+  if (action === "rollback-legacy-diagnosis") {
+    const resolution = resolveSystemReference(context, input);
+    const rollbackInput = {
+      systemId: resolution.systemId,
+      reviewId: stringArg(input, "diagnosisReviewId")
+    };
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        ...context.executionDiagnosis.previewLegacyRollback(rollbackInput),
+        systemResolution: resolution,
+        nextAction:
+          "Present the rollback changes and ask for explicit confirmation with a human rollback note."
+      };
+    }
+    return {
+      status: "rolled-back",
+      ...context.executionDiagnosis.confirmLegacyRollback({
+        ...rollbackInput,
+        note: stringArg(input, "confirmationNote")
+      }),
+      systemResolution: resolution,
+      nextAction:
+        "Re-audit the restored historical asset before applying another diagnosis."
+    };
+  }
   if (action === "review-legacy-diagnosis") {
     const resolution = resolveSystemReference(context, input);
     const reviewInput = {
@@ -948,6 +974,11 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   });
   const openBugs = bugs.filter((bug) => bug.status === "open" || bug.status === "retest-failed");
   const unfinishedSuites = unfinishedCaseSuites(context, systemId);
+  const documentRunLedgerEntries = context.runLedger.list({
+    runType: "document-suite",
+    systemId
+  });
+  const activeDocumentSuite = unfinishedSuites.at(-1);
   const pendingAgentTasks = context.service
     .listAgentTasks(systemId)
     .filter((task) => task.status === "pending");
@@ -993,6 +1024,17 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       byStatus: countBy(suiteRuns, (run) => run.status),
       recent: suiteRuns.slice(-5)
     },
+    documentRunLedger: {
+      total: documentRunLedgerEntries.length,
+      activeSummary:
+        activeDocumentSuite &&
+        documentRunLedgerEntries.some(
+          (entry) => entry.caseSuiteId === activeDocumentSuite.suiteId
+        )
+          ? context.runLedger.summary(activeDocumentSuite.suiteId)
+          : undefined,
+      recent: documentRunLedgerEntries.slice(-20)
+    },
     agentTasks: {
       pending: pendingAgentTasks
     },
@@ -1005,7 +1047,9 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       ...context.executionDiagnosis.summary({ systemId }),
       recent: executionDiagnoses.slice(-10),
       legacyAudit: legacyDiagnosisAudit.summary,
-      legacyReviews: context.executionDiagnosis.legacyReviewSummary(systemId)
+      legacyReviews: context.executionDiagnosis.legacyReviewSummary(systemId),
+      humanAdjudicationEval:
+        context.executionDiagnosis.legacyReviewEval(systemId)
     },
     facadeNextAction: nextAction,
     userSummary,
@@ -1270,6 +1314,16 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
   if (optionalBooleanArg(input, "continueOnBlocked") && suite.continueOnBlocked !== true) {
     context.service.enableCaseSuiteContinueOnBlocked(suite.id);
   }
+  ensureDocumentSuiteLedger(context, suite);
+  if (requestedSuiteId && optionalBooleanArg(input, "resume")) {
+    recordDocumentSuiteLedger(context, suite, {
+      event: "suite-resumed",
+      scope: "suite",
+      stage: "suite",
+      fromStatus: suite.status,
+      toStatus: "running"
+    });
+  }
   const alreadyPassed = passedCaseNosForSuite(context, systemId, suite.id);
   const casesToRun = parsed.cases.filter(
     (documentCase) =>
@@ -1308,6 +1362,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     const documentCase = casesToRun[0];
     if (!documentCase) {
       const completedSuite = context.service.updateCaseSuiteStatus(suite.id, "completed");
+      completeDocumentSuiteLedger(context, completedSuite, "completed");
       return {
         mode: "case-source-suite",
         status: "completed",
@@ -1387,6 +1442,11 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     suite.id,
     allSuiteCasesPassed ? "completed" : "failed"
   );
+  completeDocumentSuiteLedger(
+    context,
+    suite,
+    allSuiteCasesPassed ? "completed" : "failed"
+  );
   const bugs = context.service.listBugReports({ systemId }).filter((bug) =>
     bugReportIds.includes(bug.id)
   );
@@ -1434,6 +1494,28 @@ async function executeDocumentCase(
     documentCase: input.documentCase
   });
   context.service.approveTestCase(testCase.id);
+  if (input.suiteId) {
+    const suite = context.service.getCaseSuite(input.suiteId);
+    const priorAttempts = context.runLedger.list({
+      runType: "document-suite",
+      systemId: input.systemId,
+      caseSuiteId: input.suiteId,
+      caseNo: input.documentCase.caseNo
+    });
+    recordDocumentSuiteLedger(context, suite, {
+      event: priorAttempts.some(
+        (entry) => entry.event === "case-started" || entry.event === "case-retried"
+      )
+        ? "case-retried"
+        : "case-started",
+      scope: "case",
+      stage: "generator",
+      toStatus: "running",
+      caseNo: input.documentCase.caseNo,
+      message: input.documentCase.title,
+      references: { testCaseId: testCase.id }
+    });
+  }
   try {
     const result = await runApprovedChain(context, {
       caseId: testCase.id,
@@ -1462,6 +1544,24 @@ async function executeDocumentCase(
         : undefined
     });
     if (!("chainRun" in result)) {
+      if (input.suiteId) {
+        recordDocumentSuiteLedger(
+          context,
+          context.service.getCaseSuite(input.suiteId),
+          {
+            event: "agent-task-requested",
+            scope: "case",
+            stage: "generator",
+            fromStatus: "running",
+            toStatus: "waiting-for-agent",
+            caseNo: input.documentCase.caseNo,
+            references: {
+              testCaseId: testCase.id,
+              agentTaskId: result.task.id
+            }
+          }
+        );
+      }
       return {
         caseResult: {
           caseNo: input.documentCase.caseNo,
@@ -1479,6 +1579,25 @@ async function executeDocumentCase(
       (item): item is string => typeof item === "string"
     );
     if (result.chainRun.status === "succeeded") {
+      if (input.suiteId) {
+        recordDocumentSuiteLedger(
+          context,
+          context.service.getCaseSuite(input.suiteId),
+          {
+            event: "case-completed",
+            scope: "case",
+            stage: "execution",
+            fromStatus: "running",
+            toStatus: "passed",
+            outcome: "passed",
+            caseNo: input.documentCase.caseNo,
+            references: {
+              testCaseId: testCase.id,
+              chainRunId: result.chainRun.id
+            }
+          }
+        );
+      }
       return {
         caseResult: {
           caseNo: input.documentCase.caseNo,
@@ -1544,6 +1663,43 @@ async function executeDocumentCase(
     if (bug) {
       context.executionDiagnosis.linkBugReport(diagnosis.id, bug.id);
     }
+    if (input.suiteId) {
+      const suite = context.service.getCaseSuite(input.suiteId);
+      recordDocumentSuiteLedger(context, suite, {
+        event: "failure-diagnosed",
+        scope: "case",
+        stage: "execution",
+        fromStatus: "running",
+        toStatus: diagnosis.verdict,
+        failureType: diagnosis.failureType,
+        caseNo: input.documentCase.caseNo,
+        references: {
+          testCaseId: testCase.id,
+          chainRunId: result.chainRun.id,
+          diagnosisId: diagnosis.id,
+          bugReportId: bug?.id,
+          gapIds: result.chainRun.gaps.map((gap) => gap.id)
+        }
+      });
+      recordDocumentSuiteLedger(context, suite, {
+        event: "case-completed",
+        scope: "case",
+        stage: "execution",
+        fromStatus: "running",
+        toStatus: isProductBug ? "failed" : "blocked",
+        outcome: isProductBug ? "failed" : "blocked",
+        failureType: diagnosis.failureType,
+        caseNo: input.documentCase.caseNo,
+        message: failureReason,
+        references: {
+          testCaseId: testCase.id,
+          chainRunId: result.chainRun.id,
+          diagnosisId: diagnosis.id,
+          bugReportId: bug?.id,
+          gapIds: result.chainRun.gaps.map((gap) => gap.id)
+        }
+      });
+    }
     return {
       caseResult: {
         caseNo: input.documentCase.caseNo,
@@ -1569,6 +1725,24 @@ async function executeDocumentCase(
       severity: "high",
       owner: "qa"
     });
+    if (input.suiteId) {
+      recordDocumentSuiteLedger(
+        context,
+        context.service.getCaseSuite(input.suiteId),
+        {
+          event: "case-completed",
+          scope: "case",
+          stage: "execution",
+          fromStatus: "running",
+          toStatus: "blocked",
+          outcome: "blocked",
+          failureType: classifyFailure(reason, "case-source-suite"),
+          caseNo: input.documentCase.caseNo,
+          message: reason,
+          references: { testCaseId: testCase.id, gapIds: [gap.id] }
+        }
+      );
+    }
     return {
       caseResult: {
         caseNo: input.documentCase.caseNo,
@@ -1710,8 +1884,27 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
       requestedTarget === "system-brain"
         ? optionalStringArg(input, "systemId") ?? optionalStringArg(input, "id")
         : optionalStringArg(input, "id"),
-      optionalNumberArg(input, "limit") ?? 50
+      optionalNumberArg(input, "limit") ?? 50,
+      optionalNumberArg(input, "minSampleSize") ?? 20
     );
+  }
+  if (!knowledgeProjectId && requestedTarget === "run-ledger") {
+    const resolution = resolveSystemReference(context, input);
+    const requestedRunId = optionalStringArg(input, "id");
+    const entries = context.runLedger
+      .list({ runType: "document-suite", systemId: resolution.systemId })
+      .filter((entry) => !requestedRunId || entry.caseSuiteId === requestedRunId);
+    const runIds = [
+      ...new Set(
+        entries.flatMap((entry) => (entry.caseSuiteId ? [entry.caseSuiteId] : []))
+      )
+    ];
+    return {
+      runType: "document-suite",
+      summaries: runIds.map((runId) => context.runLedger.summary(runId)),
+      entries,
+      systemResolution: resolution
+    };
   }
   if (
     isKnowledgeReviewTarget(requestedTarget) &&
@@ -1724,6 +1917,10 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
   const target = requestedTarget;
   const failureTypes = failureTypeFilters(input);
   if (target === "execution-diagnosis") {
+    const diagnosisEval = context.executionDiagnosis.legacyReviewEval(
+      systemId,
+      optionalNumberArg(input, "minSampleSize") ?? 20
+    );
     const items = context.executionDiagnosis
       .list({ systemId })
       .filter(
@@ -1742,6 +1939,8 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
         limit: optionalNumberArg(input, "limit") ?? 50
       }),
       legacyReviews: context.executionDiagnosis.listLegacyReviews(systemId),
+      humanAdjudicationEval: diagnosisEval,
+      evalMarkdown: legacyDiagnosisEvalMarkdown(diagnosisEval),
       systemResolution: resolution
     };
   }
@@ -3109,7 +3308,11 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         legacyReviews: aggregateLegacyDiagnosisReviewSummary(
           context,
           project.systemIds
-        )
+        ),
+        humanAdjudicationEval:
+          context.executionDiagnosis.legacyReviewEvalForSystems(
+            project.systemIds
+          )
       },
       testData: {
         tasks: {
@@ -3144,7 +3347,8 @@ function knowledgeReview(
   projectId: string,
   target: KnowledgeReviewTarget,
   idValue?: string,
-  limit = 50
+  limit = 50,
+  minSampleSize = 20
 ) {
   const status = knowledgeStatus(context, projectId);
   const project = status.knowledge.project;
@@ -3199,7 +3403,9 @@ function knowledgeReview(
         (entry) => !idValue || entry.requirementSuiteRunId === idValue
       );
     const runIds = [...new Set(
-      entries.map((entry) => entry.requirementSuiteRunId)
+      entries.flatMap((entry) =>
+        entry.requirementSuiteRunId ? [entry.requirementSuiteRunId] : []
+      )
     )];
     return {
       project,
@@ -3208,6 +3414,10 @@ function knowledgeReview(
     };
   }
   if (target === "execution-diagnosis") {
+    const diagnosisEval = context.executionDiagnosis.legacyReviewEvalForSystems(
+      project.systemIds,
+      minSampleSize
+    );
     const items = context.executionDiagnosis
       .list({ knowledgeProjectId: projectId })
       .filter((item) => !idValue || item.id === idValue);
@@ -3224,7 +3434,9 @@ function knowledgeReview(
       ),
       legacyReviews: project.systemIds.flatMap((systemId) =>
         context.executionDiagnosis.listLegacyReviews(systemId)
-      )
+      ),
+      humanAdjudicationEval: diagnosisEval,
+      evalMarkdown: legacyDiagnosisEvalMarkdown(diagnosisEval)
     };
   }
   if (target === "coverage") {
@@ -3908,6 +4120,23 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       suiteContext: result.task.suiteContext,
       regressionContext: result.task.regressionContext
     });
+    if (result.task.suiteContext) {
+      const suite = context.service.getCaseSuite(result.task.suiteContext.suiteId);
+      recordDocumentSuiteLedger(context, suite, {
+        event: "agent-task-requested",
+        scope: "case",
+        stage: "generator",
+        fromStatus: "waiting-for-agent",
+        toStatus: "waiting-for-agent",
+        caseNo: result.task.suiteContext.caseNo,
+        message: "Controlled healer retry requested",
+        references: {
+          testCaseId: chainContext.testCaseId,
+          agentTaskId: healerTaskPackage.task.id,
+          chainRunId: chainRun.id
+        }
+      });
+    }
     if (
       chainContext.requirementSuiteRunId &&
       chainContext.executableCaseId &&
@@ -4124,9 +4353,51 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     : undefined;
   if (suiteRun) {
     const suite = context.service.getCaseSuite(suiteRun.suiteId);
+    const suiteContext = result.task.suiteContext!;
+    if (terminalDiagnosis) {
+      recordDocumentSuiteLedger(context, suite, {
+        event: "failure-diagnosed",
+        scope: "case",
+        stage: "execution",
+        fromStatus: "waiting-for-agent",
+        toStatus: terminalDiagnosis.verdict,
+        failureType: terminalDiagnosis.failureType,
+        caseNo: suiteContext.caseNo,
+        references: {
+          testCaseId: chainContext.testCaseId,
+          agentTaskId: result.task.id,
+          chainRunId: chainRun.id,
+          diagnosisId: terminalDiagnosis.id,
+          bugReportId: bugReport?.id,
+          gapIds: gaps.map((gap) => gap.id)
+        }
+      });
+    }
+    recordDocumentSuiteLedger(context, suite, {
+      event: "case-completed",
+      scope: "case",
+      stage: "execution",
+      fromStatus: "waiting-for-agent",
+      toStatus:
+        status === "succeeded" ? "passed" : bugReport ? "failed" : "blocked",
+      outcome:
+        status === "succeeded" ? "passed" : bugReport ? "failed" : "blocked",
+      failureType: terminalDiagnosis?.failureType,
+      caseNo: suiteContext.caseNo,
+      message: failureReason,
+      references: {
+        testCaseId: chainContext.testCaseId,
+        agentTaskId: result.task.id,
+        chainRunId: chainRun.id,
+        diagnosisId: terminalDiagnosis?.id,
+        bugReportId: bugReport?.id,
+        gapIds: gaps.map((gap) => gap.id)
+      }
+    });
     const passed = passedCaseNosForSuite(context, suiteRun.systemId, suiteRun.suiteId);
     if (suite.selectedCaseNos.every((caseNo) => passed.has(caseNo))) {
       const completedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "completed");
+      completeDocumentSuiteLedger(context, completedSuite, "completed");
       return {
         ...result,
         status: "completed",
@@ -4142,6 +4413,7 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         (suiteRun.gapIds.length > 0 && suiteRun.bugReportIds.length === 0))
     ) {
       const blockedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "blocked");
+      completeDocumentSuiteLedger(context, blockedSuite, "blocked");
       return {
         ...result,
         status: "blocked",
@@ -4169,6 +4441,7 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     }
     const finalStatus = hostAgentSuiteFailureStatus(context, suite);
     const failedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, finalStatus);
+    completeDocumentSuiteLedger(context, failedSuite, finalStatus);
     return {
       ...result,
       status: finalStatus,
@@ -4571,12 +4844,24 @@ function suiteRunReview(
       }))
   );
   const summary = suiteRunSummary(runs, bugReports, gaps);
+  const suiteIds = new Set(runs.map((run) => run.suiteId));
+  const ledgerEntries = context.runLedger
+    .list({ runType: "document-suite", systemId })
+    .filter((entry) => suiteIds.has(entry.caseSuiteId ?? ""));
   return {
     summary,
     runs,
     failedCases,
     bugReports,
     gaps,
+    runLedger: {
+      summaries: [...suiteIds]
+        .filter((suiteId) =>
+          ledgerEntries.some((entry) => entry.caseSuiteId === suiteId)
+        )
+        .map((suiteId) => context.runLedger.summary(suiteId)),
+      entries: ledgerEntries
+    },
     reportMarkdown: suiteRunMarkdown(summary, failedCases, bugReports, gaps),
     nextAction: suiteRunNextAction(bugReports, gaps)
   };
@@ -4874,6 +5159,68 @@ function caseSuiteProgress(context: BrainCreatorMcpContext, suite: CaseSuite) {
     remaining: snapshot.remainingCaseNos.length,
     ...snapshot
   };
+}
+
+function ensureDocumentSuiteLedger(
+  context: BrainCreatorMcpContext,
+  suite: CaseSuite
+) {
+  const existing = context.runLedger.list({
+    runType: "document-suite",
+    systemId: suite.systemId,
+    caseSuiteId: suite.id
+  });
+  if (existing.length > 0) return;
+  recordDocumentSuiteLedger(context, suite, {
+    event: "suite-created",
+    scope: "suite",
+    stage: "suite",
+    toStatus: suite.status
+  });
+}
+
+function recordDocumentSuiteLedger(
+  context: BrainCreatorMcpContext,
+  suite: CaseSuite,
+  input: Omit<
+    Parameters<RunLedgerService["append"]>[0],
+    "runType" | "knowledgeProjectId" | "systemId" | "requirementSuiteRunId" | "caseSuiteId" | "caseSourceId"
+  >
+) {
+  return context.runLedger.append({
+    runType: "document-suite",
+    systemId: suite.systemId,
+    caseSuiteId: suite.id,
+    caseSourceId: suite.sourceId,
+    ...input
+  });
+}
+
+function completeDocumentSuiteLedger(
+  context: BrainCreatorMcpContext,
+  suite: CaseSuite,
+  status: "completed" | "failed" | "blocked" | "cancelled"
+) {
+  const entries = context.runLedger.list({
+    runType: "document-suite",
+    systemId: suite.systemId,
+    caseSuiteId: suite.id
+  });
+  const latest = entries.at(-1);
+  if (latest?.event === "suite-completed" && latest.toStatus === status) return;
+  recordDocumentSuiteLedger(context, suite, {
+    event: "suite-completed",
+    scope: "suite",
+    stage: "suite",
+    fromStatus: suite.status,
+    toStatus: status,
+    outcome:
+      status === "completed"
+        ? "passed"
+        : status === "cancelled"
+          ? "cancelled"
+          : status
+  });
 }
 
 async function prepareNextHostAgentSuiteTask(
@@ -5402,7 +5749,10 @@ function aggregateLegacyDiagnosisReviewSummary(
   const reviews = systemIds.flatMap((systemId) =>
     context.executionDiagnosis.listLegacyReviews(systemId)
   );
-  const adjudicated = reviews.filter(
+  const activeReviews = reviews.filter(
+    (review) => review.status !== "rolled-back"
+  );
+  const adjudicated = activeReviews.filter(
     (review) => review.confirmedVerdict !== undefined
   );
   const matched = adjudicated.filter(
@@ -5410,9 +5760,10 @@ function aggregateLegacyDiagnosisReviewSummary(
   );
   return {
     total: reviews.length,
-    byDecision: countBy(reviews, (review) => review.decision),
-    migrated: reviews.filter((review) => review.status === "migrated").length,
-    needsEvidence: reviews.filter(
+    byDecision: countBy(activeReviews, (review) => review.decision),
+    migrated: activeReviews.filter((review) => review.status === "migrated").length,
+    rolledBack: reviews.filter((review) => review.status === "rolled-back").length,
+    needsEvidence: activeReviews.filter(
       (review) => review.decision === "needs_evidence"
     ).length,
     quality: {
@@ -5437,6 +5788,35 @@ function aggregateLegacyDiagnosisReviewSummary(
       }, {})
     }
   };
+}
+
+function legacyDiagnosisEvalMarkdown(evaluation: {
+  metric: string;
+  adjudicated: number;
+  minSampleSize: number;
+  readiness: "ready" | "insufficient-sample";
+  observedAccuracy: number | null;
+  reportableAccuracy: number | null;
+  matched: number;
+  corrected: number;
+  inconclusive: number;
+  rolledBack: number;
+}) {
+  const percent = (value: number | null) =>
+    value === null ? "n/a" : `${(value * 100).toFixed(1)}%`;
+  return [
+    "# Historical Execution Diagnosis Eval",
+    "",
+    `- Metric: ${evaluation.metric}`,
+    `- Readiness: ${evaluation.readiness}`,
+    `- Adjudicated sample: ${evaluation.adjudicated}/${evaluation.minSampleSize}`,
+    `- Observed accuracy: ${percent(evaluation.observedAccuracy)}`,
+    `- Reportable accuracy: ${percent(evaluation.reportableAccuracy)}`,
+    `- Matched: ${evaluation.matched}`,
+    `- Corrected: ${evaluation.corrected}`,
+    `- Inconclusive: ${evaluation.inconclusive}`,
+    `- Rolled back: ${evaluation.rolledBack}`
+  ].join("\n");
 }
 
 function sumBy<T>(items: T[], getValue: (item: T) => number) {
@@ -6507,6 +6887,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "generate-test-design",
       "confirm-eval-actions",
       "review-legacy-diagnosis",
+      "rollback-legacy-diagnosis",
       "approve-baseline",
       "compile-cases",
       "resolve-test-data",
@@ -6529,6 +6910,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "generate-test-design"
     | "confirm-eval-actions"
     | "review-legacy-diagnosis"
+    | "rollback-legacy-diagnosis"
     | "approve-baseline"
     | "compile-cases"
     | "resolve-test-data"
