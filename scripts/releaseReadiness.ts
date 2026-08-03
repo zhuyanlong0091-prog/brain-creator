@@ -30,6 +30,7 @@ export type ReleaseReadinessInput = {
 };
 
 const requiredBins = [
+  "brain-creator",
   "brain-creator-mcp",
   "brain-creator-doctor",
   "brain-creator-install-assets",

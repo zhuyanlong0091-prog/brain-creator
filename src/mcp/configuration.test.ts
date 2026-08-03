@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { BRAIN_CREATOR_VERSION } from "../version.js";
 
 describe("Brain Creator local integration files", () => {
   it("defines Claude Code MCP server settings for Brain Creator", async () => {
@@ -32,11 +33,13 @@ describe("Brain Creator local integration files", () => {
     const packageLock = JSON.parse(await readFile("package-lock.json", "utf8"));
     const serverModule = await readFile("src/mcp/server.ts", "utf8");
 
-    expect(packageJson.version).toBe("2.0.4");
-    expect(packageLock.version).toBe("2.0.4");
-    expect(packageLock.packages[""].version).toBe("2.0.4");
-    expect(serverModule).toContain('version: "2.0.4"');
+    expect(BRAIN_CREATOR_VERSION).toBe("2.0.5");
+    expect(packageJson.version).toBe(BRAIN_CREATOR_VERSION);
+    expect(packageLock.version).toBe(BRAIN_CREATOR_VERSION);
+    expect(packageLock.packages[""].version).toBe(BRAIN_CREATOR_VERSION);
+    expect(serverModule).toContain("version: BRAIN_CREATOR_VERSION");
     expect(packageJson.bin).toEqual({
+      "brain-creator": "dist/cli/brainCreator.js",
       "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
       "brain-creator-doctor": "dist/cli/doctor.js",
       "brain-creator-install-assets": "dist/cli/installAssets.js",
@@ -110,7 +113,7 @@ describe("Brain Creator local integration files", () => {
     const manifest = JSON.parse(await readFile("plugin/manifest.json", "utf8"));
 
     expect(manifest.name).toBe("brain-creator");
-    expect(manifest.version).toBe("2.0.3");
+    expect(manifest.version).toBe(BRAIN_CREATOR_VERSION);
     expect(manifest.mcpServers["brain-creator"]).toEqual({
       command: "npx",
       args: ["brain-creator-mcp"],
@@ -141,7 +144,7 @@ describe("Brain Creator local integration files", () => {
     const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
 
     expect(pluginManifest.name).toBe("brain-creator");
-    expect(pluginManifest.version).toBe("2.0.3");
+    expect(pluginManifest.version).toBe(BRAIN_CREATOR_VERSION);
     expect(pluginManifest.description).toContain("Agent-native testing brain");
     expect(pluginManifest.skills).toBe("./skills/");
     expect(pluginManifest.mcpServers).toBe("./.mcp.json");

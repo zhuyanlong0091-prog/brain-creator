@@ -13,6 +13,7 @@ const businessDir = join(smokeRoot, "business-project");
 const sourceDataFile = join(rootDir, ".brain-creator", "local-assets.json");
 const sourceSnapshot = await readOptionalFile(sourceDataFile);
 const keepArtifacts = process.env.BRAIN_CREATOR_KEEP_LIVE_ARTIFACTS === "1";
+const packageVersion = JSON.parse(await readFile(join(rootDir, "package.json"), "utf8")).version;
 
 try {
   await mkdir(packageDir, { recursive: true });
@@ -25,6 +26,17 @@ try {
   await run("npm", ["install", tarballName], businessDir);
 
   const binDir = join(businessDir, "node_modules", ".bin");
+  const version = await run(join(binDir, "brain-creator.cmd"), ["--version"], businessDir);
+  assert(
+    version.stdout.trim() === packageVersion,
+    `installed brain-creator reported ${version.stdout.trim()} instead of ${packageVersion}`
+  );
+  const cliHelp = await run(join(binDir, "brain-creator.cmd"), ["--help"], businessDir);
+  assert(
+    cliHelp.stdout.includes("brain-creator-mcp") &&
+      cliHelp.stdout.includes("brain-creator-doctor"),
+    "installed Brain Creator CLI help is missing expected commands"
+  );
   await run(join(binDir, "brain-creator-install-assets.cmd"), [], businessDir);
   await run(join(binDir, "brain-creator-write-mcp-config.cmd"), [], businessDir);
   const codexPluginHelp = await run(

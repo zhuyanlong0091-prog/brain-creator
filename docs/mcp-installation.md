@@ -24,6 +24,8 @@ Install Brain Creator into the business project:
 
 ```bash
 npm install --save-dev brain-creator
+npx brain-creator --version
+npx brain-creator --help
 ```
 
 Install the Brain Creator Skill, Playwright agent definitions, and a portable Playwright config when the project does not already have one:
@@ -120,6 +122,8 @@ If you prefer a global install, use:
 
 ```bash
 npm install -g brain-creator
+brain-creator --version
+brain-creator --help
 brain-creator-install-assets
 brain-creator-write-mcp-config --global
 brain-creator-install-codex-plugin
@@ -200,6 +204,8 @@ When installed from the repo-local marketplace, Brain Creator still expects the 
 
 ```bash
 npx brain-creator-mcp
+npx brain-creator --version
+npx brain-creator --help
 npx brain-creator-doctor
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config

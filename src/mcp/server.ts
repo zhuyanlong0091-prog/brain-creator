@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
+import { BRAIN_CREATOR_VERSION } from "../version.js";
 import {
   parseBrainCreatorToolProfile,
   registerBrainCreatorTools,
@@ -16,7 +17,7 @@ export function createBrainCreatorServer(
   const context = createBrainCreatorMcpContext();
   const server = new McpServer({
     name: "brain-creator",
-    version: "2.0.4"
+    version: BRAIN_CREATOR_VERSION
   });
 
   registerBrainCreatorTools(
