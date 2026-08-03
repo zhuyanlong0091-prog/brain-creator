@@ -1,8 +1,10 @@
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ExecutionDiagnosis,
+  ExecutionDiagnosisReview,
   ExecutionDiagnosisVerdict,
-  ExecutionFailureType
+  ExecutionFailureType,
+  LegacyDiagnosisDecision
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import { classifyExecutionFailure } from "./failureClassifier.js";
@@ -50,11 +52,7 @@ export type LegacyDiagnosisCandidate = {
   failureType: ExecutionFailureType;
   proposedVerdict: ExecutionDiagnosisVerdict;
   confidence: "high" | "medium" | "low";
-  suggestedDecision:
-    | "confirm_bug"
-    | "review_bug_as_gap"
-    | "confirm_gap"
-    | "needs_evidence";
+  suggestedDecision: LegacyDiagnosisDecision;
   reason: string;
 };
 
@@ -181,39 +179,7 @@ export class ExecutionDiagnosisService {
 
   auditLegacy(input: { systemId: string; limit?: number }) {
     const limit = Math.min(100, Math.max(1, input.limit ?? 50));
-    const diagnosedBugIds = new Set(
-      this.repository.executionDiagnoses.flatMap((diagnosis) =>
-        diagnosis.systemId === input.systemId && diagnosis.bugReportId
-          ? [diagnosis.bugReportId]
-          : []
-      )
-    );
-    for (const bug of this.repository.bugReports) {
-      if (bug.systemId === input.systemId && bug.diagnosisId) {
-        diagnosedBugIds.add(bug.id);
-      }
-    }
-    const diagnosedGapIds = new Set(
-      this.repository.executionDiagnoses.flatMap((diagnosis) =>
-        diagnosis.systemId === input.systemId ? diagnosis.gapIds : []
-      )
-    );
-    const candidates: LegacyDiagnosisCandidate[] = [
-      ...this.repository.bugReports
-        .filter(
-          (bug) =>
-            bug.systemId === input.systemId && !diagnosedBugIds.has(bug.id)
-        )
-        .map((bug) => legacyBugCandidate(bug)),
-      ...this.repository.gaps
-        .filter(
-          (gap) =>
-            gap.projectId === input.systemId &&
-            isExecutionGapSourceType(gap.sourceType) &&
-            !diagnosedGapIds.has(gap.id)
-        )
-        .map((gap) => legacyGapCandidate(gap))
-    ];
+    const candidates = this.legacyCandidates(input.systemId);
     const selected = candidates.slice(0, limit);
     return {
       summary: {
@@ -237,6 +203,230 @@ export class ExecutionDiagnosisService {
       candidates: selected
     };
   }
+
+  private legacyCandidates(systemId: string) {
+    const diagnosedBugIds = new Set(
+      this.repository.executionDiagnoses.flatMap((diagnosis) =>
+        diagnosis.systemId === systemId && diagnosis.bugReportId
+          ? [diagnosis.bugReportId]
+          : []
+      )
+    );
+    for (const bug of this.repository.bugReports) {
+      if (bug.systemId === systemId && bug.diagnosisId) {
+        diagnosedBugIds.add(bug.id);
+      }
+    }
+    const diagnosedGapIds = new Set(
+      this.repository.executionDiagnoses.flatMap((diagnosis) =>
+        diagnosis.systemId === systemId ? diagnosis.gapIds : []
+      )
+    );
+    const reviewedAssetKeys = new Set(
+      this.repository.executionDiagnosisReviews
+        .filter((review) => review.systemId === systemId)
+        .map((review) => `${review.assetType}:${review.assetId}`)
+    );
+    return [
+      ...this.repository.bugReports
+        .filter(
+          (bug) =>
+            bug.systemId === systemId &&
+            !diagnosedBugIds.has(bug.id) &&
+            !reviewedAssetKeys.has(`bug:${bug.id}`)
+        )
+        .map((bug) => legacyBugCandidate(bug)),
+      ...this.repository.gaps
+        .filter(
+          (gap) =>
+            gap.projectId === systemId &&
+            isExecutionGapSourceType(gap.sourceType) &&
+            !diagnosedGapIds.has(gap.id) &&
+            !reviewedAssetKeys.has(`gap:${gap.id}`)
+        )
+        .map((gap) => legacyGapCandidate(gap))
+    ];
+  }
+
+  previewLegacyReview(input: {
+    systemId: string;
+    assetType: "bug" | "gap";
+    assetId: string;
+    decision: LegacyDiagnosisDecision;
+  }) {
+    const candidate = this.legacyCandidate(input);
+    validateLegacyDecision(candidate, input.decision);
+    return {
+      candidate,
+      decision: input.decision,
+      changes: legacyReviewChanges(input.decision),
+      requiresConfirmation: true
+    };
+  }
+
+  confirmLegacyReview(input: {
+    systemId: string;
+    assetType: "bug" | "gap";
+    assetId: string;
+    decision: LegacyDiagnosisDecision;
+    note: string;
+  }) {
+    if (!input.note.trim()) {
+      throw new Error("A human review note is required");
+    }
+    const preview = this.previewLegacyReview(input);
+    const now = this.now();
+    const review: ExecutionDiagnosisReview = {
+      id: id("executionDiagnosisReview"),
+      systemId: input.systemId,
+      assetType: input.assetType,
+      assetId: input.assetId,
+      proposedFailureType: preview.candidate.failureType,
+      proposedVerdict: preview.candidate.proposedVerdict,
+      suggestedDecision: preview.candidate.suggestedDecision,
+      decision: input.decision,
+      note: input.note.trim(),
+      status: input.decision === "needs_evidence" ? "recorded" : "migrated",
+      priorAssetStatus: preview.candidate.currentStatus,
+      resultingAssetStatus: preview.candidate.currentStatus,
+      createdAt: now
+    };
+    if (input.decision !== "needs_evidence") {
+      const diagnosis: ExecutionDiagnosis = {
+        id: id("executionDiagnosis"),
+        systemId: input.systemId,
+        bugReportId: input.assetType === "bug" ? input.assetId : undefined,
+        gapIds: input.assetType === "gap" ? [input.assetId] : [],
+        legacyReviewId: review.id,
+        testCaseId: legacyTestCaseId(this.repository, preview.candidate),
+        verdict: preview.candidate.proposedVerdict,
+        failureType: preview.candidate.failureType,
+        confidence: preview.candidate.confidence,
+        retry: {
+          attempted: 0,
+          max: 0,
+          exhausted: true,
+          eligible: false
+        },
+        reasons: ["Historical execution asset was explicitly reviewed by a user"],
+        evidenceRefs: [input.assetId],
+        createdAt: now
+      };
+      if (input.decision === "review_bug_as_gap") {
+        const bug = this.repository.bugReports.find(
+          (item) => item.id === input.assetId && item.systemId === input.systemId
+        );
+        if (!bug) throw new Error("Historical BugReport not found");
+        const gapId = id("gap");
+        this.repository.gaps.push({
+          id: gapId,
+          projectId: input.systemId,
+          sourceType: "diagnosis-migration",
+          sourceId: bug.id,
+          reason: `Historical Bug was explicitly reclassified as ${preview.candidate.proposedVerdict}`,
+          severity: "high",
+          owner: "qa",
+          status: "open",
+          createdAt: now,
+          updatedAt: now
+        });
+        bug.status = "closed";
+        bug.updatedAt = now;
+        bug.gapIds = uniqueStrings([...bug.gapIds, gapId]);
+        diagnosis.gapIds = [gapId];
+        review.createdGapId = gapId;
+        review.resultingAssetStatus = "closed";
+      }
+      if (input.assetType === "bug") {
+        const bug = this.repository.bugReports.find(
+          (item) => item.id === input.assetId && item.systemId === input.systemId
+        );
+        if (!bug) throw new Error("Historical BugReport not found");
+        bug.diagnosisId = diagnosis.id;
+        bug.updatedAt = now;
+      }
+      this.repository.executionDiagnoses.push(diagnosis);
+      review.diagnosisId = diagnosis.id;
+    }
+    this.repository.executionDiagnosisReviews.push(review);
+    this.repository.persist();
+    return {
+      review,
+      diagnosis: review.diagnosisId
+        ? this.repository.executionDiagnoses.find(
+            (item) => item.id === review.diagnosisId
+          )
+        : undefined,
+      createdGap: review.createdGapId
+        ? this.repository.gaps.find((item) => item.id === review.createdGapId)
+        : undefined
+    };
+  }
+
+  listLegacyReviews(systemId: string) {
+    return this.repository.executionDiagnosisReviews.filter(
+      (review) => review.systemId === systemId
+    );
+  }
+
+  legacyReviewSummary(systemId: string) {
+    const reviews = this.listLegacyReviews(systemId);
+    return {
+      total: reviews.length,
+      byDecision: countBy(reviews.map((review) => review.decision)),
+      migrated: reviews.filter((review) => review.status === "migrated").length,
+      needsEvidence: reviews.filter(
+        (review) => review.decision === "needs_evidence"
+      ).length
+    };
+  }
+
+  private legacyCandidate(input: {
+    systemId: string;
+    assetType: "bug" | "gap";
+    assetId: string;
+  }) {
+    const candidate = this.legacyCandidates(input.systemId).find(
+      (item) =>
+        item.assetType === input.assetType && item.assetId === input.assetId
+    );
+    if (!candidate) {
+      throw new Error("Historical diagnosis candidate not found or already reviewed");
+    }
+    return candidate;
+  }
+}
+
+function validateLegacyDecision(
+  candidate: LegacyDiagnosisCandidate,
+  decision: LegacyDiagnosisDecision
+) {
+  if (decision === "needs_evidence") return;
+  if (candidate.suggestedDecision !== decision) {
+    throw new Error("Decision does not match the audited candidate recommendation");
+  }
+}
+
+function legacyReviewChanges(decision: LegacyDiagnosisDecision) {
+  if (decision === "review_bug_as_gap") {
+    return ["close historical BugReport", "create typed Gap", "record diagnosis and review"];
+  }
+  if (decision === "needs_evidence") {
+    return ["record human review only", "leave BugReport and Gap unchanged"];
+  }
+  return ["record diagnosis and review", "leave source asset status unchanged"];
+}
+
+function legacyTestCaseId(
+  repository: InMemoryBrainCreatorRepository,
+  candidate: LegacyDiagnosisCandidate
+) {
+  if (candidate.assetType === "bug") {
+    return repository.bugReports.find((item) => item.id === candidate.assetId)
+      ?.caseNo ?? candidate.assetId;
+  }
+  return repository.gaps.find((item) => item.id === candidate.assetId)
+    ?.sourceId ?? candidate.assetId;
 }
 
 function legacyBugCandidate(

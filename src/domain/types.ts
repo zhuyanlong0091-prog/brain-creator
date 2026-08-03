@@ -1093,6 +1093,7 @@ export type ExecutionDiagnosis = {
   chainRunId?: string;
   bugReportId?: string;
   gapIds: string[];
+  legacyReviewId?: string;
   testCaseId: string;
   verdict: ExecutionDiagnosisVerdict;
   failureType?: ExecutionFailureType;
@@ -1105,6 +1106,30 @@ export type ExecutionDiagnosis = {
   };
   reasons: string[];
   evidenceRefs: string[];
+  createdAt: string;
+};
+
+export type LegacyDiagnosisDecision =
+  | "confirm_bug"
+  | "review_bug_as_gap"
+  | "confirm_gap"
+  | "needs_evidence";
+
+export type ExecutionDiagnosisReview = {
+  id: string;
+  systemId: string;
+  assetType: "bug" | "gap";
+  assetId: string;
+  proposedFailureType: ExecutionFailureType;
+  proposedVerdict: ExecutionDiagnosisVerdict;
+  suggestedDecision: LegacyDiagnosisDecision;
+  decision: LegacyDiagnosisDecision;
+  note: string;
+  status: "recorded" | "migrated";
+  priorAssetStatus: string;
+  resultingAssetStatus: string;
+  diagnosisId?: string;
+  createdGapId?: string;
   createdAt: string;
 };
 

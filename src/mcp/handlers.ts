@@ -81,7 +81,8 @@ import type {
   TestCaseScenario,
   TestCaseStep,
   TestDataTask,
-  KnowledgeNodeType
+  KnowledgeNodeType,
+  LegacyDiagnosisDecision
 } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
@@ -589,6 +590,33 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
 
 async function prepareFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const action = prepareActionArg(input, "action");
+  if (action === "review-legacy-diagnosis") {
+    const resolution = resolveSystemReference(context, input);
+    const reviewInput = {
+      systemId: resolution.systemId,
+      assetType: diagnosisAssetTypeArg(input, "diagnosisAssetType"),
+      assetId: stringArg(input, "diagnosisAssetId"),
+      decision: legacyDiagnosisDecisionArg(input, "diagnosisDecision")
+    };
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        ...context.executionDiagnosis.previewLegacyReview(reviewInput),
+        systemResolution: resolution,
+        nextAction:
+          "Present the proposed asset changes and ask for explicit confirmation with a human review note."
+      };
+    }
+    return {
+      status: "confirmed",
+      ...context.executionDiagnosis.confirmLegacyReview({
+        ...reviewInput,
+        note: stringArg(input, "confirmationNote")
+      }),
+      systemResolution: resolution,
+      nextAction: "Review the updated diagnosis, Bug, and Gap state."
+    };
+  }
   if (action === "ingest-requirement" || action === "refresh-requirement") {
     const knowledgeProjectId = stringArg(input, "knowledgeProjectId");
     const source = stringArg(input, "source");
@@ -968,7 +996,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     executionDiagnoses: {
       ...context.executionDiagnosis.summary({ systemId }),
       recent: executionDiagnoses.slice(-10),
-      legacyAudit: legacyDiagnosisAudit.summary
+      legacyAudit: legacyDiagnosisAudit.summary,
+      legacyReviews: context.executionDiagnosis.legacyReviewSummary(systemId)
     },
     facadeNextAction: nextAction,
     userSummary,
@@ -1704,6 +1733,7 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
         systemId,
         limit: optionalNumberArg(input, "limit") ?? 50
       }),
+      legacyReviews: context.executionDiagnosis.listLegacyReviews(systemId),
       systemResolution: resolution
     };
   }
@@ -3067,7 +3097,11 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
           knowledgeProjectId: projectId
         }),
         recent: executionDiagnoses.slice(-10),
-        legacyAudit: legacyDiagnosisAudit.summary
+        legacyAudit: legacyDiagnosisAudit.summary,
+        legacyReviews: aggregateLegacyDiagnosisReviewSummary(
+          context,
+          project.systemIds
+        )
       },
       testData: {
         tasks: {
@@ -3179,6 +3213,9 @@ function knowledgeReview(
         context,
         project.systemIds,
         limit
+      ),
+      legacyReviews: project.systemIds.flatMap((systemId) =>
+        context.executionDiagnosis.listLegacyReviews(systemId)
       )
     };
   }
@@ -5350,6 +5387,23 @@ function aggregateLegacyDiagnosisAudit(
   };
 }
 
+function aggregateLegacyDiagnosisReviewSummary(
+  context: BrainCreatorMcpContext,
+  systemIds: string[]
+) {
+  const reviews = systemIds.flatMap((systemId) =>
+    context.executionDiagnosis.listLegacyReviews(systemId)
+  );
+  return {
+    total: reviews.length,
+    byDecision: countBy(reviews, (review) => review.decision),
+    migrated: reviews.filter((review) => review.status === "migrated").length,
+    needsEvidence: reviews.filter(
+      (review) => review.decision === "needs_evidence"
+    ).length
+  };
+}
+
 function sumBy<T>(items: T[], getValue: (item: T) => number) {
   return items.reduce((total, item) => total + getValue(item), 0);
 }
@@ -6417,6 +6471,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "generate-analysis",
       "generate-test-design",
       "confirm-eval-actions",
+      "review-legacy-diagnosis",
       "approve-baseline",
       "compile-cases",
       "resolve-test-data",
@@ -6438,6 +6493,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "generate-analysis"
     | "generate-test-design"
     | "confirm-eval-actions"
+    | "review-legacy-diagnosis"
     | "approve-baseline"
     | "compile-cases"
     | "resolve-test-data"
@@ -6449,6 +6505,35 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "record-training-evidence"
     | "explore-system"
     | "refresh-system-brain";
+}
+
+function diagnosisAssetTypeArg(
+  input: Record<string, unknown>,
+  key: string
+): "bug" | "gap" {
+  const value = stringArg(input, key);
+  if (value !== "bug" && value !== "gap") {
+    throw new Error(`${key} is invalid`);
+  }
+  return value;
+}
+
+function legacyDiagnosisDecisionArg(
+  input: Record<string, unknown>,
+  key: string
+): LegacyDiagnosisDecision {
+  const value = stringArg(input, key);
+  if (
+    ![
+      "confirm_bug",
+      "review_bug_as_gap",
+      "confirm_gap",
+      "needs_evidence"
+    ].includes(value)
+  ) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as LegacyDiagnosisDecision;
 }
 
 function testDataTaskResultStatusArg(

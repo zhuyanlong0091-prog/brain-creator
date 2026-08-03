@@ -2184,6 +2184,36 @@ describe("Brain Creator requirement-first facade", () => {
     expect(review.legacyAudit.candidates).toEqual([
       expect.objectContaining({ systemId: bound.id, assetId: `gap-${bound.id}` })
     ]);
+
+    await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "review-legacy-diagnosis",
+      systemId: bound.id,
+      diagnosisAssetType: "gap",
+      diagnosisAssetId: `gap-${bound.id}`,
+      diagnosisDecision: "confirm_gap",
+      confirmationNote: "Confirmed network execution blocker",
+      confirm: true
+    });
+    const confirmedStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+    const confirmedReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "execution-diagnosis",
+        knowledgeProjectId: project.id
+      })
+    );
+    expect(
+      confirmedStatus.knowledge.executionDiagnoses.legacyAudit.totalCandidates
+    ).toBe(0);
+    expect(confirmedStatus.knowledge.executionDiagnoses.legacyReviews).toEqual(
+      expect.objectContaining({ total: 1, migrated: 1 })
+    );
+    expect(confirmedReview.legacyReviews).toEqual([
+      expect.objectContaining({ systemId: bound.id, assetId: `gap-${bound.id}` })
+    ]);
   });
 });
 

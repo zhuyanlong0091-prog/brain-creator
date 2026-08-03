@@ -138,6 +138,8 @@ After the bounded Healer attempt, rely on the persisted ExecutionDiagnosis verdi
 
 Historical diagnosis `legacyAudit` is read-only and bounded. Use the status summary first and request `bc_review target=execution-diagnosis` only when candidate details are needed. Present `confirm_bug`, `review_bug_as_gap`, `confirm_gap`, and `needs_evidence` as suggestions. Never close a Bug or create/resolve a Gap from an audit candidate without explicit user confirmation and a dedicated migration action.
 
+For one approved candidate, preview `bc_prepare action=review-legacy-diagnosis confirm=false` with its system, asset type, asset ID, and decision. Show the exact `changes`, then repeat with `confirm=true` and a human `confirmationNote`. Never batch approvals. `confirm_bug` and `confirm_gap` preserve status; `review_bug_as_gap` closes only the selected Bug and creates a linked typed Gap; `needs_evidence` records a review without migration.
+
 ## System
 
 - Use `bc_list_systems` only in full-profile discovery or debugging.
