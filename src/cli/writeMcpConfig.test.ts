@@ -2,7 +2,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseMcpProviderArg, runWriteMcpConfigCli, writeBrainCreatorMcpConfig } from "./writeMcpConfig.js";
+import {
+  inspectBrainCreatorMcpConfig,
+  parseMcpProviderArg,
+  runWriteMcpConfigCli,
+  writeBrainCreatorMcpConfig
+} from "./writeMcpConfig.js";
 
 const tempDirs: string[] = [];
 
@@ -128,6 +133,53 @@ describe("writeBrainCreatorMcpConfig", () => {
 
     expect(exitCode).toBe(1);
     expect(messages).toEqual(["Unsupported Brain Creator agent provider: cursor"]);
+  });
+
+  it("inspects only the Brain Creator server and redacts secret-like environment values", async () => {
+    const targetDir = await tempDir();
+    await writeFile(
+      join(targetDir, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          "brain-creator": {
+            command: "npx",
+            args: ["brain-creator-mcp"],
+            env: {
+              BRAIN_CREATOR_AGENT_PROVIDER: "codex",
+              BRAIN_CREATOR_FEISHU_APP_SECRET: "private-value"
+            }
+          },
+          unrelated: {
+            command: "other",
+            env: { TOKEN: "must-not-leak" }
+          }
+        }
+      }),
+      "utf8"
+    );
+
+    const inspection = await inspectBrainCreatorMcpConfig({ targetDir });
+
+    expect(inspection.exists).toBe(true);
+    expect(inspection.server).toEqual({
+      command: "npx",
+      args: ["brain-creator-mcp"],
+      env: {
+        BRAIN_CREATOR_AGENT_PROVIDER: "codex",
+        BRAIN_CREATOR_FEISHU_APP_SECRET: "[REDACTED]"
+      }
+    });
+    expect(JSON.stringify(inspection)).not.toContain("must-not-leak");
+    expect(JSON.stringify(inspection)).not.toContain("private-value");
+  });
+
+  it("reports a missing MCP config without creating one", async () => {
+    const targetDir = await tempDir();
+
+    await expect(inspectBrainCreatorMcpConfig({ targetDir })).resolves.toEqual({
+      path: join(targetDir, ".mcp.json"),
+      exists: false
+    });
   });
 });
 

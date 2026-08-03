@@ -65,16 +65,17 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
 npm install --save-dev brain-creator
 npx brain-creator --version
 npx brain-creator --help
-npx brain-creator-install-assets
-npx brain-creator-write-mcp-config --provider host-agent
-npx brain-creator-doctor
+npx brain-creator init --provider host-agent
+npx brain-creator doctor
 ```
 
 Codex 用户还可以安装插件入口：
 
 ```bash
-npx brain-creator-install-codex-plugin
+npx brain-creator plugin install
 ```
+
+`brain-creator init` 会以幂等方式安装 Skill、Playwright Agent 定义和 MCP 配置，不覆盖已有自定义资产。使用 `brain-creator config` 可只读检查脱敏后的配置；只有 `brain-creator config write` 会更新配置。旧版独立命令继续兼容，使用 `brain-creator help legacy` 查看，但不再作为推荐入口。
 
 新生成的 `.mcp.json` 默认包含：
 
@@ -266,7 +267,7 @@ BRAIN_CREATOR_KNOWLEDGE_DIR=F:\YourVault\BrainCreator
 - `auto`：检测可用 provider。
 - `disabled`：只允许预览与状态查询。
 
-`waiting-for-agent` 是可执行任务，不是“AgentBridge 缺失”。执行前运行 `npx brain-creator-doctor`，可以提前检查 provider、浏览器、知识目录、工具 Profile 和飞书连接器。
+`waiting-for-agent` 是可执行任务，不是“AgentBridge 缺失”。执行前运行 `npx brain-creator doctor`，可以提前检查 provider、浏览器、知识目录、工具 Profile 和飞书连接器。
 
 ### 验证
 
@@ -306,13 +307,19 @@ Recommended MCP CLI connection mode:
 npm install --save-dev brain-creator
 npx brain-creator --version
 npx brain-creator --help
-npx brain-creator-install-assets
-npx brain-creator-write-mcp-config --provider host-agent
-npx brain-creator-install-codex-plugin
-npx brain-creator-doctor
+npx brain-creator init --provider host-agent
+npx brain-creator doctor
+```
+
+Codex users can also install the plugin entrypoint:
+
+```bash
+npx brain-creator plugin install
 ```
 
 Use `BRAIN_CREATOR_TOOL_PROFILE=facade` for normal Agent use. Set `full` only for compatibility, audit, or debugging.
+
+`brain-creator init` idempotently installs the Skill, Playwright Agent definitions, and MCP configuration without overwriting existing custom assets. Use `brain-creator config` for a redacted read-only inspection; only `brain-creator config write` changes configuration. Legacy standalone executables remain compatible and are listed by `brain-creator help legacy`, but are no longer the recommended entrypoints.
 
 The source checkout mode is for contributors. The repo-local plugin installation mode registers this repository through `codex plugin marketplace add .` and installs `brain-creator@personal`.
 

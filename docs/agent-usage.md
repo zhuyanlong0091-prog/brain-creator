@@ -17,7 +17,7 @@ The recommended path starts from requirements. The older “connect a business s
 ## Installation Modes
 
 - **source checkout mode**: contribute to Brain Creator from this repository.
-- **MCP CLI connection mode**: install `brain-creator` in a business project and run `brain-creator-install-assets`, `brain-creator-write-mcp-config`, and `brain-creator-doctor`.
+- **MCP CLI connection mode**: install `brain-creator` in a business project, run `brain-creator init`, then verify it with `brain-creator doctor`. Existing standalone executables remain available under `brain-creator help legacy` for compatibility.
 - **repo-local plugin installation mode**: register this repository or the installed npm package as a Codex plugin marketplace.
 
 Full setup details are in `docs/mcp-installation.md`.
