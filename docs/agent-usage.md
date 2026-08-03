@@ -109,6 +109,8 @@ For a terminal Requirement Suite failure, read `bc_status.knowledge.executionDia
 
 Document suites and bug regression use the same gate. For an Excel/Markdown flow without a KnowledgeProject, pass `systemId` to `bc_status` or `bc_review target=execution-diagnosis`. A document failure creates a BugReport only for `product_bug`. During regression, `passed` moves the existing bug to `retest-passed`, `product_bug` moves it to `retest-failed`, and a technical diagnosis restores the prior bug status while returning a blocked result and Gap. Host Agent regression tasks retain `regressionContext` across Generator and Healer submissions.
 
+`legacyAudit` covers BugReports and Gaps that predate ExecutionDiagnosis. Status exposes only its summary; diagnosis review exposes a bounded candidate list with standardized reasons. Treat `confirm_bug`, `review_bug_as_gap`, `confirm_gap`, and `needs_evidence` as review suggestions, not commands. Never mutate a historical Bug or Gap from this output. Show the candidate to the user and obtain explicit confirmation before a later migration workflow is allowed to act.
+
 Failure classification is shared between Ledger and review filters: assertion, auth, locator, network, generated-automation, test-data, environment, execution, or unknown. Classification is diagnostic evidence, not permission to create a Bug. Product Bug creation still requires an expectation mismatch supported by execution evidence.
 
 ### 10. Review Evidence

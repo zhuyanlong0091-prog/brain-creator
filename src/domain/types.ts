@@ -1092,6 +1092,7 @@ export type ExecutionDiagnosis = {
   executionEvidenceId?: string;
   chainRunId?: string;
   bugReportId?: string;
+  gapIds: string[];
   testCaseId: string;
   verdict: ExecutionDiagnosisVerdict;
   failureType?: ExecutionFailureType;

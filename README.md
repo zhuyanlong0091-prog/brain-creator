@@ -213,6 +213,8 @@ Requirement Suite 支持经确认的执行控制，且不新增用户必须记�
 
 该门禁同时覆盖 Requirement Suite、Excel/Markdown Document Suite 和 Bug 回归。文档用例诊断会关联来源、Suite、用例编号和 Bug；回归只有再次确认 `product_bug` 才写为 `retest-failed`，自动化、数据、鉴权、环境或网络阻塞会保留 Bug 原状态。没有 KnowledgeProject 时也可按 `systemId` 使用 `bc_status` 和 `bc_review target=execution-diagnosis` 查看分流统计。
 
+对门禁上线前产生的 Bug/Gap，`bc_status.executionDiagnoses.legacyAudit` 只返回候选数量摘要，`bc_review target=execution-diagnosis` 返回最多 100 条标准化复核候选。该审计是只读建议：不会关闭 Bug、创建或解决 Gap，也不会复制历史原始错误文本。Agent 必须展示候选并取得明确确认后，未来的迁移流程才可改动资产。
+
 系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。`interactionMode` 默认为 `off`，此时不点击控件。显式设置 `safe` 后，每页默认最多探测 3 个、硬上限 10 个 Tab、展开控件或原生下拉，并记录前后状态、可见字段、弹窗、URL、截图与被拦截请求。危险名称、无稳定 selector、提交类控件、非 GET/HEAD/OPTIONS 请求和危险 URL 会被跳过或拦截；该模式不会提交表单，也不能证明设计错误的 GET 接口绝无副作用。复杂菜单、需要输入的数据流程和真实业务提交仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
 
 ### 飞书需求接入
@@ -368,6 +370,8 @@ Every Requirement Suite also writes a persistent RunLedger. It records Suite cre
 Terminal failures now pass through an `ExecutionDiagnosis` gate. It combines the normalized failure type, bounded Healer attempt count, and evidence references to classify a product bug or an automation, test-data, auth, environment, network, execution, or unknown Gap. A BugReport is allowed only when an explicit expected/actual mismatch remains after controlled retries. `bc_status` returns a bounded diagnosis summary, and `bc_review target=execution-diagnosis` shows normalized reasons, retry budget, and evidence IDs. Diagnoses never persist raw stderr, prompts, or secrets.
 
 The same gate covers Requirement Suites, Excel/Markdown document suites, and bug regression. Document diagnoses link the source, suite, case number, and BugReport. A regression becomes `retest-failed` only when `product_bug` is confirmed again; automation, data, auth, environment, and network blockers preserve the prior bug status. Without a KnowledgeProject, use `bc_status` and `bc_review target=execution-diagnosis` with `systemId` to inspect routing metrics.
+
+For Bugs and Gaps created before the gate existed, `bc_status.executionDiagnoses.legacyAudit` returns counts only, while `bc_review target=execution-diagnosis` returns at most 100 normalized review candidates. This audit is advisory and read-only: it never closes a Bug, creates or resolves a Gap, or copies raw historical failure text. The Agent must present candidates and obtain explicit confirmation before any future migration may change assets.
 
 System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. `interactionMode` defaults to `off`. Opt-in `safe` mode probes at most 3 controls per page by default, with a hard limit of 10, and only considers tabs, disclosure controls, and native selects with stable selectors. It records before/after states and blocks write methods, dangerous URLs, and write-like labels. It never submits forms, but cannot prove that a misdesigned GET endpoint has no side effect. Complex menus, data-entry flows, and business submissions still require supplemental host-Agent page or training evidence.
 

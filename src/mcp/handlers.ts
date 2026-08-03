@@ -906,6 +906,10 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const suiteRuns = context.service.listCaseSuiteRuns(systemId);
   const bugs = context.service.listBugReports({ systemId });
   const executionDiagnoses = context.executionDiagnosis.list({ systemId });
+  const legacyDiagnosisAudit = context.executionDiagnosis.auditLegacy({
+    systemId,
+    limit: 1
+  });
   const openBugs = bugs.filter((bug) => bug.status === "open" || bug.status === "retest-failed");
   const unfinishedSuites = unfinishedCaseSuites(context, systemId);
   const pendingAgentTasks = context.service
@@ -963,7 +967,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     },
     executionDiagnoses: {
       ...context.executionDiagnosis.summary({ systemId }),
-      recent: executionDiagnoses.slice(-10)
+      recent: executionDiagnoses.slice(-10),
+      legacyAudit: legacyDiagnosisAudit.summary
     },
     facadeNextAction: nextAction,
     userSummary,
@@ -1475,6 +1480,11 @@ async function executeDocumentCase(
     if (isProductBug) {
       result.chainRun.gaps = [];
       context.repository.persist();
+    } else {
+      context.executionDiagnosis.linkGaps(
+        diagnosis.id,
+        result.chainRun.gaps.map((gap) => gap.id)
+      );
     }
     const bug =
       isProductBug && input.createBugOnFailure !== false
@@ -1662,7 +1672,8 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
       requestedTarget,
       requestedTarget === "system-brain"
         ? optionalStringArg(input, "systemId") ?? optionalStringArg(input, "id")
-        : optionalStringArg(input, "id")
+        : optionalStringArg(input, "id"),
+      optionalNumberArg(input, "limit") ?? 50
     );
   }
   if (
@@ -1689,6 +1700,10 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
     return {
       summary: context.executionDiagnosis.summary({ systemId }),
       items,
+      legacyAudit: context.executionDiagnosis.auditLegacy({
+        systemId,
+        limit: optionalNumberArg(input, "limit") ?? 50
+      }),
       systemResolution: resolution
     };
   }
@@ -2575,6 +2590,16 @@ async function executeRequirementSuiteCase(
   if (requirementBug && diagnosis) {
     context.executionDiagnosis.linkBugReport(diagnosis.id, requirementBug.id);
   }
+  if (
+    diagnosis &&
+    diagnosis.verdict !== "product_bug" &&
+    "chainRun" in result
+  ) {
+    context.executionDiagnosis.linkGaps(
+      diagnosis.id,
+      result.chainRun?.gaps.map((gap) => gap.id) ?? []
+    );
+  }
   if (requirementBug && "chainRun" in result) result.chainRun.gaps = [];
   const completedEvidence =
     "chainRun" in result && result.chainRun?.status !== "partial"
@@ -2873,6 +2898,11 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const executionDiagnoses = context.executionDiagnosis.list({
     knowledgeProjectId: projectId
   });
+  const legacyDiagnosisAudit = aggregateLegacyDiagnosisAudit(
+    context,
+    project.systemIds,
+    1
+  );
   const activeRequirementSuiteRun = requirementSuiteRuns
     .filter(
       (item) =>
@@ -3036,7 +3066,8 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         ...context.executionDiagnosis.summary({
           knowledgeProjectId: projectId
         }),
-        recent: executionDiagnoses.slice(-10)
+        recent: executionDiagnoses.slice(-10),
+        legacyAudit: legacyDiagnosisAudit.summary
       },
       testData: {
         tasks: {
@@ -3070,7 +3101,8 @@ function knowledgeReview(
   context: BrainCreatorMcpContext,
   projectId: string,
   target: KnowledgeReviewTarget,
-  idValue?: string
+  idValue?: string,
+  limit = 50
 ) {
   const status = knowledgeStatus(context, projectId);
   const project = status.knowledge.project;
@@ -3142,7 +3174,12 @@ function knowledgeReview(
       summary: context.executionDiagnosis.summary({
         knowledgeProjectId: projectId
       }),
-      items
+      items,
+      legacyAudit: aggregateLegacyDiagnosisAudit(
+        context,
+        project.systemIds,
+        limit
+      )
     };
   }
   if (target === "coverage") {
@@ -3938,6 +3975,12 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
           })
         ]
       : [];
+  if (terminalDiagnosis && gaps.length > 0) {
+    context.executionDiagnosis.linkGaps(
+      terminalDiagnosis.id,
+      gaps.map((gap) => gap.id)
+    );
+  }
   const chainRun: ChainRun = {
     id: chainRunId,
     systemId: result.task.systemId,
@@ -5270,6 +5313,41 @@ function countBy<T>(items: T[], getKey: (item: T) => string) {
     result[key] = (result[key] ?? 0) + 1;
     return result;
   }, {});
+}
+
+function aggregateLegacyDiagnosisAudit(
+  context: BrainCreatorMcpContext,
+  systemIds: string[],
+  limit: number
+) {
+  const audits = systemIds.map((systemId) => ({
+    systemId,
+    audit: context.executionDiagnosis.auditLegacy({ systemId, limit: 100 })
+  }));
+  const candidates = audits
+    .flatMap((item) => item.audit.candidates)
+    .slice(0, Math.min(100, Math.max(1, limit)));
+  const sum = (
+    select: (summary: (typeof audits)[number]["audit"]["summary"]) => number
+  ) => audits.reduce((total, item) => total + select(item.audit.summary), 0);
+  const totalCandidates = sum((summary) => summary.totalCandidates);
+  return {
+    summary: {
+      totalCandidates,
+      bugs: sum((summary) => summary.bugs),
+      gaps: sum((summary) => summary.gaps),
+      reviewBugAsGap: sum((summary) => summary.reviewBugAsGap),
+      confirmBug: sum((summary) => summary.confirmBug),
+      confirmGap: sum((summary) => summary.confirmGap),
+      needsEvidence: sum((summary) => summary.needsEvidence),
+      truncated: candidates.length < totalCandidates
+    },
+    bySystem: audits.map((item) => ({
+      systemId: item.systemId,
+      ...item.audit.summary
+    })),
+    candidates
+  };
 }
 
 function sumBy<T>(items: T[], getValue: (item: T) => number) {

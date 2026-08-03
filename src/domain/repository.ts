@@ -40,7 +40,7 @@ import type {
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 12;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 13;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
@@ -250,7 +250,12 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       })
     );
     this.executionEvidence = snapshot.executionEvidence ?? [];
-    this.executionDiagnoses = snapshot.executionDiagnoses ?? [];
+    this.executionDiagnoses = (snapshot.executionDiagnoses ?? []).map(
+      (diagnosis) => ({
+        ...diagnosis,
+        gapIds: diagnosis.gapIds ?? []
+      })
+    );
     this.runLedgerEntries = snapshot.runLedgerEntries ?? [];
   }
 
