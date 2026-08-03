@@ -41,7 +41,7 @@ import type {
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 14;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 15;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
@@ -260,7 +260,22 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
         gapIds: diagnosis.gapIds ?? []
       })
     );
-    this.executionDiagnosisReviews = snapshot.executionDiagnosisReviews ?? [];
+    this.executionDiagnosisReviews = (snapshot.executionDiagnosisReviews ?? []).map(
+      (review) => {
+        const adjudicated = review.decision !== "needs_evidence";
+        return {
+          ...review,
+          confirmedFailureType:
+            review.confirmedFailureType ??
+            (adjudicated ? review.proposedFailureType : undefined),
+          confirmedVerdict:
+            review.confirmedVerdict ??
+            (adjudicated ? review.proposedVerdict : undefined),
+          matchesSuggestion:
+            review.matchesSuggestion ?? (adjudicated ? true : undefined)
+        };
+      }
+    );
     this.runLedgerEntries = snapshot.runLedgerEntries ?? [];
   }
 

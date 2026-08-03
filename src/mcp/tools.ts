@@ -186,7 +186,33 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
           "confirm_bug",
           "review_bug_as_gap",
           "confirm_gap",
-          "needs_evidence"
+          "needs_evidence",
+          "override_classification"
+        ])
+        .optional(),
+      correctedFailureType: z
+        .enum([
+          "assertion_failure",
+          "auth_failure",
+          "locator_failure",
+          "network_failure",
+          "automation_failure",
+          "test_data_failure",
+          "environment_failure",
+          "execution_failure",
+          "unknown_failure"
+        ])
+        .optional(),
+      correctedVerdict: z
+        .enum([
+          "product_bug",
+          "automation_gap",
+          "test_data_gap",
+          "auth_gap",
+          "environment_gap",
+          "network_gap",
+          "execution_gap",
+          "unknown_gap"
         ])
         .optional(),
       systemId: z.string().optional(),

@@ -4988,6 +4988,72 @@ describe("handleBrainCreatorTool", () => {
       })
     );
     expect(repeated).toContain("already reviewed");
+
+    context.repository.bugReports.push({
+      id: "legacy-technical-bug",
+      systemId: system.id,
+      sourceId: "legacy-source",
+      caseNo: "TC-003",
+      caseTitle: "Misclassified generated test failure",
+      module: "Orders",
+      priority: "P1",
+      expectedResult: "approved",
+      actualResult: "SyntaxError in generated test",
+      reproductionSteps: [],
+      evidencePaths: [],
+      gapIds: [],
+      status: "open",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z"
+    });
+    const correctedPreview = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "review-legacy-diagnosis",
+        systemId: system.id,
+        diagnosisAssetType: "bug",
+        diagnosisAssetId: "legacy-technical-bug",
+        diagnosisDecision: "override_classification",
+        correctedFailureType: "assertion_failure",
+        correctedVerdict: "product_bug",
+        confirm: false
+      })
+    );
+    expect(correctedPreview.conclusion).toEqual({
+      failureType: "assertion_failure",
+      verdict: "product_bug",
+      matchesSuggestion: false
+    });
+    const corrected = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "review-legacy-diagnosis",
+        systemId: system.id,
+        diagnosisAssetType: "bug",
+        diagnosisAssetId: "legacy-technical-bug",
+        diagnosisDecision: "override_classification",
+        correctedFailureType: "assertion_failure",
+        correctedVerdict: "product_bug",
+        confirmationNote: "Trace confirms the assertion reached the target system",
+        confirm: true
+      })
+    );
+    const qualityStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", { systemId: system.id })
+    );
+    expect(corrected.review).toEqual(
+      expect.objectContaining({
+        decision: "override_classification",
+        matchesSuggestion: false,
+        confirmedVerdict: "product_bug"
+      })
+    );
+    expect(qualityStatus.executionDiagnoses.legacyReviews.quality).toEqual(
+      expect.objectContaining({
+        adjudicated: 2,
+        matched: 1,
+        corrected: 1,
+        accuracy: 0.5
+      })
+    );
   });
 });
 

@@ -218,6 +218,8 @@ Requirement Suite 支持经确认的执行控制，且不新增用户必须记�
 
 历史候选通过 `bc_prepare action=review-legacy-diagnosis` 逐条处理。`confirm=false` 只返回变更预览；`confirm=true` 必须携带人工复核说明。确认 Bug 或 Gap 只补诊断关联且不改变原状态；确认技术 Bug 转 Gap 时会关闭该 Bug、创建标准化 Gap，并保存 `ExecutionDiagnosisReview`、原状态、诊断 ID 和新 Gap ID。`needs_evidence` 只保存人工标签，不迁移资产。重复、跨系统或与候选建议不匹配的确认会被拒绝。
 
+如果审计建议本身错误，使用 `diagnosisDecision=override_classification`，并同时提供一致的 `correctedFailureType` 与 `correctedVerdict`。Brain Creator 会同时保留算法原判和人工正确结论，并在 `legacyReviews.quality` 中按已裁决样本计算命中数、纠错数、准确率及各原始失败类型统计；`needs_evidence` 不进入准确率分母。历史 Gap 因缺少完整用例上下文，不能直接纠正为产品 Bug。
+
 系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。`interactionMode` 默认为 `off`，此时不点击控件。显式设置 `safe` 后，每页默认最多探测 3 个、硬上限 10 个 Tab、展开控件或原生下拉，并记录前后状态、可见字段、弹窗、URL、截图与被拦截请求。危险名称、无稳定 selector、提交类控件、非 GET/HEAD/OPTIONS 请求和危险 URL 会被跳过或拦截；该模式不会提交表单，也不能证明设计错误的 GET 接口绝无副作用。复杂菜单、需要输入的数据流程和真实业务提交仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
 
 ### 飞书需求接入
@@ -378,6 +380,8 @@ The same gate covers Requirement Suites, Excel/Markdown document suites, and bug
 For Bugs and Gaps created before the gate existed, `bc_status.executionDiagnoses.legacyAudit` returns counts only, while `bc_review target=execution-diagnosis` returns at most 100 normalized review candidates. This audit is advisory and read-only: it never closes a Bug, creates or resolves a Gap, or copies raw historical failure text. The Agent must present candidates and obtain explicit confirmation before any future migration may change assets.
 
 Process legacy candidates one at a time with `bc_prepare action=review-legacy-diagnosis`. `confirm=false` is read-only; `confirm=true` requires a human review note. Confirming a Bug or Gap adds diagnosis links without changing its status. Confirming a technical Bug-to-Gap reclassification closes that Bug, creates a normalized Gap, and stores an `ExecutionDiagnosisReview` with the prior status, diagnosis ID, and created Gap ID. `needs_evidence` records only the human label. Repeated, cross-system, or recommendation-mismatched confirmations are rejected.
+
+When the audit recommendation is wrong, use `diagnosisDecision=override_classification` with a consistent `correctedFailureType` and `correctedVerdict`. Brain Creator preserves both the algorithm proposal and the human-adjudicated conclusion. `legacyReviews.quality` reports adjudicated, matched, corrected, overall accuracy, and per-proposed-failure-type counts; `needs_evidence` is excluded from the denominator. A historical Gap cannot be promoted directly to a product Bug because it lacks complete case evidence.
 
 System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. `interactionMode` defaults to `off`. Opt-in `safe` mode probes at most 3 controls per page by default, with a hard limit of 10, and only considers tabs, disclosure controls, and native selects with stable selectors. It records before/after states and blocks write methods, dangerous URLs, and write-like labels. It never submits forms, but cannot prove that a misdesigned GET endpoint has no side effect. Complex menus, data-entry flows, and business submissions still require supplemental host-Agent page or training evidence.
 
