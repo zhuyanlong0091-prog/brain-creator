@@ -4916,6 +4916,78 @@ describe("handleBrainCreatorTool", () => {
         gaps: context.repository.gaps
       })
     ).toBe(before);
+
+    const migrationPreview = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "review-legacy-diagnosis",
+        systemId: system.id,
+        diagnosisAssetType: "bug",
+        diagnosisAssetId: "legacy-bug",
+        diagnosisDecision: "confirm_bug",
+        confirm: false
+      })
+    );
+    expect(migrationPreview).toEqual(
+      expect.objectContaining({
+        status: "preview",
+        requiresConfirmation: true,
+        decision: "confirm_bug"
+      })
+    );
+    expect(context.repository.executionDiagnosisReviews).toHaveLength(0);
+
+    const confirmed = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "review-legacy-diagnosis",
+        systemId: system.id,
+        diagnosisAssetType: "bug",
+        diagnosisAssetId: "legacy-bug",
+        diagnosisDecision: "confirm_bug",
+        confirmationNote: "Confirmed historical expectation mismatch",
+        confirm: true
+      })
+    );
+    const confirmedStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", { systemId: system.id })
+    );
+    const confirmedReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "execution-diagnosis",
+        systemId: system.id
+      })
+    );
+    expect(confirmed).toEqual(
+      expect.objectContaining({
+        status: "confirmed",
+        review: expect.objectContaining({ decision: "confirm_bug" }),
+        diagnosis: expect.objectContaining({
+          verdict: "product_bug",
+          bugReportId: "legacy-bug"
+        })
+      })
+    );
+    expect(context.repository.bugReports[0].status).toBe("open");
+    expect(confirmedStatus.executionDiagnoses).toEqual(
+      expect.objectContaining({
+        legacyAudit: expect.objectContaining({ totalCandidates: 1 }),
+        legacyReviews: expect.objectContaining({ total: 1, migrated: 1 })
+      })
+    );
+    expect(confirmedReview.legacyReviews).toEqual([
+      expect.objectContaining({ assetId: "legacy-bug", decision: "confirm_bug" })
+    ]);
+    const repeated = errorOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "review-legacy-diagnosis",
+        systemId: system.id,
+        diagnosisAssetType: "bug",
+        diagnosisAssetId: "legacy-bug",
+        diagnosisDecision: "confirm_bug",
+        confirmationNote: "Repeat",
+        confirm: true
+      })
+    );
+    expect(repeated).toContain("already reviewed");
   });
 });
 

@@ -230,6 +230,199 @@ describe("ExecutionDiagnosisService", () => {
     expect(audit.summary.truncated).toBe(true);
     expect(audit.candidates).toHaveLength(1);
   });
+
+  it("previews a legacy migration without changing assets", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+    repository.bugReports.push(
+      legacyBug("bug-syntax", "SyntaxError in generated test")
+    );
+    const before = JSON.stringify(repository);
+
+    const preview = service.previewLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-syntax",
+      decision: "review_bug_as_gap"
+    });
+
+    expect(preview).toEqual(
+      expect.objectContaining({
+        decision: "review_bug_as_gap",
+        requiresConfirmation: true,
+        changes: [
+          "close historical BugReport",
+          "create typed Gap",
+          "record diagnosis and review"
+        ]
+      })
+    );
+    expect(JSON.stringify(repository)).toBe(before);
+  });
+
+  it("reclassifies an explicitly confirmed technical Bug as a Gap", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(
+      repository,
+      () => "2026-08-03T00:00:00.000Z"
+    );
+    repository.bugReports.push(
+      legacyBug("bug-syntax", "SyntaxError in generated test")
+    );
+
+    const result = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-syntax",
+      decision: "review_bug_as_gap",
+      note: "Confirmed as generated automation failure"
+    });
+
+    expect(result.review).toEqual(
+      expect.objectContaining({
+        decision: "review_bug_as_gap",
+        status: "migrated",
+        priorAssetStatus: "open",
+        resultingAssetStatus: "closed",
+        diagnosisId: result.diagnosis?.id,
+        createdGapId: result.createdGap?.id
+      })
+    );
+    expect(result.diagnosis).toEqual(
+      expect.objectContaining({
+        bugReportId: "bug-syntax",
+        gapIds: [result.createdGap?.id],
+        verdict: "automation_gap",
+        legacyReviewId: result.review.id
+      })
+    );
+    expect(result.createdGap).toEqual(
+      expect.objectContaining({
+        projectId: "system-a",
+        sourceType: "diagnosis-migration",
+        sourceId: "bug-syntax",
+        status: "open"
+      })
+    );
+    expect(repository.bugReports[0]).toEqual(
+      expect.objectContaining({
+        status: "closed",
+        gapIds: [result.createdGap?.id],
+        diagnosisId: result.diagnosis?.id
+      })
+    );
+    expect(service.auditLegacy({ systemId: "system-a" }).summary.totalCandidates).toBe(0);
+  });
+
+  it("records confirmed Bugs, Gaps, and needs-evidence labels without extra mutations", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+    repository.bugReports.push(
+      legacyBug("bug-assertion", "Expected approved, actual pending")
+    );
+    repository.gaps.push(
+      legacyGap("gap-network", "network timeout"),
+      legacyGap("gap-unknown", "Expected visible, actual hidden")
+    );
+
+    const confirmedBug = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-assertion",
+      decision: "confirm_bug",
+      note: "Expectation mismatch confirmed"
+    });
+    const confirmedGap = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "gap",
+      assetId: "gap-network",
+      decision: "confirm_gap",
+      note: "Network blocker confirmed"
+    });
+    const needsEvidence = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "gap",
+      assetId: "gap-unknown",
+      decision: "needs_evidence",
+      note: "Controlled retry evidence is missing"
+    });
+
+    expect(confirmedBug.diagnosis).toEqual(
+      expect.objectContaining({ verdict: "product_bug", bugReportId: "bug-assertion" })
+    );
+    expect(confirmedGap.diagnosis).toEqual(
+      expect.objectContaining({ verdict: "network_gap", gapIds: ["gap-network"] })
+    );
+    expect(needsEvidence.diagnosis).toBeUndefined();
+    expect(repository.bugReports[0]).toEqual(
+      expect.objectContaining({
+        status: "open",
+        diagnosisId: confirmedBug.diagnosis?.id
+      })
+    );
+    expect(repository.gaps.map((gap) => gap.status)).toEqual(["open", "open"]);
+    expect(service.legacyReviewSummary("system-a")).toEqual({
+      total: 3,
+      byDecision: {
+        confirm_bug: 1,
+        confirm_gap: 1,
+        needs_evidence: 1
+      },
+      migrated: 2,
+      needsEvidence: 1
+    });
+  });
+
+  it("rejects mismatched, cross-system, and repeated legacy decisions", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+    repository.bugReports.push(
+      legacyBug("bug-syntax", "SyntaxError in generated test")
+    );
+
+    expect(() =>
+      service.previewLegacyReview({
+        systemId: "system-a",
+        assetType: "bug",
+        assetId: "bug-syntax",
+        decision: "confirm_bug"
+      })
+    ).toThrow("Decision does not match");
+    expect(() =>
+      service.previewLegacyReview({
+        systemId: "system-b",
+        assetType: "bug",
+        assetId: "bug-syntax",
+        decision: "review_bug_as_gap"
+      })
+    ).toThrow("candidate not found");
+    expect(() =>
+      service.confirmLegacyReview({
+        systemId: "system-a",
+        assetType: "bug",
+        assetId: "bug-syntax",
+        decision: "review_bug_as_gap",
+        note: "   "
+      })
+    ).toThrow("review note is required");
+
+    service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-syntax",
+      decision: "needs_evidence",
+      note: "Need trace evidence"
+    });
+    expect(() =>
+      service.confirmLegacyReview({
+        systemId: "system-a",
+        assetType: "bug",
+        assetId: "bug-syntax",
+        decision: "needs_evidence",
+        note: "Repeat"
+      })
+    ).toThrow("already reviewed");
+  });
 });
 
 function legacyBug(id: string, actualResult: string) {

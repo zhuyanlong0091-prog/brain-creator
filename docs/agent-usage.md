@@ -111,6 +111,8 @@ Document suites and bug regression use the same gate. For an Excel/Markdown flow
 
 `legacyAudit` covers BugReports and Gaps that predate ExecutionDiagnosis. Status exposes only its summary; diagnosis review exposes a bounded candidate list with standardized reasons. Treat `confirm_bug`, `review_bug_as_gap`, `confirm_gap`, and `needs_evidence` as review suggestions, not commands. Never mutate a historical Bug or Gap from this output. Show the candidate to the user and obtain explicit confirmation before a later migration workflow is allowed to act.
 
+After the user decides, call `bc_prepare action=review-legacy-diagnosis` for one asset. First use `confirm=false` with `systemId`, `diagnosisAssetType`, `diagnosisAssetId`, and `diagnosisDecision`. Show the returned `changes`. Only then repeat with `confirm=true` and a concise `confirmationNote`. `confirm_bug` and `confirm_gap` preserve source status; `review_bug_as_gap` closes the historical Bug and creates a typed Gap; `needs_evidence` records an inconclusive human label without migration. Never batch these confirmations or reuse approval across candidates.
+
 Failure classification is shared between Ledger and review filters: assertion, auth, locator, network, generated-automation, test-data, environment, execution, or unknown. Classification is diagnostic evidence, not permission to create a Bug. Product Bug creation still requires an expectation mismatch supported by execution evidence.
 
 ### 10. Review Evidence

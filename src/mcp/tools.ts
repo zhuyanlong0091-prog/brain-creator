@@ -121,7 +121,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, confirming Requirement Eval, approving a baseline, exploring System Brain, compiling evidence-bound cases, preparing test data, and confirming immutable execution preflight snapshots.",
+      "Requirement-first facade for ingesting sources, confirming Requirement Eval, reviewing historical execution diagnoses, approving a baseline, exploring System Brain, compiling evidence-bound cases, preparing test data, and confirming immutable execution preflight snapshots.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
@@ -129,6 +129,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "generate-analysis",
         "generate-test-design",
         "confirm-eval-actions",
+        "review-legacy-diagnosis",
         "approve-baseline",
         "compile-cases",
         "resolve-test-data",
@@ -177,7 +178,17 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
           })
         )
         .default([]),
-      confirmationNote: z.string().optional(),
+      confirmationNote: z.string().min(1).max(500).optional(),
+      diagnosisAssetType: z.enum(["bug", "gap"]).optional(),
+      diagnosisAssetId: z.string().optional(),
+      diagnosisDecision: z
+        .enum([
+          "confirm_bug",
+          "review_bug_as_gap",
+          "confirm_gap",
+          "needs_evidence"
+        ])
+        .optional(),
       systemId: z.string().optional(),
       observationType: z.enum([
         "module", "actor", "object", "field", "rule", "workflow", "state", "permission",

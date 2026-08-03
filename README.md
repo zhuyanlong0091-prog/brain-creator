@@ -169,6 +169,7 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 | 兼容执行测试文档 | `bc_run mode=case-source-suite confirm=false`，确认后 `bc_run mode=case-source-suite confirm=true` |
 | 回归 Bug | `bc_run mode=bug-regression` |
 | 查看 Bug/Gap/证据 | `bc_review target="bug"`、`bc_review target="gap"`，优先展示 `reviewMarkdown` |
+| 复核历史执行诊断 | 先用 `bc_review target=execution-diagnosis` 查看候选，再用 `bc_prepare action=review-legacy-diagnosis confirm=false` 预览，用户确认后以相同参数和 `confirmationNote` 传 `confirm=true` |
 | 查看需求质量历史 | `bc_review target=requirement-eval-accuracy` |
 | 查看系统知识 | `bc_review target=system-brain` 并传入 `systemId` |
 | 查看系统探索记录 | `bc_review target=system-exploration` |
@@ -214,6 +215,8 @@ Requirement Suite 支持经确认的执行控制，且不新增用户必须记�
 该门禁同时覆盖 Requirement Suite、Excel/Markdown Document Suite 和 Bug 回归。文档用例诊断会关联来源、Suite、用例编号和 Bug；回归只有再次确认 `product_bug` 才写为 `retest-failed`，自动化、数据、鉴权、环境或网络阻塞会保留 Bug 原状态。没有 KnowledgeProject 时也可按 `systemId` 使用 `bc_status` 和 `bc_review target=execution-diagnosis` 查看分流统计。
 
 对门禁上线前产生的 Bug/Gap，`bc_status.executionDiagnoses.legacyAudit` 只返回候选数量摘要，`bc_review target=execution-diagnosis` 返回最多 100 条标准化复核候选。该审计是只读建议：不会关闭 Bug、创建或解决 Gap，也不会复制历史原始错误文本。Agent 必须展示候选并取得明确确认后，未来的迁移流程才可改动资产。
+
+历史候选通过 `bc_prepare action=review-legacy-diagnosis` 逐条处理。`confirm=false` 只返回变更预览；`confirm=true` 必须携带人工复核说明。确认 Bug 或 Gap 只补诊断关联且不改变原状态；确认技术 Bug 转 Gap 时会关闭该 Bug、创建标准化 Gap，并保存 `ExecutionDiagnosisReview`、原状态、诊断 ID 和新 Gap ID。`needs_evidence` 只保存人工标签，不迁移资产。重复、跨系统或与候选建议不匹配的确认会被拒绝。
 
 系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。`interactionMode` 默认为 `off`，此时不点击控件。显式设置 `safe` 后，每页默认最多探测 3 个、硬上限 10 个 Tab、展开控件或原生下拉，并记录前后状态、可见字段、弹窗、URL、截图与被拦截请求。危险名称、无稳定 selector、提交类控件、非 GET/HEAD/OPTIONS 请求和危险 URL 会被跳过或拦截；该模式不会提交表单，也不能证明设计错误的 GET 接口绝无副作用。复杂菜单、需要输入的数据流程和真实业务提交仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
 
@@ -327,6 +330,7 @@ The source checkout mode is for contributors. The repo-local plugin installation
 | Run an existing case document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` |
 | Regress bugs | `bc_run mode=bug-regression` |
 | Review bugs and Gaps | `bc_review target="bug"`, `bc_review target="gap"` |
+| Review a legacy execution diagnosis | Inspect candidates with `bc_review target=execution-diagnosis`, preview `bc_prepare action=review-legacy-diagnosis confirm=false`, then repeat with `confirm=true` and `confirmationNote` only after explicit user approval |
 | Review Requirement Eval history | `bc_review target=requirement-eval-accuracy` |
 | Review System Brain | `bc_review target=system-brain` with `systemId` |
 | Review exploration runs | `bc_review target=system-exploration` |
@@ -372,6 +376,8 @@ Terminal failures now pass through an `ExecutionDiagnosis` gate. It combines the
 The same gate covers Requirement Suites, Excel/Markdown document suites, and bug regression. Document diagnoses link the source, suite, case number, and BugReport. A regression becomes `retest-failed` only when `product_bug` is confirmed again; automation, data, auth, environment, and network blockers preserve the prior bug status. Without a KnowledgeProject, use `bc_status` and `bc_review target=execution-diagnosis` with `systemId` to inspect routing metrics.
 
 For Bugs and Gaps created before the gate existed, `bc_status.executionDiagnoses.legacyAudit` returns counts only, while `bc_review target=execution-diagnosis` returns at most 100 normalized review candidates. This audit is advisory and read-only: it never closes a Bug, creates or resolves a Gap, or copies raw historical failure text. The Agent must present candidates and obtain explicit confirmation before any future migration may change assets.
+
+Process legacy candidates one at a time with `bc_prepare action=review-legacy-diagnosis`. `confirm=false` is read-only; `confirm=true` requires a human review note. Confirming a Bug or Gap adds diagnosis links without changing its status. Confirming a technical Bug-to-Gap reclassification closes that Bug, creates a normalized Gap, and stores an `ExecutionDiagnosisReview` with the prior status, diagnosis ID, and created Gap ID. `needs_evidence` records only the human label. Repeated, cross-system, or recommendation-mismatched confirmations are rejected.
 
 System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. `interactionMode` defaults to `off`. Opt-in `safe` mode probes at most 3 controls per page by default, with a hard limit of 10, and only considers tabs, disclosure controls, and native selects with stable selectors. It records before/after states and blocks write methods, dangerous URLs, and write-like labels. It never submits forms, but cannot prove that a misdesigned GET endpoint has no side effect. Complex menus, data-entry flows, and business submissions still require supplemental host-Agent page or training evidence.
 

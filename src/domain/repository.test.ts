@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(13);
+    expect(second.schemaVersion).toBe(14);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -342,11 +342,28 @@ describe("JsonFileBrainCreatorRepository", () => {
       evidenceRefs: ["executionEvidence_1", "chainRun_1"],
       createdAt: "2026-07-30T00:02:00.000Z"
     });
+    first.executionDiagnosisReviews.push({
+      id: "executionDiagnosisReview_1",
+      systemId: "system_1",
+      assetType: "bug",
+      assetId: "bugReport_1",
+      proposedFailureType: "automation_failure",
+      proposedVerdict: "automation_gap",
+      suggestedDecision: "review_bug_as_gap",
+      decision: "review_bug_as_gap",
+      note: "Confirmed generated test failure",
+      status: "migrated",
+      priorAssetStatus: "open",
+      resultingAssetStatus: "closed",
+      diagnosisId: "executionDiagnosis_1",
+      createdGapId: "gap_1",
+      createdAt: "2026-07-30T00:02:00.000Z"
+    });
     first.persist();
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(13);
+    expect(second.schemaVersion).toBe(14);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);
@@ -378,6 +395,13 @@ describe("JsonFileBrainCreatorRepository", () => {
         caseNo: "TC-001",
         bugReportId: "bugReport_1",
         gapIds: ["gap_1"]
+      })
+    ]);
+    expect(second.executionDiagnosisReviews).toEqual([
+      expect.objectContaining({
+        id: "executionDiagnosisReview_1",
+        decision: "review_bug_as_gap",
+        createdGapId: "gap_1"
       })
     ]);
   });
@@ -436,7 +460,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const repository = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(repository.schemaVersion).toBe(13);
+    expect(repository.schemaVersion).toBe(14);
     expect(repository.requirementSuiteRuns[0]).toEqual(
       expect.objectContaining({
         id: "legacy-suite",
