@@ -63,6 +63,8 @@ Brain Creator 是一个“需求驱动的 Agent 原生测试业务脑”。推�
 
 ```bash
 npm install --save-dev brain-creator
+npx brain-creator --version
+npx brain-creator --help
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config --provider host-agent
 npx brain-creator-doctor
@@ -302,6 +304,8 @@ Recommended MCP CLI connection mode:
 
 ```bash
 npm install --save-dev brain-creator
+npx brain-creator --version
+npx brain-creator --help
 npx brain-creator-install-assets
 npx brain-creator-write-mcp-config --provider host-agent
 npx brain-creator-install-codex-plugin

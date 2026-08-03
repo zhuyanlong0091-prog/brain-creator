@@ -24,6 +24,7 @@ const publishableScripts = {
 };
 
 const publishableBins = {
+  "brain-creator": "dist/cli/brainCreator.js",
   "brain-creator-mcp": "dist/cli/brainCreatorMcp.js",
   "brain-creator-doctor": "dist/cli/doctor.js",
   "brain-creator-install-assets": "dist/cli/installAssets.js",

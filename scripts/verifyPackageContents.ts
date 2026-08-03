@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
 const requiredPaths = [
+  "dist/cli/brainCreator.js",
   "dist/cli/brainCreatorMcp.js",
   "dist/cli/doctor.js",
   "dist/cli/installAssets.js",
@@ -50,6 +51,10 @@ const forbidden = paths.filter((path) =>
 assert(forbidden.length === 0, `Package includes forbidden paths: ${forbidden.join(", ")}`);
 
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+assert(
+  packageJson.bin?.["brain-creator"] === "dist/cli/brainCreator.js",
+  "Package does not expose the brain-creator CLI"
+);
 const pluginJson = JSON.parse(
   await readFile("plugins/brain-creator/.codex-plugin/plugin.json", "utf8")
 );
