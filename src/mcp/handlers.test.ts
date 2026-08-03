@@ -2967,6 +2967,18 @@ describe("handleBrainCreatorTool", () => {
         systemId: system.id
       })
     );
+    const ledger = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "run-ledger",
+        systemId: system.id,
+        id: result.suite.id
+      })
+    );
+    const status = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        systemId: system.id
+      })
+    );
 
     expect(result.status).toBe("completed");
     expect(result.suiteRun).toEqual(
@@ -2976,6 +2988,24 @@ describe("handleBrainCreatorTool", () => {
     expect(suiteRuns.summary).toEqual(
       expect.objectContaining({ totalRuns: 1, totalCases: 2, passed: 2, failed: 0, blocked: 0 })
     );
+    expect(suiteRuns.runLedger.summaries).toEqual([
+      expect.objectContaining({
+        runType: "document-suite",
+        runId: result.suite.id,
+        currentStatus: "completed",
+        outcomes: { passed: 2 }
+      })
+    ]);
+    expect(ledger.entries.map((entry: { event: string }) => entry.event)).toEqual([
+      "suite-created",
+      "case-started",
+      "case-completed",
+      "case-started",
+      "case-completed",
+      "suite-completed"
+    ]);
+    expect(status.documentRunLedger).toEqual(expect.objectContaining({ total: 6 }));
+    expect(status.documentRunLedger.activeSummary).toBeUndefined();
   });
 
   it("reviews suite runs with failed cases, bug links, and markdown report", async () => {
@@ -3551,6 +3581,30 @@ describe("handleBrainCreatorTool", () => {
         })
       );
       expect(context.service.listCaseSuiteRuns(system.id)).toHaveLength(2);
+      const ledger = dataOf(
+        await handleBrainCreatorTool(context, "bc_review", {
+          target: "run-ledger",
+          systemId: system.id,
+          id: firstRun.suite.id
+        })
+      );
+      expect(ledger.summaries).toEqual([
+        expect.objectContaining({
+          runType: "document-suite",
+          currentStatus: "completed",
+          outcomes: { passed: 2 }
+        })
+      ]);
+      expect(ledger.entries.map((entry: { event: string }) => entry.event)).toEqual([
+        "suite-created",
+        "case-started",
+        "agent-task-requested",
+        "case-completed",
+        "case-started",
+        "agent-task-requested",
+        "case-completed",
+        "suite-completed"
+      ]);
     } finally {
       restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
     }
@@ -5039,6 +5093,13 @@ describe("handleBrainCreatorTool", () => {
     const qualityStatus = dataOf(
       await handleBrainCreatorTool(context, "bc_status", { systemId: system.id })
     );
+    const qualityReview = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "execution-diagnosis",
+        systemId: system.id,
+        minSampleSize: 2
+      })
+    );
     expect(corrected.review).toEqual(
       expect.objectContaining({
         decision: "override_classification",
@@ -5054,6 +5115,100 @@ describe("handleBrainCreatorTool", () => {
         accuracy: 0.5
       })
     );
+    expect(qualityStatus.executionDiagnoses.humanAdjudicationEval).toEqual(
+      expect.objectContaining({
+        readiness: "insufficient-sample",
+        adjudicated: 2,
+        minSampleSize: 20,
+        observedAccuracy: 0.5,
+        reportableAccuracy: null
+      })
+    );
+    expect(qualityReview.humanAdjudicationEval).toEqual(
+      expect.objectContaining({
+        readiness: "ready",
+        reportableAccuracy: 0.5
+      })
+    );
+    expect(qualityReview.evalMarkdown).toContain(
+      "Reportable accuracy: 50.0%"
+    );
+  });
+
+  it("previews and confirms rollback of a historical diagnosis migration", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+    const system = context.service.createSystemProfile({
+      name: "Rollback Console",
+      environment: "test",
+      baseUrl: "https://rollback.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://rollback.example.test"]
+    });
+    context.repository.bugReports.push({
+      id: "legacy-automation-bug",
+      systemId: system.id,
+      sourceId: "legacy-source",
+      caseNo: "TC-ROLLBACK",
+      caseTitle: "Generated test failed",
+      module: "Orders",
+      priority: "P1",
+      expectedResult: "approved",
+      actualResult: "SyntaxError in generated test",
+      reproductionSteps: [],
+      evidencePaths: [],
+      gapIds: [],
+      status: "open",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z"
+    });
+    const migrated = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "review-legacy-diagnosis",
+        systemId: system.id,
+        diagnosisAssetType: "bug",
+        diagnosisAssetId: "legacy-automation-bug",
+        diagnosisDecision: "review_bug_as_gap",
+        confirmationNote: "Confirmed generated test failure",
+        confirm: true
+      })
+    );
+
+    const beforePreview = JSON.stringify(context.repository);
+    const preview = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "rollback-legacy-diagnosis",
+        systemId: system.id,
+        diagnosisReviewId: migrated.review.id,
+        confirm: false
+      })
+    );
+    expect(preview).toEqual(
+      expect.objectContaining({ status: "preview", requiresConfirmation: true })
+    );
+    expect(JSON.stringify(context.repository)).toBe(beforePreview);
+
+    const rolledBack = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "rollback-legacy-diagnosis",
+        systemId: system.id,
+        diagnosisReviewId: migrated.review.id,
+        confirmationNote: "Restore the source asset for a new evidence review",
+        confirm: true
+      })
+    );
+    expect(rolledBack).toEqual(
+      expect.objectContaining({
+        status: "rolled-back",
+        review: expect.objectContaining({ status: "rolled-back" })
+      })
+    );
+    expect(context.repository.bugReports[0]).toEqual(
+      expect.objectContaining({ status: "open", gapIds: [], diagnosisId: undefined })
+    );
+    expect(context.repository.gaps).toEqual([]);
+    expect(context.repository.executionDiagnoses).toEqual([]);
   });
 });
 

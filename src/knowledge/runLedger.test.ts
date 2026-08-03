@@ -99,4 +99,48 @@ describe("RunLedgerService", () => {
       })
     );
   });
+
+  it("records and summarizes a document suite without a knowledge project", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const ledger = new RunLedgerService(repository);
+    ledger.append({
+      runType: "document-suite",
+      systemId: "system-orders",
+      caseSuiteId: "document-suite-1",
+      caseSourceId: "source-1",
+      event: "suite-created",
+      scope: "suite",
+      stage: "suite",
+      toStatus: "running"
+    });
+    ledger.append({
+      runType: "document-suite",
+      systemId: "system-orders",
+      caseSuiteId: "document-suite-1",
+      caseSourceId: "source-1",
+      caseNo: "TC-001",
+      event: "case-completed",
+      scope: "case",
+      stage: "execution",
+      toStatus: "passed",
+      outcome: "passed"
+    });
+
+    expect(
+      ledger.list({
+        runType: "document-suite",
+        systemId: "system-orders",
+        caseSuiteId: "document-suite-1"
+      })
+    ).toHaveLength(2);
+    expect(ledger.summary("document-suite-1")).toEqual(
+      expect.objectContaining({
+        runType: "document-suite",
+        runId: "document-suite-1",
+        caseSuiteId: "document-suite-1",
+        currentCaseNo: "TC-001",
+        outcomes: { passed: 1 }
+      })
+    );
+  });
 });

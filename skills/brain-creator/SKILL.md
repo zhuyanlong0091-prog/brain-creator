@@ -23,7 +23,7 @@ The recommended entrypoint is a requirement document or link. Existing Excel/Mar
 
 New installations use `BRAIN_CREATOR_TOOL_PROFILE=facade`. Prefer these high-level tools:
 
-- `bc_prepare`: ingest requirements, generate analysis and test design, approve baselines, run bounded system exploration with link-only and opt-in safe-interaction modes, submit page/training evidence, refresh System Brain, compile evidence-bound cases, and record system observations.
+- `bc_prepare`: ingest requirements, generate analysis and test design, approve baselines, run bounded system exploration, submit evidence, compile cases, and preview/confirm or roll back historical diagnosis migrations.
 - `bc_status`: inspect knowledge projects or runtime systems and choose the next action.
 - `bc_configure`: create knowledge projects, systems, auth, rules, terms, bindings, checkpoints, and inspect connectors.
 - `bc_run`: preview or execute requirement suites, approved cases, document suites, and bug regression.
@@ -55,7 +55,7 @@ Fine-grained tools remain available with `BRAIN_CREATOR_TOOL_PROFILE=full` for c
 | Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true` |
 | Execute an existing test document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` | Explicit confirmation required |
 | Regress bugs | `bc_run mode=bug-regression` | Show filters and candidates |
-| Review status | `bc_status`, then `bc_review target="bug"`, `bc_review target="gap"`, `bc_review target=requirement-eval-accuracy`, `bc_review target=system-brain`, or `bc_review target=system-exploration` | Read-only |
+| Review status | `bc_status`, then `bc_review target="bug"`, `bc_review target="gap"`, `bc_review target=run-ledger`, `bc_review target=execution-diagnosis`, `bc_review target=requirement-eval-accuracy`, or System Brain reviews | Read-only |
 | Record an external blocker | `bc_report_gap` | Include reason, severity, owner, and evidence context |
 
 Use `statusMarkdown` and `reviewMarkdown` when present for concise replies. `/bc help` is optional shorthand, not the primary product entrypoint.
@@ -140,7 +140,11 @@ Historical diagnosis `legacyAudit` is read-only and bounded. Use the status summ
 
 For one approved candidate, preview `bc_prepare action=review-legacy-diagnosis confirm=false` with its system, asset type, asset ID, and decision. Show the exact `changes`, then repeat with `confirm=true` and a human `confirmationNote`. Never batch approvals. `confirm_bug` and `confirm_gap` preserve status; `review_bug_as_gap` closes only the selected Bug and creates a linked typed Gap; `needs_evidence` records a review without migration.
 
-When the user rejects the recommendation, use `diagnosisDecision=override_classification` with a consistent `correctedFailureType` and `correctedVerdict`, preview it, and obtain confirmation again. Preserve proposed and confirmed labels. Report `legacyReviews.quality.accuracy` as human-adjudicated accuracy with sample size; exclude `needs_evidence` and never promote a historical Gap directly to a product Bug.
+When the user rejects the recommendation, use `diagnosisDecision=override_classification` with a consistent `correctedFailureType` and `correctedVerdict`, preview it, and obtain confirmation again. Preserve proposed and confirmed labels. Report `humanAdjudicationEval.observedAccuracy` with its sample size; only report `reportableAccuracy` after the configured minimum, which defaults to 20 active adjudications. Exclude `needs_evidence` and rolled-back reviews, and never promote a historical Gap directly to a product Bug.
+
+If a confirmed migration was wrong, preview `bc_prepare action=rollback-legacy-diagnosis` with its `diagnosisReviewId`. Show the exact changes and require a new human `confirmationNote` before `confirm=true`. Rollback must remove only the diagnosis and migration Gap created by that review, restore the prior Bug status, retain a `rolled-back` audit record, and make the source asset reviewable again.
+
+Requirement and Document Suites share `bc_review target=run-ledger`. Use `knowledgeProjectId` for Requirement Suite timelines and `systemId` for Excel/Markdown Document Suite timelines. Routine status stays bounded; request a full ledger only for progress diagnosis or audit.
 
 ## System
 

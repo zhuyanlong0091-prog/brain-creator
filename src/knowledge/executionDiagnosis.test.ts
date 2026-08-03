@@ -378,6 +378,7 @@ describe("ExecutionDiagnosisService", () => {
         needs_evidence: 1
       },
       migrated: 2,
+      rolledBack: 0,
       needsEvidence: 1,
       quality: {
         adjudicated: 2,
@@ -440,6 +441,7 @@ describe("ExecutionDiagnosisService", () => {
       total: 2,
       byDecision: { override_classification: 2 },
       migrated: 2,
+      rolledBack: 0,
       needsEvidence: 0,
       quality: {
         adjudicated: 2,
@@ -566,6 +568,211 @@ describe("ExecutionDiagnosisService", () => {
       })
     ).toThrow("already reviewed");
   });
+
+  it("previews and confirms rollback of a migrated technical Bug", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const times = [
+      "2026-08-03T00:00:00.000Z",
+      "2026-08-03T00:01:00.000Z"
+    ];
+    const service = new ExecutionDiagnosisService(
+      repository,
+      () => times.shift()!
+    );
+    repository.bugReports.push(
+      legacyBug("bug-syntax", "SyntaxError in generated test")
+    );
+    const migrated = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-syntax",
+      decision: "review_bug_as_gap",
+      note: "Confirmed as generated automation failure"
+    });
+    const beforePreview = JSON.stringify(repository);
+
+    const preview = service.previewLegacyRollback({
+      systemId: "system-a",
+      reviewId: migrated.review.id
+    });
+
+    expect(preview).toEqual(
+      expect.objectContaining({
+        reviewId: migrated.review.id,
+        requiresConfirmation: true,
+        changes: [
+          "restore historical BugReport status to open",
+          "remove the migration-created Gap",
+          "remove the migration-created diagnosis",
+          "retain the review as a rolled-back audit record"
+        ]
+      })
+    );
+    expect(JSON.stringify(repository)).toBe(beforePreview);
+
+    const rolledBack = service.confirmLegacyRollback({
+      systemId: "system-a",
+      reviewId: migrated.review.id,
+      note: "The original execution evidence must be reviewed again"
+    });
+
+    expect(rolledBack.review).toEqual(
+      expect.objectContaining({
+        status: "rolled-back",
+        rollback: expect.objectContaining({
+          note: "The original execution evidence must be reviewed again",
+          diagnosisId: migrated.diagnosis?.id,
+          removedGapId: migrated.createdGap?.id,
+          restoredAssetStatus: "open",
+          rolledBackAt: "2026-08-03T00:01:00.000Z"
+        })
+      })
+    );
+    expect(repository.executionDiagnoses).toEqual([]);
+    expect(repository.gaps).toEqual([]);
+    expect(repository.bugReports[0]).toEqual(
+      expect.objectContaining({
+        status: "open",
+        gapIds: [],
+        diagnosisId: undefined
+      })
+    );
+    expect(service.auditLegacy({ systemId: "system-a" }).candidates).toEqual([
+      expect.objectContaining({ assetId: "bug-syntax" })
+    ]);
+  });
+
+  it("rolls back diagnosis-only reviews without changing source Gap status", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+    repository.gaps.push(legacyGap("gap-network", "network timeout"));
+    const migrated = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "gap",
+      assetId: "gap-network",
+      decision: "confirm_gap",
+      note: "Network blocker confirmed"
+    });
+
+    service.confirmLegacyRollback({
+      systemId: "system-a",
+      reviewId: migrated.review.id,
+      note: "Re-open classification review"
+    });
+
+    expect(repository.executionDiagnoses).toEqual([]);
+    expect(repository.gaps[0]).toEqual(
+      expect.objectContaining({ id: "gap-network", status: "open" })
+    );
+    expect(service.auditLegacy({ systemId: "system-a" }).candidates).toEqual([
+      expect.objectContaining({ assetId: "gap-network" })
+    ]);
+  });
+
+  it("rejects unsafe, repeated, and non-migrated rollback attempts", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+    repository.bugReports.push(
+      legacyBug("bug-syntax", "SyntaxError in generated test"),
+      legacyBug("bug-unknown", "No useful execution evidence")
+    );
+    const migrated = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-syntax",
+      decision: "review_bug_as_gap",
+      note: "Automation failure"
+    });
+    const recorded = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-unknown",
+      decision: "needs_evidence",
+      note: "Need more evidence"
+    });
+
+    expect(() =>
+      service.previewLegacyRollback({
+        systemId: "system-b",
+        reviewId: migrated.review.id
+      })
+    ).toThrow("review not found");
+    expect(() =>
+      service.previewLegacyRollback({
+        systemId: "system-a",
+        reviewId: recorded.review.id
+      })
+    ).toThrow("not an active migration");
+
+    const createdGap = repository.gaps.find(
+      (gap) => gap.id === migrated.review.createdGapId
+    )!;
+    createdGap.sourceId = "another-bug";
+    expect(() =>
+      service.confirmLegacyRollback({
+        systemId: "system-a",
+        reviewId: migrated.review.id,
+        note: "Rollback"
+      })
+    ).toThrow("migration-created Gap does not match");
+    createdGap.sourceId = "bug-syntax";
+
+    service.confirmLegacyRollback({
+      systemId: "system-a",
+      reviewId: migrated.review.id,
+      note: "Rollback after ownership verification"
+    });
+    expect(() =>
+      service.confirmLegacyRollback({
+        systemId: "system-a",
+        reviewId: migrated.review.id,
+        note: "Repeat"
+      })
+    ).toThrow("not an active migration");
+  });
+
+  it("reports human-adjudicated accuracy only after the minimum sample size", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+    repository.executionDiagnosisReviews.push(
+      legacyReview("review-match", true),
+      legacyReview("review-corrected", false),
+      {
+        ...legacyReview("review-rolled-back", true),
+        status: "rolled-back"
+      },
+      {
+        ...legacyReview("review-inconclusive", true),
+        decision: "needs_evidence",
+        confirmedFailureType: undefined,
+        confirmedVerdict: undefined,
+        matchesSuggestion: undefined,
+        status: "recorded"
+      }
+    );
+
+    expect(service.legacyReviewEval("system-a", 3)).toEqual(
+      expect.objectContaining({
+        activeReviews: 3,
+        rolledBack: 1,
+        adjudicated: 2,
+        inconclusive: 1,
+        observedAccuracy: 0.5,
+        reportableAccuracy: null,
+        readiness: "insufficient-sample",
+        minSampleSize: 3
+      })
+    );
+    expect(service.legacyReviewEval("system-a", 2)).toEqual(
+      expect.objectContaining({
+        readiness: "ready",
+        reportableAccuracy: 0.5,
+        byProposedFailureType: {
+          automation_failure: { total: 2, matched: 1, corrected: 1 }
+        }
+      })
+    );
+  });
 });
 
 function legacyBug(id: string, actualResult: string) {
@@ -600,5 +807,32 @@ function legacyGap(id: string, reason: string) {
     status: "open" as const,
     createdAt: "2026-07-31T00:00:00.000Z",
     updatedAt: "2026-07-31T00:00:00.000Z"
+  };
+}
+
+function legacyReview(id: string, matchesSuggestion: boolean) {
+  return {
+    id,
+    systemId: "system-a",
+    assetType: "bug" as const,
+    assetId: `asset-${id}`,
+    proposedFailureType: "automation_failure" as const,
+    proposedVerdict: "automation_gap" as const,
+    suggestedDecision: "review_bug_as_gap" as const,
+    decision: matchesSuggestion
+      ? ("review_bug_as_gap" as const)
+      : ("override_classification" as const),
+    confirmedFailureType: matchesSuggestion
+      ? ("automation_failure" as const)
+      : ("assertion_failure" as const),
+    confirmedVerdict: matchesSuggestion
+      ? ("automation_gap" as const)
+      : ("product_bug" as const),
+    matchesSuggestion,
+    note: "Human adjudication",
+    status: "migrated" as const,
+    priorAssetStatus: "open",
+    resultingAssetStatus: "open",
+    createdAt: "2026-08-03T00:00:00.000Z"
   };
 }

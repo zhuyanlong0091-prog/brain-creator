@@ -170,6 +170,7 @@ Use Brain Creator to connect this system and bind the approved requirement basel
 | 回归 Bug | `bc_run mode=bug-regression` |
 | 查看 Bug/Gap/证据 | `bc_review target="bug"`、`bc_review target="gap"`，优先展示 `reviewMarkdown` |
 | 复核历史执行诊断 | 先用 `bc_review target=execution-diagnosis` 查看候选，再用 `bc_prepare action=review-legacy-diagnosis confirm=false` 预览，用户确认后以相同参数和 `confirmationNote` 传 `confirm=true` |
+| 回滚历史诊断迁移 | 使用 `bc_prepare action=rollback-legacy-diagnosis` 和 `diagnosisReviewId` 先预览，再携带人工 `confirmationNote` 确认；只撤销该次迁移创建的诊断和 Gap |
 | 查看需求质量历史 | `bc_review target=requirement-eval-accuracy` |
 | 查看系统知识 | `bc_review target=system-brain` 并传入 `systemId` |
 | 查看系统探索记录 | `bc_review target=system-exploration` |
@@ -208,7 +209,7 @@ Requirement Suite 支持经确认的执行控制，且不新增用户必须记�
 - 跳过：使用 `suiteAction=skip` 和目标 `executableCaseId`。仅允许显式跳过 blocked 用例；存在待清理的创建数据时拒绝跳过。
 - 三种控制都必须先 `confirm=false` 预览，再由用户批准 `confirm=true`。`bc_status` 与 `bc_review target=requirement-suite-run` 返回 passed/failed/blocked/skipped/cancelled 计数和尝试历史。
 
-每个 Requirement Suite 还会写入持久化 RunLedger。它按时间记录 Suite 创建、用例开始、数据准备/清理、ExecutionPlan 冻结、Agent 等待、用例结果、重试、跳过、取消与 Suite 结束，并关联 task、plan、evidence、chain、Bug 和 Gap ID。`bc_status` 返回当前运行摘要和最近事件；`bc_review target=run-ledger` 可按 Suite ID 复盘完整时间线。Ledger 只记录已经发生的事实，不替代 RequirementSuiteRun 的控制状态。
+Requirement Suite 和 Excel/Markdown Document Suite 都会写入持久化 RunLedger。它按时间记录 Suite 创建、用例开始、Agent 等待、执行结果和 Suite 结束；Requirement Suite 还记录数据准备/清理、ExecutionPlan、重试、跳过和取消。`bc_status` 返回当前运行摘要和最近事件；`bc_review target=run-ledger` 可分别用 `knowledgeProjectId` 或 `systemId` 按 Suite ID 复盘完整时间线。Ledger 只记录已经发生的事实，不替代各 Suite 的控制状态。
 
 终态失败会先进入 `ExecutionDiagnosis` 门禁。它结合失败类型、Healer 已尝试次数和证据引用，把结果归类为产品 Bug、自动化、测试数据、鉴权、环境、网络、执行或未知 Gap；只有受控重试结束后仍存在明确预期/实际差异时才创建 BugReport。`bc_status` 返回有界诊断摘要，`bc_review target=execution-diagnosis` 可查看标准化原因、重试预算和证据 ID。诊断资产不保存原始 stderr、prompt 或密钥。
 
@@ -218,7 +219,9 @@ Requirement Suite 支持经确认的执行控制，且不新增用户必须记�
 
 历史候选通过 `bc_prepare action=review-legacy-diagnosis` 逐条处理。`confirm=false` 只返回变更预览；`confirm=true` 必须携带人工复核说明。确认 Bug 或 Gap 只补诊断关联且不改变原状态；确认技术 Bug 转 Gap 时会关闭该 Bug、创建标准化 Gap，并保存 `ExecutionDiagnosisReview`、原状态、诊断 ID 和新 Gap ID。`needs_evidence` 只保存人工标签，不迁移资产。重复、跨系统或与候选建议不匹配的确认会被拒绝。
 
-如果审计建议本身错误，使用 `diagnosisDecision=override_classification`，并同时提供一致的 `correctedFailureType` 与 `correctedVerdict`。Brain Creator 会同时保留算法原判和人工正确结论，并在 `legacyReviews.quality` 中按已裁决样本计算命中数、纠错数、准确率及各原始失败类型统计；`needs_evidence` 不进入准确率分母。历史 Gap 因缺少完整用例上下文，不能直接纠正为产品 Bug。
+如果审计建议本身错误，使用 `diagnosisDecision=override_classification`，并同时提供一致的 `correctedFailureType` 与 `correctedVerdict`。Brain Creator 会同时保留算法原判和人工正确结论。`humanAdjudicationEval` 会展示观察准确率与样本数，但默认至少 20 条有效人工裁决后才给出 `reportableAccuracy`；`needs_evidence` 和已回滚复核不进入分母。可用 `minSampleSize` 调整审计门槛，并通过 `npm run verify:historical-diagnosis-eval` 对当前本地仓库执行只读验证。历史 Gap 因缺少完整用例上下文，不能直接纠正为产品 Bug。
+
+误确认的迁移可通过 `bc_prepare action=rollback-legacy-diagnosis` 逐条回滚。`confirm=false` 只返回影响预览；`confirm=true` 必须提交新的人工说明。回滚会恢复 Bug 原状态，删除且仅删除该次迁移创建的 Gap 和诊断，并把 Review 保留为 `rolled-back` 审计记录；随后源资产会重新进入历史审计候选。
 
 系统自动探索默认最多访问 5 页、2 层链接、运行 60 秒；可调整但硬上限为 25 页、4 层、300 秒。`interactionMode` 默认为 `off`，此时不点击控件。显式设置 `safe` 后，每页默认最多探测 3 个、硬上限 10 个 Tab、展开控件或原生下拉，并记录前后状态、可见字段、弹窗、URL、截图与被拦截请求。危险名称、无稳定 selector、提交类控件、非 GET/HEAD/OPTIONS 请求和危险 URL 会被跳过或拦截；该模式不会提交表单，也不能证明设计错误的 GET 接口绝无副作用。复杂菜单、需要输入的数据流程和真实业务提交仍应通过宿主 Agent 的 `record-page-evidence` / `record-training-evidence` 补充。
 
@@ -333,6 +336,7 @@ The source checkout mode is for contributors. The repo-local plugin installation
 | Regress bugs | `bc_run mode=bug-regression` |
 | Review bugs and Gaps | `bc_review target="bug"`, `bc_review target="gap"` |
 | Review a legacy execution diagnosis | Inspect candidates with `bc_review target=execution-diagnosis`, preview `bc_prepare action=review-legacy-diagnosis confirm=false`, then repeat with `confirm=true` and `confirmationNote` only after explicit user approval |
+| Roll back a diagnosis migration | Preview `bc_prepare action=rollback-legacy-diagnosis` with `diagnosisReviewId`, then confirm with a human `confirmationNote`; only artifacts created by that migration are removed |
 | Review Requirement Eval history | `bc_review target=requirement-eval-accuracy` |
 | Review System Brain | `bc_review target=system-brain` with `systemId` |
 | Review exploration runs | `bc_review target=system-exploration` |
@@ -371,7 +375,7 @@ Requirement Suite controls remain behind the existing `bc_run` facade:
 - Skip: use `suiteAction=skip` with `executableCaseId`. Only blocked cases can be skipped, and cleanup-due created data prevents skipping.
 - Every control requires preview then confirmation. `bc_status` and `bc_review target=requirement-suite-run` expose passed, failed, blocked, skipped, cancelled, and prior-attempt history.
 
-Every Requirement Suite also writes a persistent RunLedger. It records Suite creation, case start, data preparation/cleanup, ExecutionPlan freezing, Agent waits, case outcomes, retries, skips, cancellation, and Suite completion while linking task, plan, evidence, chain, Bug, and Gap IDs. `bc_status` exposes the active summary and recent events; `bc_review target=run-ledger` replays a Suite timeline by ID. The ledger records facts and does not replace RequirementSuiteRun as the control state.
+Requirement Suites and Excel/Markdown Document Suites both write a persistent RunLedger. It records Suite creation, case start, Agent waits, case outcomes, and Suite completion; Requirement Suites additionally record data preparation/cleanup, ExecutionPlan freezing, retries, skips, and cancellation. `bc_status` exposes active summaries and recent events. Use `bc_review target=run-ledger` with `knowledgeProjectId` or `systemId` to replay the relevant Suite timeline by ID. The ledger records facts and does not replace either Suite control model.
 
 Terminal failures now pass through an `ExecutionDiagnosis` gate. It combines the normalized failure type, bounded Healer attempt count, and evidence references to classify a product bug or an automation, test-data, auth, environment, network, execution, or unknown Gap. A BugReport is allowed only when an explicit expected/actual mismatch remains after controlled retries. `bc_status` returns a bounded diagnosis summary, and `bc_review target=execution-diagnosis` shows normalized reasons, retry budget, and evidence IDs. Diagnoses never persist raw stderr, prompts, or secrets.
 
@@ -381,7 +385,9 @@ For Bugs and Gaps created before the gate existed, `bc_status.executionDiagnoses
 
 Process legacy candidates one at a time with `bc_prepare action=review-legacy-diagnosis`. `confirm=false` is read-only; `confirm=true` requires a human review note. Confirming a Bug or Gap adds diagnosis links without changing its status. Confirming a technical Bug-to-Gap reclassification closes that Bug, creates a normalized Gap, and stores an `ExecutionDiagnosisReview` with the prior status, diagnosis ID, and created Gap ID. `needs_evidence` records only the human label. Repeated, cross-system, or recommendation-mismatched confirmations are rejected.
 
-When the audit recommendation is wrong, use `diagnosisDecision=override_classification` with a consistent `correctedFailureType` and `correctedVerdict`. Brain Creator preserves both the algorithm proposal and the human-adjudicated conclusion. `legacyReviews.quality` reports adjudicated, matched, corrected, overall accuracy, and per-proposed-failure-type counts; `needs_evidence` is excluded from the denominator. A historical Gap cannot be promoted directly to a product Bug because it lacks complete case evidence.
+When the audit recommendation is wrong, use `diagnosisDecision=override_classification` with a consistent `correctedFailureType` and `correctedVerdict`. Brain Creator preserves both the algorithm proposal and the human-adjudicated conclusion. `humanAdjudicationEval` shows observed accuracy and sample size, but withholds `reportableAccuracy` until the default minimum of 20 active adjudications is reached. `needs_evidence` and rolled-back reviews are excluded. Override the audit threshold with `minSampleSize`, and run `npm run verify:historical-diagnosis-eval` for a read-only report against the current local repository. A historical Gap cannot be promoted directly to a product Bug because it lacks complete case evidence.
+
+An incorrect migration can be reversed one item at a time with `bc_prepare action=rollback-legacy-diagnosis`. Preview first, then confirm with a new human note. Rollback restores the prior Bug status, removes only the diagnosis and Gap created by that migration, retains a `rolled-back` review record, and makes the source asset eligible for audit again.
 
 System exploration defaults to 5 pages, depth 2, and 60 seconds, with hard limits of 25 pages, depth 4, and 300 seconds. `interactionMode` defaults to `off`. Opt-in `safe` mode probes at most 3 controls per page by default, with a hard limit of 10, and only considers tabs, disclosure controls, and native selects with stable selectors. It records before/after states and blocks write methods, dangerous URLs, and write-like labels. It never submits forms, but cannot prove that a misdesigned GET endpoint has no side effect. Complex menus, data-entry flows, and business submissions still require supplemental host-Agent page or training evidence.
 

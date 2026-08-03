@@ -225,7 +225,10 @@ export class ExecutionDiagnosisService {
     );
     const reviewedAssetKeys = new Set(
       this.repository.executionDiagnosisReviews
-        .filter((review) => review.systemId === systemId)
+        .filter(
+          (review) =>
+            review.systemId === systemId && review.status !== "rolled-back"
+        )
         .map((review) => `${review.assetType}:${review.assetId}`)
     );
     return [
@@ -383,9 +386,106 @@ export class ExecutionDiagnosisService {
     );
   }
 
+  previewLegacyRollback(input: { systemId: string; reviewId: string }) {
+    const review = this.activeMigrationReview(input);
+    const diagnosis = this.repository.executionDiagnoses.find(
+      (item) => item.id === review.diagnosisId && item.systemId === input.systemId
+    );
+    if (!diagnosis || diagnosis.legacyReviewId !== review.id) {
+      throw new Error("Migration-created diagnosis does not match the review");
+    }
+    const changes: string[] = [];
+    if (review.assetType === "bug") {
+      const bug = this.repository.bugReports.find(
+        (item) => item.id === review.assetId && item.systemId === input.systemId
+      );
+      if (!bug || bug.diagnosisId !== diagnosis.id) {
+        throw new Error("Historical BugReport does not match the migration review");
+      }
+      changes.push(
+        `restore historical BugReport status to ${review.priorAssetStatus}`
+      );
+      if (review.createdGapId) {
+        const gap = this.repository.gaps.find(
+          (item) => item.id === review.createdGapId
+        );
+        if (
+          !gap ||
+          gap.projectId !== input.systemId ||
+          gap.sourceType !== "diagnosis-migration" ||
+          gap.sourceId !== review.assetId ||
+          !diagnosis.gapIds.includes(gap.id) ||
+          !bug.gapIds.includes(gap.id)
+        ) {
+          throw new Error("The migration-created Gap does not match the review");
+        }
+        changes.push("remove the migration-created Gap");
+      }
+    }
+    changes.push(
+      "remove the migration-created diagnosis",
+      "retain the review as a rolled-back audit record"
+    );
+    return {
+      reviewId: review.id,
+      review,
+      diagnosis,
+      changes,
+      requiresConfirmation: true
+    };
+  }
+
+  confirmLegacyRollback(input: {
+    systemId: string;
+    reviewId: string;
+    note: string;
+  }) {
+    if (!input.note.trim()) {
+      throw new Error("A human rollback note is required");
+    }
+    const preview = this.previewLegacyRollback(input);
+    const review = preview.review;
+    const diagnosis = preview.diagnosis;
+    const rolledBackAt = this.now();
+    let removedGapId: string | undefined;
+    if (review.assetType === "bug") {
+      const bug = this.repository.bugReports.find(
+        (item) => item.id === review.assetId && item.systemId === input.systemId
+      )!;
+      if (review.createdGapId) {
+        removedGapId = review.createdGapId;
+        this.repository.gaps = this.repository.gaps.filter(
+          (item) => item.id !== removedGapId
+        );
+        bug.gapIds = bug.gapIds.filter((gapId) => gapId !== removedGapId);
+      }
+      bug.status = review.priorAssetStatus as typeof bug.status;
+      bug.diagnosisId = undefined;
+      bug.updatedAt = rolledBackAt;
+    }
+    this.repository.executionDiagnoses =
+      this.repository.executionDiagnoses.filter(
+        (item) => item.id !== diagnosis.id
+      );
+    review.status = "rolled-back";
+    review.resultingAssetStatus = review.priorAssetStatus;
+    review.rollback = {
+      note: input.note.trim(),
+      diagnosisId: diagnosis.id,
+      removedGapId,
+      restoredAssetStatus: review.priorAssetStatus,
+      rolledBackAt
+    };
+    this.repository.persist();
+    return { review };
+  }
+
   legacyReviewSummary(systemId: string) {
     const reviews = this.listLegacyReviews(systemId);
-    const adjudicated = reviews.filter(
+    const activeReviews = reviews.filter(
+      (review) => review.status !== "rolled-back"
+    );
+    const adjudicated = activeReviews.filter(
       (review) => review.confirmedVerdict !== undefined
     );
     const matched = adjudicated.filter(
@@ -393,9 +493,10 @@ export class ExecutionDiagnosisService {
     );
     return {
       total: reviews.length,
-      byDecision: countBy(reviews.map((review) => review.decision)),
-      migrated: reviews.filter((review) => review.status === "migrated").length,
-      needsEvidence: reviews.filter(
+      byDecision: countBy(activeReviews.map((review) => review.decision)),
+      migrated: activeReviews.filter((review) => review.status === "migrated").length,
+      rolledBack: reviews.filter((review) => review.status === "rolled-back").length,
+      needsEvidence: activeReviews.filter(
         (review) => review.decision === "needs_evidence"
       ).length,
       quality: {
@@ -407,6 +508,63 @@ export class ExecutionDiagnosisService {
         byProposedFailureType: reviewQualityByFailureType(adjudicated)
       }
     };
+  }
+
+  legacyReviewEval(systemId: string, minSampleSize = 20) {
+    return this.legacyReviewEvalForSystems([systemId], minSampleSize);
+  }
+
+  legacyReviewEvalForSystems(systemIds: string[], minSampleSize = 20) {
+    if (!Number.isInteger(minSampleSize) || minSampleSize < 1) {
+      throw new Error("Minimum diagnosis Eval sample size must be a positive integer");
+    }
+    const selectedSystems = new Set(systemIds);
+    const reviews = this.repository.executionDiagnosisReviews.filter((review) =>
+      selectedSystems.has(review.systemId)
+    );
+    const activeReviews = reviews.filter(
+      (review) => review.status !== "rolled-back"
+    );
+    const adjudicated = activeReviews.filter(
+      (review) => review.confirmedVerdict !== undefined
+    );
+    const matched = adjudicated.filter(
+      (review) => review.matchesSuggestion === true
+    );
+    const observedAccuracy =
+      adjudicated.length > 0 ? matched.length / adjudicated.length : null;
+    const ready = adjudicated.length >= minSampleSize;
+    return {
+      metric: "human-adjudicated diagnosis accuracy",
+      totalReviews: reviews.length,
+      activeReviews: activeReviews.length,
+      rolledBack: reviews.length - activeReviews.length,
+      adjudicated: adjudicated.length,
+      inconclusive: activeReviews.length - adjudicated.length,
+      matched: matched.length,
+      corrected: adjudicated.length - matched.length,
+      minSampleSize,
+      readiness: ready ? ("ready" as const) : ("insufficient-sample" as const),
+      observedAccuracy,
+      reportableAccuracy: ready ? observedAccuracy : null,
+      warning: ready
+        ? undefined
+        : `At least ${minSampleSize} active human-adjudicated reviews are required before reporting diagnosis accuracy.`,
+      byProposedFailureType: reviewQualityByFailureType(adjudicated)
+    };
+  }
+
+  private activeMigrationReview(input: { systemId: string; reviewId: string }) {
+    const review = this.repository.executionDiagnosisReviews.find(
+      (item) => item.id === input.reviewId && item.systemId === input.systemId
+    );
+    if (!review) {
+      throw new Error("Historical diagnosis review not found");
+    }
+    if (review.status !== "migrated" || !review.diagnosisId) {
+      throw new Error("Historical diagnosis review is not an active migration");
+    }
+    return review;
   }
 
   private legacyCandidate(input: {

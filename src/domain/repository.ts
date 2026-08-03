@@ -41,7 +41,7 @@ import type {
   TrainingSession
 } from "./types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 15;
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 16;
 
 export class InMemoryBrainCreatorRepository {
   schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
@@ -276,7 +276,12 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
         };
       }
     );
-    this.runLedgerEntries = snapshot.runLedgerEntries ?? [];
+    this.runLedgerEntries = (snapshot.runLedgerEntries ?? []).map((entry) => ({
+      ...entry,
+      runType:
+        entry.runType ??
+        (entry.caseSuiteId ? "document-suite" : "requirement-suite")
+    }));
   }
 
   private snapshot(): RepositorySnapshot {
