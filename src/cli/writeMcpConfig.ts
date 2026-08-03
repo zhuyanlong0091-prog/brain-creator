@@ -13,7 +13,7 @@ type BrainCreatorMcpServer = {
 };
 
 const supportedProviders = ["auto", "claude", "codex", "host-agent", "disabled"] as const;
-type BrainCreatorAgentProvider = (typeof supportedProviders)[number];
+export type BrainCreatorAgentProvider = (typeof supportedProviders)[number];
 
 export type WriteMcpConfigOptions = {
   targetDir?: string;
@@ -24,6 +24,16 @@ export type WriteMcpConfigOptions = {
 export type WriteMcpConfigResult = {
   path: string;
   status: "created" | "updated";
+};
+
+export type InspectMcpConfigOptions = {
+  targetDir?: string;
+};
+
+export type InspectMcpConfigResult = {
+  path: string;
+  exists: boolean;
+  server?: unknown;
 };
 
 type WriteMcpConfigCliIo = {
@@ -95,12 +105,47 @@ export async function writeBrainCreatorMcpConfig(
   return { path: configPath, status };
 }
 
+export async function inspectBrainCreatorMcpConfig(
+  options: InspectMcpConfigOptions = {}
+): Promise<InspectMcpConfigResult> {
+  const targetDir = resolve(options.targetDir ?? process.cwd());
+  const path = join(targetDir, ".mcp.json");
+  const config = await readExistingConfig(path);
+  if (!config) {
+    return { path, exists: false };
+  }
+  const server = config.mcpServers?.["brain-creator"];
+  return {
+    path,
+    exists: true,
+    ...(server === undefined ? {} : { server: redactSecretValues(server) })
+  };
+}
+
 async function readExistingConfig(path: string): Promise<McpConfig | undefined> {
   const raw = await readFile(path, "utf8").catch(() => undefined);
   if (raw === undefined) {
     return undefined;
   }
   return JSON.parse(raw) as McpConfig;
+}
+
+function redactSecretValues(value: unknown, key = ""): unknown {
+  if (/secret|token|password|cookie/i.test(key)) {
+    return "[REDACTED]";
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSecretValues(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([childKey, childValue]) => [
+        childKey,
+        redactSecretValues(childValue, childKey)
+      ])
+    );
+  }
+  return value;
 }
 
 export function parseMcpProviderArg(value: string | undefined): BrainCreatorAgentProvider {

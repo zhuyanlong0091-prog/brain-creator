@@ -28,26 +28,32 @@ npx brain-creator --version
 npx brain-creator --help
 ```
 
-Install the Brain Creator Skill, Playwright agent definitions, and a portable Playwright config when the project does not already have one:
+Initialize the Brain Creator Skill, Playwright agent definitions, portable Playwright config, and MCP configuration:
 
 ```bash
-npx brain-creator-install-assets
+npx brain-creator init --provider host-agent
 ```
 
-Create or update the business project's MCP config:
+The command is idempotent: existing custom assets are skipped and existing MCP servers are preserved. Inspect the redacted Brain Creator MCP entry without changing it:
 
 ```bash
-npx brain-creator-write-mcp-config
+npx brain-creator config
 ```
 
-The command preserves existing MCP servers in `.mcp.json` and adds the `brain-creator` server. By default, it writes an MCP command that uses the project-local package through `npx`.
+Only use the explicit write action when the provider or command mode must change:
+
+```bash
+npx brain-creator config write --provider host-agent
+```
+
+By default, initialization writes an MCP command that uses the project-local package through `npx`.
 
 New configs set `BRAIN_CREATOR_TOOL_PROFILE=facade`, so the Agent sees only the high-level preparation, status, configuration, execution, review, and host-task submission tools. Set the profile to `full` only for compatibility, audit, or debugging.
 
 Install the Codex plugin from the installed package:
 
 ```bash
-npx brain-creator-install-codex-plugin
+npx brain-creator plugin install
 ```
 
 The command registers the package root as a Codex marketplace source, installs `brain-creator@personal`, and writes the current workspace `.mcp.json` with `BRAIN_CREATOR_AGENT_PROVIDER=host-agent`. The plugin commands are equivalent to `codex plugin marketplace add node_modules/brain-creator` followed by `codex plugin add brain-creator@personal`; the MCP rewrite prevents Codex from accidentally selecting a local Claude subprocess.
@@ -55,9 +61,9 @@ The command registers the package root as a Codex marketplace source, installs `
 If the target runtime is already known, choose it explicitly:
 
 ```bash
-npx brain-creator-write-mcp-config --provider claude
-npx brain-creator-write-mcp-config --provider codex
-npx brain-creator-write-mcp-config --provider host-agent
+npx brain-creator config write --provider claude
+npx brain-creator config write --provider codex
+npx brain-creator config write --provider host-agent
 ```
 
 Supported values are `auto`, `claude`, `codex`, `host-agent`, and `disabled`. Invalid provider names fail immediately.
@@ -109,7 +115,7 @@ Manual browser authentication uses workspace-local runtime evidence: save Playwr
 Run the preflight before the first Brain Creator workflow:
 
 ```bash
-npx brain-creator-doctor
+npx brain-creator doctor
 ```
 
 Doctor prints the resolved provider, real browser availability, and recommended action, so users can tell whether Brain Creator will use a Claude subprocess, Codex subprocess, host-agent task handoff, or preview-only disabled mode before running a confirmed workflow. If neither a Playwright browser nor system Chrome/Edge is available, install Chromium or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` before running a suite.
@@ -124,13 +130,12 @@ If you prefer a global install, use:
 npm install -g brain-creator
 brain-creator --version
 brain-creator --help
-brain-creator-install-assets
-brain-creator-write-mcp-config --global
-brain-creator-install-codex-plugin
-brain-creator-doctor
+brain-creator init --global --provider host-agent
+brain-creator doctor
 ```
 
 In global mode, `.mcp.json` uses `"command": "brain-creator-mcp"` instead of `npx`.
+Install the Codex plugin from a project-local package so its marketplace root and MCP command remain pinned to that project.
 
 Validate local package installation from this repository:
 
@@ -175,7 +180,7 @@ After installing Brain Creator from npm in a business project, use the installed
 ```bash
 cd /path/to/business-project
 npm install --save-dev brain-creator
-npx brain-creator-install-codex-plugin
+npx brain-creator plugin install
 codex plugin list
 ```
 
@@ -203,13 +208,11 @@ npm run verify:codex-plugin-install
 When installed from the repo-local marketplace, Brain Creator still expects the npm package to be installed in the business project:
 
 ```bash
-npx brain-creator-mcp
 npx brain-creator --version
 npx brain-creator --help
-npx brain-creator-doctor
-npx brain-creator-install-assets
-npx brain-creator-write-mcp-config
-npx brain-creator-install-codex-plugin
+npx brain-creator doctor
+npx brain-creator init --provider host-agent
+npx brain-creator plugin install
 ```
 
-If those commands are not available yet, use MCP CLI connection mode first, or install the package tarball produced by `npm pack`.
+The standalone executables (`brain-creator-mcp`, `brain-creator-doctor`, `brain-creator-install-assets`, `brain-creator-write-mcp-config`, and `brain-creator-install-codex-plugin`) remain available for existing MCP and automation configurations. Run `brain-creator help legacy` to list their consolidated replacements.

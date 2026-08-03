@@ -33,12 +33,58 @@ try {
   );
   const cliHelp = await run(join(binDir, "brain-creator.cmd"), ["--help"], businessDir);
   assert(
-    cliHelp.stdout.includes("brain-creator-mcp") &&
-      cliHelp.stdout.includes("brain-creator-doctor"),
+    cliHelp.stdout.includes("brain-creator init") &&
+      cliHelp.stdout.includes("brain-creator doctor") &&
+      cliHelp.stdout.includes("brain-creator plugin install"),
     "installed Brain Creator CLI help is missing expected commands"
   );
-  await run(join(binDir, "brain-creator-install-assets.cmd"), [], businessDir);
-  await run(join(binDir, "brain-creator-write-mcp-config.cmd"), [], businessDir);
+  await run(
+    join(binDir, "brain-creator.cmd"),
+    ["init", "--target", businessDir, "--provider", "host-agent"],
+    businessDir
+  );
+  const configInspection = await run(
+    join(binDir, "brain-creator.cmd"),
+    ["config", "--target", businessDir, "--json"],
+    businessDir
+  );
+  const configEnvelope = JSON.parse(configInspection.stdout);
+  assert(
+    configEnvelope.success === true && configEnvelope.command === "config show",
+    "installed Brain Creator CLI could not inspect its MCP config"
+  );
+  await run(
+    join(binDir, "brain-creator.cmd"),
+    [
+      "config",
+      "write",
+      "--target",
+      businessDir,
+      "--global",
+      "--provider",
+      "codex"
+    ],
+    businessDir
+  );
+  const globalInspection = JSON.parse(
+    (
+      await run(
+        join(binDir, "brain-creator.cmd"),
+        ["config", "--target", businessDir, "--json"],
+        businessDir
+      )
+    ).stdout
+  );
+  assert(
+    globalInspection.data.server.command === "brain-creator-mcp" &&
+      globalInspection.data.server.env.BRAIN_CREATOR_AGENT_PROVIDER === "codex",
+    "installed Brain Creator CLI did not write global Codex configuration"
+  );
+  await run(
+    join(binDir, "brain-creator.cmd"),
+    ["config", "write", "--target", businessDir, "--provider", "host-agent"],
+    businessDir
+  );
   const codexPluginHelp = await run(
     join(binDir, "brain-creator-install-codex-plugin.cmd"),
     ["--help"],
@@ -93,8 +139,9 @@ try {
         "brain-creator",
         "dist",
         "cli",
-        "brainCreatorMcp.js"
-      )
+        "brainCreator.js"
+      ),
+      "mcp"
     ],
     cwd: businessDir,
     env: childEnv({

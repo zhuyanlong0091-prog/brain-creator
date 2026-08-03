@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runBrainCreatorCli } from "./brainCreator.js";
+import { runBrainCreatorCli, type BrainCreatorCliDependencies } from "./brainCreator.js";
 
 function createIo() {
   return {
@@ -8,38 +8,188 @@ function createIo() {
   };
 }
 
+function dependencies(
+  overrides: Partial<BrainCreatorCliDependencies> = {}
+): BrainCreatorCliDependencies {
+  return {
+    installAssets: vi.fn(async () => ({
+      targetDir: "C:\\project",
+      installed: ["skill"],
+      skipped: []
+    })),
+    writeMcpConfig: vi.fn(async () => ({
+      path: "C:\\project\\.mcp.json",
+      status: "created" as const
+    })),
+    inspectMcpConfig: vi.fn(async () => ({
+      path: "C:\\project\\.mcp.json",
+      exists: true,
+      server: { command: "npx", args: ["brain-creator-mcp"], env: {} }
+    })),
+    installCodexPlugin: vi.fn(async () => ({
+      marketplaceRoot: "C:\\project\\node_modules\\brain-creator",
+      mcpConfigPath: "C:\\project\\.mcp.json"
+    })),
+    buildDoctorReport: vi.fn(() => ({ ok: true, checks: [] }) as never),
+    formatDoctorReport: vi.fn(() => "Brain Creator doctor: ready"),
+    startMcp: vi.fn(async () => undefined),
+    ...overrides
+  };
+}
+
 describe("Brain Creator CLI", () => {
   it.each([["--version"], ["-v"], ["version"]])(
     "prints the package version for %s",
-    (...args) => {
+    async (...args) => {
       const io = createIo();
 
-      expect(runBrainCreatorCli(args, io)).toBe(0);
-      expect(io.stdout).toHaveBeenCalledWith("2.0.5");
+      expect(await runBrainCreatorCli(args, io, dependencies())).toBe(0);
+      expect(io.stdout).toHaveBeenCalledWith("2.1.0");
       expect(io.stderr).not.toHaveBeenCalled();
     }
   );
 
-  it.each([[], ["--help"], ["-h"]])("prints help for %j", (...args) => {
+  it.each([[], ["--help"], ["-h"], ["help"]])(
+    "prints task-oriented help for %j",
+    async (...args) => {
+      const io = createIo();
+
+      expect(await runBrainCreatorCli(args, io, dependencies())).toBe(0);
+      const output = io.stdout.mock.calls.flat().join("\n");
+      expect(output).toContain("brain-creator init");
+      expect(output).toContain("brain-creator doctor");
+      expect(output).toContain("brain-creator config");
+      expect(output).toContain("brain-creator plugin install");
+      expect(output).toContain("brain-creator mcp");
+      expect(output).not.toContain("brain-creator-install-assets");
+      expect(io.stderr).not.toHaveBeenCalled();
+    }
+  );
+
+  it("documents legacy executable aliases separately", async () => {
     const io = createIo();
 
-    expect(runBrainCreatorCli(args, io)).toBe(0);
+    expect(await runBrainCreatorCli(["help", "legacy"], io, dependencies())).toBe(0);
     const output = io.stdout.mock.calls.flat().join("\n");
-    expect(output).toContain("brain-creator --version");
-    expect(output).toContain("brain-creator-mcp");
-    expect(output).toContain("brain-creator-doctor");
     expect(output).toContain("brain-creator-install-assets");
     expect(output).toContain("brain-creator-write-mcp-config");
-    expect(output).toContain("brain-creator-install-codex-plugin");
-    expect(io.stderr).not.toHaveBeenCalled();
+    expect(output).toContain("Compatibility aliases");
   });
 
-  it("rejects unknown arguments", () => {
+  it.each(["init", "doctor", "config", "plugin", "mcp"])(
+    "prints focused help for the %s command",
+    async (command) => {
+      const io = createIo();
+
+      expect(await runBrainCreatorCli([command, "--help"], io, dependencies())).toBe(0);
+      expect(io.stdout).toHaveBeenCalledWith(expect.stringContaining(`brain-creator ${command}`));
+      expect(io.stderr).not.toHaveBeenCalled();
+    }
+  );
+
+  it("initializes assets and MCP config in one idempotent command", async () => {
+    const io = createIo();
+    const deps = dependencies();
+
+    expect(
+      await runBrainCreatorCli(
+        ["init", "--target", "C:\\project", "--provider", "codex", "--force"],
+        io,
+        deps
+      )
+    ).toBe(0);
+    expect(deps.installAssets).toHaveBeenCalledWith({
+      targetDir: "C:\\project",
+      force: true
+    });
+    expect(deps.writeMcpConfig).toHaveBeenCalledWith({
+      targetDir: "C:\\project",
+      commandMode: "local",
+      provider: "codex"
+    });
+    expect(io.stdout).toHaveBeenCalledWith(expect.stringContaining("initialization complete"));
+  });
+
+  it("can initialize the Codex plugin only with host-agent execution", async () => {
+    const io = createIo();
+    const deps = dependencies();
+
+    expect(
+      await runBrainCreatorCli(
+        ["init", "--target", "C:\\project", "--with-plugin", "--provider", "host-agent"],
+        io,
+        deps
+      )
+    ).toBe(0);
+    expect(deps.installCodexPlugin).toHaveBeenCalledWith({ workspaceDir: "C:\\project" });
+    expect(deps.writeMcpConfig).not.toHaveBeenCalled();
+
+    const rejectedIo = createIo();
+    expect(
+      await runBrainCreatorCli(
+        ["init", "--with-plugin", "--provider", "claude"],
+        rejectedIo,
+        dependencies()
+      )
+    ).toBe(1);
+    expect(rejectedIo.stderr).toHaveBeenCalledWith(
+      expect.stringContaining("--with-plugin requires --provider host-agent")
+    );
+  });
+
+  it("shows redacted config by default and writes only when explicitly requested", async () => {
+    const io = createIo();
+    const deps = dependencies();
+
+    expect(await runBrainCreatorCli(["config", "--json"], io, deps)).toBe(0);
+    expect(deps.inspectMcpConfig).toHaveBeenCalledWith({ targetDir: undefined });
+    expect(deps.writeMcpConfig).not.toHaveBeenCalled();
+    expect(JSON.parse(io.stdout.mock.calls[0][0])).toEqual(
+      expect.objectContaining({ success: true, command: "config show" })
+    );
+
+    expect(
+      await runBrainCreatorCli(
+        ["config", "write", "--provider", "claude", "--global"],
+        createIo(),
+        deps
+      )
+    ).toBe(0);
+    expect(deps.writeMcpConfig).toHaveBeenCalledWith({
+      targetDir: undefined,
+      commandMode: "global",
+      provider: "claude"
+    });
+  });
+
+  it("runs doctor, MCP, and Codex plugin through the consolidated router", async () => {
+    const deps = dependencies();
+    const doctorIo = createIo();
+
+    expect(await runBrainCreatorCli(["doctor", "--json"], doctorIo, deps)).toBe(0);
+    expect(JSON.parse(doctorIo.stdout.mock.calls[0][0])).toEqual(
+      expect.objectContaining({ success: true, command: "doctor" })
+    );
+    expect(await runBrainCreatorCli(["mcp"], createIo(), deps)).toBe(0);
+    expect(deps.startMcp).toHaveBeenCalledOnce();
+    expect(
+      await runBrainCreatorCli(
+        ["plugin", "install", "--target", "C:\\project"],
+        createIo(),
+        deps
+      )
+    ).toBe(0);
+    expect(deps.installCodexPlugin).toHaveBeenCalledWith({ workspaceDir: "C:\\project" });
+  });
+
+  it("returns a structured error for invalid commands", async () => {
     const io = createIo();
 
-    expect(runBrainCreatorCli(["unknown"], io)).toBe(1);
-    expect(io.stderr).toHaveBeenCalledWith(expect.stringContaining("Unknown argument: unknown"));
-    expect(io.stderr).toHaveBeenCalledWith(expect.stringContaining("brain-creator --help"));
-    expect(io.stdout).not.toHaveBeenCalled();
+    expect(await runBrainCreatorCli(["unknown", "--json"], io, dependencies())).toBe(1);
+    expect(JSON.parse(io.stderr.mock.calls[0][0])).toEqual({
+      success: false,
+      command: "unknown",
+      error: "Unknown command: unknown"
+    });
   });
 });

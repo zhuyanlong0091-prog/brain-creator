@@ -33,7 +33,7 @@ describe("Brain Creator local integration files", () => {
     const packageLock = JSON.parse(await readFile("package-lock.json", "utf8"));
     const serverModule = await readFile("src/mcp/server.ts", "utf8");
 
-    expect(BRAIN_CREATOR_VERSION).toBe("2.0.5");
+    expect(BRAIN_CREATOR_VERSION).toBe("2.1.0");
     expect(packageJson.version).toBe(BRAIN_CREATOR_VERSION);
     expect(packageLock.version).toBe(BRAIN_CREATOR_VERSION);
     expect(packageLock.packages[""].version).toBe(BRAIN_CREATOR_VERSION);
