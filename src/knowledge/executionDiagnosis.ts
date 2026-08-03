@@ -4,7 +4,8 @@ import type {
   ExecutionDiagnosisReview,
   ExecutionDiagnosisVerdict,
   ExecutionFailureType,
-  LegacyDiagnosisDecision
+  LegacyDiagnosisDecision,
+  LegacyDiagnosisSuggestion
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import { classifyExecutionFailure } from "./failureClassifier.js";
@@ -52,7 +53,7 @@ export type LegacyDiagnosisCandidate = {
   failureType: ExecutionFailureType;
   proposedVerdict: ExecutionDiagnosisVerdict;
   confidence: "high" | "medium" | "low";
-  suggestedDecision: LegacyDiagnosisDecision;
+  suggestedDecision: LegacyDiagnosisSuggestion;
   reason: string;
 };
 
@@ -253,13 +254,16 @@ export class ExecutionDiagnosisService {
     assetType: "bug" | "gap";
     assetId: string;
     decision: LegacyDiagnosisDecision;
+    correctedFailureType?: ExecutionFailureType;
+    correctedVerdict?: ExecutionDiagnosisVerdict;
   }) {
     const candidate = this.legacyCandidate(input);
-    validateLegacyDecision(candidate, input.decision);
+    const conclusion = resolveLegacyReviewConclusion(candidate, input);
     return {
       candidate,
       decision: input.decision,
-      changes: legacyReviewChanges(input.decision),
+      conclusion,
+      changes: legacyReviewChanges(candidate, conclusion),
       requiresConfirmation: true
     };
   }
@@ -269,6 +273,8 @@ export class ExecutionDiagnosisService {
     assetType: "bug" | "gap";
     assetId: string;
     decision: LegacyDiagnosisDecision;
+    correctedFailureType?: ExecutionFailureType;
+    correctedVerdict?: ExecutionDiagnosisVerdict;
     note: string;
   }) {
     if (!input.note.trim()) {
@@ -285,13 +291,16 @@ export class ExecutionDiagnosisService {
       proposedVerdict: preview.candidate.proposedVerdict,
       suggestedDecision: preview.candidate.suggestedDecision,
       decision: input.decision,
+      confirmedFailureType: preview.conclusion?.failureType,
+      confirmedVerdict: preview.conclusion?.verdict,
+      matchesSuggestion: preview.conclusion?.matchesSuggestion,
       note: input.note.trim(),
-      status: input.decision === "needs_evidence" ? "recorded" : "migrated",
+      status: preview.conclusion ? "migrated" : "recorded",
       priorAssetStatus: preview.candidate.currentStatus,
       resultingAssetStatus: preview.candidate.currentStatus,
       createdAt: now
     };
-    if (input.decision !== "needs_evidence") {
+    if (preview.conclusion) {
       const diagnosis: ExecutionDiagnosis = {
         id: id("executionDiagnosis"),
         systemId: input.systemId,
@@ -299,9 +308,11 @@ export class ExecutionDiagnosisService {
         gapIds: input.assetType === "gap" ? [input.assetId] : [],
         legacyReviewId: review.id,
         testCaseId: legacyTestCaseId(this.repository, preview.candidate),
-        verdict: preview.candidate.proposedVerdict,
-        failureType: preview.candidate.failureType,
-        confidence: preview.candidate.confidence,
+        verdict: preview.conclusion.verdict,
+        failureType: preview.conclusion.failureType,
+        confidence: preview.conclusion.matchesSuggestion
+          ? preview.candidate.confidence
+          : "high",
         retry: {
           attempted: 0,
           max: 0,
@@ -312,7 +323,10 @@ export class ExecutionDiagnosisService {
         evidenceRefs: [input.assetId],
         createdAt: now
       };
-      if (input.decision === "review_bug_as_gap") {
+      if (
+        input.assetType === "bug" &&
+        preview.conclusion.verdict !== "product_bug"
+      ) {
         const bug = this.repository.bugReports.find(
           (item) => item.id === input.assetId && item.systemId === input.systemId
         );
@@ -323,7 +337,7 @@ export class ExecutionDiagnosisService {
           projectId: input.systemId,
           sourceType: "diagnosis-migration",
           sourceId: bug.id,
-          reason: `Historical Bug was explicitly reclassified as ${preview.candidate.proposedVerdict}`,
+          reason: `Historical Bug was explicitly reclassified as ${preview.conclusion.verdict}`,
           severity: "high",
           owner: "qa",
           status: "open",
@@ -371,13 +385,27 @@ export class ExecutionDiagnosisService {
 
   legacyReviewSummary(systemId: string) {
     const reviews = this.listLegacyReviews(systemId);
+    const adjudicated = reviews.filter(
+      (review) => review.confirmedVerdict !== undefined
+    );
+    const matched = adjudicated.filter(
+      (review) => review.matchesSuggestion === true
+    );
     return {
       total: reviews.length,
       byDecision: countBy(reviews.map((review) => review.decision)),
       migrated: reviews.filter((review) => review.status === "migrated").length,
       needsEvidence: reviews.filter(
         (review) => review.decision === "needs_evidence"
-      ).length
+      ).length,
+      quality: {
+        adjudicated: adjudicated.length,
+        matched: matched.length,
+        corrected: adjudicated.length - matched.length,
+        accuracy:
+          adjudicated.length > 0 ? matched.length / adjudicated.length : null,
+        byProposedFailureType: reviewQualityByFailureType(adjudicated)
+      }
     };
   }
 
@@ -397,24 +425,94 @@ export class ExecutionDiagnosisService {
   }
 }
 
-function validateLegacyDecision(
+function resolveLegacyReviewConclusion(
   candidate: LegacyDiagnosisCandidate,
-  decision: LegacyDiagnosisDecision
+  input: {
+    decision: LegacyDiagnosisDecision;
+    correctedFailureType?: ExecutionFailureType;
+    correctedVerdict?: ExecutionDiagnosisVerdict;
+  }
 ) {
-  if (decision === "needs_evidence") return;
-  if (candidate.suggestedDecision !== decision) {
+  if (input.decision !== "override_classification") {
+    if (input.correctedFailureType || input.correctedVerdict) {
+      throw new Error("Corrected classification is only valid for an override");
+    }
+  }
+  if (input.decision === "needs_evidence") return undefined;
+  if (input.decision === "override_classification") {
+    const failureType = input.correctedFailureType;
+    const verdict = input.correctedVerdict;
+    if (!failureType || !verdict) {
+      throw new Error("Corrected failure type and verdict are required for an override");
+    }
+    if (failureType === "unknown_failure" || verdict === "unknown_gap") {
+      throw new Error("Use needs_evidence instead of overriding to an unknown classification");
+    }
+    if (verdict !== confirmedVerdictForFailureType(failureType)) {
+      throw new Error("Corrected failure type and verdict are inconsistent");
+    }
+    if (candidate.assetType === "gap" && verdict === "product_bug") {
+      throw new Error("A historical Gap cannot be promoted to a product Bug without case evidence");
+    }
+    if (
+      failureType === candidate.failureType &&
+      verdict === candidate.proposedVerdict
+    ) {
+      throw new Error("Override must differ from the audited classification");
+    }
+    return { failureType, verdict, matchesSuggestion: false };
+  }
+  if (candidate.suggestedDecision !== input.decision) {
     throw new Error("Decision does not match the audited candidate recommendation");
   }
+  return {
+    failureType: candidate.failureType,
+    verdict: candidate.proposedVerdict,
+    matchesSuggestion: true
+  };
 }
 
-function legacyReviewChanges(decision: LegacyDiagnosisDecision) {
-  if (decision === "review_bug_as_gap") {
-    return ["close historical BugReport", "create typed Gap", "record diagnosis and review"];
-  }
-  if (decision === "needs_evidence") {
+function legacyReviewChanges(
+  candidate: LegacyDiagnosisCandidate,
+  conclusion:
+    | {
+        failureType: ExecutionFailureType;
+        verdict: ExecutionDiagnosisVerdict;
+        matchesSuggestion: boolean;
+      }
+    | undefined
+) {
+  if (!conclusion) {
     return ["record human review only", "leave BugReport and Gap unchanged"];
   }
+  if (candidate.assetType === "bug" && conclusion.verdict !== "product_bug") {
+    return ["close historical BugReport", "create typed Gap", "record diagnosis and review"];
+  }
   return ["record diagnosis and review", "leave source asset status unchanged"];
+}
+
+function confirmedVerdictForFailureType(
+  failureType: ExecutionFailureType
+): ExecutionDiagnosisVerdict {
+  if (failureType === "assertion_failure") return "product_bug";
+  return verdictForFailureType(failureType);
+}
+
+function reviewQualityByFailureType(reviews: ExecutionDiagnosisReview[]) {
+  return reviews.reduce<
+    Record<string, { total: number; matched: number; corrected: number }>
+  >((summary, review) => {
+    const current = summary[review.proposedFailureType] ?? {
+      total: 0,
+      matched: 0,
+      corrected: 0
+    };
+    current.total += 1;
+    if (review.matchesSuggestion) current.matched += 1;
+    else current.corrected += 1;
+    summary[review.proposedFailureType] = current;
+    return summary;
+  }, {});
 }
 
 function legacyTestCaseId(

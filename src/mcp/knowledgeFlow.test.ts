@@ -2209,7 +2209,16 @@ describe("Brain Creator requirement-first facade", () => {
       confirmedStatus.knowledge.executionDiagnoses.legacyAudit.totalCandidates
     ).toBe(0);
     expect(confirmedStatus.knowledge.executionDiagnoses.legacyReviews).toEqual(
-      expect.objectContaining({ total: 1, migrated: 1 })
+      expect.objectContaining({
+        total: 1,
+        migrated: 1,
+        quality: expect.objectContaining({
+          adjudicated: 1,
+          matched: 1,
+          corrected: 0,
+          accuracy: 1
+        })
+      })
     );
     expect(confirmedReview.legacyReviews).toEqual([
       expect.objectContaining({ systemId: bound.id, assetId: `gap-${bound.id}` })

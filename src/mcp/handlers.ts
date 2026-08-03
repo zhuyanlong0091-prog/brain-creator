@@ -596,7 +596,15 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemId: resolution.systemId,
       assetType: diagnosisAssetTypeArg(input, "diagnosisAssetType"),
       assetId: stringArg(input, "diagnosisAssetId"),
-      decision: legacyDiagnosisDecisionArg(input, "diagnosisDecision")
+      decision: legacyDiagnosisDecisionArg(input, "diagnosisDecision"),
+      correctedFailureType: optionalExecutionFailureTypeArg(
+        input,
+        "correctedFailureType"
+      ),
+      correctedVerdict: optionalExecutionDiagnosisVerdictArg(
+        input,
+        "correctedVerdict"
+      )
     };
     if (!optionalBooleanArg(input, "confirm")) {
       return {
@@ -5394,13 +5402,40 @@ function aggregateLegacyDiagnosisReviewSummary(
   const reviews = systemIds.flatMap((systemId) =>
     context.executionDiagnosis.listLegacyReviews(systemId)
   );
+  const adjudicated = reviews.filter(
+    (review) => review.confirmedVerdict !== undefined
+  );
+  const matched = adjudicated.filter(
+    (review) => review.matchesSuggestion === true
+  );
   return {
     total: reviews.length,
     byDecision: countBy(reviews, (review) => review.decision),
     migrated: reviews.filter((review) => review.status === "migrated").length,
     needsEvidence: reviews.filter(
       (review) => review.decision === "needs_evidence"
-    ).length
+    ).length,
+    quality: {
+      adjudicated: adjudicated.length,
+      matched: matched.length,
+      corrected: adjudicated.length - matched.length,
+      accuracy:
+        adjudicated.length > 0 ? matched.length / adjudicated.length : null,
+      byProposedFailureType: adjudicated.reduce<
+        Record<string, { total: number; matched: number; corrected: number }>
+      >((summary, review) => {
+        const current = summary[review.proposedFailureType] ?? {
+          total: 0,
+          matched: 0,
+          corrected: 0
+        };
+        current.total += 1;
+        if (review.matchesSuggestion) current.matched += 1;
+        else current.corrected += 1;
+        summary[review.proposedFailureType] = current;
+        return summary;
+      }, {})
+    }
   };
 }
 
@@ -6528,12 +6563,60 @@ function legacyDiagnosisDecisionArg(
       "confirm_bug",
       "review_bug_as_gap",
       "confirm_gap",
-      "needs_evidence"
+      "needs_evidence",
+      "override_classification"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
   }
   return value as LegacyDiagnosisDecision;
+}
+
+function optionalExecutionFailureTypeArg(
+  input: Record<string, unknown>,
+  key: string
+): ExecutionFailureType | undefined {
+  const value = optionalStringArg(input, key);
+  if (!value) return undefined;
+  if (
+    ![
+      "assertion_failure",
+      "auth_failure",
+      "locator_failure",
+      "network_failure",
+      "automation_failure",
+      "test_data_failure",
+      "environment_failure",
+      "execution_failure",
+      "unknown_failure"
+    ].includes(value)
+  ) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as ExecutionFailureType;
+}
+
+function optionalExecutionDiagnosisVerdictArg(
+  input: Record<string, unknown>,
+  key: string
+): ExecutionDiagnosisVerdict | undefined {
+  const value = optionalStringArg(input, key);
+  if (!value) return undefined;
+  if (
+    ![
+      "product_bug",
+      "automation_gap",
+      "test_data_gap",
+      "auth_gap",
+      "environment_gap",
+      "network_gap",
+      "execution_gap",
+      "unknown_gap"
+    ].includes(value)
+  ) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as ExecutionDiagnosisVerdict;
 }
 
 function testDataTaskResultStatusArg(

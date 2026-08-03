@@ -325,6 +325,12 @@ describe("ExecutionDiagnosisService", () => {
       legacyGap("gap-unknown", "Expected visible, actual hidden")
     );
 
+    const needsEvidenceBugPreview = service.previewLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-assertion",
+      decision: "needs_evidence"
+    });
     const confirmedBug = service.confirmLegacyReview({
       systemId: "system-a",
       assetType: "bug",
@@ -346,7 +352,6 @@ describe("ExecutionDiagnosisService", () => {
       decision: "needs_evidence",
       note: "Controlled retry evidence is missing"
     });
-
     expect(confirmedBug.diagnosis).toEqual(
       expect.objectContaining({ verdict: "product_bug", bugReportId: "bug-assertion" })
     );
@@ -354,6 +359,10 @@ describe("ExecutionDiagnosisService", () => {
       expect.objectContaining({ verdict: "network_gap", gapIds: ["gap-network"] })
     );
     expect(needsEvidence.diagnosis).toBeUndefined();
+    expect(needsEvidenceBugPreview.changes).toEqual([
+      "record human review only",
+      "leave BugReport and Gap unchanged"
+    ]);
     expect(repository.bugReports[0]).toEqual(
       expect.objectContaining({
         status: "open",
@@ -369,8 +378,142 @@ describe("ExecutionDiagnosisService", () => {
         needs_evidence: 1
       },
       migrated: 2,
-      needsEvidence: 1
+      needsEvidence: 1,
+      quality: {
+        adjudicated: 2,
+        matched: 2,
+        corrected: 0,
+        accuracy: 1,
+        byProposedFailureType: {
+          assertion_failure: { total: 1, matched: 1, corrected: 0 },
+          network_failure: { total: 1, matched: 1, corrected: 0 }
+        }
+      }
     });
+  });
+
+  it("records corrected human classifications and computes review accuracy", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+    repository.bugReports.push(
+      legacyBug("bug-syntax", "SyntaxError in generated test"),
+      legacyBug("bug-assertion", "Expected approved, actual pending")
+    );
+
+    const correctedBug = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-syntax",
+      decision: "override_classification",
+      correctedFailureType: "assertion_failure",
+      correctedVerdict: "product_bug",
+      note: "Trace confirms a real expectation mismatch"
+    });
+    const correctedGap = service.confirmLegacyReview({
+      systemId: "system-a",
+      assetType: "bug",
+      assetId: "bug-assertion",
+      decision: "override_classification",
+      correctedFailureType: "network_failure",
+      correctedVerdict: "network_gap",
+      note: "Request failed before the assertion ran"
+    });
+
+    expect(correctedBug.review).toEqual(
+      expect.objectContaining({
+        proposedFailureType: "automation_failure",
+        proposedVerdict: "automation_gap",
+        confirmedFailureType: "assertion_failure",
+        confirmedVerdict: "product_bug",
+        matchesSuggestion: false
+      })
+    );
+    expect(repository.bugReports.find((bug) => bug.id === "bug-syntax")?.status).toBe("open");
+    expect(correctedGap.createdGap).toEqual(
+      expect.objectContaining({
+        sourceId: "bug-assertion",
+        reason: expect.stringContaining("network_gap")
+      })
+    );
+    expect(repository.bugReports.find((bug) => bug.id === "bug-assertion")?.status).toBe("closed");
+    expect(service.legacyReviewSummary("system-a")).toEqual({
+      total: 2,
+      byDecision: { override_classification: 2 },
+      migrated: 2,
+      needsEvidence: 0,
+      quality: {
+        adjudicated: 2,
+        matched: 0,
+        corrected: 2,
+        accuracy: 0,
+        byProposedFailureType: {
+          automation_failure: { total: 1, matched: 0, corrected: 1 },
+          assertion_failure: { total: 1, matched: 0, corrected: 1 }
+        }
+      }
+    });
+  });
+
+  it("validates corrected classification evidence and asset boundaries", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+    repository.bugReports.push(
+      legacyBug("bug-missing", "SyntaxError in generated test"),
+      legacyBug("bug-inconsistent", "SyntaxError in generated test"),
+      legacyBug("bug-same", "SyntaxError in generated test")
+    );
+    repository.gaps.push(
+      legacyGap("gap-product", "network timeout")
+    );
+
+    expect(() =>
+      service.previewLegacyReview({
+        systemId: "system-a",
+        assetType: "bug",
+        assetId: "bug-missing",
+        decision: "override_classification"
+      })
+    ).toThrow("Corrected failure type and verdict are required");
+    expect(() =>
+      service.previewLegacyReview({
+        systemId: "system-a",
+        assetType: "bug",
+        assetId: "bug-inconsistent",
+        decision: "override_classification",
+        correctedFailureType: "network_failure",
+        correctedVerdict: "automation_gap"
+      })
+    ).toThrow("inconsistent");
+    expect(() =>
+      service.previewLegacyReview({
+        systemId: "system-a",
+        assetType: "bug",
+        assetId: "bug-same",
+        decision: "override_classification",
+        correctedFailureType: "automation_failure",
+        correctedVerdict: "automation_gap"
+      })
+    ).toThrow("must differ");
+    expect(() =>
+      service.previewLegacyReview({
+        systemId: "system-a",
+        assetType: "gap",
+        assetId: "gap-product",
+        decision: "override_classification",
+        correctedFailureType: "assertion_failure",
+        correctedVerdict: "product_bug"
+      })
+    ).toThrow("cannot be promoted");
+    expect(() =>
+      service.previewLegacyReview({
+        systemId: "system-a",
+        assetType: "bug",
+        assetId: "bug-missing",
+        decision: "review_bug_as_gap",
+        correctedFailureType: "network_failure",
+        correctedVerdict: "network_gap"
+      })
+    ).toThrow("only valid for an override");
   });
 
   it("rejects mismatched, cross-system, and repeated legacy decisions", () => {

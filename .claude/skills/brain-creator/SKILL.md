@@ -140,6 +140,8 @@ Historical diagnosis `legacyAudit` is read-only and bounded. Use the status summ
 
 For one approved candidate, preview `bc_prepare action=review-legacy-diagnosis confirm=false` with its system, asset type, asset ID, and decision. Show the exact `changes`, then repeat with `confirm=true` and a human `confirmationNote`. Never batch approvals. `confirm_bug` and `confirm_gap` preserve status; `review_bug_as_gap` closes only the selected Bug and creates a linked typed Gap; `needs_evidence` records a review without migration.
 
+When the user rejects the recommendation, use `diagnosisDecision=override_classification` with a consistent `correctedFailureType` and `correctedVerdict`, preview it, and obtain confirmation again. Preserve proposed and confirmed labels. Report `legacyReviews.quality.accuracy` as human-adjudicated accuracy with sample size; exclude `needs_evidence` and never promote a historical Gap directly to a product Bug.
+
 ## System
 
 - Use `bc_list_systems` only in full-profile discovery or debugging.

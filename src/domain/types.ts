@@ -1109,11 +1109,15 @@ export type ExecutionDiagnosis = {
   createdAt: string;
 };
 
-export type LegacyDiagnosisDecision =
+export type LegacyDiagnosisSuggestion =
   | "confirm_bug"
   | "review_bug_as_gap"
   | "confirm_gap"
   | "needs_evidence";
+
+export type LegacyDiagnosisDecision =
+  | LegacyDiagnosisSuggestion
+  | "override_classification";
 
 export type ExecutionDiagnosisReview = {
   id: string;
@@ -1122,8 +1126,11 @@ export type ExecutionDiagnosisReview = {
   assetId: string;
   proposedFailureType: ExecutionFailureType;
   proposedVerdict: ExecutionDiagnosisVerdict;
-  suggestedDecision: LegacyDiagnosisDecision;
+  suggestedDecision: LegacyDiagnosisSuggestion;
   decision: LegacyDiagnosisDecision;
+  confirmedFailureType?: ExecutionFailureType;
+  confirmedVerdict?: ExecutionDiagnosisVerdict;
+  matchesSuggestion?: boolean;
   note: string;
   status: "recorded" | "migrated";
   priorAssetStatus: string;
