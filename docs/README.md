@@ -2,6 +2,8 @@
 
 Brain Creator turns requirements into traceable, reviewable, and executable Agent testing workflows for Claude Code and Codex.
 
+Search the published site at <https://zhuyanlong0091-prog.github.io/brain-creator/>. The complete Simplified Chinese documentation is available under `/zh-CN/`.
+
 This documentation is organized by what you are trying to accomplish. Start with one successful workflow, then read concepts and references only when you need them.
 
 ## Start Here
@@ -52,12 +54,14 @@ Start with [Troubleshooting](troubleshooting.md). Then use Brain Creator review 
 - [MCP installation and configuration](mcp-installation.md)
 - [Machine-readable documentation index](llms.txt)
 - [Release checklist](release-checklist.md)
+- [Release notes 2.1.1](release-notes-2.1.1.md)
 - [Release notes 2.0.3](release-notes-2.0.3.md)
 - [Release notes 2.0.2](release-notes-2.0.2.md)
 
 ## 中文导航
 
 - 第一次使用：阅读[快速开始](getting-started.md)。
+- 在线搜索：[Brain Creator 中文文档](https://zhuyanlong0091-prog.github.io/brain-creator/zh-CN/)。
 - 理解需求脑、系统脑和执行门禁：阅读[核心概念](core-concepts.md)。
 - 从需求走到真实测试：阅读[需求到测试指南](guides/requirement-to-test.md)。
 - 查询命令：阅读 [CLI 参考](cli-reference.md)。

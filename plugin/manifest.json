@@ -1,6 +1,6 @@
 {
   "name": "brain-creator",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Agent-native testing brain for Claude Code and Codex.",
   "mcpServers": {
     "brain-creator": {

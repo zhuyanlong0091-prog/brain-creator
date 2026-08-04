@@ -44,7 +44,7 @@ describe("Brain Creator CLI", () => {
       const io = createIo();
 
       expect(await runBrainCreatorCli(args, io, dependencies())).toBe(0);
-      expect(io.stdout).toHaveBeenCalledWith("2.1.0");
+      expect(io.stdout).toHaveBeenCalledWith("2.1.1");
       expect(io.stderr).not.toHaveBeenCalled();
     }
   );

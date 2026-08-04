@@ -150,8 +150,8 @@ Use Brain Creator to analyze this requirement document or Feishu link, generate 
 Use this mode only when developing Brain Creator itself:
 
 ```bash
-git clone https://github.com/zhuyanlong0091-prog/brain-creator-mvp.git
-cd brain-creator-mvp
+git clone https://github.com/zhuyanlong0091-prog/brain-creator.git
+cd brain-creator
 npm install
 npm test
 npm run dev:mcp
@@ -176,7 +176,7 @@ Read-only status, asset, and review tools declare MCP `readOnlyHint` annotations
 Install the repo-local plugin from the repository root. The marketplace source is the repository root because Codex discovers `.agents/plugins/marketplace.json` under it:
 
 ```bash
-cd /path/to/brain-creator-mvp
+cd /path/to/brain-creator
 codex plugin marketplace add .
 codex plugin add brain-creator@personal
 codex plugin list

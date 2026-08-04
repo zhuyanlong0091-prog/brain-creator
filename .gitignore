@@ -13,5 +13,7 @@ playwright-report/
 /specs/
 /tests/seed-*.spec.ts
 /tests/generated/case_*.spec.ts
+docs/.vitepress/cache/
+docs/.vitepress/dist/
 test_execution_agent_arch.png
 dummy.md

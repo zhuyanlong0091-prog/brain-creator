@@ -4,7 +4,7 @@ Brain Creator is a requirement-driven, agent-native testing brain for Claude Cod
 
 Brain Creator has **No Web UI**. The conversation in Claude Code or Codex is the user interface; a Skill and MCP server provide the testing workflow behind it.
 
-[中文](#中文) | [English](#english) | [Documentation](docs/README.md) | [npm](https://www.npmjs.com/package/brain-creator)
+[中文](#中文) | [English](#english) | [Documentation](https://zhuyanlong0091-prog.github.io/brain-creator/) | [中文文档](https://zhuyanlong0091-prog.github.io/brain-creator/zh-CN/) | [npm](https://www.npmjs.com/package/brain-creator)
 
 ## 中文
 
@@ -86,7 +86,8 @@ CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin` 和 `mcp`
 
 ### 文档
 
-- [文档首页](docs/README.md)：按目标选择下一篇文档。
+- [文档站](https://zhuyanlong0091-prog.github.io/brain-creator/zh-CN/)：可搜索的完整中文文档。
+- [仓库文档首页](docs/README.md)：按目标选择下一篇文档。
 - [快速开始](docs/getting-started.md)：安装、诊断并完成第一次需求分析。
 - [核心概念](docs/core-concepts.md)：Requirement Brain、System Brain、Case Compiler、Gap 与 Bridge。
 - [从需求到测试](docs/guides/requirement-to-test.md)：完整审批与执行工作流。
@@ -172,7 +173,8 @@ The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, and `mcp`. Co
 
 ### Documentation
 
-- [Documentation home](docs/README.md)
+- [Searchable documentation site](https://zhuyanlong0091-prog.github.io/brain-creator/)
+- [Repository documentation home](docs/README.md)
 - [Quickstart](docs/getting-started.md)
 - [Core concepts](docs/core-concepts.md)
 - [Requirement-to-test guide](docs/guides/requirement-to-test.md)

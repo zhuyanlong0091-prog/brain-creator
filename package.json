@@ -1,6 +1,12 @@
 {
   "name": "brain-creator",
-  "version": "2.1.0",
+  "version": "2.1.1",
+  "description": "Requirement-driven, agent-native testing for Claude Code and Codex.",
+  "homepage": "https://zhuyanlong0091-prog.github.io/brain-creator/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhuyanlong0091-prog/brain-creator.git"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -21,6 +27,7 @@
     "playwright.config.ts",
     "docs/**/*.md",
     "docs/llms.txt",
+    "docs/public/brain-creator-mark.png",
     "README.md"
   ],
   "scripts": {
@@ -45,7 +52,10 @@
     "verify:historical-diagnosis-eval": "node --loader ts-node/esm scripts/historicalDiagnosisEval.ts",
     "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts",
     "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
-    "release:check": "node --loader ts-node/esm scripts/releaseReadiness.ts"
+    "release:check": "node --loader ts-node/esm scripts/releaseReadiness.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -59,6 +69,7 @@
     "@types/node": "^24.10.1",
     "ts-node": "^10.9.0",
     "typescript": "^5.9.3",
+    "vitepress": "^1.6.4",
     "vitest": "^4.0.13"
   }
 }

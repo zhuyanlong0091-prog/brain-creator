@@ -1,12 +1,12 @@
 {
   "name": "brain-creator",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Agent-native testing brain for Claude Code and Codex.",
   "author": {
     "name": "Brain Creator"
   },
-  "homepage": "https://github.com/zhuyanlong0091-prog/brain-creator-mvp",
-  "repository": "https://github.com/zhuyanlong0091-prog/brain-creator-mvp",
+  "homepage": "https://zhuyanlong0091-prog.github.io/brain-creator/",
+  "repository": "https://github.com/zhuyanlong0091-prog/brain-creator",
   "license": "MIT",
   "keywords": [
     "testing",

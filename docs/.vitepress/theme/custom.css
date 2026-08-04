@@ -1,0 +1,38 @@
+:root {
+  --vp-c-brand-1: #0f6b4f;
+  --vp-c-brand-2: #0b5a43;
+  --vp-c-brand-3: #084936;
+  --vp-c-brand-soft: rgba(15, 107, 79, 0.12);
+  --vp-c-tip-1: #0f6b4f;
+  --vp-c-tip-soft: rgba(15, 107, 79, 0.12);
+  --vp-c-warning-1: #b35a36;
+  --vp-c-warning-soft: rgba(179, 90, 54, 0.12);
+  --vp-border-radius: 6px;
+}
+
+.dark {
+  --vp-c-brand-1: #59c49a;
+  --vp-c-brand-2: #72d6ae;
+  --vp-c-brand-3: #8de4c0;
+  --vp-c-brand-soft: rgba(89, 196, 154, 0.14);
+}
+
+.VPHomeHero .image-src {
+  width: min(280px, 72vw);
+  height: min(280px, 72vw);
+  object-fit: contain;
+}
+
+.VPFeature {
+  border-radius: 6px !important;
+}
+
+.vp-doc table {
+  display: table;
+  width: 100%;
+}
+
+.vp-doc th,
+.vp-doc td {
+  vertical-align: top;
+}
