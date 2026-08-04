@@ -8,6 +8,17 @@
 - [Quickstart](getting-started.md): Install Brain Creator, verify the runtime, and produce the first reviewable requirement analysis.
 - [Core concepts](core-concepts.md): Understand Requirement Brain, System Brain, case compilation, test data, execution plans, Bugs, Gaps, and Agent providers.
 
+## 简体中文
+
+- [中文文档首页](zh-CN/index.md): 按任务选择 Brain Creator 中文指南。
+- [中文快速开始](zh-CN/getting-started.md): 安装、诊断并完成第一次需求分析。
+- [中文核心概念](zh-CN/core-concepts.md): 理解 Requirement Brain、System Brain、执行计划、Bug 与 Gap。
+- [中文需求到测试](zh-CN/guides/requirement-to-test.md): 从需求来源完成审批、系统绑定、数据准备、执行和复盘。
+- [中文 CLI 参考](zh-CN/cli-reference.md): 查询统一命令、参数和环境变量。
+- [中文 MCP 安装](zh-CN/mcp-installation.md): 配置 Claude、Codex 与 host-agent。
+- [中文故障排查](zh-CN/troubleshooting.md): 按症状解决安装和执行问题。
+- [中文会话恢复](zh-CN/e2e-session-resume-workflow.md): 在新 Agent 会话中恢复持久状态并继续正确任务。
+
 ## Guides
 
 - [Requirement to test](guides/requirement-to-test.md): Take an approved requirement through system binding, evidence collection, data preparation, execution, and review.
