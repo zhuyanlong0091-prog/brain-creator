@@ -1,0 +1,32 @@
+# Brain Creator Documentation
+
+> Brain Creator is a requirement-driven, agent-native testing brain for Claude Code and Codex.
+
+## Start here
+
+- [Documentation home](README.md): Choose a task-oriented path through the Brain Creator documentation.
+- [Quickstart](getting-started.md): Install Brain Creator, verify the runtime, and produce the first reviewable requirement analysis.
+- [Core concepts](core-concepts.md): Understand Requirement Brain, System Brain, case compilation, test data, execution plans, Bugs, Gaps, and Agent providers.
+
+## Guides
+
+- [Requirement to test](guides/requirement-to-test.md): Take an approved requirement through system binding, evidence collection, data preparation, execution, and review.
+- [Agent usage](agent-usage.md): Use natural-language entrypoints and understand Facade approval behavior.
+- [Session resume workflow](e2e-session-resume-workflow.md): Restore a persisted Brain Creator workflow in a new Agent session.
+- [v2 low-level quickstart](v2-quickstart.md): Inspect internal and compatibility `bc_*` workflows.
+
+## Reference
+
+- [CLI reference](cli-reference.md): Look up consolidated commands, options, environment variables, and compatibility executables.
+- [MCP installation](mcp-installation.md): Configure Claude, Codex, host-agent, the Codex plugin, and MCP transport.
+- [Troubleshooting](troubleshooting.md): Diagnose installation, provider, browser, authentication, connector, evidence, and execution problems by symptom.
+- [Release checklist](release-checklist.md): Verify source, package, plugin, and npm publish gates.
+
+## Product rules
+
+- Start from requirement sources when available.
+- Do not execute before explicit approval.
+- Keep requirement expectations, system observations, and execution results separate.
+- Create a Gap when evidence is missing or ambiguous; do not invent business actions.
+- Create a BugReport only for an evidence-backed business expectation mismatch.
+- Prefer Facade MCP tools. Use low-level tools only for compatibility, audit, and debugging.

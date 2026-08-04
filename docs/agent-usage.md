@@ -125,6 +125,23 @@ The Agent uses `bc_review` to show requirements, knowledge, coverage, Requiremen
 
 ## User Entrypoints
 
+| User intent | Default Facade action |
+|---|---|
+| Preview ambiguous wording | `bc_intent_preview` |
+| Show current readiness | `bc_status`; present `statusMarkdown` first |
+| Create or bind a system | `bc_configure target=system` |
+| Configure authentication | `bc_configure target=auth` |
+| Pause for protected login | `bc_configure target=checkpoint` |
+| Preview an existing case document | `bc_run mode=case-source-suite confirm=false` |
+| Run a confirmed case document | `bc_run mode=case-source-suite confirm=true` |
+| Regress open Bugs | `bc_run mode=bug-regression` |
+| Review Bugs | `bc_review target="bug"`; present `reviewMarkdown` first |
+| Review Gaps | `bc_review target="gap"`; present `reviewMarkdown` first |
+| Record an external blocker | `bc_report_gap` |
+| Show optional shortcuts | `/bc help` |
+
+A denied or cancelled Facade action must not be retried through a lower-level equivalent.
+
 Typical natural-language requests:
 
 ```text
