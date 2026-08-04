@@ -19,7 +19,8 @@
     "plugins/brain-creator/",
     ".agents/plugins/marketplace.json",
     "playwright.config.ts",
-    "docs/mcp-installation.md",
+    "docs/**/*.md",
+    "docs/llms.txt",
     "README.md"
   ],
   "scripts": {

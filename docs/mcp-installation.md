@@ -1,22 +1,15 @@
 # Brain Creator MCP Installation
 
-Brain Creator can be used from Claude Code or Codex without starting from a Web UI. The recommended product path is MCP CLI connection mode.
+Connect Brain Creator to Claude Code or Codex through a project-local MCP server. By the end of this guide, the host can discover the Facade tools and `brain-creator doctor` can explain the selected Agent execution provider.
 
-## source checkout mode
+## Prerequisites
 
-Use this mode when developing Brain Creator itself.
+- Node.js 20 or later.
+- Claude Code or Codex installed.
+- A writable business project directory.
+- Permission to restart the Agent host after changing MCP configuration.
 
-```bash
-git clone https://github.com/zhuyanlong0091-prog/brain-creator-mvp.git
-cd brain-creator-mvp
-npm install
-npm test
-npm run dev:mcp
-```
-
-This mode still depends on the source checkout and is mainly for contributors.
-
-## MCP CLI connection mode
+## Project-Local MCP Connection (Recommended)
 
 Use this mode when connecting Brain Creator to a business project. The recommended setup is a project-local install, so each business project controls its own Brain Creator version.
 
@@ -152,7 +145,21 @@ After MCP is connected, start in Claude Code or Codex with:
 Use Brain Creator to analyze this requirement document or Feishu link, generate test design and data, and wait for my approval.
 ```
 
-## repo-local plugin installation mode
+## Source Checkout Mode
+
+Use this mode only when developing Brain Creator itself:
+
+```bash
+git clone https://github.com/zhuyanlong0091-prog/brain-creator-mvp.git
+cd brain-creator-mvp
+npm install
+npm test
+npm run dev:mcp
+```
+
+The source checkout is not required in a normal business project.
+
+## Repo-Local Plugin Installation Mode
 
 The repo-local Codex plugin is available under `plugins/brain-creator` and is registered in `.agents/plugins/marketplace.json`.
 
@@ -216,3 +223,9 @@ npx brain-creator plugin install
 ```
 
 The standalone executables (`brain-creator-mcp`, `brain-creator-doctor`, `brain-creator-install-assets`, `brain-creator-write-mcp-config`, and `brain-creator-install-codex-plugin`) remain available for existing MCP and automation configurations. Run `brain-creator help legacy` to list their consolidated replacements.
+
+## Next Steps
+
+- Complete the first workflow in [Quickstart](getting-started.md).
+- Learn provider and evidence boundaries in [Core concepts](core-concepts.md).
+- Resolve connection or runtime failures with [Troubleshooting](troubleshooting.md).

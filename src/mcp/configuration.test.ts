@@ -53,7 +53,8 @@ describe("Brain Creator local integration files", () => {
         ".claude/agents/",
         "plugin/",
         "playwright.config.ts",
-        "docs/mcp-installation.md",
+        "docs/**/*.md",
+        "docs/llms.txt",
         "README.md"
       ])
     );
@@ -244,13 +245,13 @@ describe("Brain Creator local integration files", () => {
     expect(content).toContain("Do not create or prioritize a Web UI");
   });
 
-  it("documents the user entrypoint map in README and the Brain Creator skill", async () => {
+  it("documents the user entrypoint map in the Agent guide and Brain Creator skill", async () => {
     const readme = await readFile("README.md", "utf8");
     const skill = await readFile("skills/brain-creator/SKILL.md", "utf8");
     const agentUsage = await readFile("docs/agent-usage.md", "utf8");
 
-    expect(readme).toContain("### 用户入口到 Agent 工具映射");
-    expect(readme).toContain("### User Entrypoint To Agent Tool Map");
+    expect(readme).toContain("docs/agent-usage.md");
+    expect(agentUsage).toContain("## User Entrypoints");
     expect(skill).toContain("## User Entrypoint Map");
 
     for (const marker of [
@@ -269,12 +270,14 @@ describe("Brain Creator local integration files", () => {
       "bc_report_gap",
       "/bc help"
     ]) {
-      expect(readme).toContain(marker);
+      expect(agentUsage).toContain(marker);
       expect(skill).toContain(marker);
     }
     expect(agentUsage).toContain("/bc help");
     expect(agentUsage).toContain("Brain Creator shortcuts");
-    expect(readme).toContain("verify:codex-native-entry");
+    expect(await readFile("docs/release-checklist.md", "utf8")).toContain(
+      "verify:codex-native-entry"
+    );
     expect(await readFile("docs/mcp-installation.md", "utf8")).toContain(
       "verify:codex-native-entry"
     );
