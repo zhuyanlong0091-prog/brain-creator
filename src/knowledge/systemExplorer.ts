@@ -7,6 +7,7 @@ import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type { BrainCreatorService } from "../domain/service.js";
 import type {
   Gap,
+  InteractionSurfaceRef,
   PageCaptureEvidence,
   SystemExploration,
   SystemExplorationBudget,
@@ -42,6 +43,7 @@ export type SystemInteractionEvidence = {
   urlChanged: boolean;
   blockedRequests: Array<{ method: string; url: string }>;
   status: "observed" | "no-change" | "blocked" | "failed";
+  surface?: InteractionSurfaceRef;
   reacquiredPage?: boolean;
   screenshotPath?: string;
 };
@@ -55,6 +57,7 @@ export type SafeInteractionCandidate = {
   ariaControls?: string;
   currentValue?: string;
   options?: Array<{ value: string; label: string; disabled: boolean }>;
+  surface?: InteractionSurfaceRef;
 };
 
 export type SystemExplorerResult = {
@@ -237,6 +240,7 @@ export class SystemExplorationCoordinator {
           targetRole: transition.target.role,
           targetSelector: transition.target.selector,
           targetKind: transition.target.kind,
+          surface: transition.surface,
           action: transition.action,
           inputValue: transition.inputValue,
           before: transition.before,
@@ -613,7 +617,7 @@ async function probeSafeInteractions(input: {
     let status: SystemInteractionEvidence["status"] = "failed";
     let screenshotPath: string | undefined;
     try {
-      const target = activePage.locator(candidate.selector).first();
+      const target = interactionLocator(activePage, candidate).first();
       if (!(await target.isVisible())) {
         throw new Error("Safe interaction target is not visible");
       }
@@ -675,6 +679,7 @@ async function probeSafeInteractions(input: {
       urlChanged: before.url !== after.url,
       blockedRequests,
       status,
+      surface: candidate.surface,
       ...(reacquiredPage ? { reacquiredPage: true } : {}),
       screenshotPath
     });
@@ -695,7 +700,120 @@ async function probeSafeInteractions(input: {
 async function collectInteractionCandidates(
   page: import("@playwright/test").Page
 ): Promise<SafeInteractionCandidate[]> {
-  return page
+  const main = await collectInteractionCandidatesFromSurface(page, {
+    kind: "document",
+    url: canonicalUrl(page.url())
+  });
+  const frames = await Promise.all(
+    page.frames()
+      .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
+      .map((frame) => collectInteractionCandidatesFromSurface(frame, {
+        kind: "iframe",
+        url: canonicalUrl(frame.url()),
+        parentUrl: canonicalUrl(page.url())
+      }))
+  );
+  const shadow = await collectOpenShadowInteractionCandidates(page, {
+    kind: "shadow-root",
+    url: canonicalUrl(page.url()),
+    parentUrl: canonicalUrl(page.url())
+  });
+  return [...main, ...frames.flat(), ...shadow];
+}
+
+async function collectOpenShadowInteractionCandidates(
+  page: import("@playwright/test").Page,
+  surfaceRef: InteractionSurfaceRef
+): Promise<SafeInteractionCandidate[]> {
+  return page.evaluate(() => {
+    const documentLike = (globalThis as unknown as {
+      document: {
+        querySelectorAll(selector: string): ArrayLike<ElementLike>;
+      };
+    }).document;
+    type ElementLike = {
+      tagName: string;
+      id: string;
+      textContent?: string | null;
+      value?: string;
+      labels?: ArrayLike<{ textContent?: string | null }>;
+      options?: ArrayLike<{ value: string; textContent?: string | null; disabled: boolean }>;
+      getAttribute(name: string): string | null;
+      shadowRoot?: { querySelectorAll(selector: string): ArrayLike<ElementLike> } | null;
+    };
+    const selectors = '[role="tab"], button[aria-expanded], button[aria-controls], select';
+    const collect = (root: { querySelectorAll(selector: string): ArrayLike<ElementLike> }) => {
+      const results: Array<{
+        name: string;
+        role: string;
+        selector: string;
+        tag: string;
+        ariaExpanded?: string;
+        ariaControls?: string;
+        currentValue?: string;
+        options?: Array<{ value: string; label: string; disabled: boolean }>;
+      }> = [];
+      for (const element of Array.from(root.querySelectorAll(selectors))) {
+        const tag = element.tagName.toLowerCase();
+        const testId = element.getAttribute("data-testid");
+        const nameValue = element.getAttribute("name");
+        const ariaControls = element.getAttribute("aria-controls") ?? undefined;
+        const selector = testId
+          ? `[data-testid=${JSON.stringify(testId)}]`
+          : element.id
+            ? `[id=${JSON.stringify(element.id)}]`
+            : nameValue
+              ? `${tag}[name=${JSON.stringify(nameValue)}]`
+              : ariaControls
+                ? `[aria-controls=${JSON.stringify(ariaControls)}]`
+                : "";
+        const name = element.getAttribute("aria-label") ||
+          (element.labels
+            ? Array.from(element.labels)
+                .map((label) => (label.textContent ?? "").trim())
+                .filter(Boolean)
+                .join(" ")
+            : "") ||
+          nameValue ||
+          (element.textContent ?? "").trim();
+        results.push({
+          name,
+          role: element.getAttribute("role") || (tag === "select" ? "combobox" : "button"),
+          selector,
+          tag,
+          ariaExpanded: element.getAttribute("aria-expanded") ?? undefined,
+          ariaControls,
+          currentValue: element.value,
+          options: element.options
+            ? Array.from(element.options).map((option) => ({
+                value: option.value,
+                label: (option.textContent ?? "").trim(),
+                disabled: option.disabled
+              }))
+            : undefined
+        });
+      }
+      for (const host of Array.from(root.querySelectorAll("*"))) {
+        if (host.shadowRoot) results.push(...collect(host.shadowRoot));
+      }
+      return results;
+    };
+    const results: ReturnType<typeof collect> = [];
+    for (const host of Array.from(documentLike.querySelectorAll("*"))) {
+      if (host.shadowRoot) results.push(...collect(host.shadowRoot));
+    }
+    return results;
+  }).then((candidates) => candidates.map((candidate) => ({
+    ...candidate,
+    surface: surfaceRef
+  })));
+}
+
+async function collectInteractionCandidatesFromSurface(
+  surface: import("@playwright/test").Page | import("@playwright/test").Frame,
+  surfaceRef: InteractionSurfaceRef
+): Promise<SafeInteractionCandidate[]> {
+  const candidates = await surface
     .locator('[role="tab"], button[aria-expanded], button[aria-controls], select')
     .evaluateAll((elements) =>
       elements.slice(0, 50).flatMap((element) => {
@@ -761,6 +879,34 @@ async function collectInteractionCandidates(
         }];
       })
     );
+  return Promise.all(
+    candidates.map(async (candidate) => {
+      const inShadowRoot = await surface
+        .locator(candidate.selector)
+        .first()
+        .evaluate((element) => element.getRootNode().toString() === "[object ShadowRoot]")
+        .catch(() => false);
+      return {
+        ...candidate,
+        surface: inShadowRoot
+          ? { ...surfaceRef, kind: "shadow-root" as const }
+          : surfaceRef
+      };
+    })
+  );
+}
+
+function interactionLocator(
+  page: import("@playwright/test").Page,
+  candidate: SafeInteractionCandidate
+) {
+  if (candidate.surface?.kind === "iframe") {
+    const frame = page.frames().find(
+      (item) => canonicalUrl(item.url()) === candidate.surface?.url
+    );
+    if (frame) return frame.locator(candidate.selector);
+  }
+  return page.locator(candidate.selector);
 }
 
 async function captureInteractionState(
@@ -768,7 +914,7 @@ async function captureInteractionState(
 ): Promise<SystemInteractionState> {
   const visibleElements = await page
     .locator(
-      'button, input, select, textarea, a[href], [role="tab"], [role="dialog"], [aria-label]'
+      'button, input, select, textarea, a[href], span, [role="tab"], [role="dialog"], [aria-label]'
     )
     .evaluateAll((elements) =>
       elements.flatMap((element) => {
@@ -800,6 +946,28 @@ async function captureInteractionState(
         return name ? [name] : [];
       })
     );
+  const frameVisibleElements = await Promise.all(
+    page.frames()
+      .filter((frame) => frame !== page.mainFrame())
+      .map((frame) =>
+        frame.locator('button, input, select, textarea, a[href], span, [role="tab"], [role="dialog"], [aria-label]')
+          .evaluateAll((elements) => elements.flatMap((element) => {
+            const html = element as unknown as {
+              textContent?: string | null;
+              getAttribute(name: string): string | null;
+              getBoundingClientRect(): { width: number; height: number };
+            };
+            const bounds = html.getBoundingClientRect();
+            if (bounds.width <= 0 || bounds.height <= 0) return [];
+            const name = html.getAttribute("aria-label") ||
+              html.getAttribute("placeholder") ||
+              html.getAttribute("name") ||
+              (html.textContent ?? "").trim();
+            return name ? [name] : [];
+          }))
+          .catch(() => [])
+      )
+  );
   const dialogs = await page.locator('[role="dialog"]').evaluateAll((elements) =>
     elements.flatMap((element) => {
       const html = element as unknown as {
@@ -814,10 +982,18 @@ async function captureInteractionState(
       return label ? [label] : [];
     })
   );
+  const frameDialogs = await Promise.all(
+    page.frames()
+      .filter((frame) => frame !== page.mainFrame())
+      .map((frame) => frame.locator('[role="dialog"]').allTextContents().catch(() => []))
+  );
   const state = {
     url: canonicalUrl(page.url()),
-    visibleElements: uniqueSorted(visibleElements),
-    dialogs: uniqueSorted(dialogs)
+    visibleElements: uniqueSorted([...visibleElements, ...frameVisibleElements.flat()]),
+    dialogs: uniqueSorted([
+      ...dialogs,
+      ...frameDialogs.flat().map((value) => value.trim()).filter(Boolean)
+    ])
   };
   return {
     id: `state-${createHash("sha256").update(JSON.stringify(state)).digest("hex").slice(0, 16)}`,
@@ -838,7 +1014,7 @@ async function capturePage(
     issues.push(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
   });
   const domText = await page.locator("body").innerText().catch(() => "");
-  const interactiveElements = await page
+  const interactiveElements: PageCaptureEvidence["interactiveElements"] = await page
     .locator(
       'button, input, select, textarea, a[href], [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="radio"]'
     )
@@ -905,19 +1081,109 @@ async function capturePage(
         return { name, role, text, selector };
       })
     );
-  if (interactiveElements.length === 0) {
+  const interactiveElementsWithSurface = await Promise.all(
+    interactiveElements.map(async (element) => {
+      const inShadowRoot = await page
+        .locator(element.selector)
+        .first()
+        .evaluate((item) => item.getRootNode().toString() === "[object ShadowRoot]")
+        .catch(() => false);
+      return inShadowRoot
+        ? {
+            ...element,
+            surface: {
+              kind: "shadow-root" as const,
+              url: finalUrl,
+              parentUrl: finalUrl
+            }
+          }
+        : element;
+    })
+  );
+  const frameInteractiveElements = await Promise.all(
+    page.frames()
+      .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
+      .map(async (frame) => {
+        const surface = {
+          kind: "iframe" as const,
+          url: canonicalUrl(frame.url()),
+          parentUrl: finalUrl
+        };
+        const elements = await frame.locator(
+          'button, input, select, textarea, a[href], [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="radio"]'
+        ).evaluateAll((items) => items.slice(0, 100).map((element, position) => {
+          const html = element as unknown as {
+            tagName: string;
+            innerText?: string;
+            textContent?: string | null;
+            id: string;
+            labels?: ArrayLike<{ textContent?: string | null }>;
+            getAttribute(name: string): string | null;
+          };
+          const tag = html.tagName.toLowerCase();
+          const text = (html.innerText || html.textContent || "").trim();
+          const associatedLabel = html.labels
+            ? Array.from(html.labels)
+                .map((label) =>
+                  (label.textContent ?? "")
+                    .replace(html.textContent ?? "", "")
+                    .trim()
+                )
+                .filter(Boolean)
+                .join(" ")
+            : "";
+          const name = html.getAttribute("aria-label") ||
+            html.getAttribute("placeholder") ||
+            associatedLabel ||
+            html.getAttribute("name") ||
+            text || `${tag}-${position + 1}`;
+          const testId = html.getAttribute("data-testid");
+          const selector = testId
+            ? `[data-testid=${JSON.stringify(testId)}]`
+            : html.id
+              ? `[id=${JSON.stringify(html.id)}]`
+              : html.getAttribute("name")
+                ? `${tag}[name=${JSON.stringify(html.getAttribute("name"))}]`
+                : `${tag}:nth-of-type(${position + 1})`;
+          const role = html.getAttribute("role") || (tag === "select" ? "combobox" : tag === "button" ? "button" : "textbox");
+          return { name, role, text, selector };
+        }));
+        return elements.map((element) => ({ ...element, surface }));
+      })
+  );
+  const allInteractiveElements = [
+    ...interactiveElementsWithSurface,
+    ...frameInteractiveElements.flat()
+  ];
+  if (allInteractiveElements.length === 0) {
     issues.push("No interactive elements found");
+  }
+  const surfaces = await collectBrowserSurfaceEvidence(page, allowedUrls);
+  if (
+    allInteractiveElements.some((element) => element.surface?.kind === "shadow-root") &&
+    !surfaces.some((surface) => surface.kind === "shadow-root")
+  ) {
+    surfaces.push({
+      kind: "shadow-root",
+      url: finalUrl,
+      parentUrl: finalUrl,
+      accessible: true,
+      interactiveCount: allInteractiveElements.filter(
+        (element) => element.surface?.kind === "shadow-root"
+      ).length,
+      evidence: "Open shadow root interactive element detected"
+    });
   }
   return {
     title: (await page.title()) || finalUrl,
     finalUrl,
     domText: domText.slice(0, 50_000),
     screenshotPath,
-    interactiveElements,
+    interactiveElements: allInteractiveElements,
     consoleErrors: [],
     networkFailures: [],
     issues,
-    surfaces: await collectBrowserSurfaceEvidence(page, allowedUrls)
+    surfaces
   };
 }
 
@@ -1034,7 +1300,12 @@ function assertResultWithinBudget(
         !page.evidence.interactiveElements.some(
           (element) =>
             element.selector === interaction.target.selector &&
-            element.name === interaction.target.name
+            element.name === interaction.target.name &&
+            (!interaction.surface ||
+              (interaction.surface.kind === "document"
+                ? !element.surface || element.surface.kind === "document"
+                : element.surface?.kind === interaction.surface.kind &&
+                  element.surface.url === interaction.surface.url))
         )
       ) {
         throw new Error("Explorer interaction target is not present in the captured page evidence");

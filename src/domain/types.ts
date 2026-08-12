@@ -123,6 +123,7 @@ export type PageCaptureEvidence = {
     role: string;
     text: string;
     selector: string;
+    surface?: InteractionSurfaceRef;
   }>;
   consoleErrors: string[];
   networkFailures: string[];
@@ -161,6 +162,12 @@ export type SystemInteractionState = {
   dialogs: string[];
 };
 
+export type InteractionSurfaceRef = {
+  kind: "document" | "iframe" | "shadow-root" | "wujie";
+  url: string;
+  parentUrl?: string;
+};
+
 export type SystemExplorationInteractionTransition = {
   id: string;
   pageModelId: string;
@@ -169,6 +176,7 @@ export type SystemExplorationInteractionTransition = {
   targetRole: string;
   targetSelector: string;
   targetKind: "tab" | "disclosure" | "select";
+  surface?: InteractionSurfaceRef;
   action: "click" | "select";
   inputValue?: string;
   before: SystemInteractionState;

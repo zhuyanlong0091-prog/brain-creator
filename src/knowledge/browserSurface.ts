@@ -29,23 +29,31 @@ export async function collectBrowserSurfaceEvidence(
   const roots = await page.evaluate(() => {
     const root = (globalThis as unknown as {
       document: {
-        querySelectorAll(selector: string): ArrayLike<{ shadowRoot?: unknown }>;
+        querySelectorAll(selector: string): ArrayLike<{ shadowRoot?: unknown; matches(selector: string): boolean }>;
       };
     }).document;
     const elements = Array.from(root.querySelectorAll("*"));
     return {
       shadowRoots: elements.filter((element) => Boolean(element.shadowRoot)).length,
-      wujie: root.querySelectorAll("[data-wujie], wujie-app, [class*='wujie']").length
+      wujie: elements.filter((element) => element.matches("[data-wujie], wujie-app, [class*='wujie']")).length
     };
   }).catch(() => ({ shadowRoots: 0, wujie: 0 }));
-  if (roots.shadowRoots > 0) {
+  const shadowInteractiveCount = await page
+    .locator(
+      'button, input, select, textarea, a[href], [role="button"], [role="link"], [role="textbox"], [role="combobox"]'
+    )
+    .evaluateAll((elements) =>
+      elements.filter((element) => element.getRootNode().toString() === "[object ShadowRoot]").length
+    )
+    .catch(() => 0);
+  if (roots.shadowRoots > 0 || shadowInteractiveCount > 0) {
     surfaces.push({
       kind: "shadow-root",
       url: mainUrl,
       parentUrl: mainUrl,
       accessible: true,
-      interactiveCount: await interactiveCount(page).catch(() => 0),
-      evidence: `${roots.shadowRoots} open shadow root(s) detected`
+      interactiveCount: shadowInteractiveCount || await interactiveCount(page).catch(() => 0),
+      evidence: `${Math.max(roots.shadowRoots, shadowInteractiveCount > 0 ? 1 : 0)} open shadow root(s) detected`
     });
   }
   if (roots.wujie > 0) {

@@ -398,7 +398,14 @@ describe("System exploration coordinator", () => {
         }
         if (request.url === "/frame") {
           response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-          response.end("<label>Frame field<input></label>");
+          response.end(`
+            <label>Frame Mode
+              <select id="frame-mode" onchange="document.body.dataset.mode=this.value; document.body.insertAdjacentHTML('beforeend', '<span>Advanced Mode</span>')">
+                <option value="basic">Basic</option>
+                <option value="advanced">Advanced</option>
+              </select>
+            </label>
+          `);
           return;
         }
         if (request.method === "POST") writeRequests += 1;
@@ -433,7 +440,20 @@ describe("System exploration coordinator", () => {
               </button>
               <script>
                 const root = document.querySelector('#shadow-host').attachShadow({ mode: 'open' });
-                root.innerHTML = '<button>Shadow action</button>';
+                const shadowButton = document.createElement('button');
+                shadowButton.id = 'shadow-details';
+                shadowButton.setAttribute('aria-expanded', 'false');
+                shadowButton.setAttribute('aria-controls', 'shadow-panel');
+                shadowButton.textContent = 'Shadow details';
+                const shadowPanel = document.createElement('span');
+                shadowPanel.id = 'shadow-panel';
+                shadowPanel.hidden = true;
+                shadowPanel.textContent = 'Shadow panel';
+                shadowButton.onclick = () => {
+                  shadowButton.setAttribute('aria-expanded', 'true');
+                  shadowPanel.hidden = false;
+                };
+                root.append(shadowButton, shadowPanel);
               </script>
             </body>
           </html>
@@ -461,7 +481,7 @@ describe("System exploration coordinator", () => {
             maxPages: 1,
             maxDepth: 0,
             maxDurationMs: 30_000,
-            maxInteractionsPerPage: 4
+            maxInteractionsPerPage: 10
           }
         });
 
@@ -488,13 +508,50 @@ describe("System exploration coordinator", () => {
             (transition) => transition.targetName === "Save"
           )
         ).toBe(false);
-        expect(result.brain.stateTransitions).toHaveLength(1);
+        expect(result.brain.stateTransitions.map((transition) => transition.targetName)).toEqual(
+          expect.arrayContaining(["Employee Type", "Frame Mode", "Shadow details"])
+        );
+        expect(result.brain.stateTransitions).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              targetName: "Frame Mode",
+              surface: expect.objectContaining({ kind: "iframe" })
+            }),
+            expect.objectContaining({
+              targetName: "Shadow details",
+              surface: expect.objectContaining({ kind: "shadow-root" })
+            })
+          ])
+        );
+        expect(result.brain.stateTransitions).not.toEqual(
+          expect.arrayContaining([expect.objectContaining({ targetName: "Sync Type" })])
+        );
         expect(result.brain.pages[0].surfaces).toEqual(
           expect.arrayContaining([
             expect.objectContaining({ kind: "iframe" }),
             expect.objectContaining({ kind: "shadow-root" }),
             expect.objectContaining({ kind: "popup" })
           ])
+        );
+        const frameMode = result.exploration.interactionTransitions.find(
+          (transition) => transition.targetName === "Frame Mode"
+        );
+        expect(frameMode).toEqual(
+          expect.objectContaining({
+            status: "observed",
+            surface: expect.objectContaining({ kind: "iframe" }),
+            visibleAdded: expect.arrayContaining(["Advanced Mode"])
+          })
+        );
+        const shadowDetails = result.exploration.interactionTransitions.find(
+          (transition) => transition.targetName === "Shadow details"
+        );
+        expect(shadowDetails).toEqual(
+          expect.objectContaining({
+            status: "observed",
+            surface: expect.objectContaining({ kind: "shadow-root" }),
+            visibleAdded: expect.arrayContaining(["Shadow panel"])
+          })
         );
         expect(writeRequests).toBe(0);
       } finally {

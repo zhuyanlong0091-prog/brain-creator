@@ -83,6 +83,7 @@ export type SystemBrainStateTransition = {
   targetRole: string;
   targetSelector: string;
   targetKind: "tab" | "disclosure" | "select";
+  surface?: import("../domain/types.js").InteractionSurfaceRef;
   action: "click" | "select";
   inputValue?: string;
   beforeStateId: string;
@@ -280,6 +281,7 @@ export function buildSystemBrain(
             targetRole: transition.targetRole,
             targetSelector: transition.targetSelector,
             targetKind: transition.targetKind,
+            surface: transition.surface,
             action: transition.action,
             inputValue: transition.inputValue,
             beforeStateId: transition.before.id,
