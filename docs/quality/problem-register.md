@@ -19,9 +19,9 @@ Status meanings:
 | A6 | Gaps had no usable lifecycle | resolved | PR A | Resolve, dismiss, and reopen require a note and evidence references; `service.test.ts`, `controlPlane.test.ts` |
 | A7 | Errors described state but not recovery | partial | PR A/PR C | Stable code, bilingual message, nextAction, retryable, and UUID trace are present; expand catalog with Harness errors |
 | A8 | Upgrade and migration had no safe path | resolved | PR B | Schema 16 migration creates a timestamped backup; schema 17 validation, doctor checks, index rebuild, and Suite export are covered |
-| B1 | SPA exploration missed navigation transitions | open | PR E | URL-changing interactions create navigation edges and queued targets |
+| B1 | SPA exploration missed navigation transitions | partial | PR E | Link navigation and observed safe-interaction URL changes now create queued targets; popup and full remount recovery remain |
 | B2 | Shared labels produced ambiguous page selection | partial | PR A/PR E | Confirmed page binding exists; candidate evidence and BrowserSurface scoring remain |
-| B3 | Shadow DOM actions were not reliably reachable | open | PR E | Open Shadow DOM and microfrontend surfaces pass interaction fixtures |
+| B3 | Shadow DOM actions were not reliably reachable | partial | PR E | Open Shadow DOM, iframe, and Wujie-like surfaces are recorded as System Brain evidence; surface-scoped actions still need fixtures |
 | B4 | SPA remount invalidated the active Page | open | PR E | Active page is reacquired after remount, popup, or close events |
 | B5 | Initial-state exploration missed conditional actions | partial | PR E | ExplorationScenario discovers state- and data-dependent controls |
 | C1 | Short-lived login state expired during suites | open | PR D | Fresh-context preflight refreshes supported auth or creates AuthCheckpoint |

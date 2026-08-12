@@ -15,6 +15,7 @@ export type SystemBrainPage = {
   probeIssueCount: number;
   locators: LocatorPoint[];
   probeResultIds: string[];
+  surfaces?: NonNullable<import("../domain/types.js").ProbeResult["surfaceEvidence"]>;
   sourceRefs: string[];
 };
 
@@ -163,6 +164,7 @@ export function buildSystemBrain(
       probeIssueCount: probes.reduce((total, probe) => total + probe.issues.length, 0),
       locators,
       probeResultIds: probes.map((probe) => probe.id),
+      surfaces: probes.flatMap((probe) => probe.surfaceEvidence ?? []),
       sourceRefs: [
         `page-model:${page.id}`,
         ...locators.map((locator) => `locator-point:${locator.id}`),

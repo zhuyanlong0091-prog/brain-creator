@@ -155,6 +155,8 @@ Brain Creator 应展示：
 
 RunLedger 提供时间线，ExecutionEvidence 提供步骤证据。Bug 必须关联已批准预期、实际差异、复现路径和证据引用。
 
+系统探索还会记录采集过程中发现的浏览器表面。System Brain 可以区分主文档、允许范围内的 iframe、开放 Shadow DOM 和 Wujie-like 容器摘要。安全交互导致 URL 变化时会加入探索队列。表面证据只用于观察，不会授权写操作，也不会静默推断跨 frame 动作。
+
 ## 10. 恢复或回归
 
 新会话中发送：

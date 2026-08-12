@@ -109,6 +109,7 @@ export type ProbeResult = {
   type: string;
   result: string;
   issues: string[];
+  surfaceEvidence?: BrowserSurfaceEvidence[];
   createdAt: string;
 };
 
@@ -126,6 +127,16 @@ export type PageCaptureEvidence = {
   consoleErrors: string[];
   networkFailures: string[];
   issues: string[];
+  surfaces?: BrowserSurfaceEvidence[];
+};
+
+export type BrowserSurfaceEvidence = {
+  kind: "document" | "iframe" | "shadow-root" | "wujie";
+  url: string;
+  parentUrl?: string;
+  accessible: boolean;
+  interactiveCount: number;
+  evidence?: string;
 };
 
 export type SystemExplorationBudget = {

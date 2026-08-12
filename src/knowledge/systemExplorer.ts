@@ -14,6 +14,7 @@ import type {
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
+import { collectBrowserSurfaceEvidence } from "./browserSurface.js";
 import type { KnowledgeService } from "./service.js";
 
 export type SystemExplorationPage = {
@@ -391,7 +392,13 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
             blockers.push(`Authentication required at ${finalUrl}`);
             continue;
           }
-          const capture = await capturePage(page, finalUrl, pages.length, input.artifactDir);
+          const capture = await capturePage(
+            page,
+            finalUrl,
+            pages.length,
+            input.artifactDir,
+            input.allowedUrls
+          );
           const links = (await page.locator("a[href]").evaluateAll((anchors) =>
             anchors.map((anchor) => ({
               text: (anchor.textContent ?? "").trim(),
@@ -429,6 +436,18 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
             links,
             interactions
           });
+          for (const interaction of interactions) {
+            if (
+              interaction.status === "observed" &&
+              interaction.urlChanged &&
+              isAllowedExplorationUrl(interaction.after.url, input.allowedUrls) &&
+              !queued.has(interaction.after.url) &&
+              !visited.has(interaction.after.url)
+            ) {
+              queued.add(interaction.after.url);
+              queue.push({ url: interaction.after.url, depth: candidate.depth + 1 });
+            }
+          }
           if (candidate.depth < input.budget.maxDepth) {
             for (const link of links) {
               if (!queued.has(link.url) && !visited.has(link.url)) {
@@ -757,7 +776,8 @@ async function capturePage(
   page: import("@playwright/test").Page,
   finalUrl: string,
   index: number,
-  artifactDir: string
+  artifactDir: string,
+  allowedUrls: string[]
 ): Promise<PageCaptureEvidence> {
   const screenshotPath = join(artifactDir, `page-${String(index + 1).padStart(2, "0")}.png`);
   const issues: string[] = [];
@@ -843,7 +863,8 @@ async function capturePage(
     interactiveElements,
     consoleErrors: [],
     networkFailures: [],
-    issues
+    issues,
+    surfaces: await collectBrowserSurfaceEvidence(page, allowedUrls)
   };
 }
 

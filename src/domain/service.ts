@@ -678,6 +678,7 @@ export class BrainCreatorService {
       type: capture ? "browser-capture" : "dom-scan",
       result: `${locatorPoints.length} locator points found`,
       issues,
+      surfaceEvidence: capture?.surfaces,
       createdAt: now
     };
 

@@ -155,6 +155,8 @@ A useful review separates:
 
 Use the RunLedger for the timeline and ExecutionEvidence for step-level proof. A Bug must include an approved expectation, actual mismatch, reproduction path, and evidence references.
 
+System exploration also records browser surfaces discovered during capture. The System Brain can distinguish the main document, allowlisted iframe, open Shadow DOM, and Wujie-like container summaries. A URL-changing safe interaction is added to the exploration queue. Surface evidence is observational; it does not authorize writes or silently infer a cross-frame action.
+
 ## 10. Resume Or Regress
 
 In a new Agent session, say:
