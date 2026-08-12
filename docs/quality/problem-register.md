@@ -57,8 +57,8 @@ Status meanings:
 
 | Status | Count |
 |---|---:|
-| resolved | 12 |
-| partial | 27 |
+| resolved | 14 |
+| partial | 25 |
 | open | 0 |
 | deferred | 2 |
 | total | 41 |

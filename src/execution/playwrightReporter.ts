@@ -118,6 +118,7 @@ function collectSteps(suites: unknown[], output: NonNullable<StructuredReporterR
 
 function collectResultSteps(result: Record<string, unknown>, output: NonNullable<StructuredReporterResult["steps"]>) {
   if (!Array.isArray(result.steps)) return;
+  const traceRefs = traceRefsFromAttachments(result.attachments);
   for (const item of result.steps) {
     if (!item || typeof item !== "object") continue;
     const step = item as Record<string, unknown>;
@@ -134,6 +135,7 @@ function collectResultSteps(result: Record<string, unknown>, output: NonNullable
           .filter((attachment): attachment is Record<string, unknown> => Boolean(attachment && typeof attachment === "object"))
           .map((attachment) => attachment.path ?? attachment.name)
           .filter((path): path is string => typeof path === "string"),
+        ...(traceRefs.length > 0 ? { traceRefs } : {}),
         ...(runtime.consoleErrors.length > 0 ? { consoleErrors: runtime.consoleErrors } : {}),
         ...(runtime.networkFailures.length > 0 ? { networkFailures: runtime.networkFailures } : {}),
         ...(typeof step.error === "string" ? { error: step.error } : {})
@@ -141,6 +143,14 @@ function collectResultSteps(result: Record<string, unknown>, output: NonNullable
     }
     collectResultSteps(step, output);
   }
+}
+
+function traceRefsFromAttachments(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  return [...new Set(value
+    .filter((attachment): attachment is Record<string, unknown> => Boolean(attachment && typeof attachment === "object"))
+    .map((attachment) => attachment.path ?? attachment.name)
+    .filter((path): path is string => typeof path === "string" && /trace[^/\\]*\.zip$/i.test(path)))];
 }
 
 function runtimeImpactFromAttachments(attachments: unknown[]) {

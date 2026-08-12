@@ -114,4 +114,21 @@ describe("Playwright JSON reporter", () => {
       networkFailures: ["GET https://example.test/api/records"]
     }));
   });
+
+  it("associates a trace attachment with the structured step that produced it", () => {
+    const result = parsePlaywrightJsonReport({
+      stats: { expected: 1, unexpected: 0, skipped: 0 },
+      suites: [{
+        specs: [{
+          tests: [{ results: [{
+            status: "passed",
+            attachments: [{ name: "trace.zip", path: "artifacts/trace.zip" }],
+            steps: [{ title: "bc:step-submit", attachments: [] }]
+          }] }]
+        }]
+      }]
+    });
+
+    expect(result.steps?.[0]?.traceRefs).toEqual(["artifacts/trace.zip"]);
+  });
 });

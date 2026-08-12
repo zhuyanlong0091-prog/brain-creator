@@ -1142,6 +1142,7 @@ export class KnowledgeService {
       step.screenshotPath = screenshot;
       const reporterStep = reporterSteps?.find((reported) => reported.id === step.stepId);
       step.evidenceRefs = [...new Set([...(step.evidenceRefs ?? []), ...(reporterStep?.evidenceRefs ?? [])])];
+      step.traceRefs = [...new Set(reporterStep?.traceRefs ?? evidence.tracePaths)];
       step.assertionStatus =
         input.status === "passed"
           ? "passed"

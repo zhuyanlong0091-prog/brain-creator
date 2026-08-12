@@ -1143,6 +1143,7 @@ export type ExecutionStepEvidence = {
   assertionStatus: "pending" | "passed" | "failed" | "blocked";
   screenshotPath?: string;
   evidenceRefs?: string[];
+  traceRefs?: string[];
   sourceRefs: string[];
   origin: ExecutableCaseStep["origin"];
 };
@@ -1215,6 +1216,7 @@ export type StructuredReporterStep = {
   status: "passed" | "failed" | "skipped" | "unknown";
   durationMs?: number;
   evidenceRefs: string[];
+  traceRefs?: string[];
   consoleErrors?: string[];
   networkFailures?: string[];
   error?: string;

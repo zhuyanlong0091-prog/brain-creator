@@ -230,3 +230,42 @@ export function summarizeRequirementGoldenSamples(results: RequirementGoldenResu
     domains: [...new Set(results.map((result) => result.sample.domain))].sort()
   };
 }
+
+export type GoldenExecutionFixture = {
+  knowledgeProjectId: string;
+  testIntentCount: number;
+  executableCaseCount: number;
+  classifications: Record<"strong-verified" | "limited" | "blocked" | "failed" | "not-selected" | "superseded", number>;
+};
+
+/**
+ * Builds a deterministic, synthetic scale fixture for coverage reconciliation.
+ * It contains no business data and is intentionally separate from the seven
+ * semantic policy samples above.
+ */
+export function buildGoldenExecutionFixture(): GoldenExecutionFixture {
+  const classifications: GoldenExecutionFixture["classifications"] = {
+    "strong-verified": 0,
+    limited: 0,
+    blocked: 0,
+    failed: 0,
+    "not-selected": 0,
+    superseded: 0
+  };
+  const executableCaseCount = 61;
+  const testIntentCount = 457;
+  for (let index = 0; index < testIntentCount; index += 1) {
+    if (index < 40) classifications["strong-verified"] += 1;
+    else if (index < 50) classifications.limited += 1;
+    else if (index < 55) classifications.blocked += 1;
+    else if (index < executableCaseCount) classifications.failed += 1;
+    else if (index < 435) classifications["not-selected"] += 1;
+    else classifications.superseded += 1;
+  }
+  return {
+    knowledgeProjectId: "golden-execution-scale",
+    testIntentCount,
+    executableCaseCount,
+    classifications
+  };
+}
