@@ -158,6 +158,35 @@ describe("generatePlanDraft", () => {
 });
 
 describe("runChain", () => {
+  it("uses the structured Playwright reporter when requested", async () => {
+    const workDir = await tempDir();
+    const testCase = approvedTestCase();
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      testCase,
+      structuredReporter: true,
+      agentBridge: async () => ({ exitCode: 0, stdout: "agent ok", stderr: "" }),
+      runner: async (_command, args) => ({
+        exitCode: 0,
+        stdout: args.includes("--reporter=json")
+          ? JSON.stringify({
+              stats: { duration: 12, expected: 1, unexpected: 0, skipped: 0 },
+              suites: [{ specs: [{ id: "assertion-1", title: "workflow", tests: [{ results: [{ status: "passed" }] }] }] }]
+            })
+          : "agent ok",
+        stderr: ""
+      })
+    });
+
+    expect(result.testResult.structuredReporter).toEqual(
+      expect.objectContaining({ status: "passed", total: 1, passed: 1 })
+    );
+    expect(result.testResult.reporterPath).toContain("playwright-report.json");
+    expect(await readFile(result.testResult.reporterPath!, "utf8")).toContain('"status": "passed"');
+  });
+
   it("serializes an approved test case, runs generator, and executes the generated test", async () => {
     const workDir = await tempDir();
     const commands: string[][] = [];

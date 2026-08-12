@@ -769,8 +769,27 @@ describe("KnowledgeService", () => {
       status: "passed",
       chainRunId: "chain-pass",
       actualResult: "Customer record created",
-      artifactPaths: []
+      artifactPaths: [],
+      reporterResult: {
+        status: "passed",
+        total: passEvidence.assertionContracts?.length ?? 0,
+        passed: passEvidence.assertionContracts?.length ?? 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 10,
+        assertions: (passEvidence.assertionContracts ?? []).map((contract) => ({
+          id: contract.id,
+          status: "passed" as const,
+          evidenceRefs: []
+        })),
+        attachments: [],
+        consoleErrors: [],
+        networkFailures: []
+      }
     });
+    expect(repository.executionEvidence.find((item) => item.id === passEvidence.id)?.assuranceLevel).toBe(
+      passEvidence.assertionContracts?.length ? "strong" : "none"
+    );
 
     const bugCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
     const bugEvidence = service.createExecutionEvidence({

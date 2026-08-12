@@ -56,6 +56,17 @@ Export a completed document Suite as a portable ZIP:
 
 ```bash
 npx brain-creator export --suite <suite-run-id> --output exports/suite.zip
+
+## Structured execution evidence
+
+Execution evidence now distinguishes process success from requirement assurance. Each evidence record may contain:
+
+- `assertionContracts`: typed expectations with requirement references and required evidence.
+- `reporterResult`: normalized Playwright JSON Reporter output.
+- `assuranceLevel`: `strong`, `limited`, or `none`.
+- `reporterPath`: the normalized reporter artifact when the runner returned structured JSON.
+
+The static HTML report is written beside the Markdown evidence report. A process that exits with code 0 but has no structured reporter mapping remains `none`; it must not be presented as strong requirement validation. The report is an offline artifact, not a new Brain Creator UI entrypoint.
 ```
 
 The archive contains `manifest.json` and available evidence files. It does not include the repository, secret material, browser storage state, or unrelated workspace files. Missing evidence is listed in the manifest instead of silently omitted.

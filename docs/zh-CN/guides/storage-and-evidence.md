@@ -56,6 +56,17 @@ npx brain-creator doctor
 
 ```bash
 npx brain-creator export --suite <suite-run-id> --output exports/suite.zip
+
+## 结构化执行证据
+
+执行证据现在区分“运行成功”和“需求验证强度”。一条证据可以包含：
+
+- `assertionContracts`：带需求来源引用、证据要求和类型的断言契约。
+- `reporterResult`：标准化后的 Playwright JSON Reporter 结果。
+- `assuranceLevel`：`strong`、`limited` 或 `none`。
+- `reporterPath`：执行器返回结构化结果时保存的 Reporter 文件。
+
+静态 HTML 报告与 Markdown 证据报告一起生成。即使命令退出码为 0，如果没有完成结构化 Reporter 映射，结果仍为 `none`，不能被描述为强需求验证。报告是离线执行产物，不是新的 Brain Creator UI 入口。
 ```
 
 归档包含 `manifest.json` 和可用证据文件，不包含仓库、密钥、浏览器 storage state 或其他无关工作区文件。缺失证据会列在 manifest 中，不会被静默忽略。

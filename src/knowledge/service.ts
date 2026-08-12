@@ -42,6 +42,8 @@ import {
   type TestDataResolution
 } from "./testDataPlanner.js";
 import { planWorkflowPath } from "./workflowPathPlanner.js";
+import { buildAssertionContracts, determineAssuranceLevel } from "../execution/assurance.js";
+import { writeStaticExecutionReport } from "../execution/staticReport.js";
 
 export class KnowledgeService {
   constructor(
@@ -933,6 +935,9 @@ export class KnowledgeService {
         sourceRefs: step.sourceRefs,
         origin: step.origin
       })),
+      assertionContracts:
+        executionPlan?.assertionContracts ?? buildAssertionContracts(executionSteps),
+      assuranceLevel: "none",
       tracePaths: [],
       artifactPaths: [input.contextPackPath],
       consoleErrors: [],
@@ -954,6 +959,8 @@ export class KnowledgeService {
       tracePaths?: string[];
       consoleErrors?: string[];
       networkFailures?: string[];
+      reporterPath?: string;
+      reporterResult?: ExecutionEvidence["reporterResult"];
     }
   ) {
     const evidence = this.repository.executionEvidence.find((item) => item.id === evidenceId);
@@ -965,6 +972,12 @@ export class KnowledgeService {
     evidence.tracePaths = [...new Set(input.tracePaths ?? [])];
     evidence.consoleErrors = input.consoleErrors ?? [];
     evidence.networkFailures = input.networkFailures ?? [];
+    evidence.reporterPath = input.reporterPath;
+    evidence.reporterResult = input.reporterResult;
+    evidence.assuranceLevel = determineAssuranceLevel(
+      evidence.assertionContracts ?? [],
+      input.reporterResult
+    );
     for (const step of evidence.steps) {
       const screenshot = evidence.artifactPaths.find((path) =>
         path.toLowerCase().includes(`step-${String(step.order).padStart(2, "0")}`)
@@ -990,6 +1003,24 @@ export class KnowledgeService {
     evidence.completedAt = timestamp();
     const reportPath = await this.writeExecutionReport(evidence);
     evidence.artifactPaths = [...new Set([...evidence.artifactPaths, reportPath])];
+    const htmlReportPath = await writeStaticExecutionReport({
+      outputPath: join(
+        this.knowledgeDir,
+        "execution-evidence",
+        "reports",
+        evidence.chainRunId ?? evidence.id,
+        "report.html"
+      ),
+      title: `Execution Evidence ${evidence.id}`,
+      evidence,
+      bugReports: this.repository.bugReports
+        .filter((bug) => bug.chainRunId === evidence.chainRunId)
+        .map((bug) => ({ id: bug.id, status: bug.status, actualResult: bug.actualResult })),
+      gaps: this.repository.gaps
+        .filter((gap) => gap.sourceId === evidence.chainRunId || gap.sourceId === evidence.id)
+        .map((gap) => ({ id: gap.id, status: gap.status, reason: gap.reason }))
+    });
+    evidence.artifactPaths = [...new Set([...evidence.artifactPaths, htmlReportPath])];
     this.repository.persist();
     return evidence;
   }

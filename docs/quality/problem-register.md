@@ -32,17 +32,17 @@ Status meanings:
 | D2 | Requirements omitted concrete UI paths | partial | PR E/PR F | Missing paths are supplied by confirmed System Brain evidence or remain explicit Gap items |
 | D3 | Source fields could not be reconciled to analysis | open | PR F | Source-field ledger reconciles source, node, intent, case, and result counts |
 | D4 | Eval classification lacked explainable provenance | partial | PR F | Every class stores source passage, reason, policy version, and confirmer |
-| D5 | Passing cases lacked replayable trace evidence | open | PR C | Trace is retained for every case and linked from the report manifest |
-| D6 | Calls lacked operator identity and unique trace IDs | partial | PR A/PR C | UUID trace IDs exist; Ledger still needs operator, provider, session, and current step |
-| D7 | Assertions and runtime evidence were disconnected | open | PR C | Reporter joins assertion, console, network, screenshot, and trace evidence by step |
-| D8 | Screenshots had no business meaning | open | PR C | `bc.step()` produces semantic names and step metadata |
-| E1 | Weak checks were reported as full validation | open | PR C | AssertionContract and assuranceLevel separate strong, limited, and none |
+| D5 | Passing cases lacked replayable trace evidence | partial | PR C/PR D | Structured Reporter and static reports retain replayable artifact references; always-on trace capture remains PR D |
+| D6 | Calls lacked operator identity and unique trace IDs | partial | PR A/PR C | UUID trace IDs and Ledger fields exist; production call sites still need to populate operator, provider, session, and current step |
+| D7 | Assertions and runtime evidence were disconnected | partial | PR C | Reporter joins assertion results and attachments; step-level console/network/trace correlation remains to be completed |
+| D8 | Screenshots had no business meaning | partial | PR C | Seed exposes `bc.step()` and Generator is instructed to use it; generated-file enforcement and full step metadata remain |
+| E1 | Weak checks were reported as full validation | resolved | PR C | AssertionContract and assuranceLevel prevent reporter-less or partially mapped passes from being strong validation |
 | E2 | Unexecuted TestIntents had no explanation | open | PR F | 100% of TestIntents are classified by execution or non-execution reason |
 | E3 | Field checks displaced workflow coverage | open | PR F | Golden Eval includes workflow and state-transition coverage |
 | E4 | Multi-role journeys were not executed | open | PR F | Actor Journey switches AuthProfiles and records role transitions in Ledger |
 | E5 | A single green run implied stability | open | PR F | Critical journeys report repeated-run stability statistics |
 | E6 | Created test data was not reliably cleaned | resolved | existing | TestData leases and cleanup states are covered by provider and suite tests |
-| E7 | Host-reported success lacked tool verification | resolved | existing/PR C | Tool-side Playwright execution exists; structured Reporter replaces remaining stdout inference |
+| E7 | Host-reported success lacked tool verification | partial | existing/PR C | Tool-side Playwright execution and structured Reporter are used when available; compatibility fallback still records non-strong results without reporter evidence |
 | F1 | Generated baselines were fragile across upgrades | resolved | PR A/PR B | Compile keys supersede stale cases; portable artifact manifests record hashes and missing evidence |
 | F2 | Runtime depended on one workstation | partial | PR D | Browser/auth portability and CI smoke coverage remain |
 | F3 | One JSON file grew without partitioning | resolved | PR B | Schema 17 sharded repository, atomic writes, migration backup, missing-shard detection, and index rebuild are covered |
@@ -51,15 +51,15 @@ Status meanings:
 | G1 | Facade responses consumed excessive context | partial | PR A | `responseMode=summary` and paged CompileRun review exist; expand to all large facade results |
 | G2 | Documentation and runtime behavior diverged | partial | every PR | Package Skill, English docs, and Chinese docs must be checked in the same PR |
 | G3 | Internal concepts dominated the user experience | deferred | post-2.2 | Natural-language role-oriented review remains a later UX pass |
-| G4 | Error and time presentation was not localized | partial | PR A/PR C | New errors are bilingual; locale-aware timestamps and the complete catalog remain |
+| G4 | Error and time presentation was not localized | partial | PR A/PR C | New errors are bilingual and static reports are searchable; locale-aware timestamps and the complete catalog remain |
 
 ## Stage totals
 
 | Status | Count |
 |---|---:|
-| resolved | 5 |
-| partial | 16 |
-| open | 18 |
+| resolved | 6 |
+| partial | 19 |
+| open | 16 |
 | deferred | 2 |
 | total | 41 |
 

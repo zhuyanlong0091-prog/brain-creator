@@ -97,6 +97,7 @@ function agentInstructions(agent: AgentBridgeInput["agent"]) {
       "- Import from `@playwright/test`.",
       "- Read the `--spec` and `--seed` argument files when present.",
       "- Write the file to the `--output` path.",
+      "- When the seed exports `bc`, wrap each meaningful browser action with `await bc.step(stepId, page, async () => { ... })` so screenshots and step evidence are retained.",
       "- The generated test must be runnable by `npx playwright test`."
     ];
   }

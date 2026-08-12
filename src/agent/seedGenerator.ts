@@ -22,7 +22,16 @@ export async function generateSeedFile(input: GenerateSeedFileInput) {
     ...formatPageFixture(input.system.baseUrl, input.authProfile.loginMethod, secrets, storageStatePath),
     `});`,
     ``,
-    `export { expect } from "@playwright/test";`
+    `export { expect } from "@playwright/test";`,
+    ``,
+    `export const bc = {`,
+    `  async step(stepId: string, page: { screenshot: (options: { path: string; fullPage?: boolean }) => Promise<unknown> }, action: () => Promise<void>) {`,
+    `    return base.step(\`bc:\${stepId}\`, async () => {`,
+    `      await action();`,
+    `      await page.screenshot({ path: base.info().outputPath(\`brain-creator-\${stepId}.png\`), fullPage: true });`,
+    `    });`,
+    `  }`,
+    `};`
   ].join("\n");
 
   await writeFile(seedPath, content, "utf8");

@@ -7,6 +7,7 @@ import { formatScenariosAsMarkdown, parseSpecMarkdown } from "./caseFormatter.js
 import { checkBusinessRules } from "./qualityGate.js";
 import { extractCandidateTerms } from "./termExtractor.js";
 import { id } from "../shared/id.js";
+import { parsePlaywrightJsonReport } from "../execution/playwrightReporter.js";
 import type {
   AgentRun,
   AuthProfile,
@@ -15,13 +16,16 @@ import type {
   Gap,
   GlossaryTerm,
   SystemProfile,
-  TestCase
+  TestCase,
+  StructuredReporterResult
 } from "../domain/types.js";
 
 export type CommandResult = {
   exitCode: number;
   stdout: string;
   stderr: string;
+  structuredReporter?: StructuredReporterResult;
+  reporterPath?: string;
 };
 
 export type CommandRunner = (
@@ -146,6 +150,7 @@ type RunChainInput = {
   runner?: CommandRunner;
   maxHealAttempts?: number;
   knowledgeContext?: string;
+  structuredReporter?: boolean;
 };
 
 export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
@@ -287,11 +292,28 @@ export async function runChain(input: RunChainInput) {
   });
 
   const runner = input.runner ?? spawnCommand;
+  const structuredReporterEnabled = input.structuredReporter ?? !input.runner;
+  const runPlaywright = async (): Promise<CommandResult> => {
+    const args = ["playwright", "test", testRunPath];
+    if (structuredReporterEnabled) args.push("--reporter=json");
+    const result = await runner("npx", args, { cwd: input.workDir });
+    if (!structuredReporterEnabled) return result;
+    const reporter = parseReporterOutput(result.stdout);
+    if (!reporter) return result;
+    const reporterPath = join(
+      input.workDir,
+      ".brain-creator",
+      "runs",
+      input.testCase.id,
+      "playwright-report.json"
+    );
+    await mkdir(dirname(reporterPath), { recursive: true });
+    await writeFile(reporterPath, `${JSON.stringify(reporter, null, 2)}\n`, "utf8");
+    return { ...result, structuredReporter: reporter, reporterPath };
+  };
   let testResult: CommandResult =
     generateRun.status === "succeeded"
-      ? await runner("npx", ["playwright", "test", testRunPath], {
-          cwd: input.workDir
-        })
+      ? await runPlaywright()
       : {
           exitCode: 1,
           stdout: "",
@@ -325,9 +347,7 @@ export async function runChain(input: RunChainInput) {
     if (healerRun.status !== "succeeded") {
       break;
     }
-    testResult = await runner("npx", ["playwright", "test", testRunPath], {
-      cwd: input.workDir
-    });
+    testResult = await runPlaywright();
   }
 
   const status = generateRun.status === "succeeded" && testResult.exitCode === 0 ? "succeeded" : "failed";
@@ -364,6 +384,14 @@ export async function runChain(input: RunChainInput) {
     testPath,
     testResult
   };
+}
+
+function parseReporterOutput(output: string): StructuredReporterResult | undefined {
+  try {
+    return parsePlaywrightJsonReport(JSON.parse(output));
+  } catch {
+    return undefined;
+  }
 }
 
 async function missingAgentBridge(): Promise<CommandResult> {

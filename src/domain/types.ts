@@ -951,6 +951,7 @@ export type ExecutionPlanDraft = {
     verifiedAt?: string;
   };
   steps: ExecutableCaseStep[];
+  assertionContracts?: AssertionContract[];
   pathPlan?: ExecutableCasePathPlan;
   statePlan?: ExecutableCaseStatePlan;
   dataBindings: ExecutionDataBinding[];
@@ -1099,6 +1100,10 @@ export type ExecutionEvidence = {
   chainRunId?: string;
   contextPackPath: string;
   status: "running" | "passed" | "failed" | "blocked";
+  assuranceLevel?: AssuranceLevel;
+  assertionContracts?: AssertionContract[];
+  reporterPath?: string;
+  reporterResult?: StructuredReporterResult;
   steps: ExecutionStepEvidence[];
   tracePaths: string[];
   artifactPaths: string[];
@@ -1107,6 +1112,50 @@ export type ExecutionEvidence = {
   actualResult?: string;
   createdAt: string;
   completedAt?: string;
+};
+
+export type AssertionContractType =
+  | "visibility"
+  | "value"
+  | "state"
+  | "workflow"
+  | "network"
+  | "side-effect";
+
+export type AssertionStrength = "strong" | "limited";
+
+export type AssuranceLevel = "strong" | "limited" | "none";
+
+export type AssertionContract = {
+  id: string;
+  stepId?: string;
+  type: AssertionContractType;
+  strength: AssertionStrength;
+  expected?: string;
+  requirementRefs: string[];
+  evidenceRequirements: Array<"actual-value" | "screenshot" | "trace" | "network" | "console">;
+};
+
+export type StructuredReporterAssertion = {
+  id: string;
+  stepId?: string;
+  status: "passed" | "failed" | "skipped" | "unknown";
+  actual?: string;
+  expected?: string;
+  evidenceRefs: string[];
+};
+
+export type StructuredReporterResult = {
+  status: "passed" | "failed" | "blocked";
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  durationMs: number;
+  assertions: StructuredReporterAssertion[];
+  attachments: string[];
+  consoleErrors: string[];
+  networkFailures: string[];
 };
 
 export type ExecutionFailureType =
@@ -1235,6 +1284,11 @@ export type RunLedgerEntry = {
   toStatus: string;
   outcome?: "passed" | "failed" | "blocked" | "skipped" | "cancelled";
   failureType?: ExecutionFailureType;
+  operator?: string;
+  provider?: string;
+  sessionId?: string;
+  traceId?: string;
+  currentStep?: string;
   message?: string;
   references?: {
     testCaseId?: string;

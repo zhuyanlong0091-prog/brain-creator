@@ -3296,20 +3296,23 @@ async function completeRequirementEvidence(
   baseArtifactPaths: string[]
 ) {
   const output = [testResult?.stdout, testResult?.stderr].filter(Boolean).join("\n").trim();
-  const outputLines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const discoveredArtifacts = output.match(
-    /(?:[a-z]:[\\/]|\.{0,2}[\\/])?[^\s"'<>]+\.(?:png|zip|har|webm)/gi
-  ) ?? [];
-  const artifactPaths = [...new Set([...baseArtifactPaths, ...discoveredArtifacts])];
+  const reporter = testResult?.structuredReporter;
+  const artifactPaths = [...new Set([...baseArtifactPaths, ...(reporter?.attachments ?? [])])];
   const status =
-    chainRun.status === "succeeded"
+    reporter?.status === "failed"
+      ? "failed"
+      : reporter?.status === "blocked"
+        ? "blocked"
+        : chainRun.status === "succeeded"
       ? "passed"
       : chainRun.gaps.length > 0
         ? "blocked"
         : "failed";
   const actualResult =
     status === "passed"
-      ? "Playwright assertions passed."
+      ? reporter
+        ? "Playwright structured reporter passed."
+        : "Playwright exited successfully, but structured reporter evidence was unavailable."
       : output || chainRun.gaps.map((gap) => gap.reason).join("; ") || "Execution failed.";
   return context.knowledgeService.completeExecutionEvidence(evidenceId, {
     status,
@@ -3317,10 +3320,10 @@ async function completeRequirementEvidence(
     actualResult,
     artifactPaths,
     tracePaths: artifactPaths.filter((path) => /trace[^\\/]*\.zip$/i.test(path)),
-    consoleErrors: outputLines.filter((line) => /console.*error/i.test(line)),
-    networkFailures: outputLines.filter((line) =>
-      /net::|network|request failed|response.*\b[45]\d\d\b/i.test(line)
-    )
+    consoleErrors: reporter?.consoleErrors ?? [],
+    networkFailures: reporter?.networkFailures ?? [],
+    reporterPath: testResult?.reporterPath,
+    reporterResult: reporter
   });
 }
 
