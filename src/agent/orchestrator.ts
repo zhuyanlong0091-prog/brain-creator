@@ -8,6 +8,8 @@ import { checkBusinessRules } from "./qualityGate.js";
 import { extractCandidateTerms } from "./termExtractor.js";
 import { id } from "../shared/id.js";
 import { parsePlaywrightJsonReport } from "../execution/playwrightReporter.js";
+import { decryptSecrets } from "../shared/crypto.js";
+import { scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
 import type {
   AgentRun,
   AuthProfile,
@@ -298,6 +300,20 @@ export async function runChain(input: RunChainInput) {
   const runner = input.runner ?? spawnCommand;
   const structuredReporterEnabled = input.structuredReporter ?? !input.runner;
   const runPlaywright = async (): Promise<CommandResult> => {
+    const generatedSource = await readGeneratedSource(testPath);
+    if (generatedSource) {
+      const secretFindings = scanGeneratedSourceSecrets(
+        generatedSource,
+        [input.authProfile, ...(input.actorJourney ?? []).map((actor) => actor.authProfile)]
+      );
+      if (secretFindings.length > 0) {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Generated test contains sensitive material: ${secretFindings.join(", ")}`
+        };
+      }
+    }
     if (input.actorJourney && input.actorJourney.length > 1) {
       const source = await readFile(testPath, "utf8");
       const journeyCheck = validateActorJourneyUsage(source, input.actorJourney);
@@ -411,6 +427,30 @@ export async function runChain(input: RunChainInput) {
     testPath,
     testResult
   };
+}
+
+async function readGeneratedSource(path: string) {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function scanGeneratedSourceSecrets(source: string, profiles: AuthProfile[]) {
+  const protectedValues = profiles.flatMap((profile) => {
+    try {
+      return Object.entries(decryptSecrets(profile.encryptedSecrets));
+    } catch {
+      return [];
+    }
+  });
+  return [
+    ...scanSensitiveValues(source, Object.fromEntries(protectedValues)).map(
+      (finding) => `credential:${finding.secretKey}`
+    ),
+    ...scanSensitivePatterns(source).map((finding) => `pattern:${finding.rule}`)
+  ];
 }
 
 export function validateActorJourneyUsage(

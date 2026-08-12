@@ -278,6 +278,30 @@ describe("runChain", () => {
     expect(result.generateRun.status).toBe("succeeded");
   });
 
+  it("blocks a generated test containing a credential pattern before Playwright runs", async () => {
+    const workDir = await tempDir();
+    const testCase = approvedTestCase();
+    let runnerCalled = false;
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      testCase,
+      agentBridge: async ({ outputPaths }) => {
+        await writeFile(outputPaths[0], 'const config = { password: "do-not-export-this" };', "utf8");
+        return { exitCode: 0, stdout: "agent ok", stderr: "" };
+      },
+      runner: async () => {
+        runnerCalled = true;
+        return { exitCode: 0, stdout: "passed", stderr: "" };
+      }
+    });
+
+    expect(runnerCalled).toBe(false);
+    expect(result.testResult.stderr).toContain("pattern:sensitive-field-literal");
+    expect(result.chainRun.status).toBe("failed");
+  });
+
   it("records Playwright stdout as the failure reason when stderr is empty", async () => {
     const workDir = await tempDir();
     const result = await runChain({

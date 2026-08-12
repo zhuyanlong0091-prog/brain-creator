@@ -73,4 +73,4 @@ npx brain-creator export --suite <suite-run-id> --output exports/suite.zip
 新的鉴权密文使用 `.brain-creator/secret.key` 中的随机本地密钥。可通过 `BRAIN_CREATOR_SECRET_KEY` 使用外部托管密钥，也可通过 `BRAIN_CREATOR_SECRET_KEY_FILE` 指定密钥文件；环境变量优先。已有 `enc:v1` 数据在读取配置时会先解密，再重新加密为 `enc:v2`。生成的 token/cookie seed 只引用 `BRAIN_CREATOR_AUTH_TOKEN` 或 `BRAIN_CREATOR_AUTH_COOKIE`，不会写入凭据值。
 ```
 
-归档包含 `manifest.json` 和可用证据文件，不包含仓库、密钥、浏览器 storage state 或其他无关工作区文件。Host Agent 的 Generator/Healer 提交会在接收前检查，ZIP 导出时还会再次扫描。两个阶段都会匹配当前受保护凭据值，以及私钥、JWT、Bearer Token、明文 password/token/cookie 字段等高置信凭据模式。缺失证据会列在 manifest 中，不会被静默忽略。
+归档包含 `manifest.json` 和可用证据文件，不包含仓库、密钥、浏览器 storage state 或其他无关工作区文件。Bridge 和 Host Agent 的 Generator/Healer 输出会在 Playwright 执行前或任务接收前检查，ZIP 导出时还会再次扫描。所有阶段都会匹配当前受保护凭据值，以及私钥、JWT、Bearer Token、明文 password/token/cookie 字段等高置信凭据模式。缺失证据会列在 manifest 中，不会被静默忽略。
