@@ -3388,7 +3388,8 @@ async function completeRequirementEvidence(
     networkFailures: reporter?.networkFailures ?? [],
     reporterPath: testResult?.reporterPath,
     reporterResult: reporter,
-    actorRoleEvidencePath: testResult?.actorRoleEvidencePath
+    actorRoleEvidencePath: testResult?.actorRoleEvidencePath,
+    evidenceRootDir: context.workDir
   });
 }
 

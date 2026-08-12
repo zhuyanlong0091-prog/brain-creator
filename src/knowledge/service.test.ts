@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -732,7 +732,9 @@ describe("KnowledgeService", () => {
 
   it("downgrades assurance when structured reporter omits a declared step", async () => {
     const repository = new InMemoryBrainCreatorRepository();
-    const service = new KnowledgeService(repository, await tempDir());
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    await writeFile(join(knowledgeDir, "trace.zip"), "trace", "utf8");
     const project = await service.createProject({ name: "Reporter coverage", key: "reporter-coverage", defaultLocale: "en-US" });
     repository.systemProfiles.push({
       id: "system-reporter-coverage",
@@ -763,6 +765,8 @@ describe("KnowledgeService", () => {
     const completed = await service.completeExecutionEvidence(evidence.id, {
       status: "passed",
       artifactPaths: [],
+      tracePaths: ["trace.zip"],
+      evidenceRootDir: knowledgeDir,
       reporterResult: {
         status: "passed",
         total: evidence.assertionContracts?.length ?? 0,
@@ -786,6 +790,7 @@ describe("KnowledgeService", () => {
     expect(completed.evidenceWarnings).toEqual([
       expect.stringContaining("Missing structured Reporter evidence for step(s):")
     ]);
+    expect(completed.evidenceWarnings?.some((warning) => warning.includes("Missing trace artifact"))).toBe(false);
   });
 
   it("records field and workflow coverage only from step evidence", async () => {

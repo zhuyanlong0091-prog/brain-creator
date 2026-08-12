@@ -96,6 +96,7 @@ The Agent previews `bc_run mode=requirement-suite confirm=false`. After explicit
 After the current case's data is ready, Brain Creator freezes its ExecutionPlan. The Generator, selected auth seed, and ExecutionEvidence consume that plan instead of rereading mutable ExecutableCase fields. Before initial chain execution and every `bc_submit_agent_output` continuation, Brain Creator recomputes the semantic hash. A stale or newly blocked plan is rejected before task submission.
 
 Only one RequirementSuiteRun case may prepare data, wait for an Agent, execute, or clean up at a time. A Host Agent terminal submission performs cleanup before starting the next queued case. Business mismatches create BugReports and continue; data, cleanup, and other technical failures create Gaps and stop unless the user explicitly resumes with `resume=true` and `continueOnBlocked=true`. Data-phase resume retries the same phase rather than skipping the case. Repeating a confirmed run returns the current TestDataTask or AgentTask instead of creating a duplicate. Inspect progress with `bc_status` or `bc_review target=requirement-suite-run`.
+For a controlled stability check, add `repeatCount` from 2 to 5 to the same `bc_run mode=requirement-suite` request. Brain Creator creates isolated linked SuiteRuns with separate evidence and ledger entries. Review `bc_review target=coverage` after all iterations; one green run is never treated as stability proof.
 
 Use the existing `bc_run` facade for explicit Suite controls. Always preview with `confirm=false`, show the affected run/case, and wait for approval before `confirm=true`:
 
@@ -123,7 +124,7 @@ Failure classification is shared between Ledger and review filters: assertion, a
 
 ### 10. Review Evidence
 
-The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, ExecutionPlans, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge.
+The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, ExecutionPlans, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge. Coverage review reports required, verified, and missing dimensions for `field`, `workflow`, `state`, `permission`, and `integration`.
 
 ## User Entrypoints
 

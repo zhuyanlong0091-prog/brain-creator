@@ -1,6 +1,6 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ExecutableCase,
@@ -1081,6 +1081,7 @@ export class KnowledgeService {
       reporterPath?: string;
       reporterResult?: ExecutionEvidence["reporterResult"];
       actorRoleEvidencePath?: string;
+      evidenceRootDir?: string;
     }
   ) {
     const evidence = this.repository.executionEvidence.find((item) => item.id === evidenceId);
@@ -1111,7 +1112,11 @@ export class KnowledgeService {
       ? await Promise.all(
           (input.tracePaths ?? []).map(async (tracePath) => {
             try {
-              await access(tracePath);
+              await access(
+                input.evidenceRootDir && !isAbsolute(tracePath)
+                  ? join(input.evidenceRootDir, tracePath)
+                  : tracePath
+              );
               return undefined;
             } catch {
               return tracePath;
