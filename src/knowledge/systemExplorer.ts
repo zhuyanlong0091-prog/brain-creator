@@ -366,6 +366,8 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
         if (!candidate || visited.has(candidate.url)) continue;
         visited.add(candidate.url);
         const page = await context.newPage();
+        const popups: Array<import("@playwright/test").Page> = [];
+        page.on("popup", (popup) => popups.push(popup));
         const consoleErrors: string[] = [];
         const networkFailures: string[] = [];
         page.on("console", (message) => {
@@ -426,6 +428,34 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
                   deadline
                 })
               : [];
+          for (const popup of popups) {
+            await popup.waitForLoadState("domcontentloaded").catch(() => undefined);
+            const popupUrl = safeCanonicalUrl(popup.url());
+            if (!popupUrl || !isAllowedExplorationUrl(popupUrl, input.allowedUrls)) {
+              warnings.push(`Ignored popup outside allowlist: ${popup.url() || "unknown"}`);
+              await popup.close().catch(() => undefined);
+              continue;
+            }
+            capture.surfaces = [
+              ...(capture.surfaces ?? []),
+              {
+                kind: "popup",
+                url: popupUrl,
+                parentUrl: finalUrl,
+                accessible: true,
+                interactiveCount: await popup
+                  .locator('button, input, select, textarea, a[href]')
+                  .count()
+                  .catch(() => 0),
+                evidence: "Popup opened by a safe interaction"
+              }
+            ];
+            if (!queued.has(popupUrl) && !visited.has(popupUrl)) {
+              queued.add(popupUrl);
+              queue.push({ url: popupUrl, depth: candidate.depth + 1 });
+            }
+            await popup.close().catch(() => undefined);
+          }
           pages.push({
             depth: candidate.depth,
             evidence: {
@@ -539,8 +569,14 @@ async function probeSafeInteractions(input: {
 
   for (let index = 0; index < candidates.length; index += 1) {
     if (Date.now() >= input.deadline) break;
+    if (input.page.isClosed()) break;
     const { candidate, decision } = candidates[index];
-    const before = await captureInteractionState(input.page);
+    let before: SystemInteractionState;
+    try {
+      before = await captureInteractionState(input.page);
+    } catch {
+      break;
+    }
     const blockedRequests: Array<{ method: string; url: string }> = [];
     const routeHandler = async (route: import("@playwright/test").Route) => {
       const request = route.request();

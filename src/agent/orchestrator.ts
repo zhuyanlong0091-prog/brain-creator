@@ -295,7 +295,7 @@ export async function runChain(input: RunChainInput) {
   const structuredReporterEnabled = input.structuredReporter ?? !input.runner;
   const runPlaywright = async (): Promise<CommandResult> => {
     const args = ["playwright", "test", testRunPath];
-    if (structuredReporterEnabled) args.push("--reporter=json");
+    if (structuredReporterEnabled) args.push("--reporter=json", "--trace=on");
     const result = await runner("npx", args, { cwd: input.workDir });
     if (!structuredReporterEnabled) return result;
     const reporter = parseReporterOutput(result.stdout);

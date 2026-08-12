@@ -391,6 +391,16 @@ describe("System exploration coordinator", () => {
     async () => {
       let writeRequests = 0;
       const server = createServer((request, response) => {
+        if (request.url === "/popup") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end("<title>Popup details</title><button>Popup action</button>");
+          return;
+        }
+        if (request.url === "/frame") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end("<label>Frame field<input></label>");
+          return;
+        }
         if (request.method === "POST") writeRequests += 1;
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         response.end(`
@@ -406,6 +416,8 @@ describe("System exploration coordinator", () => {
                 </select>
               </label>
               <input id="replacement" aria-label="Replacement Employee" hidden>
+              <iframe src="/frame" title="Embedded form"></iframe>
+              <div id="shadow-host"></div>
               <label>
                 Sync Type
                 <select id="sync-type" onchange="fetch('/api/sync', { method: 'POST' }).catch(() => {})">
@@ -416,6 +428,13 @@ describe("System exploration coordinator", () => {
               <button id="save" aria-expanded="false" onclick="fetch('/api/save', { method: 'POST' })">
                 Save
               </button>
+              <button id="details" aria-controls="popup" aria-expanded="false" onclick="window.open('/popup', '_blank')">
+                Open details
+              </button>
+              <script>
+                const root = document.querySelector('#shadow-host').attachShadow({ mode: 'open' });
+                root.innerHTML = '<button>Shadow action</button>';
+              </script>
             </body>
           </html>
         `);
@@ -470,6 +489,13 @@ describe("System exploration coordinator", () => {
           )
         ).toBe(false);
         expect(result.brain.stateTransitions).toHaveLength(1);
+        expect(result.brain.pages[0].surfaces).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ kind: "iframe" }),
+            expect.objectContaining({ kind: "shadow-root" }),
+            expect.objectContaining({ kind: "popup" })
+          ])
+        );
         expect(writeRequests).toBe(0);
       } finally {
         await new Promise<void>((resolve, reject) =>

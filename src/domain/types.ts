@@ -131,7 +131,7 @@ export type PageCaptureEvidence = {
 };
 
 export type BrowserSurfaceEvidence = {
-  kind: "document" | "iframe" | "shadow-root" | "wujie";
+  kind: "document" | "iframe" | "shadow-root" | "wujie" | "popup";
   url: string;
   parentUrl?: string;
   accessible: boolean;

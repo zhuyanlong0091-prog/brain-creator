@@ -24,15 +24,15 @@ Status meanings:
 | B3 | Shadow DOM actions were not reliably reachable | partial | PR E | Open Shadow DOM, iframe, and Wujie-like surfaces are recorded as System Brain evidence; surface-scoped actions still need fixtures |
 | B4 | SPA remount invalidated the active Page | open | PR E | Active page is reacquired after remount, popup, or close events |
 | B5 | Initial-state exploration missed conditional actions | partial | PR E | ExplorationScenario discovers state- and data-dependent controls |
-| C1 | Short-lived login state expired during suites | open | PR D | Fresh-context preflight refreshes supported auth or creates AuthCheckpoint |
+| C1 | Short-lived login state expired during suites | partial | PR D | Fresh-context preflight detects expiry and creates AuthCheckpoint; provider-specific automatic refresh remains |
 | C2 | Generated seed omitted a supported auth reference | partial | PR D | Tests reference protected storageState or runtime auth environment variables; automatic token/cookie storageState conversion remains |
 | C3 | Test credentials appeared in generated files | partial | PR D | Token/cookie values are removed from generated seeds and legacy ciphertext migrates; full artifact/export secret scan remains |
-| C4 | Authentication overhead limited suite throughput | open | PR D | Verified storageState is reused across isolated contexts; concurrency stays gated by data isolation |
+| C4 | Authentication overhead limited suite throughput | partial | PR D | Verified storageState is cached for a bounded TTL while each test still gets an isolated context; controlled concurrency remains gated by data isolation |
 | D1 | Unread attachments were misclassified as model limitations | open | PR F | Assets are inventoried and marked unread until an OCR/vision adapter returns evidence |
 | D2 | Requirements omitted concrete UI paths | partial | PR E/PR F | Missing paths are supplied by confirmed System Brain evidence or remain explicit Gap items |
 | D3 | Source fields could not be reconciled to analysis | open | PR F | Source-field ledger reconciles source, node, intent, case, and result counts |
 | D4 | Eval classification lacked explainable provenance | partial | PR F | Every class stores source passage, reason, policy version, and confirmer |
-| D5 | Passing cases lacked replayable trace evidence | partial | PR C/PR D | Structured Reporter and static reports retain replayable artifact references; always-on trace capture remains PR D |
+| D5 | Passing cases lacked replayable trace evidence | partial | PR C/PR D | Default structured Playwright runs request `--trace=on` and retain reporter artifact references; trace existence validation and legacy/custom-runner coverage remain |
 | D6 | Calls lacked operator identity and unique trace IDs | partial | PR A/PR C | UUID trace IDs and Ledger fields exist; production call sites still need to populate operator, provider, session, and current step |
 | D7 | Assertions and runtime evidence were disconnected | partial | PR C | Reporter joins assertion results and attachments; step-level console/network/trace correlation remains to be completed |
 | D8 | Screenshots had no business meaning | partial | PR C | Seed exposes `bc.step()` and Generator is instructed to use it; generated-file enforcement and full step metadata remain |

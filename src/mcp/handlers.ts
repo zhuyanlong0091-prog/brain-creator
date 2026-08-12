@@ -109,6 +109,7 @@ export type BrainCreatorMcpContext = {
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
   authStateVerifier: AuthStateVerifier;
+  authVerificationCache: Map<string, number>;
   feishuReader?: RequirementSourceReader;
 };
 
@@ -183,6 +184,7 @@ export function createBrainCreatorMcpContext(
       (input.runner ? commandRunnerAgentBridge(input.runner) : createConfiguredAgentBridge()),
     runner: input.runner,
     authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
+    authVerificationCache: new Map(),
     feishuReader: input.feishuReader ?? configuredFeishuReader()
   };
 }
@@ -3706,7 +3708,8 @@ function knowledgeReview(
       traceableIntents: intents.filter(
         (item) => item.requirementRefs.length > 0 && item.knowledgeNodeRefs.length > 0
       ).length,
-      totalIntents: intents.length
+      totalIntents: intents.length,
+      executionLedger: context.knowledgeService.testIntentCoverage(projectId)
     };
   }
   if (target === "requirement-eval-accuracy") {
@@ -4013,12 +4016,22 @@ async function verifyAuthForExecution(
   if (!capture) return;
   const storageStatePath = capture.secrets.storageStatePath;
   if (!storageStatePath) return;
+  const cacheTtlMs = Math.max(
+    5_000,
+    Math.min(300_000, Number(process.env.BRAIN_CREATOR_AUTH_CACHE_TTL_MS ?? 60_000))
+  );
+  const cachedUntil = context.authVerificationCache.get(authProfile.id) ?? 0;
+  if (cachedUntil > Date.now()) return;
   const verification = await context.authStateVerifier({
     storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
     targetUrl: system.baseUrl,
     allowedUrls: system.urlAllowlist
   });
-  if (verification.status === "valid") return;
+  if (verification.status === "valid") {
+    context.authVerificationCache.set(authProfile.id, Date.now() + cacheTtlMs);
+    return;
+  }
+  context.authVerificationCache.delete(authProfile.id);
   const pending = context.service.listAuthCheckpoints(system.id, "awaiting-user")
     .find((checkpoint) => checkpoint.authProfileId === authProfile.id);
   if (!pending) {

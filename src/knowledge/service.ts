@@ -883,6 +883,60 @@ export class KnowledgeService {
     return this.repository.testIntents.filter((item) => item.knowledgeProjectId === projectId);
   }
 
+  testIntentCoverage(projectId: string) {
+    this.getProject(projectId);
+    const intents = this.listTestIntents(projectId);
+    const executableCases = this.repository.executableCases.filter(
+      (item) => item.knowledgeProjectId === projectId
+    );
+    const evidence = this.repository.executionEvidence.filter(
+      (item) => item.knowledgeProjectId === projectId
+    );
+    const items = intents.map((intent) => {
+      const requirementSet = this.repository.requirementSets.find(
+        (item) => item.id === intent.requirementSetId
+      );
+      const cases = executableCases.filter(
+        (item) => item.testIntentId === intent.id && item.status !== "superseded"
+      );
+      const caseIds = cases.map((item) => item.id);
+      const results = evidence.filter((item) => caseIds.includes(item.executableCaseId));
+      const classification = requirementSet?.status === "superseded"
+        ? "superseded"
+        : cases.length === 0
+          ? "not-selected"
+          : results.some((item) => item.assuranceLevel === "strong")
+            ? "strong-verified"
+            : results.some((item) => item.assuranceLevel === "limited")
+              ? "limited"
+              : results.some((item) => item.status === "failed")
+                ? "failed"
+                : results.some((item) => item.status === "blocked") || cases.some((item) => item.status === "blocked")
+                  ? "blocked"
+                  : "not-selected";
+      return {
+        testIntentId: intent.id,
+        requirementSetId: intent.requirementSetId,
+        title: intent.title,
+        module: intent.module,
+        priority: intent.priority,
+        classification,
+        executableCaseIds: caseIds,
+        evidenceIds: results.map((item) => item.id),
+        requirementRefs: intent.requirementRefs
+      } as const;
+    });
+    const counts = items.reduce<Record<string, number>>((result, item) => {
+      result[item.classification] = (result[item.classification] ?? 0) + 1;
+      return result;
+    }, {});
+    return {
+      total: items.length,
+      counts,
+      items
+    };
+  }
+
   listExecutableCases(projectId: string) {
     return this.repository.executableCases.filter((item) => item.knowledgeProjectId === projectId);
   }
