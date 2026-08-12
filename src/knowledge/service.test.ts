@@ -129,6 +129,145 @@ describe("KnowledgeService", () => {
     expect(compiled.executableCase.steps.every((step) => step.sourceRefs.length > 0)).toBe(true);
   });
 
+  it("batch compiles an approved requirement idempotently and records a bounded compile run", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({
+      name: "Order Lifecycle",
+      key: "order-lifecycle-batch",
+      defaultLocale: "en-US"
+    });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "order-batch-hash",
+        "Buyer creates an order. Manager approves an order. Finance rejects an order."
+      )
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    if (design.evaluationGate.actions.length > 0) {
+      await service.confirmEvaluationActions({
+        requirementSetId: ingested.requirementSet.id,
+        actionIds: design.evaluationGate.actions.map((action) => action.id),
+        note: "The listed order lifecycle branches are confirmed.",
+        confirm: true
+      });
+    }
+    service.approveRequirementSet(ingested.requirementSet.id);
+
+    const first = service.compileExecutableCasesBatch({
+      requirementSetId: ingested.requirementSet.id
+    });
+    const second = service.compileExecutableCasesBatch({
+      requirementSetId: ingested.requirementSet.id
+    });
+
+    expect(first.compileRun.total).toBe(design.testIntents.length);
+    expect(first.compileRun.items).toHaveLength(design.testIntents.length);
+    expect(first.compileRun.items.every((item) => item.result !== "reused")).toBe(true);
+    expect(second.compileRun.items.every((item) => item.result === "reused")).toBe(true);
+    expect(repository.executableCases).toHaveLength(design.testIntents.length);
+    expect(repository.compileRuns).toHaveLength(2);
+  });
+
+  it("rejects an explicit batch selection that crosses requirement sets", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({
+      name: "Order Revisions",
+      key: "order-revisions-batch",
+      defaultLocale: "en-US"
+    });
+    const first = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("order-revision-1", "Buyer creates an order.")
+    });
+    const second = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("order-revision-2", "Manager approves an order.")
+    });
+    const firstDesign = await service.generateTestDesign(first.requirementSet.id);
+    const secondDesign = await service.generateTestDesign(second.requirementSet.id);
+
+    expect(() =>
+      service.compileExecutableCasesBatch({
+        requirementSetId: first.requirementSet.id,
+        testIntentIds: [firstDesign.testIntents[0].id, secondDesign.testIntents[0].id]
+      })
+    ).toThrow(/does not belong to RequirementSet/);
+  });
+
+  it("persists an explicit page binding decision for ambiguous compilation", async () => {
+    const root = await tempDir();
+    const filePath = join(root, "assets.json");
+    const repository = new JsonFileBrainCreatorRepository(filePath);
+    const service = new KnowledgeService(repository, join(root, "knowledge"));
+    const project = await service.createProject({
+      name: "Page Binding",
+      key: "page-binding",
+      defaultLocale: "en-US"
+    });
+    repository.systemProfiles.push({
+      id: "system-binding-1",
+      name: "Orders",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://orders.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-binding-1");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("binding-hash", "User creates an order.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    repository.pageModels.push({
+      id: "page-binding-1",
+      projectId: "system-binding-1",
+      route: "/orders/new",
+      name: "Create order",
+      version: 1,
+      domSnapshotId: "dom-1",
+      screenshotId: "shot-1",
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const decision = service.confirmPageBinding({
+      testIntentId: design.testIntents[0].id,
+      systemId: "system-binding-1",
+      pageModelId: "page-binding-1",
+      role: "buyer",
+      note: "Confirmed from the order creation workflow."
+    });
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        testIntentId: design.testIntents[0].id,
+        pageModelId: "page-binding-1",
+        role: "buyer"
+      })
+    );
+    expect(repository.pageBindingDecisions).toHaveLength(1);
+    expect(
+      service.confirmPageBinding({
+        testIntentId: design.testIntents[0].id,
+        systemId: "system-binding-1",
+        pageModelId: "page-binding-1",
+        role: "buyer",
+        note: "Confirmed from the order creation workflow."
+      }).id
+    ).toBe(decision.id);
+    expect(repository.pageBindingDecisions).toHaveLength(1);
+    expect(new JsonFileBrainCreatorRepository(filePath).pageBindingDecisions).toEqual([
+      expect.objectContaining({ id: decision.id, pageModelId: "page-binding-1" })
+    ]);
+  });
+
   it("persists atomic test intents and a traceable requirement evaluation report", async () => {
     const knowledgeDir = await tempDir();
     const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), knowledgeDir);

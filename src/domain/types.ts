@@ -5,7 +5,7 @@ export type TaskStatus =
   | "failed"
   | "cancelled";
 
-export type GapStatus = "open" | "resolved";
+export type GapStatus = "open" | "resolved" | "dismissed";
 
 export type AssetType =
   | "system-profile"
@@ -53,6 +53,13 @@ export type AuthProfile = {
   status: TaskStatus;
   lastVerifiedAt?: string;
   failureReason?: string;
+  verificationEvidence?: {
+    status: "valid";
+    targetUrl: string;
+    finalUrl: string;
+    title?: string;
+    verifiedAt: string;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -232,6 +239,12 @@ export type Gap = {
   severity: "low" | "medium" | "high";
   owner: string;
   status: GapStatus;
+  lifecycle?: Array<{
+    operation: "resolve" | "dismiss" | "reopen";
+    note: string;
+    evidenceRefs: string[];
+    createdAt: string;
+  }>;
   createdAt: string;
   updatedAt: string;
 };
@@ -702,6 +715,42 @@ export type TestIntent = {
   updatedAt: string;
 };
 
+export type PageBindingDecision = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  testIntentId: string;
+  systemId: string;
+  pageModelId: string;
+  role?: string;
+  note: string;
+  confirmedAt: string;
+};
+
+export type CompileRunItem = {
+  testIntentId: string;
+  result: "ready" | "blocked" | "ambiguous" | "skipped" | "reused";
+  executableCaseId?: string;
+  gapIds: string[];
+  reason?: string;
+};
+
+export type CompileRun = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  systemId?: string;
+  status: "completed" | "completed-with-blockers" | "failed";
+  total: number;
+  ready: number;
+  blocked: number;
+  ambiguous: number;
+  skipped: number;
+  reused: number;
+  items: CompileRunItem[];
+  createdAt: string;
+};
+
 export type TestDataProfile = {
   id: string;
   knowledgeProjectId: string;
@@ -1013,7 +1062,9 @@ export type ExecutableCase = {
   testIntentId: string;
   systemId?: string;
   title: string;
-  status: "ready" | "blocked" | "executed";
+  status: "ready" | "blocked" | "executed" | "superseded";
+  compileKey?: string;
+  supersededById?: string;
   preconditions: string[];
   steps: ExecutableCaseStep[];
   pathPlan?: ExecutableCasePathPlan;

@@ -5,6 +5,7 @@ import { chromium } from "@playwright/test";
 export type AuthStateVerification = {
   status: "valid" | "expired" | "unavailable";
   finalUrl?: string;
+  title?: string;
   reason?: string;
 };
 
@@ -41,6 +42,7 @@ export const verifyStoredBrowserAuth: AuthStateVerifier = async (input) => {
     await page.waitForTimeout(1_000);
 
     const finalUrl = page.url();
+    const title = await page.title();
     const final = new URL(finalUrl);
     const allowedOrigins = new Set(
       [input.targetUrl, ...input.allowedUrls].map((url) => new URL(url).origin)
@@ -60,7 +62,7 @@ export const verifyStoredBrowserAuth: AuthStateVerifier = async (input) => {
         reason: "Stored browser authentication redirected to a login page."
       };
     }
-    return { status: "valid", finalUrl };
+    return { status: "valid", finalUrl, title };
   } catch (error) {
     return {
       status: "unavailable",

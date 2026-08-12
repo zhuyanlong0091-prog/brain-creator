@@ -75,6 +75,8 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 
 Agent 默认使用高阶 Facade 工具。只有调试、审计或兼容旧流程时才需要底层 `bc_*` 工具。完整映射见 [Agent 使用指南](docs/agent-usage.md)。
 
+可信控制面不要求手工修改运行数据：鉴权可通过 Facade 创建、真实浏览器验证和归档；需求可按 RequirementSet、TestIntent 子集或模块一次批量编译；页面歧义通过人工确认绑定；Gap 支持带说明和证据的解决、忽略与重开。普通调用默认使用 `responseMode=summary`，详细结果通过可分页的 CompileRun 复盘。参见 [可信控制面](docs/zh-CN/guides/trusted-control-plane.md)。
+
 ### 安装模式
 
 - **业务项目安装（推荐）**：`npm install --save-dev brain-creator`，再运行 `brain-creator init`。
@@ -91,6 +93,7 @@ CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin` 和 `mcp`
 - [快速开始](docs/getting-started.md)：安装、诊断并完成第一次需求分析。
 - [核心概念](docs/core-concepts.md)：Requirement Brain、System Brain、Case Compiler、Gap 与 Bridge。
 - [从需求到测试](docs/guides/requirement-to-test.md)：完整审批与执行工作流。
+- [可信控制面](docs/zh-CN/guides/trusted-control-plane.md)：鉴权验证、批量编译、页面绑定、Gap 生命周期与摘要响应。
 - [CLI 参考](docs/cli-reference.md)：命令、参数和示例。
 - [MCP 安装](docs/mcp-installation.md)：Claude、Codex、host-agent 和连接配置。
 - [故障排查](docs/troubleshooting.md)：按症状定位 provider、浏览器、鉴权和连接器问题。
@@ -162,6 +165,8 @@ Brain Creator enforces these boundaries:
 
 The Agent uses high-level Facade tools by default. Low-level `bc_*` tools are for compatibility, audit, and debugging. See the [Agent usage guide](docs/agent-usage.md) for the mapping.
 
+The trusted control plane removes manual runtime-store edits: auth can be created, browser-verified, and archived through the Facade; approved intents can be batch compiled by requirement, explicit IDs, or module; ambiguous pages require a confirmed binding; and Gaps support evidence-backed resolve, dismiss, and reopen transitions. Normal calls use `responseMode=summary`, with paged CompileRun detail available for review. See [Trusted control plane](docs/guides/trusted-control-plane.md).
+
 ### Installation modes
 
 - **Business project (recommended):** install `brain-creator` as a development dependency and run `brain-creator init`.
@@ -178,6 +183,7 @@ The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, and `mcp`. Co
 - [Quickstart](docs/getting-started.md)
 - [Core concepts](docs/core-concepts.md)
 - [Requirement-to-test guide](docs/guides/requirement-to-test.md)
+- [Trusted control plane](docs/guides/trusted-control-plane.md)
 - [CLI reference](docs/cli-reference.md)
 - [MCP installation](docs/mcp-installation.md)
 - [Troubleshooting](docs/troubleshooting.md)

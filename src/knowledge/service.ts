@@ -1,14 +1,17 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ExecutableCase,
   ExecutableCaseStep,
+  CompileRun,
   ExecutionEvidence,
   Gap,
   KnowledgeNode,
   KnowledgeNodeType,
   KnowledgeProject,
+  PageBindingDecision,
   RequirementEvalAction,
   RequirementEvalActionKind,
   RequirementEvaluationGate,
@@ -482,6 +485,26 @@ export class KnowledgeService {
       throw new Error("Requirement baseline must be approved before compiling executable cases");
     }
     const source = this.getRequirementSource(requirementSet.sourceId);
+    const compileKey = executableCaseCompileKey(
+      this.repository,
+      intent,
+      requirementSet,
+      systemId
+    );
+    const existing = this.repository.executableCases.find(
+      (item) =>
+        item.testIntentId === intent.id &&
+        item.systemId === systemId &&
+        item.compileKey === compileKey &&
+        item.status !== "superseded"
+    );
+    if (existing) {
+      return {
+        executableCase: existing,
+        gaps: this.repository.gaps.filter((gap) => existing.gapIds.includes(gap.id)),
+        reused: true
+      };
+    }
     const confirmedEvalActions =
       requirementSet.evaluationGate?.actions.filter(
         (action) => action.status === "confirmed" && action.confirmationNote
@@ -512,7 +535,18 @@ export class KnowledgeService {
       if (gaps.length === 0) {
         const brain = buildSystemBrain(this.repository, project.id, systemId);
         const contextQuery = `${intent.module} ${intent.title} ${intent.objective}`;
-        const planned = planWorkflowPath(steps, brain, contextQuery);
+        const confirmedBinding = [...this.repository.pageBindingDecisions]
+          .reverse()
+          .find(
+            (decision) =>
+              decision.testIntentId === intent.id && decision.systemId === systemId
+          );
+        const planned = planWorkflowPath(
+          steps,
+          brain,
+          contextQuery,
+          confirmedBinding?.pageModelId
+        );
         pathPlan = {
           verdict: planned.verdict,
           reason: planned.reason,
@@ -615,6 +649,7 @@ export class KnowledgeService {
       systemId,
       title: intent.title,
       status: gaps.length > 0 ? "blocked" : "ready",
+      compileKey,
       preconditions: intent.preconditions,
       steps,
       pathPlan,
@@ -625,11 +660,159 @@ export class KnowledgeService {
       createdAt: now,
       updatedAt: now
     };
+    const superseded = this.repository.executableCases.filter(
+      (item) =>
+        item.testIntentId === intent.id &&
+        item.systemId === systemId &&
+        item.status !== "superseded"
+    );
+    for (const previous of superseded) {
+      previous.status = "superseded";
+      previous.supersededById = executableCase.id;
+      previous.updatedAt = now;
+    }
     this.repository.executableCases.push(executableCase);
     intent.status = gaps.length > 0 ? "blocked" : "compiled";
     intent.updatedAt = now;
     this.repository.persist();
-    return { executableCase, gaps };
+    return { executableCase, gaps, reused: false };
+  }
+
+  compileExecutableCasesBatch(input: {
+    requirementSetId?: string;
+    testIntentIds?: string[];
+    modules?: string[];
+    systemId?: string;
+  }) {
+    const requestedIds = [...new Set(input.testIntentIds ?? [])];
+    if (!input.requirementSetId && requestedIds.length === 0) {
+      throw new Error("requirementSetId or testIntentIds is required");
+    }
+    const requirementSet = input.requirementSetId
+      ? this.getRequirementSet(input.requirementSetId)
+      : this.getRequirementSet(this.getTestIntent(requestedIds[0]).requirementSetId);
+    const requestedIntents = requestedIds.map((testIntentId) => this.getTestIntent(testIntentId));
+    const mismatchedIntent = requestedIntents.find(
+      (intent) => intent.requirementSetId !== requirementSet.id
+    );
+    if (mismatchedIntent) {
+      throw new Error(
+        `TestIntent ${mismatchedIntent.id} does not belong to RequirementSet ${requirementSet.id}`
+      );
+    }
+    const moduleFilter = new Set((input.modules ?? []).map((module) => normalizeText(module)));
+    const intents = this.repository.testIntents.filter(
+      (intent) =>
+        intent.requirementSetId === requirementSet.id &&
+        (requestedIds.length === 0 || requestedIds.includes(intent.id)) &&
+        (moduleFilter.size === 0 || moduleFilter.has(normalizeText(intent.module)))
+    );
+    if (intents.length === 0) {
+      throw new Error("No TestIntent matched the batch compile selection");
+    }
+
+    const items: CompileRun["items"] = intents.map((intent) => {
+      try {
+        const compiled = this.compileExecutableCases(intent.id, input.systemId);
+        const result = compiled.reused
+          ? "reused"
+          : compiled.executableCase.pathPlan?.verdict === "ambiguous"
+            ? "ambiguous"
+            : compiled.executableCase.status === "ready"
+              ? "ready"
+              : "blocked";
+        return {
+          testIntentId: intent.id,
+          result,
+          executableCaseId: compiled.executableCase.id,
+          gapIds: compiled.executableCase.gapIds
+        };
+      } catch (error) {
+        return {
+          testIntentId: intent.id,
+          result: "skipped",
+          gapIds: [],
+          reason: error instanceof Error ? error.message : String(error)
+        };
+      }
+    });
+    const count = (result: CompileRun["items"][number]["result"]) =>
+      items.filter((item) => item.result === result).length;
+    const now = timestamp();
+    const compileRun: CompileRun = {
+      id: id("compileRun"),
+      knowledgeProjectId: requirementSet.knowledgeProjectId,
+      requirementSetId: requirementSet.id,
+      systemId: input.systemId,
+      status:
+        count("skipped") === items.length
+          ? "failed"
+          : count("blocked") + count("ambiguous") + count("skipped") > 0
+            ? "completed-with-blockers"
+            : "completed",
+      total: items.length,
+      ready: count("ready"),
+      blocked: count("blocked"),
+      ambiguous: count("ambiguous"),
+      skipped: count("skipped"),
+      reused: count("reused"),
+      items,
+      createdAt: now
+    };
+    this.repository.compileRuns.push(compileRun);
+    this.repository.persist();
+    return { compileRun };
+  }
+
+  confirmPageBinding(input: {
+    testIntentId: string;
+    systemId: string;
+    pageModelId: string;
+    role?: string;
+    note: string;
+  }): PageBindingDecision {
+    const intent = this.getTestIntent(input.testIntentId);
+    const project = this.getProject(intent.knowledgeProjectId);
+    if (!project.systemIds.includes(input.systemId)) {
+      throw new Error("Business system must be bound before confirming a page binding");
+    }
+    const page = this.repository.pageModels.find(
+      (item) => item.id === input.pageModelId && item.projectId === input.systemId
+    );
+    if (!page) {
+      throw new Error("Page model does not belong to the selected business system");
+    }
+    const note = input.note.trim();
+    if (!note) throw new Error("Page binding confirmation note is required");
+    const existing = this.repository.pageBindingDecisions.find(
+      (item) =>
+        item.testIntentId === intent.id &&
+        item.systemId === input.systemId &&
+        item.pageModelId === page.id &&
+        item.role === (input.role?.trim() || undefined) &&
+        item.note === note
+    );
+    if (existing) return existing;
+    const decision: PageBindingDecision = {
+      id: id("pageBinding"),
+      knowledgeProjectId: project.id,
+      requirementSetId: intent.requirementSetId,
+      testIntentId: intent.id,
+      systemId: input.systemId,
+      pageModelId: page.id,
+      role: input.role?.trim() || undefined,
+      note,
+      confirmedAt: timestamp()
+    };
+    this.repository.pageBindingDecisions.push(decision);
+    this.repository.persist();
+    return decision;
+  }
+
+  getCompileRun(idValue: string) {
+    const run = this.repository.compileRuns.find((item) => item.id === idValue);
+    if (!run) throw new Error("Compile run not found");
+    return run;
   }
 
   resolveExecutableCaseTestData(input: {
@@ -834,8 +1017,9 @@ export class KnowledgeService {
       const linkedBug = this.repository.bugReports.some(
         (bug) =>
           bug.systemId === item.systemId &&
-          ((item.chainRunId !== undefined && bug.chainRunId === item.chainRunId) ||
-            bug.sourceId === item.executableCaseId)
+          (bug.chainRunId
+            ? item.chainRunId === bug.chainRunId
+            : bug.sourceId === item.executableCaseId)
       );
       const linkedGap = this.repository.gaps.some(
         (gap) =>
@@ -1764,6 +1948,32 @@ function observationIdentityRef(sourceRefs: string[]) {
     if (match) return match;
   }
   return [...sourceRefs].sort()[0] ?? "";
+}
+
+function executableCaseCompileKey(
+  repository: InMemoryBrainCreatorRepository,
+  intent: TestIntent,
+  requirementSet: RequirementSet,
+  systemId?: string
+) {
+  const systemEvidence = systemId
+    ? {
+        brain: buildSystemBrain(repository, intent.knowledgeProjectId, systemId),
+        bindings: repository.pageBindingDecisions.filter(
+          (item) => item.systemId === systemId && item.testIntentId === intent.id
+        )
+      }
+    : undefined;
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        testIntentId: intent.id,
+        systemId: systemId ?? null,
+        requirementHash: requirementSet.contentHash,
+        systemEvidence
+      })
+    )
+    .digest("hex");
 }
 
 function timestamp() {

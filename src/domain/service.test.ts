@@ -1016,6 +1016,36 @@ describe("BrainCreatorService", () => {
     ).toThrow("Gap belongs to another business system");
   });
 
+  it("records auditable dismiss and reopen transitions for gaps", () => {
+    const service = createService();
+    const failed = service.failTrainingSession(
+      service.createTrainingSession({ projectId: "system-1", pageModelId: "page_1" }).id,
+      "No stable locator evidence"
+    );
+
+    const dismissed = service.transitionGap({
+      projectId: "system-1",
+      gapId: failed.gap.id,
+      operation: "dismiss",
+      note: "Accepted as an out-of-scope browser limitation.",
+      evidenceRefs: ["evidence:review-1"]
+    });
+    const reopened = service.transitionGap({
+      projectId: "system-1",
+      gapId: failed.gap.id,
+      operation: "reopen",
+      note: "New browser evidence makes this actionable.",
+      evidenceRefs: ["evidence:review-2"]
+    });
+
+    expect(dismissed.status).toBe("dismissed");
+    expect(reopened.status).toBe("open");
+    expect(reopened.lifecycle).toEqual([
+      expect.objectContaining({ operation: "dismiss", evidenceRefs: ["evidence:review-1"] }),
+      expect.objectContaining({ operation: "reopen", evidenceRefs: ["evidence:review-2"] })
+    ]);
+  });
+
   it("searches v2 business rules, test cases, and run history as system assets", () => {
     const service = createService();
     service.createBusinessRule({

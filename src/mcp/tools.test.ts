@@ -100,6 +100,53 @@ describe("BRAIN_CREATOR_TOOLS", () => {
     expect(registered).toEqual(BRAIN_CREATOR_TOOLS.map((tool) => tool.name));
   });
 
+  it("exposes the controlled facade operations without adding more tools", () => {
+    const prepare = BRAIN_CREATOR_TOOLS.find((tool) => tool.name === "bc_prepare");
+    const configure = BRAIN_CREATOR_TOOLS.find((tool) => tool.name === "bc_configure");
+    const review = BRAIN_CREATOR_TOOLS.find((tool) => tool.name === "bc_review");
+
+    expect(
+      prepare?.inputSchema.safeParse({
+        action: "compile-cases",
+        requirementSetId: "requirement-1",
+        testIntentIds: [],
+        modules: ["Orders"],
+        responseMode: "summary"
+      }).success
+    ).toBe(true);
+    expect(
+      prepare?.inputSchema.safeParse({
+        action: "resolve-gap",
+        gapId: "gap-1",
+        systemId: "system-1",
+        confirmationNote: "Resolved with browser evidence.",
+        evidenceRefs: ["evidence:1"],
+        confirm: true
+      }).success
+    ).toBe(true);
+    expect(
+      configure?.inputSchema.safeParse({
+        target: "auth",
+        operation: "verify",
+        systemId: "system-1",
+        authProfileId: "auth-1"
+      }).success
+    ).toBe(true);
+    expect(
+      configure?.inputSchema.safeParse({
+        target: "runtime",
+        operation: "reload-store"
+      }).success
+    ).toBe(true);
+    expect(
+      review?.inputSchema.safeParse({
+        target: "compile-run",
+        id: "compile-run-1",
+        limit: 25
+      }).success
+    ).toBe(true);
+  });
+
   it("registers facade inspection tools as read-only", () => {
     const registered = new Map<string, Record<string, unknown>>();
     const fakeServer = {
