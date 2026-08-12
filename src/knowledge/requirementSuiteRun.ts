@@ -1,6 +1,7 @@
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ExecutionFailureType,
+  ActorJourneyConfig,
   ExecutionPlan,
   RequirementSuiteCaseOutcome,
   RequirementSuiteCaseRun,
@@ -13,6 +14,7 @@ type CreateRequirementSuiteRunInput = {
   knowledgeProjectId: string;
   systemId: string;
   authProfileId?: string;
+  actorJourney?: ActorJourneyConfig[];
   executionPlans?: ExecutionPlan[];
   cases?: Array<{
     executableCaseId: string;
@@ -76,6 +78,7 @@ export class RequirementSuiteRunService {
       knowledgeProjectId: input.knowledgeProjectId,
       systemId: input.systemId,
       authProfileId: input.authProfileId,
+      actorJourney: input.actorJourney,
       status: "running",
       continueOnBlocked: input.continueOnBlocked,
       allowCreateTestData: Boolean(input.allowCreateTestData),
@@ -344,6 +347,27 @@ export class RequirementSuiteRunService {
       toStatus: caseRun.status,
       references: { executionPlanId }
     });
+    return run;
+  }
+
+  recordActorJourneyEvidence(
+    runId: string,
+    executableCaseId: string,
+    evidencePath: string
+  ) {
+    const run = this.get(runId);
+    const caseRun = this.caseById(run, executableCaseId);
+    for (const actor of run.actorJourney ?? []) {
+      this.record(run, {
+        executableCaseId,
+        event: "role-switched",
+        scope: "case",
+        stage: "execution",
+        toStatus: caseRun.status,
+        currentStep: actor.afterStepId,
+        message: `Observed actor role ${actor.role}; evidence=${evidencePath}`
+      });
+    }
     return run;
   }
 

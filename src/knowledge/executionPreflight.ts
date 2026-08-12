@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   AuthProfile,
+  ActorJourneyStep,
+  ActorJourneyConfig,
   ExecutableCase,
   ExecutionDataBinding,
   ExecutionPlan,
@@ -17,6 +19,7 @@ type PrepareExecutionInput = {
   systemId: string;
   executableCaseId: string;
   authProfileId?: string;
+  actorJourney?: ActorJourneyConfig[];
   confirm: boolean;
 };
 
@@ -44,7 +47,8 @@ export class ExecutionPreflightService {
     const draft = this.buildDraft(
       executableCase,
       input.systemId,
-      input.authProfileId
+      input.authProfileId,
+      input.actorJourney
     );
     if (!input.confirm) {
       return { status: "preview", persisted: false, draft };
@@ -102,7 +106,8 @@ export class ExecutionPreflightService {
     const draft = this.buildDraft(
       executableCase,
       executionPlan.systemId,
-      executionPlan.auth?.profileId
+      executionPlan.auth?.profileId,
+      executionPlan.actorJourney
     );
     if (draft.verdict !== "ready") {
       return {
@@ -168,7 +173,8 @@ export class ExecutionPreflightService {
   private buildDraft(
     executableCase: ExecutableCase,
     systemId: string,
-    authProfileId?: string
+    authProfileId?: string,
+    actorJourneyInput?: PrepareExecutionInput["actorJourney"] | ActorJourneyStep[]
   ): ExecutionPlanDraft {
     const requirementSet = this.repository.requirementSets.find(
       (item) => item.id === executableCase.requirementSetId
@@ -201,8 +207,15 @@ export class ExecutionPreflightService {
             (lease.status === "active" || lease.status === "cleanup-failed")
         )
       : [];
-    const authProfile = authProfileId
-      ? this.repository.authProfiles.find((item) => item.id === authProfileId)
+    const actorJourneyResolution = this.resolveActorJourney(
+      executableCase,
+      systemId,
+      actorJourneyInput
+    );
+    const selectedAuthProfileId =
+      authProfileId ?? actorJourneyResolution.steps[0]?.authProfileId;
+    const authProfile = selectedAuthProfileId
+      ? this.repository.authProfiles.find((item) => item.id === selectedAuthProfileId)
       : undefined;
     const checks: ExecutionPreflightCheck[] = [
       check(
@@ -256,7 +269,8 @@ export class ExecutionPreflightService {
           : `${cleanupDue.length} created data lease(s) must be cleaned before rerun.`,
         cleanupDue.map((lease) => `test-data-lease:${lease.id}`)
       ),
-      this.authCheck(systemId, authProfileId, authProfile)
+      this.authCheck(systemId, selectedAuthProfileId, authProfile),
+      actorJourneyResolution.check
     ];
     const dataBindings = this.dataBindings(executableCase, systemId);
     const retrievedContextPack = buildContextPack(this.repository, {
@@ -312,6 +326,9 @@ export class ExecutionPreflightService {
       },
       executableCase: executableCaseSnapshot(executableCase, systemId),
       contextPack,
+      actorJourney: actorJourneyResolution.steps.length
+        ? actorJourneyResolution.steps
+        : undefined,
       auth: authProfile
         ? {
             id: authProfile.id,
@@ -349,8 +366,11 @@ export class ExecutionPreflightService {
               role: authProfile.role,
               method: authProfile.loginMethod,
               verifiedAt: authProfile.lastVerifiedAt
-            }
-          : undefined,
+          }
+        : undefined,
+      actorJourney: actorJourneyResolution.steps.length
+        ? actorJourneyResolution.steps
+        : undefined,
       steps: clone(executableCase.steps),
       pathPlan: clone(executableCase.pathPlan),
       statePlan: clone(executableCase.statePlan),
@@ -364,6 +384,70 @@ export class ExecutionPreflightService {
         .update(stableStringify(snapshot))
         .digest("hex"),
       generatedAt: timestamp()
+    };
+  }
+
+  private resolveActorJourney(
+    executableCase: ExecutableCase,
+    systemId: string,
+    input: PrepareExecutionInput["actorJourney"] | ActorJourneyStep[] | undefined
+  ) {
+    if (!input || input.length === 0) {
+      return {
+        steps: [] as ActorJourneyStep[],
+        check: check(
+          "actor-journey",
+          "pass",
+          "No multi-role journey was requested; execution uses one auth profile.",
+          []
+        )
+      };
+    }
+    const validStepIds = new Set(executableCase.steps.map((step) => step.id));
+    const errors: string[] = [];
+    const steps = input.map((item, index) => {
+      const profile = this.repository.authProfiles.find(
+        (candidate) => candidate.id === item.authProfileId
+      );
+      const role = (item.role ?? profile?.role ?? "").trim();
+      const sourceRefs = unique([
+        ...(item.sourceRefs ?? []),
+        `auth-profile:${item.authProfileId}`
+      ]);
+      if (!profile) {
+        errors.push(`Actor journey profile ${item.authProfileId} was not found.`);
+      } else if (profile.projectId !== systemId) {
+        errors.push(
+          `Actor journey profile ${item.authProfileId} belongs to another business system.`
+        );
+      } else if (profile.status !== "succeeded") {
+        errors.push(`Actor journey profile ${item.authProfileId} is not verified.`);
+      }
+      if (!role) errors.push(`Actor journey entry ${index + 1} must declare a role.`);
+      if (item.afterStepId && !validStepIds.has(item.afterStepId)) {
+        errors.push(
+          `Actor journey entry ${index + 1} references unknown step ${item.afterStepId}.`
+        );
+      }
+      return {
+        id: `actor-journey:${executableCase.id}:${index + 1}:${item.authProfileId}`,
+        order: index + 1,
+        role,
+        authProfileId: item.authProfileId,
+        ...(item.afterStepId ? { afterStepId: item.afterStepId } : {}),
+        sourceRefs
+      } satisfies ActorJourneyStep;
+    });
+    return {
+      steps,
+      check: check(
+        "actor-journey",
+        errors.length > 0 ? "blocked" : "pass",
+        errors.length > 0
+          ? errors.join(" ")
+          : `Actor journey is ready for ${steps.length} role(s); every transition has a verified AuthProfile.`,
+        unique(steps.flatMap((step) => step.sourceRefs))
+      )
     };
   }
 

@@ -888,6 +888,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemId: stringArg(input, "systemId"),
       executableCaseId,
       authProfileId: optionalStringArg(input, "authProfileId"),
+      actorJourney: actorJourneyArg(input),
       confirm
     });
   }
@@ -2342,6 +2343,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   const selectedSystemId =
     optionalStringArg(input, "systemId") ?? project.systemIds[0];
   const authProfileId = optionalStringArg(input, "authProfileId");
+  const actorJourney = actorJourneyArg(input);
   if (!optionalBooleanArg(input, "confirm")) {
     const executionPreflights = selectedSystemId
       ? candidates.map((executableCase) => ({
@@ -2351,6 +2353,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
             systemId: selectedSystemId,
             executableCaseId: executableCase.id,
             authProfileId,
+            actorJourney,
             confirm: false
           })
         }))
@@ -2406,6 +2409,13 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       throw new Error(
         "Requirement suite run cannot change its selected auth profile"
       );
+    }
+    if (
+      actorJourney &&
+      JSON.stringify(activeRequirementSuiteRun.actorJourney ?? []) !==
+        JSON.stringify(actorJourney)
+    ) {
+      throw new Error("Requirement suite run cannot change its actor journey");
     }
     if (
       optionalBooleanArg(input, "allowCreateTestData") &&
@@ -2475,6 +2485,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       systemId,
       executableCaseId: candidate.id,
       authProfileId,
+      actorJourney,
       confirm: false
     });
     return {
@@ -2520,6 +2531,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     knowledgeProjectId: projectId,
     systemId,
     authProfileId,
+    actorJourney,
     cases: candidates.map((candidate) => ({
       executableCaseId: candidate.id,
       title: candidate.title
@@ -2777,6 +2789,7 @@ async function executeNextRequirementSuiteCase(
     systemId: requirementSuiteRun.systemId,
     executableCaseId: executableCase.id,
     authProfileId: requirementSuiteRun.authProfileId,
+    actorJourney: requirementSuiteRun.actorJourney,
     confirm: true
   });
   if (
@@ -3046,6 +3059,17 @@ async function executeRequirementSuiteCase(
           )
         )
       : executionEvidence;
+  if (
+    "chainRun" in result &&
+    result.testResult?.actorRoleEvidencePath &&
+    requirementSuiteRun.actorJourney?.length
+  ) {
+    context.requirementSuiteRuns.recordActorJourneyEvidence(
+      requirementSuiteRun.id,
+      executableCase.id,
+      result.testResult.actorRoleEvidencePath
+    );
+  }
   const caseStatus =
     "chainRun" in result && result.chainRun?.status === "succeeded"
       ? "passed"
@@ -3255,6 +3279,18 @@ function formatRequirementGeneratorContext(
     `- Snapshot hash: ${executionPlan.snapshotHash}`,
     `- System: ${executionPlan.systemId}`,
     `- Auth profile: ${executionPlan.auth?.profileId ?? "public-or-host-managed"}`,
+    ...(executionPlan.actorJourney?.length
+      ? [
+          "",
+          "## Actor Journey",
+          ...executionPlan.actorJourney.map(
+            (actor) =>
+              `- Role ${actor.order}: ${actor.role}; authProfile=${actor.authProfileId}; afterStep=${actor.afterStepId ?? "start"}; sources=${actor.sourceRefs.join(",")}`
+          ),
+          "- Switch role only at the declared step boundary; do not infer an account or role from page text.",
+          "- The generated test must call bc.runAsRole(browser, role, action) for every role transition."
+        ]
+      : []),
     ...executionPlan.checks.map(
       (check) => `- ${check.id}: ${check.status}; ${check.message}`
     ),
@@ -3325,7 +3361,8 @@ async function completeRequirementEvidence(
     consoleErrors: reporter?.consoleErrors ?? [],
     networkFailures: reporter?.networkFailures ?? [],
     reporterPath: testResult?.reporterPath,
-    reporterResult: reporter
+    reporterResult: reporter,
+    actorRoleEvidencePath: testResult?.actorRoleEvidencePath
   });
 }
 
@@ -3934,6 +3971,13 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
         )
       : findAuthProfile(context, testCase.systemId);
   await verifyAuthForExecution(context, system, authProfile);
+  const actorJourneyProfiles = executionPlan?.actorJourney?.map((actor) => ({
+    role: actor.role,
+    authProfile: findAuthProfileById(context, testCase.systemId, actor.authProfileId)
+  }));
+  for (const actor of actorJourneyProfiles ?? []) {
+    await verifyAuthForExecution(context, system, actor.authProfile);
+  }
   if (context.agentBridge?.provider === "host-agent") {
     const specsDir = join(context.workDir, "specs");
     const generatedDir = join(context.workDir, "tests", "generated");
@@ -3952,7 +3996,8 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
       workDir: context.workDir,
       outputDir: join(context.workDir, "tests"),
       system,
-      authProfile
+      authProfile,
+      actorJourney: actorJourneyProfiles
     });
     const taskPackage = await prepareAgentTask(context, {
       systemId: system.id,
@@ -3998,7 +4043,11 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     agentBridge: context.agentBridge,
     runner: context.runner,
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
-    knowledgeContext: optionalStringArg(input, "knowledgeContext")
+    knowledgeContext: optionalStringArg(input, "knowledgeContext"),
+    actorJourney: actorJourneyProfiles,
+    requiredStepIds: executionPlan?.steps
+      .filter((step) => step.action !== "api")
+      .map((step) => step.id)
   });
   context.service.recordAgentRun(result.generateRun);
   for (const healerRun of result.healerRuns) {
@@ -6477,6 +6526,24 @@ function numberArg(input: Record<string, unknown>, key: string): number {
 
 function optionalBooleanArg(input: Record<string, unknown>, key: string): boolean {
   return input[key] === true;
+}
+
+function actorJourneyArg(input: Record<string, unknown>) {
+  const value = input.actorJourney;
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("actorJourney must be an array");
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`actorJourney[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    return {
+      role: optionalStringArg(record, "role"),
+      authProfileId: stringArg(record, "authProfileId"),
+      afterStepId: optionalStringArg(record, "afterStepId"),
+      sourceRefs: optionalStringArrayArg(record, "sourceRefs") ?? []
+    };
+  });
 }
 
 function planContextArg(input: Record<string, unknown>): AgentTask["planContext"] | undefined {

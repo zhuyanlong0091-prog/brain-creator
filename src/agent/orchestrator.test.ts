@@ -7,7 +7,9 @@ import {
   generatePlanDraft,
   preflightAgentBridge,
   runAgent,
-  runChain
+  runChain,
+  validateActorJourneyUsage,
+  validateStepInstrumentation
 } from "./orchestrator.js";
 import { encryptSecrets } from "../shared/crypto.js";
 import type {
@@ -22,6 +24,38 @@ const tempDirs: string[] = [];
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe("actor journey guard", () => {
+  it("requires every declared actor role to be explicitly used", () => {
+    expect(
+      validateActorJourneyUsage(
+        "await bc.runAsRole(browser, 'recruiter', action);",
+        [{ role: "recruiter" }, { role: "approver" }]
+      )
+    ).toEqual({
+      valid: false,
+      reason: "Generated test does not reference actor role(s): approver."
+    });
+    expect(
+      validateActorJourneyUsage(
+        "await bc.runAsRole(browser, 'recruiter', action); await bc.runAsRole(browser, 'approver', action);",
+        [{ role: "recruiter" }, { role: "approver" }]
+      )
+    ).toEqual({ valid: true });
+  });
+});
+
+describe("step instrumentation guard", () => {
+  it("requires each executable step to be wrapped by bc.step", () => {
+    expect(validateStepInstrumentation("await bc.step('step-create', page, action);", ["step-create", "step-save"]))
+      .toEqual({
+        valid: false,
+        reason: "Generated test is missing bc.step instrumentation for: step-save."
+      });
+    expect(validateStepInstrumentation("await bc.step(\"step-create\", page, action);", ["step-create"]))
+      .toEqual({ valid: true });
+  });
 });
 
 describe("runAgent", () => {

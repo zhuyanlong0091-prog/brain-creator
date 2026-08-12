@@ -31,6 +31,41 @@ describe("RequirementSuiteRunService", () => {
     ]);
   });
 
+  it("records declared actor role transitions in the run ledger", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      actorJourney: [
+        { role: "recruiter", authProfileId: "auth-recruiter", afterStepId: "step-submit" },
+        { role: "approver", authProfileId: "auth-approver", afterStepId: "step-submit" }
+      ],
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false
+    });
+    const current = fixture.service.beginNext(run.id).caseRun!;
+
+    fixture.service.recordActorJourneyEvidence(
+      run.id,
+      current.executableCaseId,
+      ".brain-creator/runs/actor-journey.json"
+    );
+
+    expect(fixture.repository.runLedgerEntries.filter((entry) => entry.event === "role-switched"))
+      .toEqual([
+        expect.objectContaining({
+          executableCaseId: current.executableCaseId,
+          currentStep: "step-submit",
+          message: expect.stringContaining("actor role recruiter")
+        }),
+        expect.objectContaining({
+          executableCaseId: current.executableCaseId,
+          currentStep: "step-submit",
+          message: expect.stringContaining("actor role approver")
+        })
+      ]);
+  });
+
   it("runs one case at a time and continues after a business failure", () => {
     const fixture = suiteFixture();
     const run = fixture.service.create({

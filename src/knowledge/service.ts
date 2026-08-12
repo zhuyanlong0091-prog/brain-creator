@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
@@ -1036,12 +1036,14 @@ export class KnowledgeService {
         instruction: step.instruction,
         expected: step.expected,
         assertionStatus: "pending",
+        evidenceRefs: [],
         sourceRefs: step.sourceRefs,
         origin: step.origin
       })),
       assertionContracts:
         executionPlan?.assertionContracts ?? buildAssertionContracts(executionSteps),
       assuranceLevel: "none",
+      actorJourney: executionPlan?.actorJourney,
       tracePaths: [],
       artifactPaths: [input.contextPackPath],
       consoleErrors: [],
@@ -1065,6 +1067,7 @@ export class KnowledgeService {
       networkFailures?: string[];
       reporterPath?: string;
       reporterResult?: ExecutionEvidence["reporterResult"];
+      actorRoleEvidencePath?: string;
     }
   ) {
     const evidence = this.repository.executionEvidence.find((item) => item.id === evidenceId);
@@ -1078,15 +1081,49 @@ export class KnowledgeService {
     evidence.networkFailures = input.networkFailures ?? [];
     evidence.reporterPath = input.reporterPath;
     evidence.reporterResult = input.reporterResult;
+    if (input.actorRoleEvidencePath) {
+      evidence.artifactPaths = [...new Set([...evidence.artifactPaths, input.actorRoleEvidencePath])];
+    }
     evidence.assuranceLevel = determineAssuranceLevel(
       evidence.assertionContracts ?? [],
       input.reporterResult
     );
+    const reporterSteps = input.reporterResult?.steps;
+    const missingStepEvidence = reporterSteps
+      ? evidence.steps
+          .filter((step) => !reporterSteps.some((reported) => reported.id === step.stepId))
+          .map((step) => step.stepId)
+      : [];
+    const missingTraceEvidence = input.reporterResult?.steps
+      ? await Promise.all(
+          (input.tracePaths ?? []).map(async (tracePath) => {
+            try {
+              await access(tracePath);
+              return undefined;
+            } catch {
+              return tracePath;
+            }
+          })
+        ).then((paths) => paths.filter((path): path is string => Boolean(path)))
+      : [];
+    evidence.evidenceWarnings = [
+      ...(missingStepEvidence.length
+        ? [`Missing structured Reporter evidence for step(s): ${missingStepEvidence.join(", ")}`]
+        : []),
+      ...(missingTraceEvidence.length
+        ? [`Missing trace artifact(s): ${missingTraceEvidence.join(", ")}`]
+        : [])
+    ];
+    if ((missingStepEvidence.length || missingTraceEvidence.length) && evidence.assuranceLevel === "strong") {
+      evidence.assuranceLevel = "limited";
+    }
     for (const step of evidence.steps) {
       const screenshot = evidence.artifactPaths.find((path) =>
         path.toLowerCase().includes(`step-${String(step.order).padStart(2, "0")}`)
       );
       step.screenshotPath = screenshot;
+      const reporterStep = reporterSteps?.find((reported) => reported.id === step.stepId);
+      step.evidenceRefs = [...new Set([...(step.evidenceRefs ?? []), ...(reporterStep?.evidenceRefs ?? [])])];
       step.assertionStatus =
         input.status === "passed"
           ? "passed"

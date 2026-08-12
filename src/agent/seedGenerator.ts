@@ -9,6 +9,7 @@ type GenerateSeedFileInput = {
   outputDir: string;
   system: SystemProfile;
   authProfile: AuthProfile;
+  actorJourney?: Array<{ role: string; authProfile: AuthProfile }>;
 };
 
 export async function generateSeedFile(input: GenerateSeedFileInput) {
@@ -16,6 +17,21 @@ export async function generateSeedFile(input: GenerateSeedFileInput) {
   const seedPath = join(input.outputDir, `seed-${input.system.id}.spec.ts`);
   const secrets = decryptSecrets(input.authProfile.encryptedSecrets);
   const storageStatePath = await resolveAuthStorageState(input, secrets.storageStatePath);
+  const actorRoles = await Promise.all(
+    (input.actorJourney ?? []).map(async ({ role, authProfile }) => {
+      const roleSecrets = decryptSecrets(authProfile.encryptedSecrets);
+      return {
+        role,
+        storageStatePath: await resolveAuthStorageState(
+          { ...input, authProfile },
+          roleSecrets.storageStatePath
+        ),
+        loginMethod: authProfile.loginMethod,
+        hasToken: Boolean(roleSecrets.token),
+        hasCookie: Boolean(roleSecrets.cookie)
+      };
+    })
+  );
   const content = [
     `import { test as base } from "@playwright/test";`,
     ``,
@@ -31,7 +47,8 @@ export async function generateSeedFile(input: GenerateSeedFileInput) {
     `      await action();`,
     `      await page.screenshot({ path: base.info().outputPath(\`brain-creator-\${stepId}.png\`), fullPage: true });`,
     `    });`,
-    `  }`,
+    `  },`,
+    ...(actorRoles.length ? formatActorRoleHelper(input.system.baseUrl, actorRoles) : []),
     `};`
   ].join("\n");
 
@@ -87,6 +104,43 @@ async function resolveAuthStorageState(
     throw new Error("Auth storage state must contain cookies and origins arrays");
   }
   return protectedPath;
+}
+
+function formatActorRoleHelper(
+  baseUrl: string,
+  actorRoles: Array<{
+    role: string;
+    storageStatePath: string | undefined;
+    loginMethod: AuthProfile["loginMethod"];
+    hasToken: boolean;
+    hasCookie: boolean;
+  }>
+) {
+  const roleConfig = actorRoles
+    .map((role) => {
+      const envSuffix = role.role.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase();
+      return [
+        `    ${JSON.stringify(role.role)}: {`,
+        `      storageStatePath: ${role.storageStatePath ? JSON.stringify(role.storageStatePath) : "undefined"},`,
+        `      loginMethod: ${JSON.stringify(role.loginMethod)},`,
+        `      tokenEnv: ${role.hasToken ? JSON.stringify(`BRAIN_CREATOR_AUTH_TOKEN_${envSuffix}`) : "undefined"},`,
+        `      cookieEnv: ${role.hasCookie ? JSON.stringify(`BRAIN_CREATOR_AUTH_COOKIE_${envSuffix}`) : "undefined"}`,
+        `    }`
+      ].join("\n");
+    })
+    .join(",\n");
+  return [
+    `  async runAsRole(browser: { newContext: (options?: Record<string, unknown>) => Promise<any> }, role: string, action: (page: any) => Promise<unknown>) {`,
+    `    const roles = {\n${roleConfig}\n    };`,
+    `    const config = roles[role as keyof typeof roles];`,
+    `    if (!config) throw new Error(\`Unknown Brain Creator actor role: \${role}\`);`,
+    `    const context = await browser.newContext(config.storageStatePath ? { storageState: config.storageStatePath } : {});`,
+    `    const page = await context.newPage();`,
+    `    await page.goto(${JSON.stringify(baseUrl)});`,
+    `    if (config.tokenEnv) { const token = process.env[config.tokenEnv]; if (!token) throw new Error(\`Missing auth env \${config.tokenEnv}\`); await page.evaluate((value: string) => window.localStorage.setItem("brain_creator_token", value), token); }`,
+    `    if (config.cookieEnv) { const cookie = process.env[config.cookieEnv]; if (!cookie) throw new Error(\`Missing auth env \${config.cookieEnv}\`); await page.context().addCookies([{ name: "brain_creator_session", value: cookie, url: ${JSON.stringify(baseUrl)} }]); }`,
+    `    try { return await action(page); } finally { await context.close(); }`,
+  ];
 }
 
 function formatAuthSetup(

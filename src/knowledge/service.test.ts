@@ -730,6 +730,64 @@ describe("KnowledgeService", () => {
     ).toContain("Expected approved status but received draft");
   });
 
+  it("downgrades assurance when structured reporter omits a declared step", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({ name: "Reporter coverage", key: "reporter-coverage", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-reporter-coverage",
+      name: "Reporter coverage",
+      environment: "test",
+      baseUrl: "https://reporter-coverage.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://reporter-coverage.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-reporter-coverage");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("reporter-coverage", "Users create an order record.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const executableCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-reporter-coverage",
+      executableCaseId: executableCase.id,
+      testCaseId: "test-reporter-coverage",
+      contextPackPath: "context/reporter-coverage.json"
+    });
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "passed",
+      artifactPaths: [],
+      reporterResult: {
+        status: "passed",
+        total: evidence.assertionContracts?.length ?? 0,
+        passed: evidence.assertionContracts?.length ?? 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        assertions: (evidence.assertionContracts ?? []).map((contract) => ({
+          id: contract.id,
+          status: "passed" as const,
+          evidenceRefs: []
+        })),
+        steps: [],
+        attachments: [],
+        consoleErrors: [],
+        networkFailures: []
+      }
+    });
+
+    expect(completed.assuranceLevel).toBe("limited");
+    expect(completed.evidenceWarnings).toEqual([
+      expect.stringContaining("Missing structured Reporter evidence for step(s):")
+    ]);
+  });
+
   it("estimates Requirement Eval accuracy from traceable historical execution outcomes", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const service = new KnowledgeService(repository, await tempDir());

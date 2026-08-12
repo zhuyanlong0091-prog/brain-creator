@@ -26,6 +26,7 @@ export type CommandResult = {
   stderr: string;
   structuredReporter?: StructuredReporterResult;
   reporterPath?: string;
+  actorRoleEvidencePath?: string;
 };
 
 export type CommandRunner = (
@@ -151,6 +152,8 @@ type RunChainInput = {
   maxHealAttempts?: number;
   knowledgeContext?: string;
   structuredReporter?: boolean;
+  actorJourney?: Array<{ role: string; authProfile: AuthProfile }>;
+  requiredStepIds?: string[];
 };
 
 export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
@@ -279,7 +282,8 @@ export async function runChain(input: RunChainInput) {
     workDir: input.workDir,
     outputDir: join(input.workDir, "tests"),
     system: input.system,
-    authProfile: input.authProfile
+    authProfile: input.authProfile,
+    actorJourney: input.actorJourney
   });
   const generateRun = await runAgent({
     systemId: input.system.id,
@@ -294,6 +298,20 @@ export async function runChain(input: RunChainInput) {
   const runner = input.runner ?? spawnCommand;
   const structuredReporterEnabled = input.structuredReporter ?? !input.runner;
   const runPlaywright = async (): Promise<CommandResult> => {
+    if (input.actorJourney && input.actorJourney.length > 1) {
+      const source = await readFile(testPath, "utf8");
+      const journeyCheck = validateActorJourneyUsage(source, input.actorJourney);
+      if (!journeyCheck.valid) {
+        return { exitCode: 1, stdout: "", stderr: journeyCheck.reason };
+      }
+    }
+    if (input.requiredStepIds?.length) {
+      const source = await readFile(testPath, "utf8");
+      const instrumentationCheck = validateStepInstrumentation(source, input.requiredStepIds);
+      if (!instrumentationCheck.valid) {
+        return { exitCode: 1, stdout: "", stderr: instrumentationCheck.reason };
+      }
+    }
     const args = ["playwright", "test", testRunPath];
     if (structuredReporterEnabled) args.push("--reporter=json", "--trace=on");
     const result = await runner("npx", args, { cwd: input.workDir });
@@ -309,7 +327,16 @@ export async function runChain(input: RunChainInput) {
     );
     await mkdir(dirname(reporterPath), { recursive: true });
     await writeFile(reporterPath, `${JSON.stringify(reporter, null, 2)}\n`, "utf8");
-    return { ...result, structuredReporter: reporter, reporterPath };
+    const actorRoleEvidencePath =
+      input.actorJourney && input.actorJourney.length > 1
+        ? await writeActorRoleEvidence(input.workDir, input.actorJourney)
+        : undefined;
+    return {
+      ...result,
+      structuredReporter: reporter,
+      reporterPath,
+      ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {})
+    };
   };
   let testResult: CommandResult =
     generateRun.status === "succeeded"
@@ -384,6 +411,67 @@ export async function runChain(input: RunChainInput) {
     testPath,
     testResult
   };
+}
+
+export function validateActorJourneyUsage(
+  source: string,
+  actorJourney: Array<{ role: string }>
+) {
+  if (actorJourney.length <= 1) return { valid: true as const };
+  if (!/\bbc\.runAsRole\s*\(/.test(source)) {
+    return {
+      valid: false as const,
+      reason: "Generated test must call bc.runAsRole for a multi-role actor journey."
+    };
+  }
+  const missingRoles = actorJourney
+    .map((actor) => actor.role)
+    .filter(
+      (role) =>
+        !source.includes(JSON.stringify(role)) &&
+        !source.includes(`'${role}'`) &&
+        !source.includes(`\"${role}\"`)
+    );
+  if (missingRoles.length > 0) {
+    return {
+      valid: false as const,
+      reason: `Generated test does not reference actor role(s): ${missingRoles.join(", ")}.`
+    };
+  }
+  return { valid: true as const };
+}
+
+export function validateStepInstrumentation(source: string, stepIds: string[]) {
+  const missingStepIds = stepIds.filter(
+    (stepId) =>
+      !source.includes(`bc.step(${JSON.stringify(stepId)}`) &&
+      !source.includes(`bc.step('${stepId}'`) &&
+      !source.includes(`bc.step("${stepId}"`)
+  );
+  return missingStepIds.length
+    ? {
+        valid: false as const,
+        reason: `Generated test is missing bc.step instrumentation for: ${missingStepIds.join(", ")}.`
+      }
+    : { valid: true as const };
+}
+
+async function writeActorRoleEvidence(
+  workDir: string,
+  actorJourney: Array<{ role: string; authProfile: AuthProfile }>
+) {
+  const path = join(workDir, ".brain-creator", "runs", "actor-journey.json");
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(
+    path,
+    `${JSON.stringify(
+      actorJourney.map((actor, index) => ({ order: index + 1, role: actor.role })),
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  return path;
 }
 
 function parseReporterOutput(output: string): StructuredReporterResult | undefined {

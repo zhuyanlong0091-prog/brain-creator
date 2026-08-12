@@ -917,7 +917,8 @@ export type ExecutionPreflightCheck = {
     | "test-data-tasks"
     | "test-data"
     | "test-data-cleanup"
-    | "auth";
+    | "auth"
+    | "actor-journey";
   status: "pass" | "action-required" | "blocked";
   message: string;
   sourceRefs: string[];
@@ -948,6 +949,22 @@ export type ExecutionContextPack = {
   truncated: boolean;
 };
 
+export type ActorJourneyConfig = {
+  role?: string;
+  authProfileId: string;
+  afterStepId?: string;
+  sourceRefs?: string[];
+};
+
+export type ActorJourneyStep = {
+  id: string;
+  order: number;
+  role: string;
+  authProfileId: string;
+  afterStepId?: string;
+  sourceRefs: string[];
+};
+
 export type ExecutionPlanDraft = {
   knowledgeProjectId: string;
   requirementSetId: string;
@@ -961,6 +978,7 @@ export type ExecutionPlanDraft = {
     method: AuthProfile["loginMethod"];
     verifiedAt?: string;
   };
+  actorJourney?: ActorJourneyStep[];
   steps: ExecutableCaseStep[];
   assertionContracts?: AssertionContract[];
   pathPlan?: ExecutableCasePathPlan;
@@ -1043,6 +1061,7 @@ export type RequirementSuiteRun = {
   knowledgeProjectId: string;
   systemId: string;
   authProfileId?: string;
+  actorJourney?: ActorJourneyConfig[];
   status:
     | "running"
     | "waiting-for-test-data"
@@ -1097,6 +1116,7 @@ export type ExecutionStepEvidence = {
   actual?: string;
   assertionStatus: "pending" | "passed" | "failed" | "blocked";
   screenshotPath?: string;
+  evidenceRefs?: string[];
   sourceRefs: string[];
   origin: ExecutableCaseStep["origin"];
 };
@@ -1115,6 +1135,8 @@ export type ExecutionEvidence = {
   assertionContracts?: AssertionContract[];
   reporterPath?: string;
   reporterResult?: StructuredReporterResult;
+  evidenceWarnings?: string[];
+  actorJourney?: ActorJourneyStep[];
   steps: ExecutionStepEvidence[];
   tracePaths: string[];
   artifactPaths: string[];
@@ -1156,6 +1178,15 @@ export type StructuredReporterAssertion = {
   evidenceRefs: string[];
 };
 
+export type StructuredReporterStep = {
+  id: string;
+  title: string;
+  status: "passed" | "failed" | "skipped" | "unknown";
+  durationMs?: number;
+  evidenceRefs: string[];
+  error?: string;
+};
+
 export type StructuredReporterResult = {
   status: "passed" | "failed" | "blocked";
   total: number;
@@ -1164,6 +1195,7 @@ export type StructuredReporterResult = {
   skipped: number;
   durationMs: number;
   assertions: StructuredReporterAssertion[];
+  steps?: StructuredReporterStep[];
   attachments: string[];
   consoleErrors: string[];
   networkFailures: string[];
@@ -1280,6 +1312,7 @@ export type RunLedgerEntry = {
     | "case-completed"
     | "suite-resumed"
     | "case-retried"
+    | "role-switched"
     | "case-skipped"
     | "suite-cancelled"
     | "suite-completed";

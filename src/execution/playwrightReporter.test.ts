@@ -46,4 +46,33 @@ describe("Playwright JSON reporter", () => {
       }).status
     ).toBe("blocked");
   });
+
+  it("extracts Brain Creator step evidence from nested Playwright steps", () => {
+    const result = parsePlaywrightJsonReport({
+      stats: { expected: 1, unexpected: 0, skipped: 0 },
+      suites: [{
+        specs: [{
+          title: "case",
+          tests: [{ results: [{
+            status: "passed",
+            steps: [{
+              title: "bc:step-create",
+              duration: 18,
+              attachments: [{ path: "evidence/step-create.png" }]
+            }]
+          }] }]
+        }]
+      }]
+    });
+
+    expect(result.steps).toEqual([
+      expect.objectContaining({
+        id: "step-create",
+        title: "bc:step-create",
+        status: "passed",
+        durationMs: 18,
+        evidenceRefs: ["evidence/step-create.png"]
+      })
+    ]);
+  });
 });

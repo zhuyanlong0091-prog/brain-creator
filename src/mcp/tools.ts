@@ -158,6 +158,16 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       evidenceRefs: z.array(z.string()).default([]),
       responseMode: z.enum(["summary", "full"]).default("full"),
       authProfileId: z.string().optional(),
+      actorJourney: z
+        .array(
+          z.object({
+            role: z.string().optional(),
+            authProfileId: z.string(),
+            afterStepId: z.string().optional(),
+            sourceRefs: z.array(z.string()).default([])
+          })
+        )
+        .optional(),
       startUrl: z.string().url().optional(),
       maxPages: z.number().int().min(1).max(25).optional(),
       maxDepth: z.number().int().min(0).max(4).optional(),
