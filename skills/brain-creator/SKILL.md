@@ -23,16 +23,18 @@ The recommended entrypoint is a requirement document or link. Existing Excel/Mar
 
 New installations use `BRAIN_CREATOR_TOOL_PROFILE=facade`. Prefer these high-level tools:
 
-- `bc_prepare`: ingest requirements, generate analysis and test design, approve baselines, run bounded system exploration, submit evidence, compile cases, and preview/confirm or roll back historical diagnosis migrations.
+- `bc_prepare`: ingest requirements, generate analysis and test design, approve baselines, run bounded system exploration, submit evidence, batch compile cases, confirm page bindings, and control Gap lifecycles.
 - `bc_status`: inspect knowledge projects or runtime systems and choose the next action.
-- `bc_configure`: create knowledge projects, systems, auth, rules, terms, bindings, checkpoints, and inspect connectors.
+- `bc_configure`: create knowledge projects, systems, auth, rules, terms, bindings, checkpoints, verify or archive auth, inspect connectors, and reload the store safely.
 - `bc_run`: preview or execute requirement suites, approved cases, document suites, and bug regression.
-- `bc_review`: review requirements, knowledge, coverage, Requirement Eval history, System Brain, test intents, executable cases, evidence, suites, bugs, and Gaps.
+- `bc_review`: review requirements, knowledge, coverage, Requirement Eval history, System Brain, CompileRuns, executable cases, evidence, suites, bugs, and Gaps.
 - `bc_intent_preview`: preview ambiguous operational wording without executing it.
 - `bc_submit_agent_output`: return Planner, Generator, or Healer output in host-agent mode.
 - `bc_command`: optional `/bc help`, status, suite, bug, and Gap shortcuts.
 
 Fine-grained tools remain available with `BRAIN_CREATOR_TOOL_PROFILE=full` for compatibility, audit, and debugging.
+
+Use `responseMode=summary` for normal Facade calls. Request `full` only for a specific audit or diagnosis, and page large CompileRun details through `bc_review target=compile-run`. Resolve, dismiss, or reopen a Gap only through `bc_prepare` preview and confirmation with a human note and evidence references.
 
 ## User Entrypoint Map
 
@@ -47,11 +49,11 @@ Fine-grained tools remain available with `BRAIN_CREATOR_TOOL_PROFILE=full` for c
 | Explore a real system | `bc_prepare action=explore-system` | Link-only by default; explicit `interactionMode=safe` probes bounded tabs, disclosures, and native selects |
 | Submit page/training evidence | `bc_prepare action=record-page-evidence` / `record-training-evidence` | Use real host-browser evidence inside the selected system allowlist |
 | Refresh System Brain | `bc_prepare action=refresh-system-brain` | Preserve system isolation and evidence references |
-| Compile against a system | `bc_prepare action=compile-cases` with `systemId` | Only a unique shortest observed path is compiled; ambiguous, unreachable, or missing evidence creates a Gap |
+| Compile against a system | `bc_prepare action=compile-cases` with `requirementSetId` or `testIntentIds`, `systemId`, and `responseMode=summary` | Review details through `bc_review target=compile-run`; ambiguous evidence requires explicit page binding |
 | Prepare test data | `bc_prepare action=prepare-test-data` | Preview first; reuse is default and create requires explicit `allowCreate=true` |
 | Submit data or cleanup evidence | `bc_prepare action=submit-test-data` | Require stable references and non-empty `sourceRefs`; never expose secrets |
 | Prepare execution | `bc_prepare action=prepare-execution` | Persist only a ready immutable plan; blocked and needs-confirmation drafts cannot start Generator |
-| Configure auth | `bc_configure target=auth` or `bc_configure target=checkpoint` | Never expose secrets |
+| Configure auth | `bc_configure target=auth operation=create|verify|archive` or `bc_configure target=checkpoint` | Verify only through a fresh browser context; never expose secrets |
 | Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true` |
 | Execute an existing test document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` | Explicit confirmation required |
 | Regress bugs | `bc_run mode=bug-regression` | Show filters and candidates |
@@ -73,7 +75,7 @@ When the user provides a requirement path or URL:
 7. Only after the Eval gate passes, call `bc_prepare action=approve-baseline confirm=true`.
 8. Create or select a runtime system with `bc_configure target=system`, bind it with `bc_configure target=system-binding`, and configure verified auth.
 9. Call `bc_prepare action=explore-system` to discover allowlisted pages, controls, and navigation links. Keep `interactionMode=off` unless safe state evidence is needed. With explicit user approval, use `interactionMode=safe` and a small `maxInteractionsPerPage` to observe tabs, disclosure controls, and native-select cascades. Use `record-page-evidence` and `record-training-evidence` for complex menus, data entry, and business workflows.
-10. Compile approved TestIntents with `bc_prepare action=compile-cases` and the selected `systemId`. Inspect `workflowPath`: only `unique` or `not-required` may continue. For `ambiguous`, present `candidatePathCount` and the returned candidate details, then ask for evidence or selection; for `missing`, collect more System Brain evidence. Candidate details are capped at 10 to keep context bounded. Never select a path on the user's behalf.
+10. Compile approved TestIntents in one bounded call with `bc_prepare action=compile-cases`, `requirementSetId` or `testIntentIds`, the selected `systemId`, and `responseMode=summary`. Review one `CompileRun` through `bc_review target=compile-run` with `limit` and `offset`. For ambiguous pages, present candidates, then use `confirm-page-binding` only after explicit user confirmation. Never select a page on the user's behalf.
 11. Inspect `stateActions` after path planning. Only `unique` or `not-required` may continue. Present state candidates when ambiguous and collect missing input or locator evidence when blocked. Treat all domain scenarios as data: never add product-specific branches to the planner.
 12. Inspect `testDataPlan`. Manual `prepare-test-data` remains available, but the normal Requirement Suite path dispatches data preparation when each case becomes current. Reuse is the default. Set `allowCreateTestData=true` on `bc_run` only after explicit user authorization.
 13. Execute the returned TestDataTask in the bound system and call `submit-test-data` with its decision, stable reference, and evidence `sourceRefs`. Created data requires `delete-created` or `restore`; repeated Suite calls reuse the pending task. Never invent structural data or expose a secret.

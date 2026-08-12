@@ -133,6 +133,10 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "rollback-legacy-diagnosis",
         "approve-baseline",
         "compile-cases",
+        "confirm-page-binding",
+        "resolve-gap",
+        "dismiss-gap",
+        "reopen-gap",
         "resolve-test-data",
         "prepare-test-data",
         "submit-test-data",
@@ -146,7 +150,13 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       knowledgeProjectId: z.string().optional(),
       requirementSetId: z.string().optional(),
       testIntentId: z.string().optional(),
+      testIntentIds: z.array(z.string()).default([]),
+      modules: z.array(z.string()).default([]),
       pageModelId: z.string().optional(),
+      role: z.string().optional(),
+      gapId: z.string().optional(),
+      evidenceRefs: z.array(z.string()).default([]),
+      responseMode: z.enum(["summary", "full"]).default("full"),
       authProfileId: z.string().optional(),
       startUrl: z.string().url().optional(),
       maxPages: z.number().int().min(1).max(25).optional(),
@@ -332,7 +342,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       knowledgeProjectId: z.string().optional(),
       systemName: z.string().optional(),
       environment: z.string().optional(),
-      include: z.array(z.string()).default([])
+      include: z.array(z.string()).default([]),
+      responseMode: z.enum(["summary", "full"]).default("full")
     })
   },
   {
@@ -364,7 +375,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       bugIds: z.array(z.string()).default([]),
       knowledgeProjectId: z.string().optional(),
       executableCaseId: z.string().optional(),
-      authProfileId: z.string().optional()
+      authProfileId: z.string().optional(),
+      responseMode: z.enum(["summary", "full"]).default("full")
     })
   },
   {
@@ -391,7 +403,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "requirement-suite-run",
         "run-ledger",
         "execution-diagnosis",
-        "evidence"
+        "evidence",
+        "compile-run"
       ]),
       knowledgeProjectId: z.string().optional(),
       systemId: z.string().optional(),
@@ -400,6 +413,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       status: z.string().optional(),
       id: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
+      offset: z.number().int().min(0).optional(),
       minSampleSize: z.number().int().min(1).max(10_000).optional(),
       failureTypes: z
         .array(
@@ -415,15 +429,17 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
             "unknown_failure"
           ])
         )
-        .default([])
+        .default([]),
+      responseMode: z.enum(["summary", "full"]).default("full")
     })
   },
   {
     name: "bc_configure",
     title: "Brain Creator configure",
-    description: "Facade configuration entry for system, auth, term, rule, and auth checkpoint setup.",
+    description: "Facade configuration entry for system, auth, term, rule, runtime, and auth checkpoint setup.",
     inputSchema: z.object({
-      target: z.enum(["system", "auth", "term", "rule", "checkpoint", "knowledge-project", "system-binding", "connector"]),
+      target: z.enum(["system", "auth", "term", "rule", "checkpoint", "knowledge-project", "system-binding", "connector", "runtime"]),
+      operation: z.enum(["create", "verify", "archive", "reload-store"]).default("create"),
       knowledgeProjectId: z.string().optional(),
       connector: z.enum(["feishu"]).optional(),
       systemId: z.string().optional(),
@@ -446,7 +462,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       authProfileId: z.string().optional(),
       testCaseId: z.string().optional(),
       reason: z.string().optional(),
-      resumeInstruction: z.string().optional()
+      resumeInstruction: z.string().optional(),
+      responseMode: z.enum(["summary", "full"]).default("full")
     })
   },
   {
@@ -810,10 +827,10 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
   {
     name: "bc_list_gaps",
     title: "List gaps",
-    description: "List open or resolved gaps for a business system.",
+    description: "List open, resolved, or dismissed gaps for a business system.",
     inputSchema: z.object({
       projectId: z.string(),
-      status: z.enum(["open", "resolved"]).optional()
+      status: z.enum(["open", "resolved", "dismissed"]).optional()
     })
   },
   {

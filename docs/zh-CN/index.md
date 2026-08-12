@@ -34,5 +34,6 @@ features:
 | 安装并分析第一份需求 | [快速开始](/zh-CN/getting-started) |
 | 理解产品模型 | [核心概念](/zh-CN/core-concepts) |
 | 执行已批准需求 | [从需求到测试](/zh-CN/guides/requirement-to-test) |
+| 安全变更鉴权、编译和 Gap 状态 | [可信控制面](/zh-CN/guides/trusted-control-plane) |
 | 连接 Agent 宿主 | [MCP 安装](/zh-CN/mcp-installation) |
 | 排查问题 | [故障排查](/zh-CN/troubleshooting) |

@@ -13,6 +13,7 @@ import type {
   CaseSuite,
   CaseSuiteRun,
   ChainRun,
+  CompileRun,
   Gap,
   GeneratedCase,
   GlossaryTerm,
@@ -26,6 +27,7 @@ import type {
   KnowledgeProject,
   LocatorPoint,
   PageModel,
+  PageBindingDecision,
   ProbeResult,
   RequirementSet,
   RequirementSuiteRun,
@@ -83,9 +85,15 @@ export class InMemoryBrainCreatorRepository {
   executionDiagnoses: ExecutionDiagnosis[] = [];
   executionDiagnosisReviews: ExecutionDiagnosisReview[] = [];
   runLedgerEntries: RunLedgerEntry[] = [];
+  compileRuns: CompileRun[] = [];
+  pageBindingDecisions: PageBindingDecision[] = [];
 
   persist() {
     return;
+  }
+
+  reload() {
+    return repositoryCounts(this);
   }
 
   reset() {
@@ -127,6 +135,8 @@ export class InMemoryBrainCreatorRepository {
     this.executionDiagnoses = [];
     this.executionDiagnosisReviews = [];
     this.runLedgerEntries = [];
+    this.compileRuns = [];
+    this.pageBindingDecisions = [];
     this.persist();
   }
 }
@@ -172,6 +182,8 @@ type RepositorySnapshot = Pick<
   | "executionDiagnoses"
   | "executionDiagnosisReviews"
   | "runLedgerEntries"
+  | "compileRuns"
+  | "pageBindingDecisions"
 >;
 
 export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorRepository {
@@ -185,11 +197,20 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
     writeFileSync(this.filePath, JSON.stringify(this.snapshot(), null, 2), "utf8");
   }
 
+  override reload() {
+    if (!existsSync(this.filePath)) {
+      throw new Error("Brain Creator store file not found");
+    }
+    this.restore();
+    return repositoryCounts(this);
+  }
+
   private restore() {
     if (!existsSync(this.filePath)) {
       return;
     }
     const snapshot = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<RepositorySnapshot>;
+    assertRepositorySnapshot(snapshot);
     this.schemaVersion = CURRENT_REPOSITORY_SCHEMA_VERSION;
     this.systemProfiles = snapshot.systemProfiles ?? [];
     this.systemExplorations = (snapshot.systemExplorations ?? []).map((exploration) => ({
@@ -282,6 +303,8 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
         entry.runType ??
         (entry.caseSuiteId ? "document-suite" : "requirement-suite")
     }));
+    this.compileRuns = snapshot.compileRuns ?? [];
+    this.pageBindingDecisions = snapshot.pageBindingDecisions ?? [];
   }
 
   private snapshot(): RepositorySnapshot {
@@ -324,7 +347,37 @@ export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorReposito
       executionEvidence: this.executionEvidence,
       executionDiagnoses: this.executionDiagnoses,
       executionDiagnosisReviews: this.executionDiagnosisReviews,
-      runLedgerEntries: this.runLedgerEntries
+      runLedgerEntries: this.runLedgerEntries,
+      compileRuns: this.compileRuns,
+      pageBindingDecisions: this.pageBindingDecisions
     };
+  }
+}
+
+function repositoryCounts(repository: InMemoryBrainCreatorRepository) {
+  return {
+    systems: repository.systemProfiles.length,
+    requirements: repository.requirementSets.length,
+    executableCases: repository.executableCases.length,
+    compileRuns: repository.compileRuns.length,
+    gaps: repository.gaps.length
+  };
+}
+
+function assertRepositorySnapshot(value: unknown): asserts value is Partial<RepositorySnapshot> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Brain Creator store must contain a JSON object");
+  }
+  const snapshot = value as Record<string, unknown>;
+  for (const [key, entry] of Object.entries(snapshot)) {
+    if (key === "schemaVersion") {
+      if (typeof entry !== "number") {
+        throw new Error("Brain Creator store schemaVersion must be a number");
+      }
+      continue;
+    }
+    if (!Array.isArray(entry)) {
+      throw new Error(`Brain Creator store field ${key} must be an array`);
+    }
   }
 }

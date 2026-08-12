@@ -21,6 +21,7 @@ const englishTheme = {
       text: "Guides",
       items: [
         { text: "Requirement to test", link: "/guides/requirement-to-test" },
+        { text: "Trusted control plane", link: "/guides/trusted-control-plane" },
         { text: "Agent usage", link: "/agent-usage" },
         { text: "Session resume", link: "/e2e-session-resume-workflow" }
       ]
@@ -31,7 +32,8 @@ const englishTheme = {
         { text: "CLI reference", link: "/cli-reference" },
         { text: "MCP installation", link: "/mcp-installation" },
         { text: "Troubleshooting", link: "/troubleshooting" },
-        { text: "Release checklist", link: "/release-checklist" }
+        { text: "Release checklist", link: "/release-checklist" },
+        { text: "Execution quality register", link: "/quality/problem-register" }
       ]
     }
   ],
@@ -71,6 +73,7 @@ const chineseTheme = {
       text: "指南",
       items: [
         { text: "从需求到测试", link: "/zh-CN/guides/requirement-to-test" },
+        { text: "可信控制面", link: "/zh-CN/guides/trusted-control-plane" },
         { text: "Agent 使用", link: "/zh-CN/agent-usage" },
         { text: "恢复新会话", link: "/zh-CN/e2e-session-resume-workflow" }
       ]

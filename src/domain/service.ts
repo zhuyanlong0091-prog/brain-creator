@@ -114,6 +114,12 @@ type ResolveGapInput = {
   gapId: string;
 };
 
+type TransitionGapInput = ResolveGapInput & {
+  operation: "resolve" | "dismiss" | "reopen";
+  note: string;
+  evidenceRefs: string[];
+};
+
 type AssetDetailInput = {
   projectId: string;
   type: AssetSearchResult["type"];
@@ -503,7 +509,10 @@ export class BrainCreatorService {
     return publicAuthProfile(profile);
   }
 
-  verifyAuthProfile(idValue: string): AuthProfile {
+  verifyAuthProfile(
+    idValue: string,
+    verificationEvidence?: { targetUrl: string; finalUrl: string; title?: string }
+  ): AuthProfile {
     const profile = this.repository.authProfiles.find((item) => item.id === idValue);
     if (!profile) {
       throw new Error("Auth profile not found");
@@ -511,7 +520,30 @@ export class BrainCreatorService {
 
     profile.status = "succeeded";
     profile.lastVerifiedAt = timestamp();
+    profile.failureReason = undefined;
+    profile.verificationEvidence = verificationEvidence
+      ? {
+          status: "valid",
+          targetUrl: verificationEvidence.targetUrl,
+          finalUrl: verificationEvidence.finalUrl,
+          title: verificationEvidence.title,
+          verifiedAt: profile.lastVerifiedAt
+        }
+      : undefined;
     profile.updatedAt = profile.lastVerifiedAt;
+    this.repository.persist();
+    return publicAuthProfile(profile);
+  }
+
+  failAuthProfileVerification(idValue: string, reason: string): AuthProfile {
+    const profile = this.repository.authProfiles.find((item) => item.id === idValue);
+    if (!profile) {
+      throw new Error("Auth profile not found");
+    }
+    profile.status = "failed";
+    profile.failureReason = reason;
+    profile.verificationEvidence = undefined;
+    profile.updatedAt = timestamp();
     this.repository.persist();
     return publicAuthProfile(profile);
   }
@@ -1515,6 +1547,15 @@ export class BrainCreatorService {
   }
 
   resolveGap(input: ResolveGapInput): Gap {
+    return this.transitionGap({
+      ...input,
+      operation: "resolve",
+      note: "Resolved through the legacy gap control.",
+      evidenceRefs: []
+    });
+  }
+
+  transitionGap(input: TransitionGapInput): Gap {
     const gap = this.repository.gaps.find((item) => item.id === input.gapId);
     if (!gap) {
       throw new Error("Gap not found");
@@ -1523,10 +1564,36 @@ export class BrainCreatorService {
       throw new Error("Gap belongs to another business system");
     }
 
-    gap.status = "resolved";
-    gap.updatedAt = timestamp();
+    const note = input.note.trim();
+    if (!note) {
+      throw new Error("Gap transition note is required");
+    }
+    if (input.operation === "reopen" && gap.status === "open") {
+      throw new Error("Gap is already open");
+    }
+    if (input.operation !== "reopen" && gap.status !== "open") {
+      throw new Error("Only open gaps can be resolved or dismissed");
+    }
+
+    const now = timestamp();
+    gap.status =
+      input.operation === "resolve"
+        ? "resolved"
+        : input.operation === "dismiss"
+          ? "dismissed"
+          : "open";
+    gap.lifecycle = [
+      ...(gap.lifecycle ?? []),
+      {
+        operation: input.operation,
+        note,
+        evidenceRefs: [...new Set(input.evidenceRefs)],
+        createdAt: now
+      }
+    ];
+    gap.updatedAt = now;
     this.repository.persist();
-    return gap;
+    return { ...gap, lifecycle: gap.lifecycle.map((entry) => ({ ...entry })) };
   }
 
   private createGap(

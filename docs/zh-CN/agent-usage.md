@@ -64,6 +64,10 @@ Requirement Suite 先以 `confirm=false` 预览，用户批准后再 `confirm=tr
 
 使用 `bc_review` 查看需求、知识、覆盖、System Brain、ExecutionPlan、步骤证据、Bug、Gap 和运行账本。需求预期与系统观察始终分层展示。
 
+## 可信控制面约定
+
+正常 Facade 调用使用 `responseMode=summary`，只有审计特定资产时使用 `full`。需求用例优先通过 `requirementSetId`、`testIntentIds` 或模块一次批量编译，并通过 `bc_review target=compile-run` 分页查看详情。页面歧义必须由用户确认后调用 `confirm-page-binding`；Gap 的解决、忽略和重开必须先预览，再携带人工说明与证据引用确认。鉴权验证必须访问真实页面，不能只修改状态字段。
+
 ## 用户入口映射
 
 | 用户意图 | 默认 Facade 动作 |

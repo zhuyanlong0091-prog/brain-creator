@@ -13,7 +13,7 @@ import {
   verifyStoredBrowserAuth,
   type AuthStateVerifier
 } from "../agent/authStateVerifier.js";
-import { errorEnvelope, successEnvelope } from "../shared/envelope.js";
+import { BrainCreatorError, errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
   resolveBrainCreatorKnowledgeDir,
@@ -67,6 +67,7 @@ import type {
   CaseSuite,
   CaseSuiteCaseResult,
   ChainRun,
+  CompileRun,
   DocumentCase,
   ExecutableCase,
   ExecutionDiagnosisVerdict,
@@ -182,19 +183,19 @@ export async function handleBrainCreatorTool(
   try {
     switch (name) {
       case "bc_prepare":
-        return textResult(await prepareFacade(context, input));
+        return facadeTextResult(await prepareFacade(context, input), input);
       case "bc_command":
         return textResult(await commandFacade(context, input));
       case "bc_intent_preview":
         return textResult(intentPreviewFacade(context, input));
       case "bc_status":
-        return textResult(await statusFacade(context, input));
+        return facadeTextResult(await statusFacade(context, input), input);
       case "bc_run":
-        return textResult(await runFacade(context, input));
+        return facadeTextResult(await runFacade(context, input), input);
       case "bc_review":
-        return textResult(await reviewFacade(context, input));
+        return facadeTextResult(await reviewFacade(context, input), input);
       case "bc_configure":
-        return textResult(await configureFacade(context, input));
+        return facadeTextResult(await configureFacade(context, input), input);
       case "bc_create_system":
         return textResult(
           context.service.createSystemProfile({
@@ -758,6 +759,59 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     }
     return context.knowledgeService.approveRequirementSet(stringArg(input, "requirementSetId"));
   }
+  if (
+    action === "resolve-gap" ||
+    action === "dismiss-gap" ||
+    action === "reopen-gap"
+  ) {
+    const resolution = resolveSystemReference(context, input);
+    const gapId = stringArg(input, "gapId");
+    const gap = context.repository.gaps.find(
+      (item) => item.id === gapId && item.projectId === resolution.systemId
+    );
+    if (!gap) throw new Error("Gap not found");
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        operation: action.replace("-gap", ""),
+        gap,
+        requiresConfirmation: true,
+        nextAction: "Present the Gap transition, evidence, and note before confirmation."
+      };
+    }
+    return context.service.transitionGap({
+      projectId: resolution.systemId,
+      gapId,
+      operation:
+        action === "resolve-gap"
+          ? "resolve"
+          : action === "dismiss-gap"
+            ? "dismiss"
+            : "reopen",
+      note: stringArg(input, "confirmationNote"),
+      evidenceRefs: stringArrayArg(input, "evidenceRefs")
+    });
+  }
+  if (action === "confirm-page-binding") {
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        testIntentId: stringArg(input, "testIntentId"),
+        systemId: stringArg(input, "systemId"),
+        pageModelId: stringArg(input, "pageModelId"),
+        role: optionalStringArg(input, "role"),
+        requiresConfirmation: true,
+        nextAction: "Present the selected page and evidence before confirming the binding."
+      };
+    }
+    return context.knowledgeService.confirmPageBinding({
+      testIntentId: stringArg(input, "testIntentId"),
+      systemId: stringArg(input, "systemId"),
+      pageModelId: stringArg(input, "pageModelId"),
+      role: optionalStringArg(input, "role"),
+      note: stringArg(input, "confirmationNote")
+    });
+  }
   if (action === "resolve-test-data") {
     const executableCaseId = stringArg(input, "executableCaseId");
     const executableCase = context.repository.executableCases.find(
@@ -920,6 +974,28 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       stringArg(input, "knowledgeProjectId"),
       stringArg(input, "systemId")
     );
+  }
+  const selectedIntentIds = stringArrayArg(input, "testIntentIds");
+  const selectedModules = stringArrayArg(input, "modules");
+  const requirementSetId = optionalStringArg(input, "requirementSetId");
+  if (requirementSetId || selectedIntentIds.length > 0 || selectedModules.length > 0) {
+    const result = context.knowledgeService.compileExecutableCasesBatch({
+      requirementSetId,
+      testIntentIds: selectedIntentIds,
+      modules: selectedModules,
+      systemId: optionalStringArg(input, "systemId")
+    });
+    const summary = compileRunSummary(result.compileRun);
+    return responseModeArg(input) === "summary"
+      ? summary
+      : {
+          ...result,
+          summary,
+          nextAction:
+            result.compileRun.blocked + result.compileRun.ambiguous + result.compileRun.skipped > 0
+              ? "review-compile-run"
+              : "preview-requirement-suite"
+        };
   }
   const compiled = context.knowledgeService.compileExecutableCases(
     stringArg(input, "testIntentId"),
@@ -1885,7 +1961,8 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
         ? optionalStringArg(input, "systemId") ?? optionalStringArg(input, "id")
         : optionalStringArg(input, "id"),
       optionalNumberArg(input, "limit") ?? 50,
-      optionalNumberArg(input, "minSampleSize") ?? 20
+      optionalNumberArg(input, "minSampleSize") ?? 20,
+      optionalNumberArg(input, "offset") ?? 0
     );
   }
   if (!knowledgeProjectId && requestedTarget === "run-ledger") {
@@ -2011,6 +2088,38 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
 
 async function configureFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const target = configureTargetArg(input, "target");
+  if (target === "runtime") {
+    if ((optionalStringArg(input, "operation") ?? "reload-store") !== "reload-store") {
+      throw new Error("runtime operation is invalid");
+    }
+    const active = [
+      ...context.repository.requirementSuiteRuns.filter((run) =>
+        ["running", "waiting-for-test-data", "waiting-for-agent"].includes(run.status)
+      ),
+      ...context.repository.caseSuiteRuns.filter((run) => run.status === "running"),
+      ...context.repository.agentTasks.filter((task) =>
+        ["pending", "running"].includes(task.status)
+      )
+    ];
+    if (active.length > 0) {
+      throw new BrainCreatorError({
+        code: "BC_STORE_BUSY",
+        message: "Store reload is blocked while a run is active",
+        userMessage: {
+          enUS: "Wait for active Brain Creator runs to finish before reloading the store.",
+          zhCN: "请等待 Brain Creator 活动运行结束后再刷新存储。"
+        },
+        nextAction: "review-active-runs",
+        retryable: true
+      });
+    }
+    return {
+      status: "reloaded",
+      counts: context.repository.reload(),
+      reloadedAt: new Date().toISOString(),
+      nextAction: "review-status"
+    };
+  }
   if (target === "knowledge-project") {
     return context.knowledgeService.createProject({
       name: stringArg(input, "name"),
@@ -2039,6 +2148,62 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
     });
   }
   if (target === "auth") {
+    const operation = optionalStringArg(input, "operation") ?? "create";
+    if (operation === "verify") {
+      const systemId = stringArg(input, "systemId");
+      const authProfileId = stringArg(input, "authProfileId");
+      const profile = findAuthProfileById(context, systemId, authProfileId);
+      const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+      if (!system) throw new Error("Business system not found");
+      const storageStatePath = context.service.getCaptureAuth(profile.id)?.secrets.storageStatePath;
+      if (!storageStatePath) {
+        throw new BrainCreatorError({
+          code: "BC_AUTH_EVIDENCE_REQUIRED",
+          message: "Auth verification requires a protected storageState path",
+          userMessage: {
+            enUS: "Capture a browser login state before verifying this authentication profile.",
+            zhCN: "验证该鉴权配置前需要先采集浏览器登录状态。"
+          },
+          nextAction: "complete-auth-checkpoint",
+          retryable: false
+        });
+      }
+      const verification = await context.authStateVerifier({
+        storageStatePath: isAbsolute(storageStatePath)
+          ? resolve(storageStatePath)
+          : resolve(context.workDir, storageStatePath),
+        targetUrl: system.baseUrl,
+        allowedUrls: system.urlAllowlist
+      });
+      if (verification.status !== "valid" || !verification.finalUrl) {
+        const reason = verification.reason ?? "Browser authentication verification failed";
+        context.service.failAuthProfileVerification(profile.id, reason);
+        throw new BrainCreatorError({
+          code: "BC_AUTH_VERIFICATION_FAILED",
+          message: reason,
+          userMessage: {
+            enUS: "The saved browser login could not be verified.",
+            zhCN: "已保存的浏览器登录状态验证失败。"
+          },
+          nextAction: "complete-auth-checkpoint",
+          retryable: verification.status === "unavailable"
+        });
+      }
+      return context.service.verifyAuthProfile(profile.id, {
+        targetUrl: system.baseUrl,
+        finalUrl: verification.finalUrl,
+        title: verification.title
+      });
+    }
+    if (operation === "archive") {
+      const profile = findAuthProfileById(
+        context,
+        stringArg(input, "systemId"),
+        stringArg(input, "authProfileId")
+      );
+      return context.service.archiveAuthProfile(profile.id);
+    }
+    if (operation !== "create") throw new Error("auth operation is invalid");
     return context.service.createAuthProfile({
       projectId: stringArg(input, "systemId"),
       env: stringArg(input, "env"),
@@ -3348,10 +3513,44 @@ function knowledgeReview(
   target: KnowledgeReviewTarget,
   idValue?: string,
   limit = 50,
-  minSampleSize = 20
+  minSampleSize = 20,
+  offset = 0
 ) {
   const status = knowledgeStatus(context, projectId);
   const project = status.knowledge.project;
+  if (target === "compile-run") {
+    const matchingRuns = context.repository.compileRuns
+      .filter(
+        (item) =>
+          item.knowledgeProjectId === projectId && (!idValue || item.id === idValue)
+      );
+    const selectedRuns = idValue
+      ? matchingRuns
+      : matchingRuns.slice(offset, offset + limit);
+    const itemOffset = idValue ? offset : 0;
+    const runs = selectedRuns
+      .map((run) => ({
+        ...compileRunSummary(run),
+        requirementSetId: run.requirementSetId,
+        systemId: run.systemId,
+        createdAt: run.createdAt,
+        items: run.items.slice(itemOffset, itemOffset + limit),
+        totalItems: run.items.length,
+        returnedItems: Math.min(Math.max(run.items.length - itemOffset, 0), limit),
+        nextItemOffset:
+          itemOffset + limit < run.items.length ? itemOffset + limit : undefined
+      }));
+    return {
+      project,
+      items: runs,
+      totalRuns: matchingRuns.length,
+      offset,
+      nextOffset:
+        !idValue && offset + runs.length < matchingRuns.length
+          ? offset + runs.length
+          : undefined
+    };
+  }
   if (target === "requirement") {
     const items = context.repository.requirementSets.filter(
       (item) => item.knowledgeProjectId === projectId && (!idValue || item.id === idValue)
@@ -3515,6 +3714,23 @@ function reportKnowledgeGap(
   context.repository.gaps.push(gap);
   context.repository.persist();
   return gap;
+}
+
+function compileRunSummary(run: CompileRun) {
+  return {
+    compileRunId: run.id,
+    status: run.status,
+    total: run.total,
+    ready: run.ready,
+    blocked: run.blocked,
+    ambiguous: run.ambiguous,
+    skipped: run.skipped,
+    reused: run.reused,
+    nextAction:
+      run.blocked + run.ambiguous + run.skipped > 0
+        ? "review-compile-run"
+        : "preview-requirement-suite"
+  };
 }
 
 function connectorStatus(context?: BrainCreatorMcpContext, projectId?: string) {
@@ -6064,6 +6280,67 @@ function textResult(data: unknown): CallToolResult {
   return envelopeResult(successEnvelope(data), false);
 }
 
+function facadeTextResult(data: unknown, input: Record<string, unknown>): CallToolResult {
+  if (responseModeArg(input) === "full") return textResult(data);
+  return textResult(compactFacadePayload(data));
+}
+
+function compactFacadePayload(data: unknown) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { responseMode: "summary", status: "succeeded", summary: data };
+  }
+  const record = data as Record<string, unknown>;
+  if (typeof record.compileRunId === "string" && !record.items) {
+    return { ...record, responseMode: "summary" };
+  }
+  const preferredSummary =
+    record.reviewSummary ?? record.userSummary ?? record.summary ?? summarizeFacadeRecord(record);
+  return {
+    responseMode: "summary",
+    status: typeof record.status === "string" ? record.status : "succeeded",
+    ...(typeof record.mode === "string" ? { mode: record.mode } : {}),
+    ...(typeof record.stage === "string" ? { stage: record.stage } : {}),
+    summary: preferredSummary,
+    ...(typeof record.nextAction === "string" ? { nextAction: record.nextAction } : {}),
+    ...(typeof record.requiresConfirmation === "boolean"
+      ? { requiresConfirmation: record.requiresConfirmation }
+      : {}),
+    references: facadeReferences(record)
+  };
+}
+
+function summarizeFacadeRecord(record: Record<string, unknown>) {
+  const summary = Object.fromEntries(
+    Object.entries(record)
+      .filter(([, value]) =>
+        typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+      )
+      .slice(0, 20)
+  );
+  for (const key of ["verificationEvidence", "counts", "completeness"]) {
+    if (record[key] && typeof record[key] === "object") summary[key] = record[key];
+  }
+  return summary;
+}
+
+function facadeReferences(value: unknown, depth = 0): Record<string, string>[] {
+  if (!value || typeof value !== "object" || depth > 3) return [];
+  const references: Record<string, string>[] = [];
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof child === "string" && (/(?:Id|Path)$/i.test(key) || key === "id")) {
+      references.push({ [key]: child });
+    } else if (Array.isArray(child)) {
+      for (const item of child.slice(0, 10)) {
+        references.push(...facadeReferences(item, depth + 1));
+      }
+    } else if (child && typeof child === "object") {
+      references.push(...facadeReferences(child, depth + 1));
+    }
+    if (references.length >= 30) break;
+  }
+  return references.slice(0, 30);
+}
+
 function envelopeResult(envelope: unknown, isError: boolean): CallToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(envelope, null, 2) }],
@@ -6332,7 +6609,8 @@ type KnowledgeReviewTarget =
   | "requirement-suite-run"
   | "run-ledger"
   | "execution-diagnosis"
-  | "evidence";
+  | "evidence"
+  | "compile-run";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
@@ -6355,7 +6633,8 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "requirement-suite-run",
       "run-ledger",
       "execution-diagnosis",
-      "evidence"
+      "evidence",
+      "compile-run"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
@@ -6383,7 +6662,8 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "requirement-suite-run",
     "run-ledger",
     "execution-diagnosis",
-    "evidence"
+    "evidence",
+    "compile-run"
   ].includes(value);
 }
 
@@ -6861,7 +7141,8 @@ function configureTargetArg(input: Record<string, unknown>, key: string) {
       "checkpoint",
       "knowledge-project",
       "system-binding",
-      "connector"
+      "connector",
+      "runtime"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
@@ -6874,7 +7155,8 @@ function configureTargetArg(input: Record<string, unknown>, key: string) {
     | "checkpoint"
     | "knowledge-project"
     | "system-binding"
-    | "connector";
+    | "connector"
+    | "runtime";
 }
 
 function prepareActionArg(input: Record<string, unknown>, key: string) {
@@ -6890,6 +7172,10 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "rollback-legacy-diagnosis",
       "approve-baseline",
       "compile-cases",
+      "confirm-page-binding",
+      "resolve-gap",
+      "dismiss-gap",
+      "reopen-gap",
       "resolve-test-data",
       "prepare-test-data",
       "submit-test-data",
@@ -6913,6 +7199,10 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "rollback-legacy-diagnosis"
     | "approve-baseline"
     | "compile-cases"
+    | "confirm-page-binding"
+    | "resolve-gap"
+    | "dismiss-gap"
+    | "reopen-gap"
     | "resolve-test-data"
     | "prepare-test-data"
     | "submit-test-data"
@@ -7273,8 +7563,16 @@ function gapStatusArg(input: Record<string, unknown>, key: string) {
   if (value === undefined) {
     return undefined;
   }
-  if (value !== "open" && value !== "resolved") {
+  if (value !== "open" && value !== "resolved" && value !== "dismissed") {
     throw new Error(`${key} is invalid`);
+  }
+  return value;
+}
+
+function responseModeArg(input: Record<string, unknown>) {
+  const value = optionalStringArg(input, "responseMode") ?? "full";
+  if (value !== "summary" && value !== "full") {
+    throw new Error("responseMode is invalid");
   }
   return value;
 }

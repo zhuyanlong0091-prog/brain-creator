@@ -14,6 +14,7 @@
 - [中文快速开始](zh-CN/getting-started.md): 安装、诊断并完成第一次需求分析。
 - [中文核心概念](zh-CN/core-concepts.md): 理解 Requirement Brain、System Brain、执行计划、Bug 与 Gap。
 - [中文需求到测试](zh-CN/guides/requirement-to-test.md): 从需求来源完成审批、系统绑定、数据准备、执行和复盘。
+- [中文可信控制面](zh-CN/guides/trusted-control-plane.md): 使用 Facade 完成鉴权验证、批量编译、页面绑定和 Gap 生命周期。
 - [中文 CLI 参考](zh-CN/cli-reference.md): 查询统一命令、参数和环境变量。
 - [中文 MCP 安装](zh-CN/mcp-installation.md): 配置 Claude、Codex 与 host-agent。
 - [中文故障排查](zh-CN/troubleshooting.md): 按症状解决安装和执行问题。
@@ -22,6 +23,7 @@
 ## Guides
 
 - [Requirement to test](guides/requirement-to-test.md): Take an approved requirement through system binding, evidence collection, data preparation, execution, and review.
+- [Trusted control plane](guides/trusted-control-plane.md): Use bounded Facade responses, verified auth, batch compilation, confirmed page bindings, and auditable Gap transitions.
 - [Agent usage](agent-usage.md): Use natural-language entrypoints and understand Facade approval behavior.
 - [Session resume workflow](e2e-session-resume-workflow.md): Restore a persisted Brain Creator workflow in a new Agent session.
 - [v2 low-level quickstart](v2-quickstart.md): Inspect internal and compatibility `bc_*` workflows.
@@ -32,6 +34,7 @@
 - [MCP installation](mcp-installation.md): Configure Claude, Codex, host-agent, the Codex plugin, and MCP transport.
 - [Troubleshooting](troubleshooting.md): Diagnose installation, provider, browser, authentication, connector, evidence, and execution problems by symptom.
 - [Release checklist](release-checklist.md): Verify source, package, plugin, and npm publish gates.
+- [Execution quality register](quality/problem-register.md): Track the sanitized 41-item execution quality baseline and acceptance gates.
 
 ## Product rules
 

@@ -63,7 +63,9 @@ The exploration creates versioned PageModels, LocatorPoints, ProbeResults, navig
 
 ### 6. Compile Executable Cases
 
-The Agent calls `bc_prepare action=compile-cases` with `systemId`. Brain Creator selects the target page from semantic and role-compatible evidence, computes shortest paths from observed graph entry pages, and binds steps to real PageModel, navigation-edge, LocatorPoint, state-transition, and ProbeResult evidence. It compiles implicit navigation only when the shortest path is unique and records the result in `workflowPath`/`pathPlan`. Equally short alternatives, an ambiguous or unreachable target, exhausted search budget, and missing locator evidence create a Gap. The Agent must present `candidatePathCount` plus the returned candidate details instead of choosing one; details are capped at 10 to protect context.
+The Agent calls `bc_prepare action=compile-cases` with a `requirementSetId`, explicit `testIntentIds`, or one compatible `testIntentId`, plus `systemId` and `responseMode=summary`. Brain Creator creates a bounded CompileRun and compiles unchanged inputs idempotently. Review details with `bc_review target=compile-run`, `limit`, and `offset`.
+
+Brain Creator selects the target page from semantic and role-compatible evidence, computes shortest paths from observed graph entry pages, and binds steps to real PageModel, navigation-edge, LocatorPoint, state-transition, and ProbeResult evidence. Equally plausible pages create a Gap. Present the candidates and use `bc_prepare action=confirm-page-binding` only after explicit user confirmation; never choose one silently.
 
 After navigation planning, Brain Creator evaluates generic `SystemBrainStateTransition` evidence and returns `stateActions`/`statePlan`. A single relevant transition may enrich an existing click/select step or insert one observed step before its assertion, including the captured input value and LocatorPoint. Equal transitions, multiple reusable source steps, missing values, or missing locators block with a Gap. Business examples are validation fixtures only and must never become planner conditionals.
 

@@ -32,8 +32,18 @@ const MIN_WORKFLOW_TARGET_SCORE = 4;
 export function planWorkflowPath(
   steps: ExecutableCaseStep[],
   brain: SystemBrain,
-  contextQuery = ""
+  contextQuery = "",
+  confirmedTargetPageModelId?: string
 ): WorkflowPathPlan {
+  const confirmedTarget = confirmedTargetPageModelId
+    ? brain.pages.find((page) => page.pageModelId === confirmedTargetPageModelId)
+    : undefined;
+  if (confirmedTargetPageModelId && !confirmedTarget) {
+    return {
+      ...emptyPlan("missing", steps),
+      reason: "The confirmed page binding is not available in the current System Brain"
+    };
+  }
   const capturedEdges = brain.navigationEdges.filter(
     (
       edge
@@ -43,10 +53,28 @@ export function planWorkflowPath(
       brain.pages.some((page) => page.pageModelId === edge.toPageModelId)
   );
   if (brain.pages.length <= 1 || capturedEdges.length === 0) {
-    return emptyPlan("not-required", steps);
+    return confirmedTarget
+      ? {
+          verdict: "not-required",
+          startPageModelId: confirmedTarget.pageModelId,
+          targetPageModelId: confirmedTarget.pageModelId,
+          pageModelIds: [confirmedTarget.pageModelId],
+          navigationSourceRefs: [],
+          candidatePathCount: 1,
+          candidatePaths: [
+            {
+              pageModelIds: [confirmedTarget.pageModelId],
+              navigationLabels: [],
+              sourceRefs: [`page-model:${confirmedTarget.pageModelId}`]
+            }
+          ],
+          steps: pinStepsToPage(steps, confirmedTarget.pageModelId)
+        }
+      : emptyPlan("not-required", steps);
   }
-
-  const targetSelection = selectWorkflowTargetPage(steps, brain, contextQuery);
+  const targetSelection = confirmedTarget
+    ? { verdict: "unique" as const, page: confirmedTarget, pageModelIds: [confirmedTarget.pageModelId] }
+    : selectWorkflowTargetPage(steps, brain, contextQuery);
   if (targetSelection.verdict === "ambiguous") {
     return {
       ...emptyPlan("ambiguous", steps),

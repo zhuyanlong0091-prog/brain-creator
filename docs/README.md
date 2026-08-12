@@ -13,6 +13,7 @@ This documentation is organized by what you are trying to accomplish. Start with
 | Install Brain Creator and analyze one requirement | [Quickstart](getting-started.md) |
 | Understand the product model and safety boundaries | [Core concepts](core-concepts.md) |
 | Take an approved requirement through real execution | [Requirement to test](guides/requirement-to-test.md) |
+| Change auth, compile, page binding, or Gap state safely | [Trusted control plane](guides/trusted-control-plane.md) |
 | Connect Claude Code, Codex, or another MCP host | [MCP installation](mcp-installation.md) |
 | Look up a CLI command or option | [CLI reference](cli-reference.md) |
 | Diagnose a setup or execution failure | [Troubleshooting](troubleshooting.md) |
@@ -45,6 +46,7 @@ Start with [Troubleshooting](troubleshooting.md). Then use Brain Creator review 
 
 - [Core concepts](core-concepts.md): the mental model and lifecycle.
 - [Agent usage guide](agent-usage.md): detailed Facade behavior and approval rules.
+- [Trusted control plane](guides/trusted-control-plane.md): safe state changes and bounded Facade responses.
 - [Session resume workflow](e2e-session-resume-workflow.md): restoring state in a new Agent session.
 - [v2 low-level quickstart](v2-quickstart.md): compatibility reference for internal `bc_*` tools.
 
@@ -54,6 +56,7 @@ Start with [Troubleshooting](troubleshooting.md). Then use Brain Creator review 
 - [MCP installation and configuration](mcp-installation.md)
 - [Machine-readable documentation index](llms.txt)
 - [Release checklist](release-checklist.md)
+- [Execution quality register](quality/problem-register.md)
 - [Release notes 2.1.1](release-notes-2.1.1.md)
 - [Release notes 2.0.3](release-notes-2.0.3.md)
 - [Release notes 2.0.2](release-notes-2.0.2.md)
