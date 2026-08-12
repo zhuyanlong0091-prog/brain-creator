@@ -3,9 +3,11 @@ import { existsSync } from "node:fs";
 import { delimiter, extname, join } from "node:path";
 import {
   resolveBrainCreatorDataFile,
+  resolveBrainCreatorStoreDir,
   resolveBrainCreatorKnowledgeDir,
   resolveBrainCreatorWorkspace
 } from "../shared/workspace.js";
+import { inspectStoreHealth, type StoreHealth } from "../storage/storeDoctor.js";
 
 type DoctorEnv = Record<string, string | undefined>;
 type SupportedBridgeProvider = "auto" | "claude" | "codex" | "host-agent" | "disabled";
@@ -28,6 +30,7 @@ export type DoctorReport = {
   ok: boolean;
   workspace: string;
   dataFile: string;
+  storeDir: string;
   knowledgeDir: string;
   toolProfile: "facade" | "full" | "invalid";
   connectors: { feishu: "direct" | "host-fallback" | "invalid" };
@@ -62,10 +65,12 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
   const fileExists = options.fileExists ?? existsSync;
   const workspace = resolveBrainCreatorWorkspace(cwd, env);
   const dataFile = resolveBrainCreatorDataFile(cwd, env);
+  const storeDir = resolveBrainCreatorStoreDir(cwd, env);
   const knowledgeDir = resolveBrainCreatorKnowledgeDir(cwd, env);
   const toolProfile = doctorToolProfile(env);
   const feishu = doctorFeishuMode(env);
   const agentBridge = resolveDoctorAgentBridge(env, commandExists);
+  const storage = inspectStoreHealth({ storeDir, legacyPath: dataFile });
   const checks: DoctorCheck[] = [
     {
       name: "Workspace",
@@ -82,6 +87,7 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
       status: "pass",
       message: `Generated knowledge will use ${knowledgeDir}.`
     },
+    storageCheck(storage),
     toolProfileCheck(toolProfile),
     feishuConnectorCheck(feishu),
     bridgeCommandCheck(env, commandExists, agentBridge),
@@ -95,6 +101,7 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
     ok: checks.every((check) => check.status !== "fail"),
     workspace,
     dataFile,
+    storeDir,
     knowledgeDir,
     toolProfile,
     connectors: { feishu },
@@ -108,6 +115,7 @@ export function formatDoctorReport(report: DoctorReport) {
     `Brain Creator doctor: ${report.ok ? "ready" : "action required"}`,
     `Workspace: ${report.workspace}`,
     `Data file: ${report.dataFile}`,
+    `Store directory: ${report.storeDir}`,
     `Knowledge directory: ${report.knowledgeDir}`,
     `Tool profile: ${report.toolProfile}`,
     `Feishu connector: ${report.connectors.feishu}`,
@@ -123,6 +131,15 @@ export function formatDoctorReport(report: DoctorReport) {
     ])
   ];
   return lines.join("\n");
+}
+
+function storageCheck(storage: StoreHealth): DoctorCheck {
+  return {
+    name: "Sharded store",
+    status: storage.status,
+    message: storage.message,
+    remediation: storage.remediation
+  };
 }
 
 function bridgeCommandCheck(

@@ -1,6 +1,6 @@
 # 可信控制面
 
-所有运行状态变更都应通过 Brain Creator Facade 完成。不要通过修改 `.brain-creator/local-assets.json`、生成测试或已安装 npm 包来绕过工作流。
+所有运行状态变更都应通过 Brain Creator Facade 完成。不要通过修改 `.brain-creator/store/`、`.brain-creator/local-assets.json`、生成测试或已安装 npm 包来绕过工作流。
 
 ## 控制 Agent 返回体大小
 

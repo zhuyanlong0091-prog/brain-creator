@@ -247,6 +247,24 @@ describe("facade control plane", () => {
     );
   });
 
+  it("rebuilds the sharded asset index through the runtime control plane", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({ workDir });
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_configure", {
+        target: "runtime",
+        operation: "rebuild-index"
+      })
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: "index-rebuilt",
+        index: expect.objectContaining({ index: "asset-index.json" })
+      })
+    );
+  });
+
   it("rejects an invalid store reload without replacing in-memory assets", async () => {
     const workDir = await tempDir();
     const dataFilePath = join(workDir, "assets.json");

@@ -44,9 +44,12 @@ describe("handleBrainCreatorTool", () => {
       });
 
       const persisted = JSON.parse(
-        await readFile(join(workDir, ".brain-creator", "local-assets.json"), "utf8")
+        await readFile(
+          join(workDir, ".brain-creator", "store", "collections", "systemProfiles.json"),
+          "utf8"
+        )
       );
-      expect(persisted.systemProfiles).toEqual([
+      expect(persisted).toEqual([
         expect.objectContaining({ name: "Orders Console" })
       ]);
     } finally {

@@ -11,6 +11,7 @@ Use the consolidated `brain-creator` command to install, inspect, diagnose, and 
 | `brain-creator config` | Print the redacted effective MCP configuration | `npx brain-creator config --json` |
 | `brain-creator config write` | Intentionally write MCP configuration | `npx brain-creator config write --provider codex` |
 | `brain-creator plugin install` | Install the Codex plugin and host-agent configuration | `npx brain-creator plugin install` |
+| `brain-creator export` | Export a completed Suite run with its evidence manifest | `npx brain-creator export --suite <id> --output exports/suite.zip` |
 | `brain-creator mcp` | Start the MCP server over stdio | `npx brain-creator mcp` |
 | `brain-creator help legacy` | List standalone compatibility executables | `npx brain-creator help legacy` |
 | `brain-creator --version` | Print the installed version | `npx brain-creator --version` |
@@ -111,6 +112,14 @@ Starts the MCP server over stdio. MCP hosts normally run this command from `.mcp
 npx brain-creator mcp
 ```
 
+## `brain-creator export`
+
+```text
+brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>] [--json]
+```
+
+Exports a completed document Suite as a portable ZIP containing `manifest.json` and available evidence. Missing files are listed in the manifest. The repository, secrets, browser storage state, and unrelated workspace files are excluded.
+
 ## Compatibility Commands
 
 Earlier package versions exposed standalone executables:
@@ -132,6 +141,7 @@ They remain available for existing automation. New documentation and examples us
 | `BRAIN_CREATOR_AGENT_PROVIDER` | Agent execution model | `host-agent` |
 | `BRAIN_CREATOR_AGENT_TIMEOUT_MS` | Agent call timeout | `120000` |
 | `BRAIN_CREATOR_KNOWLEDGE_DIR` | External knowledge root | `<absolute-knowledge-path>` |
+| `BRAIN_CREATOR_STORE_DIR` | Schema 17 sharded runtime store | `<workspace>/.brain-creator/store` |
 | `BRAIN_CREATOR_FEISHU_APP_ID` | Feishu OpenAPI app ID | environment secret reference |
 | `BRAIN_CREATOR_FEISHU_APP_SECRET` | Feishu OpenAPI app secret | environment secret reference |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE` | Explicit browser executable | local Chrome/Edge path |

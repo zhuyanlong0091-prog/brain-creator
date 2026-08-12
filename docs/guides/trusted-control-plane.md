@@ -1,6 +1,6 @@
 # Trusted control plane
 
-Use the Brain Creator Facade to change runtime state. Do not edit `.brain-creator/local-assets.json`, generated tests, or installed package files to unblock a workflow.
+Use the Brain Creator Facade to change runtime state. Do not edit `.brain-creator/store/`, `.brain-creator/local-assets.json`, generated tests, or installed package files to unblock a workflow.
 
 ## Keep Agent responses bounded
 

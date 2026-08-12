@@ -2,17 +2,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import { join, resolve } from "node:path";
 import {
   resolveBrainCreatorDataFile,
+  resolveBrainCreatorStoreDir,
   resolveBrainCreatorKnowledgeDir,
   resolveBrainCreatorWorkspace
 } from "./workspace.js";
 
 const previousWorkspace = process.env.BRAIN_CREATOR_WORKSPACE;
 const previousDataFile = process.env.BRAIN_CREATOR_DATA_FILE;
+const previousStoreDir = process.env.BRAIN_CREATOR_STORE_DIR;
 const previousKnowledgeDir = process.env.BRAIN_CREATOR_KNOWLEDGE_DIR;
 
 afterEach(() => {
   restoreEnv("BRAIN_CREATOR_WORKSPACE", previousWorkspace);
   restoreEnv("BRAIN_CREATOR_DATA_FILE", previousDataFile);
+  restoreEnv("BRAIN_CREATOR_STORE_DIR", previousStoreDir);
   restoreEnv("BRAIN_CREATOR_KNOWLEDGE_DIR", previousKnowledgeDir);
 });
 
@@ -48,6 +51,21 @@ describe("Brain Creator workspace resolution", () => {
     expect(resolveBrainCreatorDataFile("business-workspace")).toBe(
       resolve("custom/assets.json")
     );
+  });
+
+  it("stores sharded runtime state under the resolved workspace by default", () => {
+    delete process.env.BRAIN_CREATOR_STORE_DIR;
+    process.env.BRAIN_CREATOR_WORKSPACE = "business-workspace";
+
+    expect(resolveBrainCreatorStoreDir("ignored")).toBe(
+      join(resolve("business-workspace"), ".brain-creator", "store")
+    );
+  });
+
+  it("uses BRAIN_CREATOR_STORE_DIR when it is configured", () => {
+    process.env.BRAIN_CREATOR_STORE_DIR = "custom/store";
+
+    expect(resolveBrainCreatorStoreDir("business-workspace")).toBe(resolve("custom/store"));
   });
 
   it("stores generated knowledge under the resolved workspace by default", () => {
