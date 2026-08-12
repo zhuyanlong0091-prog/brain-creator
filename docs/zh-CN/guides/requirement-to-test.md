@@ -157,6 +157,8 @@ RunLedger 提供时间线，ExecutionEvidence 提供步骤证据。Bug 必须关
 
 系统探索还会记录采集过程中发现的浏览器表面。System Brain 可以区分主文档、允许范围内的 iframe、开放 Shadow DOM 和 Wujie-like 容器摘要。安全交互导致 URL 变化时会加入探索队列。表面证据只用于观察，不会授权写操作，也不会静默推断跨 frame 动作。
 
+使用 `bc_review` 并设置 `target=coverage` 查看 TestIntent 执行台账。每条意图都会被归类为 strong-verified、limited、failed、blocked、not-selected 或 superseded。同一响应还会返回来源台账，包含块、需求版本、知识节点、意图、可执行用例、执行证据和未读取附件。
+
 ## 10. 恢复或回归
 
 新会话中发送：

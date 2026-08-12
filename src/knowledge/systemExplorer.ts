@@ -42,6 +42,7 @@ export type SystemInteractionEvidence = {
   urlChanged: boolean;
   blockedRequests: Array<{ method: string; url: string }>;
   status: "observed" | "no-change" | "blocked" | "failed";
+  reacquiredPage?: boolean;
   screenshotPath?: string;
 };
 
@@ -420,6 +421,7 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
             input.interactionMode === "safe" && input.budget.maxInteractionsPerPage > 0
               ? await probeSafeInteractions({
                   page,
+                  context,
                   pageUrl: finalUrl,
                   allowedUrls: input.allowedUrls,
                   artifactDir: input.artifactDir,
@@ -545,6 +547,7 @@ export function classifySafeInteractionCandidate(candidate: SafeInteractionCandi
 
 async function probeSafeInteractions(input: {
   page: import("@playwright/test").Page;
+  context: import("@playwright/test").BrowserContext;
   pageUrl: string;
   allowedUrls: string[];
   artifactDir: string;
@@ -552,7 +555,8 @@ async function probeSafeInteractions(input: {
   limit: number;
   deadline: number;
 }): Promise<SystemInteractionEvidence[]> {
-  const candidates = (await collectInteractionCandidates(input.page))
+  let activePage = input.page;
+  const candidates = (await collectInteractionCandidates(activePage))
     .map((candidate) => ({ candidate, decision: classifySafeInteractionCandidate(candidate) }))
     .filter(
       (
@@ -569,11 +573,17 @@ async function probeSafeInteractions(input: {
 
   for (let index = 0; index < candidates.length; index += 1) {
     if (Date.now() >= input.deadline) break;
-    if (input.page.isClosed()) break;
+    let reacquiredPage = false;
+    if (activePage.isClosed()) {
+      const replacement = await reacquirePage(input.context, input.pageUrl, input.deadline);
+      if (!replacement) break;
+      activePage = replacement;
+      reacquiredPage = true;
+    }
     const { candidate, decision } = candidates[index];
     let before: SystemInteractionState;
     try {
-      before = await captureInteractionState(input.page);
+      before = await captureInteractionState(activePage);
     } catch {
       break;
     }
@@ -598,12 +608,12 @@ async function probeSafeInteractions(input: {
       }
       await route.continue();
     };
-    await input.page.route("**/*", routeHandler);
+    await activePage.route("**/*", routeHandler);
     let after = before;
     let status: SystemInteractionEvidence["status"] = "failed";
     let screenshotPath: string | undefined;
     try {
-      const target = input.page.locator(candidate.selector).first();
+      const target = activePage.locator(candidate.selector).first();
       if (!(await target.isVisible())) {
         throw new Error("Safe interaction target is not visible");
       }
@@ -615,8 +625,14 @@ async function probeSafeInteractions(input: {
         await target.click({ timeout: interactionTimeout(input.deadline) });
       }
       const settleMs = Math.min(300, Math.max(0, input.deadline - Date.now()));
-      if (settleMs > 0) await input.page.waitForTimeout(settleMs);
-      after = await captureInteractionState(input.page);
+      if (settleMs > 0) await activePage.waitForTimeout(settleMs);
+      if (activePage.isClosed()) {
+        const replacement = await reacquirePage(input.context, input.pageUrl, input.deadline);
+        if (!replacement) throw new Error("Active page closed and could not be reacquired");
+        activePage = replacement;
+        reacquiredPage = true;
+      }
+      after = await captureInteractionState(activePage);
       status =
         blockedRequests.length > 0
           ? "blocked"
@@ -630,7 +646,7 @@ async function probeSafeInteractions(input: {
             index + 1
           ).padStart(2, "0")}.png`
         );
-        await input.page
+        await activePage
           .screenshot({ path: screenshotPath, fullPage: true })
           .catch(() => {
             screenshotPath = undefined;
@@ -639,7 +655,7 @@ async function probeSafeInteractions(input: {
     } catch {
       status = blockedRequests.length > 0 ? "blocked" : "failed";
     } finally {
-      await input.page.unroute("**/*", routeHandler).catch(() => undefined);
+      await activePage.unroute("**/*", routeHandler).catch(() => undefined);
     }
     transitions.push({
       target: {
@@ -659,17 +675,18 @@ async function probeSafeInteractions(input: {
       urlChanged: before.url !== after.url,
       blockedRequests,
       status,
+      ...(reacquiredPage ? { reacquiredPage: true } : {}),
       screenshotPath
     });
     if (Date.now() < input.deadline) {
-      await input.page
+      await activePage
         .goto(input.pageUrl, {
           waitUntil: "domcontentloaded",
           timeout: interactionTimeout(input.deadline)
         })
         .catch(() => undefined);
       const settleMs = Math.min(200, Math.max(0, input.deadline - Date.now()));
-      if (settleMs > 0) await input.page.waitForTimeout(settleMs);
+      if (settleMs > 0) await activePage.waitForTimeout(settleMs);
     }
   }
   return transitions;
@@ -902,6 +919,25 @@ async function capturePage(
     issues,
     surfaces: await collectBrowserSurfaceEvidence(page, allowedUrls)
   };
+}
+
+async function reacquirePage(
+  context: import("@playwright/test").BrowserContext,
+  pageUrl: string,
+  deadline: number
+) {
+  if (Date.now() >= deadline) return undefined;
+  const page = await context.newPage();
+  try {
+    await page.goto(pageUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: interactionTimeout(deadline)
+    });
+    return page;
+  } catch {
+    await page.close().catch(() => undefined);
+    return undefined;
+  }
 }
 
 async function isLoginOrChallengePage(

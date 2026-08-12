@@ -19,6 +19,14 @@ export type SystemBrainPage = {
   sourceRefs: string[];
 };
 
+export type PageCandidateScore = {
+  pageModelId: string;
+  pageName: string;
+  route: string;
+  score: number;
+  matchedEvidence: string[];
+};
+
 export type SystemBrainWorkflow = {
   trainingSessionId: string;
   pageModelId: string;
@@ -512,6 +520,10 @@ export function bindStepsToSystemBrain(
     reason: string;
   }> = [];
   if (!page && hasUnpinnedSteps) {
+    const candidates = scorePageCandidates(
+      brain.pages,
+      `${contextQuery} ${steps.map((step) => step.instruction).join(" ")}`
+    );
     return {
       steps,
       missingEvidence: steps.map((step) => ({
@@ -520,7 +532,10 @@ export function bindStepsToSystemBrain(
         reason:
           brain.pages.length === 0
             ? "System Brain has no page evidence"
-            : "System Brain has no unambiguous page evidence"
+            : `System Brain has no unambiguous page evidence; candidates: ${candidates
+                .slice(0, 3)
+                .map((candidate) => `${candidate.pageName} (${candidate.score})`)
+                .join(", ")}`
       }))
     };
   }
@@ -679,14 +694,38 @@ function matchingStateTransitions(
 
 function selectPage(pages: SystemBrainPage[], query: string) {
   if (pages.length <= 1) return pages[0];
-  const scored = pages
-    .map((page) => ({
-      page,
-      score: tokenOverlap(query.toLowerCase(), `${page.name} ${page.route}`.toLowerCase())
-    }))
-    .sort((left, right) => right.score - left.score);
+  const scored = scorePageCandidates(pages, query).map((candidate) => ({
+    page: pages.find((page) => page.pageModelId === candidate.pageModelId)!,
+    score: candidate.score
+  }));
   if (scored[0].score === 0 || scored[0].score === scored[1].score) return undefined;
   return scored[0].page;
+}
+
+export function scorePageCandidates(
+  pages: SystemBrainPage[],
+  query: string
+): PageCandidateScore[] {
+  const normalizedQuery = query.toLowerCase();
+  return pages
+    .map((page) => {
+      const evidence = [
+        page.name,
+        page.route,
+        ...page.locators.flatMap((locator) => [locator.name, locator.text])
+      ].filter(Boolean);
+      const matchedEvidence = evidence.filter(
+        (value) => tokenOverlap(normalizedQuery, value.toLowerCase()) > 0
+      );
+      return {
+        pageModelId: page.pageModelId,
+        pageName: page.name,
+        route: page.route,
+        score: tokenOverlap(normalizedQuery, evidence.join(" ").toLowerCase()),
+        matchedEvidence
+      };
+    })
+    .sort((left, right) => right.score - left.score || left.pageName.localeCompare(right.pageName));
 }
 
 function tokenOverlap(left: string, right: string) {

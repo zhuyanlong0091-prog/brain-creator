@@ -22,25 +22,25 @@ Status meanings:
 | B1 | SPA exploration missed navigation transitions | partial | PR E | Link navigation and observed safe-interaction URL changes now create queued targets; popup and full remount recovery remain |
 | B2 | Shared labels produced ambiguous page selection | partial | PR A/PR E | Confirmed page binding exists; candidate evidence and BrowserSurface scoring remain |
 | B3 | Shadow DOM actions were not reliably reachable | partial | PR E | Open Shadow DOM, iframe, and Wujie-like surfaces are recorded as System Brain evidence; surface-scoped actions still need fixtures |
-| B4 | SPA remount invalidated the active Page | open | PR E | Active page is reacquired after remount, popup, or close events |
+| B4 | SPA remount invalidated the active Page | partial | PR E | Safe exploration now reacquires a closed/invalid active page before continuing; explicit remount fixture coverage remains |
 | B5 | Initial-state exploration missed conditional actions | partial | PR E | ExplorationScenario discovers state- and data-dependent controls |
 | C1 | Short-lived login state expired during suites | partial | PR D | Fresh-context preflight detects expiry and creates AuthCheckpoint; provider-specific automatic refresh remains |
 | C2 | Generated seed omitted a supported auth reference | partial | PR D | Tests reference protected storageState or runtime auth environment variables; automatic token/cookie storageState conversion remains |
-| C3 | Test credentials appeared in generated files | partial | PR D | Token/cookie values are removed from generated seeds and legacy ciphertext migrates; full artifact/export secret scan remains |
+| C3 | Test credentials appeared in generated files | partial | PR D/PR E | Token/cookie values are removed from generated seeds, legacy ciphertext migrates, and Suite export blocks known credential values; full generated-artifact scan remains |
 | C4 | Authentication overhead limited suite throughput | partial | PR D | Verified storageState is cached for a bounded TTL while each test still gets an isolated context; controlled concurrency remains gated by data isolation |
-| D1 | Unread attachments were misclassified as model limitations | open | PR F | Assets are inventoried and marked unread until an OCR/vision adapter returns evidence |
+| D1 | Unread attachments were misclassified as model limitations | resolved | PR F | Source ledger inventories attachments as `unread` with an explicit no-OCR/vision reason |
 | D2 | Requirements omitted concrete UI paths | partial | PR E/PR F | Missing paths are supplied by confirmed System Brain evidence or remain explicit Gap items |
-| D3 | Source fields could not be reconciled to analysis | open | PR F | Source-field ledger reconciles source, node, intent, case, and result counts |
+| D3 | Source fields could not be reconciled to analysis | resolved | PR F | Source ledger reconciles blocks, requirements, nodes, intents, cases, evidence, and attachments |
 | D4 | Eval classification lacked explainable provenance | partial | PR F | Every class stores source passage, reason, policy version, and confirmer |
 | D5 | Passing cases lacked replayable trace evidence | partial | PR C/PR D | Default structured Playwright runs request `--trace=on` and retain reporter artifact references; trace existence validation and legacy/custom-runner coverage remain |
 | D6 | Calls lacked operator identity and unique trace IDs | partial | PR A/PR C | UUID trace IDs and Ledger fields exist; production call sites still need to populate operator, provider, session, and current step |
 | D7 | Assertions and runtime evidence were disconnected | partial | PR C | Reporter joins assertion results and attachments; step-level console/network/trace correlation remains to be completed |
 | D8 | Screenshots had no business meaning | partial | PR C | Seed exposes `bc.step()` and Generator is instructed to use it; generated-file enforcement and full step metadata remain |
 | E1 | Weak checks were reported as full validation | resolved | PR C | AssertionContract and assuranceLevel prevent reporter-less or partially mapped passes from being strong validation |
-| E2 | Unexecuted TestIntents had no explanation | open | PR F | 100% of TestIntents are classified by execution or non-execution reason |
+| E2 | Unexecuted TestIntents had no explanation | resolved | PR F | Coverage ledger classifies every intent as strong, limited, failed, blocked, not-selected, or superseded |
 | E3 | Field checks displaced workflow coverage | open | PR F | Golden Eval includes workflow and state-transition coverage |
 | E4 | Multi-role journeys were not executed | open | PR F | Actor Journey switches AuthProfiles and records role transitions in Ledger |
-| E5 | A single green run implied stability | open | PR F | Critical journeys report repeated-run stability statistics |
+| E5 | A single green run implied stability | partial | PR F | Coverage ledger reports terminal run counts and strong-pass stability when repeated evidence exists; automatic repeated-run orchestration remains |
 | E6 | Created test data was not reliably cleaned | resolved | existing | TestData leases and cleanup states are covered by provider and suite tests |
 | E7 | Host-reported success lacked tool verification | partial | existing/PR C | Tool-side Playwright execution and structured Reporter are used when available; compatibility fallback still records non-strong results without reporter evidence |
 | F1 | Generated baselines were fragile across upgrades | resolved | PR A/PR B | Compile keys supersede stale cases; portable artifact manifests record hashes and missing evidence |
@@ -57,9 +57,9 @@ Status meanings:
 
 | Status | Count |
 |---|---:|
-| resolved | 6 |
-| partial | 19 |
-| open | 16 |
+| resolved | 12 |
+| partial | 25 |
+| open | 2 |
 | deferred | 2 |
 | total | 41 |
 

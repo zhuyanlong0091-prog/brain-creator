@@ -923,7 +923,17 @@ export class KnowledgeService {
         classification,
         executableCaseIds: caseIds,
         evidenceIds: results.map((item) => item.id),
-        requirementRefs: intent.requirementRefs
+        requirementRefs: intent.requirementRefs,
+        stability: {
+          runs: results.length,
+          passed: results.filter((item) => item.status === "passed" && item.assuranceLevel === "strong").length,
+          failed: results.filter((item) => item.status === "failed").length,
+          blocked: results.filter((item) => item.status === "blocked").length,
+          rate: results.length > 0
+            ? results.filter((item) => item.status === "passed" && item.assuranceLevel === "strong").length / results.length
+            : undefined,
+          repeated: results.length >= 2
+        }
       } as const;
     });
     const counts = items.reduce<Record<string, number>>((result, item) => {
@@ -935,6 +945,46 @@ export class KnowledgeService {
       counts,
       items
     };
+  }
+
+  requirementSourceLedger(projectId: string) {
+    this.getProject(projectId);
+    const sources = this.repository.requirementSources.filter(
+      (source) => source.knowledgeProjectId === projectId
+    );
+    return sources.map((source) => {
+      const sets = this.repository.requirementSets.filter((item) => item.sourceId === source.id);
+      const setIds = new Set(sets.map((item) => item.id));
+      const nodes = this.repository.knowledgeNodes.filter(
+        (item) => item.requirementSetId && setIds.has(item.requirementSetId)
+      );
+      const intents = this.repository.testIntents.filter((item) => setIds.has(item.requirementSetId));
+      const intentIds = new Set(intents.map((item) => item.id));
+      const cases = this.repository.executableCases.filter((item) => intentIds.has(item.testIntentId));
+      const caseIds = new Set(cases.map((item) => item.id));
+      const evidence = this.repository.executionEvidence.filter((item) => caseIds.has(item.executableCaseId));
+      return {
+        sourceId: source.id,
+        title: source.title,
+        source: source.source,
+        revision: source.revision,
+        contentHash: source.contentHash,
+        blockCount: source.blocks.length,
+        attachmentCount: source.attachments.length,
+        unreadAttachments: source.attachments.map((attachment) => ({
+          name: attachment.name,
+          url: attachment.url,
+          type: attachment.type,
+          status: "unread" as const,
+          reason: "No OCR or visual adapter has analyzed this attachment yet."
+        })),
+        requirementSetCount: sets.length,
+        nodeCount: nodes.length,
+        intentCount: intents.length,
+        executableCaseCount: cases.length,
+        evidenceCount: evidence.length
+      };
+    });
   }
 
   listExecutableCases(projectId: string) {

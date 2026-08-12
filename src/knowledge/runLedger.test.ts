@@ -37,6 +37,9 @@ describe("RunLedgerService", () => {
       expect.objectContaining({
         knowledgeProjectId: "knowledge-orders",
         systemId: "system-orders",
+        operator: "local-agent",
+        provider: "unknown",
+        traceId: expect.stringMatching(/^[0-9a-f-]{36}$/),
         requirementSuiteRunId: "suite-orders"
       })
     ]);

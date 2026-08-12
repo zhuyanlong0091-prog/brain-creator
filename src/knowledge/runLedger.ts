@@ -2,6 +2,7 @@ import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   RunLedgerEntry
 } from "../domain/types.js";
+import { randomUUID } from "node:crypto";
 import { id } from "../shared/id.js";
 
 type AppendRunLedgerEntryInput = Omit<RunLedgerEntry, "id" | "createdAt">;
@@ -30,6 +31,13 @@ export class RunLedgerService {
       runType:
         input.runType ??
         (input.caseSuiteId ? "document-suite" : "requirement-suite"),
+      operator: input.operator ?? process.env.BRAIN_CREATOR_OPERATOR ?? "local-agent",
+      provider:
+        input.provider ??
+        process.env.BRAIN_CREATOR_AGENT_PROVIDER ??
+        "unknown",
+      sessionId: input.sessionId ?? process.env.BRAIN_CREATOR_SESSION_ID,
+      traceId: input.traceId ?? randomUUID(),
       createdAt: this.now()
     };
     this.repository.runLedgerEntries.push(entry);

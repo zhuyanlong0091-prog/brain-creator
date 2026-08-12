@@ -17,6 +17,22 @@ describe("TestIntent coverage ledger", () => {
       ["set-superseded", "superseded"]
     ] as const;
     for (const [id, status] of sets) {
+      repository.requirementSources.push({
+        id: `source-${id}`,
+        knowledgeProjectId: project.id,
+        source: `docs/${id}.md`,
+        sourceType: "local-file",
+        title: id,
+        contentHash: id,
+        content: "Requirement content",
+        blocks: [{ type: "paragraph", text: "Requirement content" }],
+        attachments: id === "set-strong" ? [{ name: "flow.png", type: "image/png" }] : [],
+        warnings: [],
+        accessStatus: "available",
+        revision: 1,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
       repository.requirementSets.push({
         id,
         knowledgeProjectId: project.id,
@@ -94,5 +110,14 @@ describe("TestIntent coverage ledger", () => {
       superseded: 1
     });
     expect(ledger.items.every((item) => item.requirementRefs.length === 1)).toBe(true);
+    expect(service.requirementSourceLedger(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceId: "source-set-strong",
+          attachmentCount: 1,
+          unreadAttachments: [expect.objectContaining({ status: "unread" })]
+        })
+      ])
+    );
   });
 });

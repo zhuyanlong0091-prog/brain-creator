@@ -3709,7 +3709,8 @@ function knowledgeReview(
         (item) => item.requirementRefs.length > 0 && item.knowledgeNodeRefs.length > 0
       ).length,
       totalIntents: intents.length,
-      executionLedger: context.knowledgeService.testIntentCoverage(projectId)
+      executionLedger: context.knowledgeService.testIntentCoverage(projectId),
+      sourceLedger: context.knowledgeService.requirementSourceLedger(projectId)
     };
   }
   if (target === "requirement-eval-accuracy") {

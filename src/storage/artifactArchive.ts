@@ -4,6 +4,8 @@ import AdmZip from "adm-zip";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CaseSuiteRun } from "../domain/types.js";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
+import { decryptSecrets } from "../shared/crypto.js";
+import { scanSensitiveValues } from "../shared/secretScan.js";
 
 export type ArtifactManifestItem = {
   path: string;
@@ -65,6 +67,29 @@ export async function exportCaseSuiteArchive(input: {
   const suiteRun = input.repository.caseSuiteRuns.find((item) => item.id === input.suiteRunId);
   if (!suiteRun) throw new Error("Case suite run not found");
   const described = await describeArtifacts(input.workDir, suiteRun.artifactPaths);
+  const secretFindings = await scanArtifactSecrets(
+    input.workDir,
+    described.filter((item) => item.status === "present"),
+    input.repository.authProfiles
+      .filter((profile) => profile.projectId === suiteRun.systemId)
+      .flatMap((profile) => {
+        try {
+          return Object.entries(decryptSecrets(profile.encryptedSecrets)).map(([key, value]) => [
+            `${profile.id}.${key}`,
+            value
+          ] as const);
+        } catch {
+          return [];
+        }
+      })
+  );
+  if (secretFindings.length > 0) {
+    throw new Error(
+      `Artifact export blocked because sensitive values were found in: ${secretFindings
+        .map((finding) => finding.path)
+        .join(", ")}`
+    );
+  }
   const manifest = {
     format: "brain-creator-suite-export",
     version: 1,
@@ -91,6 +116,24 @@ export async function exportCaseSuiteArchive(input: {
     artifactCount: manifest.artifacts.length,
     missingArtifacts: manifest.missingArtifacts
   };
+}
+
+async function scanArtifactSecrets(
+  workDir: string,
+  artifacts: ArtifactManifestItem[],
+  entries: Array<readonly [string, string]>
+) {
+  const secrets = Object.fromEntries(entries);
+  if (Object.keys(secrets).length === 0) return [];
+  const findings: Array<{ path: string; secretKeys: string[] }> = [];
+  for (const artifact of artifacts) {
+    const content = await readFile(resolve(workDir, artifact.path));
+    const matches = scanSensitiveValues(content.toString("utf8"), secrets);
+    if (matches.length > 0) {
+      findings.push({ path: artifact.path, secretKeys: matches.map((match) => match.secretKey) });
+    }
+  }
+  return findings;
 }
 
 async function describeArtifacts(workDir: string, paths: string[]) {
