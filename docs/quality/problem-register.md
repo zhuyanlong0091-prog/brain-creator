@@ -26,7 +26,7 @@ Status meanings:
 | B5 | Initial-state exploration missed conditional actions | partial | PR E | ExplorationScenario discovers state- and data-dependent controls |
 | C1 | Short-lived login state expired during suites | partial | PR D | Fresh-context preflight detects expiry and creates AuthCheckpoint; provider-specific automatic refresh remains |
 | C2 | Generated seed omitted a supported auth reference | partial | PR D | Tests reference protected storageState or runtime auth environment variables; automatic token/cookie storageState conversion remains |
-| C3 | Test credentials appeared in generated files | partial | PR D/PR E | Token/cookie values are removed from generated seeds, legacy ciphertext migrates, and Suite export blocks known credential values; full generated-artifact scan remains |
+| C3 | Test credentials appeared in generated files | partial | PR D/PR E | Token/cookie values are removed from generated seeds, legacy ciphertext migrates, and Suite export blocks known values plus high-confidence credential patterns; full generated-artifact lifecycle scan remains |
 | C4 | Authentication overhead limited suite throughput | partial | PR D | Verified storageState is cached for a bounded TTL while each test still gets an isolated context; controlled concurrency remains gated by data isolation |
 | D1 | Unread attachments were misclassified as model limitations | resolved | PR F | Source ledger inventories attachments as `unread` with an explicit no-OCR/vision reason |
 | D2 | Requirements omitted concrete UI paths | partial | PR E/PR F | Missing paths are supplied by confirmed System Brain evidence or remain explicit Gap items |

@@ -134,6 +134,39 @@ describe("artifact archive", () => {
       })
     ).rejects.toThrow("Artifact export blocked because sensitive values were found in: report.html");
   });
+
+  it("blocks exporting an artifact with a credential pattern even without the source value", async () => {
+    const root = await tempDir();
+    const artifact = join(root, "generated.spec.ts");
+    await writeFile(artifact, 'const config = { password: "do-not-export-this" };', "utf8");
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.caseSuiteRuns.push({
+      id: "suite_run_pattern",
+      systemId: "system_orders",
+      suiteId: "suite_1",
+      sourceId: "source_1",
+      status: "completed",
+      total: 1,
+      passed: 1,
+      failed: 0,
+      blocked: 0,
+      caseResults: [],
+      artifactPaths: [artifact],
+      bugReportIds: [],
+      gapIds: [],
+      createdAt: "2026-08-12T00:00:00.000Z",
+      completedAt: "2026-08-12T00:01:00.000Z"
+    });
+
+    await expect(
+      exportCaseSuiteArchive({
+        repository,
+        workDir: root,
+        suiteRunId: "suite_run_pattern",
+        outputPath: join(root, "exports", "suite.zip")
+      })
+    ).rejects.toThrow("Artifact export blocked because sensitive values were found in: generated.spec.ts");
+  });
 });
 
 async function tempDir() {

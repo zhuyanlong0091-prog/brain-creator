@@ -5,7 +5,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CaseSuiteRun } from "../domain/types.js";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import { decryptSecrets } from "../shared/crypto.js";
-import { scanSensitiveValues } from "../shared/secretScan.js";
+import { scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
 
 export type ArtifactManifestItem = {
   path: string;
@@ -124,13 +124,19 @@ async function scanArtifactSecrets(
   entries: Array<readonly [string, string]>
 ) {
   const secrets = Object.fromEntries(entries);
-  if (Object.keys(secrets).length === 0) return [];
   const findings: Array<{ path: string; secretKeys: string[] }> = [];
   for (const artifact of artifacts) {
     const content = await readFile(resolve(workDir, artifact.path));
     const matches = scanSensitiveValues(content.toString("utf8"), secrets);
-    if (matches.length > 0) {
-      findings.push({ path: artifact.path, secretKeys: matches.map((match) => match.secretKey) });
+    const patternMatches = scanSensitivePatterns(content.toString("utf8"));
+    if (matches.length > 0 || patternMatches.length > 0) {
+      findings.push({
+        path: artifact.path,
+        secretKeys: [
+          ...matches.map((match) => match.secretKey),
+          ...patternMatches.map((match) => `pattern:${match.rule}`)
+        ]
+      });
     }
   }
   return findings;
