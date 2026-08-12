@@ -18,7 +18,9 @@ import type {
   RequirementContentPackage,
   RequirementSet,
   RequirementSource,
-  TestIntent
+  TestIntent,
+  CoverageDimension,
+  AssertionContractType
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import {
@@ -657,6 +659,7 @@ export class KnowledgeService {
       pathPlan,
       statePlan,
       dataPlan: dataPlanned.plan,
+      coverageDimensions: intent.coverageDimensions,
       dataProfileIds: dataProfiles.map((profile) => profile.id),
       gapIds: gaps.map((gap) => gap.id),
       createdAt: now,
@@ -905,7 +908,7 @@ export class KnowledgeService {
         ? "superseded"
         : cases.length === 0
           ? "not-selected"
-          : results.some((item) => item.assuranceLevel === "strong")
+          : results.some((item) => item.assuranceLevel === "strong" && (item.coverage?.missing.length ?? 0) === 0)
             ? "strong-verified"
             : results.some((item) => item.assuranceLevel === "limited")
               ? "limited"
@@ -924,13 +927,18 @@ export class KnowledgeService {
         executableCaseIds: caseIds,
         evidenceIds: results.map((item) => item.id),
         requirementRefs: intent.requirementRefs,
+        coverage: {
+          required: intent.coverageDimensions ?? [],
+          verified: [...new Set(results.flatMap((item) => item.coverage?.verified ?? []))],
+          missing: [...new Set(results.flatMap((item) => item.coverage?.missing ?? intent.coverageDimensions ?? []))]
+        },
         stability: {
           runs: results.length,
-          passed: results.filter((item) => item.status === "passed" && item.assuranceLevel === "strong").length,
+          passed: results.filter((item) => item.status === "passed" && item.assuranceLevel === "strong" && (item.coverage?.missing.length ?? 0) === 0).length,
           failed: results.filter((item) => item.status === "failed").length,
           blocked: results.filter((item) => item.status === "blocked").length,
           rate: results.length > 0
-            ? results.filter((item) => item.status === "passed" && item.assuranceLevel === "strong").length / results.length
+            ? results.filter((item) => item.status === "passed" && item.assuranceLevel === "strong" && (item.coverage?.missing.length ?? 0) === 0).length / results.length
             : undefined,
           repeated: results.length >= 2
         }
@@ -1044,6 +1052,11 @@ export class KnowledgeService {
         executionPlan?.assertionContracts ?? buildAssertionContracts(executionSteps),
       assuranceLevel: "none",
       actorJourney: executionPlan?.actorJourney,
+      coverage: {
+        required: executableCase.coverageDimensions ?? ["workflow"],
+        verified: [],
+        missing: executableCase.coverageDimensions ?? ["workflow"]
+      },
       tracePaths: [],
       artifactPaths: [input.contextPackPath],
       consoleErrors: [],
@@ -1131,6 +1144,18 @@ export class KnowledgeService {
             ? input.status
             : "blocked";
       if (step.action === "assert") step.actual = input.actualResult;
+    }
+    if (reporterSteps !== undefined) {
+      const requiredCoverage = evidence.coverage?.required ?? ["workflow"];
+      const verifiedCoverage = verifiedCoverageDimensions(evidence, input.status);
+      evidence.coverage = {
+        required: requiredCoverage,
+        verified: verifiedCoverage,
+        missing: requiredCoverage.filter((dimension) => !verifiedCoverage.includes(dimension))
+      };
+      if (evidence.coverage.missing.length > 0 && evidence.assuranceLevel === "strong") {
+        evidence.assuranceLevel = "limited";
+      }
     }
     if (input.status !== "blocked") {
       const executableCase = this.repository.executableCases.find(
@@ -2150,4 +2175,33 @@ function executableCaseCompileKey(
 
 function timestamp() {
   return new Date().toISOString();
+}
+
+function verifiedCoverageDimensions(
+  evidence: ExecutionEvidence,
+  status: ExecutionEvidence["status"]
+): CoverageDimension[] {
+  if (status !== "passed") return [];
+  const hasStepEvidence = (action: ExecutableCaseStep["action"]) =>
+    evidence.steps.some(
+      (step) => step.action === action && (step.evidenceRefs?.length ?? 0) > 0
+    );
+  const hasAssertion = (type: AssertionContractType) =>
+    evidence.assertionContracts?.some((contract) => contract.type === type) &&
+    evidence.reporterResult?.assertions.some((assertion) => assertion.status === "passed");
+  const verified: CoverageDimension[] = [];
+  if (hasStepEvidence("fill") || hasStepEvidence("select") || hasAssertion("value")) {
+    verified.push("field");
+  }
+  if (hasStepEvidence("navigate") || hasStepEvidence("click") || hasAssertion("workflow")) {
+    verified.push("workflow");
+  }
+  if (hasStepEvidence("select") || hasAssertion("state")) {
+    verified.push("state");
+  }
+  if (evidence.actorJourney?.length || hasAssertion("side-effect")) {
+    verified.push("permission");
+  }
+  if (hasAssertion("network")) verified.push("integration");
+  return [...new Set(verified)];
 }

@@ -2,6 +2,7 @@ import { id } from "../shared/id.js";
 import type {
   KnowledgeNode,
   KnowledgeNodeType,
+  CoverageDimension,
   TestDataProfile,
   TestDesignTechnique,
   TestIntent
@@ -161,6 +162,7 @@ export function designTests(input: {
       requirementRefs: [clause.sourceRef],
       knowledgeNodeRefs: relatedNodes.map((node) => `${node.type}:${node.title}`),
       techniques,
+      coverageDimensions: coverageDimensionsForClause(clause),
       status: "draft",
       createdAt: now,
       updatedAt: now
@@ -207,6 +209,21 @@ export function designTests(input: {
       intentCount: testIntents.length
     }
   };
+}
+
+function coverageDimensionsForClause(clause: RequirementClause): CoverageDimension[] {
+  return [
+    ...new Set(
+      clause.nodeTypes.flatMap((type): CoverageDimension[] => {
+        if (type === "field" || type === "data-constraint") return ["field"];
+        if (type === "workflow" || type === "object") return ["workflow"];
+        if (type === "state" || type === "rule") return ["state"];
+        if (type === "permission") return ["permission"];
+        if (type === "integration") return ["integration"];
+        return [];
+      })
+    )
+  ];
 }
 
 export function evaluatePolicyOutput(analysis: RequirementAnalysis): RequirementPolicyEvaluation {

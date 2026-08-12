@@ -788,6 +788,69 @@ describe("KnowledgeService", () => {
     ]);
   });
 
+  it("records field and workflow coverage only from step evidence", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({ name: "Coverage dimensions", key: "coverage-dimensions", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-coverage-dimensions",
+      name: "Coverage dimensions",
+      environment: "test",
+      baseUrl: "https://coverage-dimensions.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://coverage-dimensions.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-coverage-dimensions");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("coverage-dimensions", "Users fill the customer form and save the customer record.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const executableCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-coverage-dimensions",
+      executableCaseId: executableCase.id,
+      testCaseId: "test-coverage-dimensions",
+      contextPackPath: "context/coverage-dimensions.json"
+    });
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "passed",
+      artifactPaths: [],
+      reporterResult: {
+        status: "passed",
+        total: evidence.assertionContracts?.length ?? 0,
+        passed: evidence.assertionContracts?.length ?? 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        assertions: (evidence.assertionContracts ?? []).map((contract) => ({
+          id: contract.id,
+          status: "passed" as const,
+          evidenceRefs: ["evidence/assertion.png"]
+        })),
+        steps: evidence.steps.map((step) => ({
+          id: step.stepId,
+          title: `bc:${step.stepId}`,
+          status: "passed" as const,
+          evidenceRefs: ["evidence/step.png"]
+        })),
+        attachments: ["evidence/step.png"],
+        consoleErrors: [],
+        networkFailures: []
+      }
+    });
+
+    expect(completed.coverage?.required).toEqual(expect.arrayContaining(["field", "workflow"]));
+    expect(completed.coverage?.verified).toEqual(expect.arrayContaining(["field", "workflow"]));
+    expect(completed.coverage?.missing).toEqual([]);
+    expect(completed.assuranceLevel).toBe("strong");
+  });
+
   it("estimates Requirement Eval accuracy from traceable historical execution outcomes", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const service = new KnowledgeService(repository, await tempDir());

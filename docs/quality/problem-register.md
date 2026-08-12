@@ -38,7 +38,7 @@ Status meanings:
 | D8 | Screenshots had no business meaning | partial | PR C | Seed exposes `bc.step()` and Generator is instructed to use it; generated-file enforcement and full step metadata remain |
 | E1 | Weak checks were reported as full validation | resolved | PR C | AssertionContract and assuranceLevel prevent reporter-less or partially mapped passes from being strong validation |
 | E2 | Unexecuted TestIntents had no explanation | resolved | PR F | Coverage ledger classifies every intent as strong, limited, failed, blocked, not-selected, or superseded |
-| E3 | Field checks displaced workflow coverage | open | PR F | Golden Eval includes workflow and state-transition coverage |
+| E3 | Field checks displaced workflow coverage | partial | PR F | TestIntent/ExecutableCase/ExecutionEvidence expose required, verified, and missing field/workflow/state/permission/integration dimensions; full golden business-flow evidence remains |
 | E4 | Multi-role journeys were not executed | partial | PR F | Actor Journey resolves system-scoped AuthProfiles, generated tests require explicit role usage, and role transitions are recorded in Ledger; real multi-role workflow stability remains |
 | E5 | A single green run implied stability | partial | PR F | Coverage ledger reports terminal run counts and strong-pass stability when repeated evidence exists; automatic repeated-run orchestration remains |
 | E6 | Created test data was not reliably cleaned | resolved | existing | TestData leases and cleanup states are covered by provider and suite tests |
@@ -58,8 +58,8 @@ Status meanings:
 | Status | Count |
 |---|---:|
 | resolved | 12 |
-| partial | 26 |
-| open | 1 |
+| partial | 27 |
+| open | 0 |
 | deferred | 2 |
 | total | 41 |
 

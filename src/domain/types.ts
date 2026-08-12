@@ -708,6 +708,13 @@ export type TestDesignTechnique =
   | "scenario"
   | "error-guessing";
 
+export type CoverageDimension =
+  | "field"
+  | "workflow"
+  | "state"
+  | "permission"
+  | "integration";
+
 export type TestIntent = {
   id: string;
   knowledgeProjectId: string;
@@ -721,6 +728,7 @@ export type TestIntent = {
   requirementRefs: string[];
   knowledgeNodeRefs: string[];
   techniques: TestDesignTechnique[];
+  coverageDimensions?: CoverageDimension[];
   status: "draft" | "approved" | "compiled" | "blocked";
   createdAt: string;
   updatedAt: string;
@@ -1101,6 +1109,7 @@ export type ExecutableCase = {
   pathPlan?: ExecutableCasePathPlan;
   statePlan?: ExecutableCaseStatePlan;
   dataPlan?: ExecutableCaseDataPlan;
+  coverageDimensions?: CoverageDimension[];
   dataProfileIds: string[];
   gapIds: string[];
   createdAt: string;
@@ -1136,6 +1145,11 @@ export type ExecutionEvidence = {
   reporterPath?: string;
   reporterResult?: StructuredReporterResult;
   evidenceWarnings?: string[];
+  coverage?: {
+    required: CoverageDimension[];
+    verified: CoverageDimension[];
+    missing: CoverageDimension[];
+  };
   actorJourney?: ActorJourneyStep[];
   steps: ExecutionStepEvidence[];
   tracePaths: string[];

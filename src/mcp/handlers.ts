@@ -3747,6 +3747,9 @@ function knowledgeReview(
       ).length,
       totalIntents: intents.length,
       executionLedger: context.knowledgeService.testIntentCoverage(projectId),
+      dimensionSummary: summarizeCoverageDimensions(
+        context.knowledgeService.testIntentCoverage(projectId).items
+      ),
       sourceLedger: context.knowledgeService.requirementSourceLedger(projectId)
     };
   }
@@ -6544,6 +6547,24 @@ function actorJourneyArg(input: Record<string, unknown>) {
       sourceRefs: optionalStringArrayArg(record, "sourceRefs") ?? []
     };
   });
+}
+
+function summarizeCoverageDimensions(
+  items: Array<{
+    coverage?: {
+      required: readonly string[];
+      verified: readonly string[];
+      missing: readonly string[];
+    };
+  }>
+) {
+  const dimensions = [...new Set(items.flatMap((item) => item.coverage?.required ?? []))];
+  return dimensions.map((dimension) => ({
+    dimension,
+    required: items.filter((item) => item.coverage?.required.includes(dimension)).length,
+    verified: items.filter((item) => item.coverage?.verified.includes(dimension)).length,
+    missing: items.filter((item) => item.coverage?.missing.includes(dimension)).length
+  }));
 }
 
 function planContextArg(input: Record<string, unknown>): AgentTask["planContext"] | undefined {
