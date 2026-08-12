@@ -55,6 +55,8 @@ import {
   runAgent,
   runChain,
   spawnCommand,
+  validateActorJourneyUsage,
+  validateStepInstrumentation,
   type AgentBridge,
   type AgentBridgeWithMetadata,
   type CommandResult,
@@ -2344,7 +2346,8 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     optionalStringArg(input, "systemId") ?? project.systemIds[0];
   const authProfileId = optionalStringArg(input, "authProfileId");
   const actorJourney = actorJourneyArg(input);
-  const repeatCount = Math.max(1, optionalNumberArg(input, "repeatCount") ?? 1);
+  const requestedRepeatCount = optionalNumberArg(input, "repeatCount");
+  const repeatCount = Math.max(1, requestedRepeatCount ?? 1);
   if (!optionalBooleanArg(input, "confirm")) {
     const executionPreflights = selectedSystemId
       ? candidates.map((executableCase) => ({
@@ -2424,7 +2427,10 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     ) {
       throw new Error("Requirement suite run cannot change its actor journey");
     }
-    if (repeatCount !== (activeRequirementSuiteRun.stabilityTarget ?? 1)) {
+    if (
+      requestedRepeatCount !== undefined &&
+      requestedRepeatCount !== (activeRequirementSuiteRun.stabilityTarget ?? 1)
+    ) {
       throw new Error("Requirement suite run cannot change its stability repeat count");
     }
     if (
@@ -4050,7 +4056,11 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
           "requirementSuiteRunId"
         ),
         executionEvidenceId: optionalStringArg(input, "executionEvidenceId"),
-        contextPackPath: optionalStringArg(input, "contextPackPath")
+        contextPackPath: optionalStringArg(input, "contextPackPath"),
+        requiredStepIds: executionPlan?.steps
+          .filter((step) => step.action !== "api")
+          .map((step) => step.id),
+        actorJourneyRoles: actorJourneyProfiles?.map((actor) => actor.role)
       },
       suiteContext: suiteContextArg(input),
       regressionContext: regressionContextArg(input)
@@ -4297,7 +4307,19 @@ async function prepareAgentTask(
     regressionContext
   });
   await mkdir(taskDir, { recursive: true });
-  await writeFile(promptPath, hostAgentPrompt({ systemId, agent, inputSummary, args, outputPaths }), "utf8");
+  await writeFile(
+    promptPath,
+    hostAgentPrompt({
+      systemId,
+      agent,
+      inputSummary,
+      args,
+      outputPaths,
+      requiredStepIds: chainContext?.requiredStepIds,
+      actorJourneyRoles: chainContext?.actorJourneyRoles
+    }),
+    "utf8"
+  );
   await writeFile(
     contextPath,
     `${JSON.stringify(
@@ -4451,6 +4473,25 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       context,
       pendingTask.chainContext.executionPlanId
     );
+  }
+  if (
+    agentOutputStatusArg(input, "status") === "succeeded" &&
+    (pendingTask.agent === "generator" || pendingTask.agent === "healer") &&
+    pendingTask.chainContext
+  ) {
+    const source = await readFile(pendingTask.chainContext.testPath, "utf8").catch((error) => {
+      throw new Error(
+        `Generated test cannot be validated before submission: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
+    const { requiredStepIds = [], actorJourneyRoles = [] } = pendingTask.chainContext;
+    const journeyCheck = validateActorJourneyUsage(
+      source,
+      actorJourneyRoles.map((role) => ({ role }))
+    );
+    if (!journeyCheck.valid) throw new Error(journeyCheck.reason);
+    const instrumentationCheck = validateStepInstrumentation(source, requiredStepIds);
+    if (!instrumentationCheck.valid) throw new Error(instrumentationCheck.reason);
   }
   const result = context.service.submitAgentTask({
     taskId,
@@ -5116,6 +5157,8 @@ function hostAgentPrompt(input: {
   inputSummary: string;
   args: string[];
   outputPaths: string[];
+  requiredStepIds?: string[];
+  actorJourneyRoles?: string[];
 }) {
   return [
     `# Brain Creator Host Agent Task`,
@@ -5132,6 +5175,16 @@ function hostAgentPrompt(input: {
     ...(input.agent === "generator" || input.agent === "healer"
       ? [
           "- When Arguments include --seed, import test and expect from that seed instead of @playwright/test; the seed owns authenticated browser setup."
+        ]
+      : []),
+    ...(input.requiredStepIds?.length
+      ? [
+          `- Instrument every declared execution step with bc.step(): ${input.requiredStepIds.join(", ")}.`
+        ]
+      : []),
+    ...(input.actorJourneyRoles && input.actorJourneyRoles.length > 1
+      ? [
+          `- This is a multi-role journey. Use bc.runAsRole() and reference every role: ${input.actorJourneyRoles.join(", ")}.`
         ]
       : []),
     "",
@@ -6640,6 +6693,8 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   const requirementSuiteRunId = candidate.requirementSuiteRunId;
   const executionEvidenceId = candidate.executionEvidenceId;
   const contextPackPath = candidate.contextPackPath;
+  const requiredStepIds = candidate.requiredStepIds;
+  const actorJourneyRoles = candidate.actorJourneyRoles;
   if (typeof testCaseId !== "string" || typeof specPath !== "string" || typeof testPath !== "string") {
     throw new Error("chainContext requires testCaseId, specPath, and testPath");
   }
@@ -6667,6 +6722,14 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
       throw new Error(`chainContext ${name} must be a string when provided`);
     }
   }
+  for (const [name, value] of Object.entries({ requiredStepIds, actorJourneyRoles })) {
+    if (
+      value !== undefined &&
+      (!Array.isArray(value) || value.some((item) => typeof item !== "string"))
+    ) {
+      throw new Error(`chainContext ${name} must be an array of strings when provided`);
+    }
+  }
   return {
     testCaseId,
     specPath,
@@ -6680,7 +6743,9 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
     executionPlanId: executionPlanId as string | undefined,
     requirementSuiteRunId: requirementSuiteRunId as string | undefined,
     executionEvidenceId: executionEvidenceId as string | undefined,
-    contextPackPath: contextPackPath as string | undefined
+    contextPackPath: contextPackPath as string | undefined,
+    requiredStepIds: requiredStepIds as string[] | undefined,
+    actorJourneyRoles: actorJourneyRoles as string[] | undefined
   };
 }
 

@@ -218,6 +218,29 @@ describe("RequirementSuiteRunService", () => {
     expect(next.caseRuns[0].status).toBe("queued");
   });
 
+  it("does not start another stability iteration after a blocked run", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false,
+      stabilityGroupId: "stability-orders",
+      stabilityIteration: 1,
+      stabilityTarget: 2
+    });
+    const current = fixture.service.beginNext(run.id).caseRun!;
+    const blocked = fixture.service.completeCase(run.id, current.executableCaseId, {
+      status: "blocked",
+      gapIds: ["gap-auth"],
+      error: "Authentication checkpoint required"
+    });
+
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.stabilityNextRunId).toBeUndefined();
+    expect(fixture.repository.requirementSuiteRuns).toHaveLength(1);
+  });
+
   it("waits for test data preparation before binding the execution plan", () => {
     const fixture = suiteFixture();
     const run = fixture.service.create({

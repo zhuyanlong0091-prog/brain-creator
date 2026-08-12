@@ -1124,6 +1124,70 @@ describe("handleBrainCreatorTool", () => {
     ]);
   });
 
+  it("keeps a host-agent task pending when generated step evidence is missing", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(async () => ({ exitCode: 1, stdout: "", stderr: "handoff" }), {
+        provider: "host-agent",
+        preflight: async () => ({ ok: true })
+      })
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Evidence System",
+        environment: "local",
+        baseUrl: "https://evidence.example.test",
+        defaultLocale: "en-US",
+        urlAllowlist: ["https://evidence.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "local",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Validate evidence instrumentation",
+      scenarios: [
+        {
+          id: "scenario_evidence",
+          title: "Evidence",
+          priority: "high",
+          steps: [{ action: "assert", target: "Ready", expected: "visible" }]
+        }
+      ],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+    const taskPackage = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_chain", { caseId: testCase.id })
+    );
+    context.repository.agentTasks.find((task) => task.id === taskPackage.task.id)!.chainContext = {
+      ...taskPackage.task.chainContext,
+      requiredStepIds: ["step-ready"]
+    };
+    await writeFile(taskPackage.testPath, "import { test, expect } from '../seed';\n", "utf8");
+
+    const rejected = await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+      taskId: taskPackage.task.id,
+      status: "succeeded",
+      stdout: "generated test",
+      outputPaths: [taskPackage.testPath]
+    });
+
+    expect(errorOf(rejected)).toContain("missing bc.step instrumentation");
+    expect(context.repository.agentTasks).toEqual([
+      expect.objectContaining({ id: taskPackage.task.id, status: "pending" })
+    ]);
+    expect(context.repository.agentRuns).toHaveLength(0);
+  });
+
   it("reruns Playwright and records a healed chain when a host-agent healer task is submitted", async () => {
     const workDir = await tempDir();
     const hostBridge = Object.assign(

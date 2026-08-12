@@ -810,6 +810,7 @@ export class RequirementSuiteRunService {
             : "blocked"
     });
     if (
+      (run.status === "completed" || run.status === "failed") &&
       run.stabilityTarget &&
       (run.stabilityIteration ?? 1) < run.stabilityTarget
     ) {

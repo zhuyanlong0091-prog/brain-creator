@@ -26,6 +26,7 @@ describe("static execution report", () => {
     expect(html).toContain("Assurance: <strong>strong</strong>");
     expect(html).toContain("Search report");
     expect(html).toContain("step-01.png");
+    expect(html).toContain("requirement:amount");
     expect(html).toContain("bug-1");
     expect(html).toContain("gap-1");
   });
@@ -56,7 +57,7 @@ function evidence(): ExecutionEvidence {
       requirementRefs: ["requirement:amount"],
       evidenceRequirements: ["actual-value", "screenshot", "trace"]
     }],
-    steps: [{ stepId: "step-1", order: 1, action: "assert", instruction: "Check total", expected: "42", actual: "42", assertionStatus: "passed", screenshotPath: "step-01.png", sourceRefs: ["requirement:amount"], origin: "source" }],
+    steps: [{ stepId: "step-1", order: 1, action: "assert", instruction: "Check total", expected: "42", actual: "42", assertionStatus: "passed", screenshotPath: "step-01.png", evidenceRefs: ["evidence/step-01.png"], sourceRefs: ["requirement:amount"], origin: "source" }],
     tracePaths: ["trace.zip"],
     artifactPaths: ["step-01.png"],
     consoleErrors: [],

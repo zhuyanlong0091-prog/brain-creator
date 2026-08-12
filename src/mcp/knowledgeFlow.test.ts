@@ -1463,6 +1463,12 @@ describe("Brain Creator requirement-first facade", () => {
       result.testPath,
       [
         `import { test, expect } from "../${basename(result.seedPath)}";`,
+        ...result.executionPlan.steps
+          .filter((step: { action: string }) => step.action !== "api")
+          .map(
+            (step: { id: string }) =>
+              `// bc.step(${JSON.stringify(step.id)}, page, action);`
+          ),
         'test("requirement mismatch", async () => { expect("draft").toBe("approved"); });'
       ].join("\n"),
       "utf8"
@@ -1586,6 +1592,9 @@ describe("Brain Creator requirement-first facade", () => {
       completed.testPath,
       [
         `import { test, expect } from "../${basename(completed.seedPath)}";`,
+        ...(completed.task.chainContext?.requiredStepIds ?? []).map(
+          (stepId: string) => `// bc.step(${JSON.stringify(stepId)}, page, action);`
+        ),
         'test("sibling scenario", async () => { expect("approved").toBe("approved"); });'
       ].join("\n"),
       "utf8"
@@ -1849,6 +1858,12 @@ describe("Brain Creator requirement-first facade", () => {
       generated.testPath,
       [
         `import { test, expect } from "../${basename(generated.seedPath)}";`,
+        ...generated.executionPlan.steps
+          .filter((step: { action: string }) => step.action !== "api")
+          .map(
+            (step: { id: string }) =>
+              `// bc.step(${JSON.stringify(step.id)}, page, action);`
+          ),
         'test("created data", async () => { expect(true).toBe(true); });'
       ].join("\n"),
       "utf8"

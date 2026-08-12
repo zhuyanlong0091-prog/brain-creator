@@ -391,6 +391,8 @@ export type AgentTask = {
     executionEvidenceId?: string;
     contextPackPath?: string;
     requirementSuiteRunId?: string;
+    requiredStepIds?: string[];
+    actorJourneyRoles?: string[];
   };
   suiteContext?: {
     suiteId: string;
