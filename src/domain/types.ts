@@ -1079,6 +1079,9 @@ export type RequirementSuiteRun = {
   knowledgeProjectId: string;
   systemId: string;
   authProfileId?: string;
+  operator?: string;
+  provider?: string;
+  sessionId?: string;
   actorJourney?: ActorJourneyConfig[];
   status:
     | "running"
@@ -1212,6 +1215,8 @@ export type StructuredReporterStep = {
   status: "passed" | "failed" | "skipped" | "unknown";
   durationMs?: number;
   evidenceRefs: string[];
+  consoleErrors?: string[];
+  networkFailures?: string[];
   error?: string;
 };
 

@@ -387,6 +387,9 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       knowledgeProjectId: z.string().optional(),
       executableCaseId: z.string().optional(),
       authProfileId: z.string().optional(),
+      operator: z.string().optional(),
+      provider: z.string().optional(),
+      sessionId: z.string().optional(),
       responseMode: z.enum(["summary", "full"]).default("full")
     })
   },

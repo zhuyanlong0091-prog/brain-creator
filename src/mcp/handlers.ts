@@ -2549,6 +2549,9 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     knowledgeProjectId: projectId,
     systemId,
     authProfileId,
+    operator: optionalStringArg(input, "operator"),
+    provider: optionalStringArg(input, "provider"),
+    sessionId: optionalStringArg(input, "sessionId"),
     actorJourney,
     cases: candidates.map((candidate) => ({
       executableCaseId: candidate.id,

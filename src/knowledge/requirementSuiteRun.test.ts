@@ -36,6 +36,9 @@ describe("RequirementSuiteRunService", () => {
     const run = fixture.service.create({
       knowledgeProjectId: "knowledge-orders",
       systemId: "system-orders",
+      operator: "qa-user",
+      provider: "codex",
+      sessionId: "session-orders",
       actorJourney: [
         { role: "recruiter", authProfileId: "auth-recruiter", afterStepId: "step-submit" },
         { role: "approver", authProfileId: "auth-approver", afterStepId: "step-submit" }
@@ -55,6 +58,9 @@ describe("RequirementSuiteRunService", () => {
       .toEqual([
         expect.objectContaining({
           executableCaseId: current.executableCaseId,
+          operator: "qa-user",
+          provider: "codex",
+          sessionId: "session-orders",
           currentStep: "step-submit",
           message: expect.stringContaining("actor role recruiter")
         }),

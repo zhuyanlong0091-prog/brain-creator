@@ -33,8 +33,8 @@ Status meanings:
 | D3 | Source fields could not be reconciled to analysis | resolved | PR F | Source ledger reconciles blocks, requirements, nodes, intents, cases, evidence, and attachments |
 | D4 | Eval classification lacked explainable provenance | partial | PR F | Every class stores source passage, reason, policy version, and confirmer |
 | D5 | Passing cases lacked replayable trace evidence | partial | PR C/PR D | Default structured Playwright runs request `--trace=on` and retain reporter artifact references; trace existence validation and legacy/custom-runner coverage remain |
-| D6 | Calls lacked operator identity and unique trace IDs | partial | PR A/PR C | UUID trace IDs and Ledger fields exist; production call sites still need to populate operator, provider, session, and current step |
-| D7 | Assertions and runtime evidence were disconnected | partial | PR C | Reporter joins assertion results and attachments; step-level console/network/trace correlation remains to be completed |
+| D6 | Calls lacked operator identity and unique trace IDs | resolved | PR C/PR E | UUID trace IDs and Ledger fields are populated; requirement-suite Facade accepts operator/provider/sessionId, stability runs inherit them, and state events retain currentStep |
+| D7 | Assertions and runtime evidence were disconnected | partial | PR C/PR E | Structured Reporter joins assertion, step screenshot, and step-level console/network runtime attachments; trace correlation and legacy/custom-runner coverage remain |
 | D8 | Screenshots had no business meaning | partial | PR C | Seed exposes `bc.step()` and Generator is instructed to use it; generated-file enforcement and full step metadata remain |
 | E1 | Weak checks were reported as full validation | resolved | PR C | AssertionContract and assuranceLevel prevent reporter-less or partially mapped passes from being strong validation |
 | E2 | Unexecuted TestIntents had no explanation | resolved | PR F | Coverage ledger classifies every intent as strong, limited, failed, blocked, not-selected, or superseded |

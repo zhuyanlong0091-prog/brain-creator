@@ -75,4 +75,43 @@ describe("Playwright JSON reporter", () => {
       })
     ]);
   });
+
+  it("joins step runtime attachments into console and network evidence", () => {
+    const result = parsePlaywrightJsonReport({
+      stats: { expected: 1, unexpected: 0, skipped: 0 },
+      suites: [{
+        specs: [{
+          title: "case",
+          tests: [{ results: [{
+            status: "passed",
+            attachments: [{
+              name: "brain-creator-runtime-step-save",
+              body: JSON.stringify({
+                consoleErrors: ["TypeError: redacted"],
+                networkFailures: ["GET https://example.test/api/records"]
+              })
+            }],
+            steps: [{
+              title: "bc:step-save",
+              attachments: [{
+                name: "brain-creator-runtime-step-save",
+                body: JSON.stringify({
+                  consoleErrors: ["TypeError: redacted"],
+                  networkFailures: ["GET https://example.test/api/records"]
+                })
+              }]
+            }]
+          }] }]
+        }]
+      }]
+    });
+
+    expect(result.consoleErrors).toEqual(["TypeError: redacted"]);
+    expect(result.networkFailures).toEqual(["GET https://example.test/api/records"]);
+    expect(result.attachments).toContain("brain-creator-runtime-step-save");
+    expect(result.steps?.[0]).toEqual(expect.objectContaining({
+      consoleErrors: ["TypeError: redacted"],
+      networkFailures: ["GET https://example.test/api/records"]
+    }));
+  });
 });

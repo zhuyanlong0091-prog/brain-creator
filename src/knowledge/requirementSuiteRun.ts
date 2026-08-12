@@ -14,6 +14,9 @@ type CreateRequirementSuiteRunInput = {
   knowledgeProjectId: string;
   systemId: string;
   authProfileId?: string;
+  operator?: string;
+  provider?: string;
+  sessionId?: string;
   actorJourney?: ActorJourneyConfig[];
   executionPlans?: ExecutionPlan[];
   cases?: Array<{
@@ -81,6 +84,9 @@ export class RequirementSuiteRunService {
       knowledgeProjectId: input.knowledgeProjectId,
       systemId: input.systemId,
       authProfileId: input.authProfileId,
+      operator: input.operator,
+      provider: input.provider,
+      sessionId: input.sessionId,
       actorJourney: input.actorJourney,
       status: "running",
       continueOnBlocked: input.continueOnBlocked,
@@ -766,6 +772,9 @@ export class RequirementSuiteRunService {
       knowledgeProjectId: run.knowledgeProjectId,
       systemId: run.systemId,
       requirementSuiteRunId: run.id,
+      operator: run.operator,
+      provider: run.provider,
+      sessionId: run.sessionId,
       ...input
     });
   }
@@ -828,6 +837,9 @@ export class RequirementSuiteRunService {
       knowledgeProjectId: previous.knowledgeProjectId,
       systemId: previous.systemId,
       authProfileId: previous.authProfileId,
+      operator: previous.operator,
+      provider: previous.provider,
+      sessionId: previous.sessionId,
       actorJourney: previous.actorJourney,
       status: "running",
       continueOnBlocked: previous.continueOnBlocked,
