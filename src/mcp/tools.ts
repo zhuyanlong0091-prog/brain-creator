@@ -439,7 +439,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     description: "Facade configuration entry for system, auth, term, rule, runtime, and auth checkpoint setup.",
     inputSchema: z.object({
       target: z.enum(["system", "auth", "term", "rule", "checkpoint", "knowledge-project", "system-binding", "connector", "runtime"]),
-      operation: z.enum(["create", "verify", "archive", "reload-store"]).default("create"),
+      operation: z.enum(["create", "verify", "archive", "reload-store", "rebuild-index"]).default("create"),
       knowledgeProjectId: z.string().optional(),
       connector: z.enum(["feishu"]).optional(),
       systemId: z.string().optional(),

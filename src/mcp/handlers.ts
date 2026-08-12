@@ -3,7 +3,11 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
 import { formatScenariosAsMarkdown, parseSpecMarkdown } from "../agent/caseFormatter.js";
-import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
+import {
+  InMemoryBrainCreatorRepository,
+  JsonFileBrainCreatorRepository,
+  ShardedFileBrainCreatorRepository
+} from "../domain/repository.js";
 import { generateSeedFile } from "../agent/seedGenerator.js";
 import { buildAgentPrompt } from "../agent/promptBuilder.js";
 import { checkBusinessRules } from "../agent/qualityGate.js";
@@ -16,6 +20,7 @@ import {
 import { BrainCreatorError, errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
+  resolveBrainCreatorStoreDir,
   resolveBrainCreatorKnowledgeDir,
   resolveBrainCreatorWorkspace
 } from "../shared/workspace.js";
@@ -25,6 +30,7 @@ import {
   type RequirementSourceReader
 } from "../knowledge/sourceAdapters.js";
 import { FeishuOpenApiAdapter } from "../knowledge/feishuAdapter.js";
+import { writeArtifactManifest } from "../storage/artifactArchive.js";
 import { normalizeHostSkillAnalysis } from "../knowledge/policies.js";
 import { buildContextPack } from "../knowledge/retriever.js";
 import {
@@ -88,7 +94,7 @@ import type {
 import type { BrainCreatorToolName } from "./tools.js";
 
 export type BrainCreatorMcpContext = {
-  repository: JsonFileBrainCreatorRepository;
+  repository: InMemoryBrainCreatorRepository;
   service: BrainCreatorService;
   knowledgeService: KnowledgeService;
   testDataProvider: TestDataProviderService;
@@ -116,6 +122,7 @@ type HostAgentTaskPackage = {
 
 type CreateContextInput = {
   dataFilePath?: string;
+  storeDirPath?: string;
   workDir?: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
@@ -129,9 +136,12 @@ export function createBrainCreatorMcpContext(
   input: CreateContextInput = {}
 ): BrainCreatorMcpContext {
   const workDir = input.workDir ?? resolveBrainCreatorWorkspace();
-  const repository = new JsonFileBrainCreatorRepository(
-    input.dataFilePath ?? resolveBrainCreatorDataFile(workDir)
-  );
+  const repository = input.dataFilePath
+    ? new JsonFileBrainCreatorRepository(input.dataFilePath)
+    : new ShardedFileBrainCreatorRepository(
+        input.storeDirPath ?? resolveBrainCreatorStoreDir(workDir),
+        resolveBrainCreatorDataFile(workDir)
+      );
   const service = new BrainCreatorService(repository);
   const knowledgeService = new KnowledgeService(
     repository,
@@ -1514,6 +1524,13 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     gapIds,
     completedAt: new Date().toISOString()
   });
+  const artifactManifest = await writeArtifactManifest({
+    workDir: context.workDir,
+    systemId,
+    suiteRunId: suiteRun.id,
+    artifactPaths: suiteRun.artifactPaths,
+    sourceRefs: [caseSource.id, suite.id]
+  });
   context.service.updateCaseSuiteStatus(
     suite.id,
     allSuiteCasesPassed ? "completed" : "failed"
@@ -1541,6 +1558,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     source: caseSource,
     suite,
     suiteRun,
+    artifactManifest,
     progress: caseSuiteProgress(context, suite),
     bugs,
     writeBack
@@ -2089,7 +2107,8 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
 async function configureFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const target = configureTargetArg(input, "target");
   if (target === "runtime") {
-    if ((optionalStringArg(input, "operation") ?? "reload-store") !== "reload-store") {
+    const operation = optionalStringArg(input, "operation") ?? "reload-store";
+    if (operation !== "reload-store" && operation !== "rebuild-index") {
       throw new Error("runtime operation is invalid");
     }
     const active = [
@@ -2112,6 +2131,16 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
         nextAction: "review-active-runs",
         retryable: true
       });
+    }
+    if (operation === "rebuild-index") {
+      if (!(context.repository instanceof ShardedFileBrainCreatorRepository)) {
+        throw new Error("Index rebuild requires the schema 17 sharded repository");
+      }
+      return {
+        status: "index-rebuilt",
+        index: context.repository.rebuildIndexes(),
+        nextAction: "review-status"
+      };
     }
     return {
       status: "reloaded",
@@ -3139,6 +3168,23 @@ async function finalizeRequirementSuiteCase(
     input.executableCase.id,
     input.outcome
   );
+  const artifactManifest = isTerminalRequirementSuiteStatus(updatedRun.status)
+    ? await writeArtifactManifest({
+        workDir: context.workDir,
+        systemId: run.systemId,
+        requirementSetId: input.executableCase.requirementSetId,
+        suiteRunId: run.id,
+        artifactPaths: updatedRun.caseRuns.flatMap((caseRun) => {
+          const evidence = caseRun.executionEvidenceId
+            ? context.repository.executionEvidence.find(
+                (item) => item.id === caseRun.executionEvidenceId
+              )
+            : undefined;
+          return evidence?.artifactPaths ?? [];
+        }),
+        sourceRefs: [input.executableCase.requirementSetId]
+      })
+    : undefined;
   if (updatedRun.status === "running") {
     const next = await executeNextRequirementSuiteCase(
       context,
@@ -3156,10 +3202,17 @@ async function finalizeRequirementSuiteCase(
     mode: "requirement-suite",
     status: updatedRun.status,
     requirementSuiteRun: updatedRun,
+    ...(artifactManifest ? { artifactManifest } : {}),
     remainingExecutableCaseIds: updatedRun.caseRuns
       .filter((item) => item.status === "queued")
       .map((item) => item.executableCaseId)
   };
+}
+
+function isTerminalRequirementSuiteStatus(
+  status: RequirementSuiteRun["status"]
+) {
+  return status === "completed" || status === "failed" || status === "cancelled";
 }
 
 function formatRequirementGeneratorContext(

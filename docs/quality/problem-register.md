@@ -15,10 +15,10 @@ Status meanings:
 | A2 | Case compilation accepted only one TestIntent | resolved | PR A | Requirement, intent-list, and module batch selection are idempotent; `service.test.ts`, `controlPlane.test.ts` |
 | A3 | Operators changed runtime state by editing the store | partial | PR A/PR E | Auth, page binding, Gap, and reload controls exist; navigation/state corrections still need BrowserSurface controls |
 | A4 | State changes required MCP restarts | partial | PR A/PR B | Store reload is in-process and blocked during active runs; sharded repository must remove whole-store reload pressure |
-| A5 | Generated output had no ownership hierarchy | open | PR B | Every artifact has system, requirement, suite, hash, source, and manifest ownership |
+| A5 | Generated output had no ownership hierarchy | resolved | PR B | Every artifact has system, requirement, suite, hash, source, and manifest ownership; artifact manifest and shard ownership tests |
 | A6 | Gaps had no usable lifecycle | resolved | PR A | Resolve, dismiss, and reopen require a note and evidence references; `service.test.ts`, `controlPlane.test.ts` |
 | A7 | Errors described state but not recovery | partial | PR A/PR C | Stable code, bilingual message, nextAction, retryable, and UUID trace are present; expand catalog with Harness errors |
-| A8 | Upgrade and migration had no safe path | partial | PR B | Export, migration backup, doctor validation, and rollback are required before closure |
+| A8 | Upgrade and migration had no safe path | resolved | PR B | Schema 16 migration creates a timestamped backup; schema 17 validation, doctor checks, index rebuild, and Suite export are covered |
 | B1 | SPA exploration missed navigation transitions | open | PR E | URL-changing interactions create navigation edges and queued targets |
 | B2 | Shared labels produced ambiguous page selection | partial | PR A/PR E | Confirmed page binding exists; candidate evidence and BrowserSurface scoring remain |
 | B3 | Shadow DOM actions were not reliably reachable | open | PR E | Open Shadow DOM and microfrontend surfaces pass interaction fixtures |
@@ -43,9 +43,9 @@ Status meanings:
 | E5 | A single green run implied stability | open | PR F | Critical journeys report repeated-run stability statistics |
 | E6 | Created test data was not reliably cleaned | resolved | existing | TestData leases and cleanup states are covered by provider and suite tests |
 | E7 | Host-reported success lacked tool verification | resolved | existing/PR C | Tool-side Playwright execution exists; structured Reporter replaces remaining stdout inference |
-| F1 | Generated baselines were fragile across upgrades | partial | PR A/PR B | Compile keys supersede stale cases; portable artifact manifests remain |
+| F1 | Generated baselines were fragile across upgrades | resolved | PR A/PR B | Compile keys supersede stale cases; portable artifact manifests record hashes and missing evidence |
 | F2 | Runtime depended on one workstation | partial | PR D | Browser/auth portability and CI smoke coverage remain |
-| F3 | One JSON file grew without partitioning | open | PR B | Schema 17 sharded repository passes 30 MB migration and recovery tests |
+| F3 | One JSON file grew without partitioning | resolved | PR B | Schema 17 sharded repository, atomic writes, migration backup, missing-shard detection, and index rebuild are covered |
 | F4 | Local assets had no collaboration model | deferred | post-2.2 | Revisit only when remote multi-writer collaboration is required |
 | F5 | Multiple requirements could contaminate assets | partial | PR A/PR B | Compile ownership and supersession exist; sharded indexes and multi-requirement Eval remain |
 | G1 | Facade responses consumed excessive context | partial | PR A | `responseMode=summary` and paged CompileRun review exist; expand to all large facade results |

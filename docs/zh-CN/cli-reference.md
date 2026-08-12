@@ -11,6 +11,7 @@
 | `brain-creator config` | 输出脱敏后的有效 MCP 配置 | `npx brain-creator config --json` |
 | `brain-creator config write` | 有意写入 MCP 配置 | `npx brain-creator config write --provider codex` |
 | `brain-creator plugin install` | 安装 Codex 插件和 host-agent 配置 | `npx brain-creator plugin install` |
+| `brain-creator export` | 导出带证据 manifest 的已完成 Suite | `npx brain-creator export --suite <id> --output exports/suite.zip` |
 | `brain-creator mcp` | 通过 stdio 启动 MCP server | `npx brain-creator mcp` |
 | `brain-creator help legacy` | 列出独立兼容命令 | `npx brain-creator help legacy` |
 | `brain-creator --version` | 输出安装版本 | `npx brain-creator --version` |
@@ -102,6 +103,14 @@ codex plugin list
 
 通过 stdio 启动 MCP server。MCP 宿主通常从 `.mcp.json` 启动该命令，除非调试传输启动，否则不要再开一个交互副本。
 
+## `brain-creator export`
+
+```text
+brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>] [--json]
+```
+
+将已完成的文档 Suite 导出为可迁移 ZIP，包含 `manifest.json` 和可用证据。缺失文件会列入 manifest。仓库、密钥、浏览器 storage state 和无关工作区文件不会被导出。
+
 ## 兼容命令
 
 早期版本暴露了以下独立命令：
@@ -123,6 +132,7 @@ codex plugin list
 | `BRAIN_CREATOR_AGENT_PROVIDER` | Agent 执行方式 | `host-agent` |
 | `BRAIN_CREATOR_AGENT_TIMEOUT_MS` | Agent 调用超时 | `120000` |
 | `BRAIN_CREATOR_KNOWLEDGE_DIR` | 外部知识目录 | `<absolute-knowledge-path>` |
+| `BRAIN_CREATOR_STORE_DIR` | schema 17 分片运行仓库 | `<workspace>/.brain-creator/store` |
 | `BRAIN_CREATOR_FEISHU_APP_ID` | 飞书 OpenAPI app ID | 环境 secret 引用 |
 | `BRAIN_CREATOR_FEISHU_APP_SECRET` | 飞书 OpenAPI app secret | 环境 secret 引用 |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE` | 显式浏览器可执行文件 | 本机 Chrome/Edge 路径 |

@@ -27,6 +27,7 @@ describe("Brain Creator doctor", () => {
     expect(report.ok).toBe(true);
     expect(report.workspace).toBe(cwd);
     expect(report.dataFile).toBe(join(cwd, ".brain-creator", "local-assets.json"));
+    expect(report.storeDir).toBe(join(cwd, ".brain-creator", "store"));
     expect(report.knowledgeDir).toBe(resolve("business-project/knowledge"));
     expect(report.toolProfile).toBe("facade");
     expect(report.checks).toEqual(
@@ -38,6 +39,7 @@ describe("Brain Creator doctor", () => {
       ])
     );
     expect(formatDoctorReport(report)).toContain("Brain Creator doctor: ready");
+    expect(formatDoctorReport(report)).toContain("Sharded store:");
     expect(formatDoctorReport(report)).toContain("npx brain-creator-install-codex-plugin");
   });
 

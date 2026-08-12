@@ -10,6 +10,13 @@ import {
   type BrainCreatorAgentProvider
 } from "./writeMcpConfig.js";
 import { startBrainCreatorServer } from "../mcp/server.js";
+import { exportCaseSuiteArchive } from "../storage/artifactArchive.js";
+import { ShardedFileBrainCreatorRepository } from "../domain/repository.js";
+import {
+  resolveBrainCreatorDataFile,
+  resolveBrainCreatorStoreDir,
+  resolveBrainCreatorWorkspace
+} from "../shared/workspace.js";
 import { BRAIN_CREATOR_VERSION } from "../version.js";
 
 type CliIo = {
@@ -25,6 +32,7 @@ export type BrainCreatorCliDependencies = {
   buildDoctorReport: typeof buildDoctorReport;
   formatDoctorReport: typeof formatDoctorReport;
   startMcp: typeof startBrainCreatorServer;
+  exportSuite: typeof exportSuiteFromWorkspace;
 };
 
 const defaultDependencies: BrainCreatorCliDependencies = {
@@ -34,7 +42,8 @@ const defaultDependencies: BrainCreatorCliDependencies = {
   installCodexPlugin: installBrainCreatorCodexPlugin,
   buildDoctorReport,
   formatDoctorReport,
-  startMcp: startBrainCreatorServer
+  startMcp: startBrainCreatorServer,
+  exportSuite: exportSuiteFromWorkspace
 };
 
 const help = `Brain Creator ${BRAIN_CREATOR_VERSION}
@@ -45,6 +54,7 @@ Usage:
   brain-creator config [show] [--target <path>] [--json]
   brain-creator config write [--provider <provider>] [--global] [--target <path>]
   brain-creator plugin install [--target <path>]
+  brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>]
   brain-creator mcp
   brain-creator --version
 
@@ -65,6 +75,7 @@ const commandHelp: Record<string, string> = {
   doctor: `Usage: brain-creator doctor [--json]\n\nChecks Agent provider, browser, connector, knowledge directory, and installed assets.`,
   config: `Usage:\n  brain-creator config [show] [--target <path>] [--json]\n  brain-creator config write [--provider <provider>] [--global] [--target <path>] [--json]\n\nShow is read-only and redacts secret-like environment values.`,
   plugin: `Usage: brain-creator plugin install [--target <path>] [--package-root <path>] [--json]\n\nInstalls the Codex plugin and configures host-agent execution.`,
+  export: `Usage: brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>] [--json]\n\nExports a portable Suite archive with evidence manifest and hashes.`,
   mcp: `Usage: brain-creator mcp\n\nStarts the Brain Creator MCP server over stdio.`
 };
 
@@ -114,6 +125,9 @@ export async function runBrainCreatorCli(
     }
     if (command === "plugin") {
       return await runPlugin(commandArgs, json, io, dependencies);
+    }
+    if (command === "export") {
+      return await runExport(commandArgs, json, io, dependencies);
     }
     if (command === "mcp") {
       assertAllowedArgs(commandArgs, [], []);
@@ -234,6 +248,46 @@ async function runPlugin(
     `Brain Creator Codex plugin installed from ${result.marketplaceRoot}`
   );
   return 0;
+}
+
+async function runExport(
+  args: string[],
+  json: boolean,
+  io: CliIo,
+  dependencies: BrainCreatorCliDependencies
+) {
+  assertAllowedArgs(args, ["--suite", "--target", "--output"], []);
+  const suiteRunId = optionValue(args, "--suite");
+  if (!suiteRunId) throw new Error("--suite requires a value");
+  const targetDir = optionValue(args, "--target");
+  const outputPath = optionValue(args, "--output");
+  const result = await dependencies.exportSuite({ suiteRunId, targetDir, outputPath });
+  writeSuccess(
+    io,
+    json,
+    "export",
+    result,
+    `Brain Creator Suite archive exported: ${result.outputPath}`
+  );
+  return 0;
+}
+
+async function exportSuiteFromWorkspace(input: {
+  suiteRunId: string;
+  targetDir?: string;
+  outputPath?: string;
+}) {
+  const workspace = resolveBrainCreatorWorkspace(input.targetDir ?? process.cwd(), process.env);
+  const repository = new ShardedFileBrainCreatorRepository(
+    resolveBrainCreatorStoreDir(workspace, process.env),
+    resolveBrainCreatorDataFile(workspace, process.env)
+  );
+  return exportCaseSuiteArchive({
+    repository,
+    workDir: workspace,
+    suiteRunId: input.suiteRunId,
+    outputPath: input.outputPath ?? `${input.suiteRunId}.brain-creator.zip`
+  });
 }
 
 function optionValue(args: string[], name: string) {

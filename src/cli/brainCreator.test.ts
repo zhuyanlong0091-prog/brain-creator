@@ -33,6 +33,13 @@ function dependencies(
     buildDoctorReport: vi.fn(() => ({ ok: true, checks: [] }) as never),
     formatDoctorReport: vi.fn(() => "Brain Creator doctor: ready"),
     startMcp: vi.fn(async () => undefined),
+    exportSuite: vi.fn(async () => ({
+      status: "exported" as const,
+      outputPath: "C:\\project\\suite.zip",
+      suiteRunId: "suite_1",
+      artifactCount: 1,
+      missingArtifacts: []
+    })),
     ...overrides
   };
 }
@@ -60,6 +67,7 @@ describe("Brain Creator CLI", () => {
       expect(output).toContain("brain-creator doctor");
       expect(output).toContain("brain-creator config");
       expect(output).toContain("brain-creator plugin install");
+      expect(output).toContain("brain-creator export");
       expect(output).toContain("brain-creator mcp");
       expect(output).not.toContain("brain-creator-install-assets");
       expect(io.stderr).not.toHaveBeenCalled();
@@ -76,7 +84,7 @@ describe("Brain Creator CLI", () => {
     expect(output).toContain("Compatibility aliases");
   });
 
-  it.each(["init", "doctor", "config", "plugin", "mcp"])(
+  it.each(["init", "doctor", "config", "plugin", "export", "mcp"])(
     "prints focused help for the %s command",
     async (command) => {
       const io = createIo();
@@ -180,6 +188,24 @@ describe("Brain Creator CLI", () => {
       )
     ).toBe(0);
     expect(deps.installCodexPlugin).toHaveBeenCalledWith({ workspaceDir: "C:\\project" });
+  });
+
+  it("exports a Suite archive through the consolidated CLI", async () => {
+    const io = createIo();
+    const deps = dependencies();
+
+    expect(
+      await runBrainCreatorCli(
+        ["export", "--suite", "suite_1", "--target", "C:\\project", "--output", "exports\\suite.zip"],
+        io,
+        deps
+      )
+    ).toBe(0);
+    expect(deps.exportSuite).toHaveBeenCalledWith({
+      suiteRunId: "suite_1",
+      targetDir: "C:\\project",
+      outputPath: "exports\\suite.zip"
+    });
   });
 
   it("returns a structured error for invalid commands", async () => {
