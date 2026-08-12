@@ -2344,6 +2344,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     optionalStringArg(input, "systemId") ?? project.systemIds[0];
   const authProfileId = optionalStringArg(input, "authProfileId");
   const actorJourney = actorJourneyArg(input);
+  const repeatCount = Math.max(1, optionalNumberArg(input, "repeatCount") ?? 1);
   if (!optionalBooleanArg(input, "confirm")) {
     const executionPreflights = selectedSystemId
       ? candidates.map((executableCase) => ({
@@ -2365,6 +2366,12 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       executableCases: candidates,
       executionPreflights,
       boundSystemIds: project.systemIds,
+      stability: {
+        repeatCount,
+        policy: repeatCount > 1
+          ? "Each iteration uses an isolated RequirementSuiteRun and is aggregated in coverage review."
+          : "Single execution; do not infer stability from one green run."
+      },
       requiresConfirmation: true,
       nextAction:
         project.systemIds.length === 0
@@ -2416,6 +2423,9 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
         JSON.stringify(actorJourney)
     ) {
       throw new Error("Requirement suite run cannot change its actor journey");
+    }
+    if (repeatCount !== (activeRequirementSuiteRun.stabilityTarget ?? 1)) {
+      throw new Error("Requirement suite run cannot change its stability repeat count");
     }
     if (
       optionalBooleanArg(input, "allowCreateTestData") &&
@@ -2539,6 +2549,9 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked"),
     allowCreateTestData: optionalBooleanArg(input, "allowCreateTestData"),
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
+    ,stabilityGroupId: repeatCount > 1 ? id("stabilityGroup") : undefined
+    ,stabilityIteration: 1
+    ,stabilityTarget: repeatCount
   });
   if (optionalBooleanArg(input, "resume")) {
     requirementSuiteRun = context.requirementSuiteRuns.resume(
@@ -3221,6 +3234,19 @@ async function finalizeRequirementSuiteCase(
       ...next,
       [input.completionField]: input.completedCase,
       requirementSuiteRun: context.requirementSuiteRuns.get(updatedRun.id)
+    };
+  }
+  if (updatedRun.stabilityNextRunId) {
+    const next = await executeNextRequirementSuiteCase(
+      context,
+      updatedRun.stabilityNextRunId,
+      { maxHealAttempts: input.maxHealAttempts }
+    );
+    return {
+      ...next,
+      [input.completionField]: input.completedCase,
+      previousStabilityRun: updatedRun,
+      requirementSuiteRun: context.requirementSuiteRuns.get(updatedRun.stabilityNextRunId)
     };
   }
   return {

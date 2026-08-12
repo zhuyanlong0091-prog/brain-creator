@@ -187,6 +187,37 @@ describe("RequirementSuiteRunService", () => {
     );
   });
 
+  it("creates the next isolated suite run for a requested stability repeat", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false,
+      stabilityGroupId: "stability-orders",
+      stabilityIteration: 1,
+      stabilityTarget: 2
+    });
+    const current = fixture.service.beginNext(run.id).caseRun!;
+    const completed = fixture.service.completeCase(run.id, current.executableCaseId, {
+      status: "passed",
+      chainRunId: "chain-stability-1",
+      gapIds: []
+    });
+
+    expect(completed.status).toBe("completed");
+    expect(completed.stabilityNextRunId).toEqual(expect.any(String));
+    const next = fixture.service.get(completed.stabilityNextRunId!);
+    expect(next).toEqual(expect.objectContaining({
+      stabilityGroupId: "stability-orders",
+      stabilityIteration: 2,
+      stabilityTarget: 2,
+      status: "running"
+    }));
+    expect(next.id).not.toBe(run.id);
+    expect(next.caseRuns[0].status).toBe("queued");
+  });
+
   it("waits for test data preparation before binding the execution plan", () => {
     const fixture = suiteFixture();
     const run = fixture.service.create({

@@ -40,7 +40,7 @@ Status meanings:
 | E2 | Unexecuted TestIntents had no explanation | resolved | PR F | Coverage ledger classifies every intent as strong, limited, failed, blocked, not-selected, or superseded |
 | E3 | Field checks displaced workflow coverage | partial | PR F | TestIntent/ExecutableCase/ExecutionEvidence expose required, verified, and missing field/workflow/state/permission/integration dimensions; full golden business-flow evidence remains |
 | E4 | Multi-role journeys were not executed | partial | PR F | Actor Journey resolves system-scoped AuthProfiles, generated tests require explicit role usage, and role transitions are recorded in Ledger; real multi-role workflow stability remains |
-| E5 | A single green run implied stability | partial | PR F | Coverage ledger reports terminal run counts and strong-pass stability when repeated evidence exists; automatic repeated-run orchestration remains |
+| E5 | A single green run implied stability | partial | PR F | `bc_run mode=requirement-suite repeatCount` creates isolated linked suite iterations and coverage reports repeated strong passes; real-system stability thresholds and long-run scheduling remain |
 | E6 | Created test data was not reliably cleaned | resolved | existing | TestData leases and cleanup states are covered by provider and suite tests |
 | E7 | Host-reported success lacked tool verification | partial | existing/PR C | Tool-side Playwright execution and structured Reporter are used when available; compatibility fallback still records non-strong results without reporter evidence |
 | F1 | Generated baselines were fragile across upgrades | resolved | PR A/PR B | Compile keys supersede stale cases; portable artifact manifests record hashes and missing evidence |

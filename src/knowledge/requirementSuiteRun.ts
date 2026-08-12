@@ -24,6 +24,9 @@ type CreateRequirementSuiteRunInput = {
   continueOnBlocked: boolean;
   allowCreateTestData?: boolean;
   maxHealAttempts?: number;
+  stabilityGroupId?: string;
+  stabilityIteration?: number;
+  stabilityTarget?: number;
 };
 
 type CompleteRequirementSuiteCaseInput = RequirementSuiteCaseOutcome;
@@ -83,6 +86,9 @@ export class RequirementSuiteRunService {
       continueOnBlocked: input.continueOnBlocked,
       allowCreateTestData: Boolean(input.allowCreateTestData),
       maxHealAttempts: input.maxHealAttempts,
+      stabilityGroupId: input.stabilityGroupId,
+      stabilityIteration: input.stabilityIteration,
+      stabilityTarget: input.stabilityTarget,
       total: cases.length,
       passed: 0,
       failed: 0,
@@ -803,6 +809,60 @@ export class RequirementSuiteRunService {
             ? "failed"
             : "blocked"
     });
+    if (
+      run.stabilityTarget &&
+      (run.stabilityIteration ?? 1) < run.stabilityTarget
+    ) {
+      const next = this.createStabilityRun(run);
+      run.stabilityNextRunId = next.id;
+      run.updatedAt = timestamp();
+      this.repository.persist();
+    }
+  }
+
+  private createStabilityRun(previous: RequirementSuiteRun): RequirementSuiteRun {
+    const nextIteration = (previous.stabilityIteration ?? 1) + 1;
+    const next: RequirementSuiteRun = {
+      id: id("requirementSuiteRun"),
+      knowledgeProjectId: previous.knowledgeProjectId,
+      systemId: previous.systemId,
+      authProfileId: previous.authProfileId,
+      actorJourney: previous.actorJourney,
+      status: "running",
+      continueOnBlocked: previous.continueOnBlocked,
+      allowCreateTestData: previous.allowCreateTestData,
+      maxHealAttempts: previous.maxHealAttempts,
+      stabilityGroupId: previous.stabilityGroupId,
+      stabilityIteration: nextIteration,
+      stabilityTarget: previous.stabilityTarget,
+      total: previous.caseRuns.length,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: previous.caseRuns.map((caseRun) => ({
+        executableCaseId: caseRun.executableCaseId,
+        executionPlanId: caseRun.executionPlanId,
+        title: caseRun.title,
+        order: caseRun.order,
+        status: "queued",
+        gapIds: [],
+        attempts: []
+      })),
+      createdAt: timestamp(),
+      updatedAt: timestamp()
+    };
+    this.repository.requirementSuiteRuns.push(next);
+    this.repository.persist();
+    this.record(next, {
+      event: "suite-created",
+      scope: "suite",
+      stage: "suite",
+      toStatus: next.status,
+      message: `Stability iteration ${nextIteration}/${next.stabilityTarget}`
+    });
+    return next;
   }
 }
 

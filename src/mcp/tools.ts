@@ -382,6 +382,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       confirmWriteBack: z.boolean().default(false),
       confirm: z.boolean().default(false),
       maxHealAttempts: z.number().int().min(0).max(10).optional(),
+      repeatCount: z.number().int().min(1).max(5).default(1),
       bugIds: z.array(z.string()).default([]),
       knowledgeProjectId: z.string().optional(),
       executableCaseId: z.string().optional(),

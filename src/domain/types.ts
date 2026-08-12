@@ -1081,6 +1081,10 @@ export type RequirementSuiteRun = {
   continueOnBlocked: boolean;
   allowCreateTestData: boolean;
   maxHealAttempts?: number;
+  stabilityGroupId?: string;
+  stabilityIteration?: number;
+  stabilityTarget?: number;
+  stabilityNextRunId?: string;
   total: number;
   passed: number;
   failed: number;
