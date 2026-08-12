@@ -1186,6 +1186,22 @@ describe("handleBrainCreatorTool", () => {
       expect.objectContaining({ id: taskPackage.task.id, status: "pending" })
     ]);
     expect(context.repository.agentRuns).toHaveLength(0);
+
+    await writeFile(
+      taskPackage.testPath,
+      "import { test, expect } from '../seed';\n// bc.step(\"step-ready\", page, action);\nconst config = { password: \"do-not-export-this\" };\n",
+      "utf8"
+    );
+    const secretRejected = await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+      taskId: taskPackage.task.id,
+      status: "succeeded",
+      stdout: "generated test",
+      outputPaths: [taskPackage.testPath]
+    });
+    expect(errorOf(secretRejected)).toContain("pattern:sensitive-field-literal");
+    expect(context.repository.agentTasks).toEqual([
+      expect.objectContaining({ id: taskPackage.task.id, status: "pending" })
+    ]);
   });
 
   it("reruns Playwright and records a healed chain when a host-agent healer task is submitted", async () => {

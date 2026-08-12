@@ -66,6 +66,8 @@ import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "
 import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import { id } from "../shared/id.js";
 import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
+import { decryptSecrets } from "../shared/crypto.js";
+import { scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
 import type {
   AgentRun,
   AgentTask,
@@ -4492,6 +4494,12 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     if (!journeyCheck.valid) throw new Error(journeyCheck.reason);
     const instrumentationCheck = validateStepInstrumentation(source, requiredStepIds);
     if (!instrumentationCheck.valid) throw new Error(instrumentationCheck.reason);
+    const secretFindings = scanGeneratedTestSecrets(context, pendingTask.systemId, source);
+    if (secretFindings.length > 0) {
+      throw new Error(
+        `Generated test contains sensitive material: ${secretFindings.join(", ")}`
+      );
+    }
   }
   const result = context.service.submitAgentTask({
     taskId,
@@ -5149,6 +5157,28 @@ async function runSubmittedTest(context: BrainCreatorMcpContext, testPath: strin
       stderr: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+function scanGeneratedTestSecrets(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  source: string
+) {
+  const protectedValues = context.repository.authProfiles
+    .filter((profile) => profile.projectId === systemId)
+    .flatMap((profile) => {
+      try {
+        return Object.entries(decryptSecrets(profile.encryptedSecrets));
+      } catch {
+        return [];
+      }
+    });
+  return [
+    ...scanSensitiveValues(source, Object.fromEntries(protectedValues)).map(
+      (finding) => `credential:${finding.secretKey}`
+    ),
+    ...scanSensitivePatterns(source).map((finding) => `pattern:${finding.rule}`)
+  ];
 }
 
 function hostAgentPrompt(input: {
