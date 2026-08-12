@@ -25,8 +25,8 @@ Status meanings:
 | B4 | SPA remount invalidated the active Page | open | PR E | Active page is reacquired after remount, popup, or close events |
 | B5 | Initial-state exploration missed conditional actions | partial | PR E | ExplorationScenario discovers state- and data-dependent controls |
 | C1 | Short-lived login state expired during suites | open | PR D | Fresh-context preflight refreshes supported auth or creates AuthCheckpoint |
-| C2 | Generated seed omitted a supported auth reference | partial | PR D | Tests consume protected storageState only and never embed login logic or credentials |
-| C3 | Test credentials appeared in generated files | open | PR D | Secret scan passes for specs, tests, logs, reports, and exports |
+| C2 | Generated seed omitted a supported auth reference | partial | PR D | Tests reference protected storageState or runtime auth environment variables; automatic token/cookie storageState conversion remains |
+| C3 | Test credentials appeared in generated files | partial | PR D | Token/cookie values are removed from generated seeds and legacy ciphertext migrates; full artifact/export secret scan remains |
 | C4 | Authentication overhead limited suite throughput | open | PR D | Verified storageState is reused across isolated contexts; concurrency stays gated by data isolation |
 | D1 | Unread attachments were misclassified as model limitations | open | PR F | Assets are inventoried and marked unread until an OCR/vision adapter returns evidence |
 | D2 | Requirements omitted concrete UI paths | partial | PR E/PR F | Missing paths are supplied by confirmed System Brain evidence or remain explicit Gap items |

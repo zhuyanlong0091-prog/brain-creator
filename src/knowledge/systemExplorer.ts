@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { chromium } from "@playwright/test";
 import { browserExecutablePath } from "../agent/authStateVerifier.js";
@@ -13,6 +13,7 @@ import type {
   SystemInteractionState
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
+import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
 import type { KnowledgeService } from "./service.js";
 
 export type SystemExplorationPage = {
@@ -148,9 +149,7 @@ export class SystemExplorationCoordinator {
     const captureAuth = service.getCaptureAuth(request.authProfileId);
     const storageStateValue = captureAuth?.secrets.storageStatePath;
     const storageStatePath = storageStateValue
-      ? isAbsolute(storageStateValue)
-        ? resolve(storageStateValue)
-        : resolve(workDir, storageStateValue)
+      ? await resolveProtectedStorageStatePath(workDir, storageStateValue)
       : undefined;
     const now = new Date().toISOString();
     const explorationId = id("exploration");

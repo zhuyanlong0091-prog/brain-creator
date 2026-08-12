@@ -1,5 +1,5 @@
 import { InMemoryBrainCreatorRepository } from "./repository.js";
-import { decryptSecrets, encryptSecrets, redactSecrets } from "../shared/crypto.js";
+import { decryptSecrets, encryptSecrets, migrateEncryptedSecrets, redactSecrets } from "../shared/crypto.js";
 import { id } from "../shared/id.js";
 import type {
   ActionStep,
@@ -623,9 +623,15 @@ export class BrainCreatorService {
     if (!profile) {
       throw new Error("Auth profile not found");
     }
+    const migrated = migrateEncryptedSecrets(profile.encryptedSecrets);
+    if (migrated.changed) {
+      profile.encryptedSecrets = migrated.encryptedSecrets;
+      profile.updatedAt = timestamp();
+      this.repository.persist();
+    }
     return {
       loginMethod: profile.loginMethod,
-      secrets: decryptSecrets(profile.encryptedSecrets)
+      secrets: decryptSecrets(migrated.encryptedSecrets)
     };
   }
 

@@ -67,6 +67,10 @@ npx brain-creator export --suite <suite-run-id> --output exports/suite.zip
 - `reporterPath`：执行器返回结构化结果时保存的 Reporter 文件。
 
 静态 HTML 报告与 Markdown 证据报告一起生成。即使命令退出码为 0，如果没有完成结构化 Reporter 映射，结果仍为 `none`，不能被描述为强需求验证。报告是离线执行产物，不是新的 Brain Creator UI 入口。
+
+## 鉴权密钥处理
+
+新的鉴权密文使用 `.brain-creator/secret.key` 中的随机本地密钥。可通过 `BRAIN_CREATOR_SECRET_KEY` 使用外部托管密钥，也可通过 `BRAIN_CREATOR_SECRET_KEY_FILE` 指定密钥文件；环境变量优先。已有 `enc:v1` 数据在读取配置时会先解密，再重新加密为 `enc:v2`。生成的 token/cookie seed 只引用 `BRAIN_CREATOR_AUTH_TOKEN` 或 `BRAIN_CREATOR_AUTH_COOKIE`，不会写入凭据值。
 ```
 
 归档包含 `manifest.json` 和可用证据文件，不包含仓库、密钥、浏览器 storage state 或其他无关工作区文件。缺失证据会列在 manifest 中，不会被静默忽略。

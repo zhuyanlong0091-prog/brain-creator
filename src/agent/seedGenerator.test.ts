@@ -40,7 +40,8 @@ describe("generateSeedFile", () => {
       secretKeys: ["token"]
     });
     expect(JSON.stringify(result)).not.toContain("secret-token");
-    expect(content).toContain("secret-token");
+    expect(content).not.toContain("secret-token");
+    expect(content).toContain("BRAIN_CREATOR_AUTH_TOKEN");
     expect(content).toContain("https://shop.example.test");
   });
 

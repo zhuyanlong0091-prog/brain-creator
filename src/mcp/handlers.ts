@@ -63,6 +63,7 @@ import {
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
 import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import { id } from "../shared/id.js";
+import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
 import type {
   AgentRun,
   AgentTask,
@@ -89,7 +90,8 @@ import type {
   TestCaseStep,
   TestDataTask,
   KnowledgeNodeType,
-  LegacyDiagnosisDecision
+  LegacyDiagnosisDecision,
+  SystemProfile
 } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
@@ -2198,9 +2200,7 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
         });
       }
       const verification = await context.authStateVerifier({
-        storageStatePath: isAbsolute(storageStatePath)
-          ? resolve(storageStatePath)
-          : resolve(context.workDir, storageStatePath),
+        storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
         targetUrl: system.baseUrl,
         allowedUrls: system.urlAllowlist
       });
@@ -3929,6 +3929,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
           optionalStringArg(input, "authProfileId")!
         )
       : findAuthProfile(context, testCase.systemId);
+  await verifyAuthForExecution(context, system, authProfile);
   if (context.agentBridge?.provider === "host-agent") {
     const specsDir = join(context.workDir, "specs");
     const generatedDir = join(context.workDir, "tests", "generated");
@@ -4001,6 +4002,36 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   }
   context.service.recordChainRun(result.chainRun);
   return result;
+}
+
+async function verifyAuthForExecution(
+  context: BrainCreatorMcpContext,
+  system: SystemProfile,
+  authProfile: AuthProfile
+) {
+  const capture = context.service.getCaptureAuth(authProfile.id);
+  if (!capture) return;
+  const storageStatePath = capture.secrets.storageStatePath;
+  if (!storageStatePath) return;
+  const verification = await context.authStateVerifier({
+    storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
+    targetUrl: system.baseUrl,
+    allowedUrls: system.urlAllowlist
+  });
+  if (verification.status === "valid") return;
+  const pending = context.service.listAuthCheckpoints(system.id, "awaiting-user")
+    .find((checkpoint) => checkpoint.authProfileId === authProfile.id);
+  if (!pending) {
+    context.service.createAuthCheckpoint({
+      systemId: system.id,
+      authProfileId: authProfile.id,
+      reason: verification.reason ?? "Stored browser authentication is no longer valid.",
+      resumeInstruction: "Refresh the browser login state, then complete this checkpoint before resuming execution."
+    });
+  }
+  throw new Error(
+    verification.reason ?? "Stored browser authentication requires user intervention before execution."
+  );
 }
 
 /**

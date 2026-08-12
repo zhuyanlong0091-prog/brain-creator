@@ -67,6 +67,10 @@ Execution evidence now distinguishes process success from requirement assurance.
 - `reporterPath`: the normalized reporter artifact when the runner returned structured JSON.
 
 The static HTML report is written beside the Markdown evidence report. A process that exits with code 0 but has no structured reporter mapping remains `none`; it must not be presented as strong requirement validation. The report is an offline artifact, not a new Brain Creator UI entrypoint.
+
+## Authentication secret handling
+
+New auth ciphertext uses a random local key at `.brain-creator/secret.key`. Set `BRAIN_CREATOR_SECRET_KEY` for an externally managed key, or `BRAIN_CREATOR_SECRET_KEY_FILE` for a managed key file path. The environment variable has priority. Existing `enc:v1` values are decrypted and re-encrypted as `enc:v2` when the profile is read. Generated token/cookie seeds reference `BRAIN_CREATOR_AUTH_TOKEN` or `BRAIN_CREATOR_AUTH_COOKIE`; they never contain the credential value.
 ```
 
 The archive contains `manifest.json` and available evidence files. It does not include the repository, secret material, browser storage state, or unrelated workspace files. Missing evidence is listed in the manifest instead of silently omitted.

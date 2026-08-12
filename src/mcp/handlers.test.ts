@@ -188,7 +188,8 @@ describe("handleBrainCreatorTool", () => {
       })
     );
     expect(JSON.stringify(seed)).not.toContain("secret-token");
-    expect(seedContent).toContain("secret-token");
+    expect(seedContent).not.toContain("secret-token");
+    expect(seedContent).toContain("BRAIN_CREATOR_AUTH_TOKEN");
   });
 
   it("prefers the latest verified auth profile when generating a seed", async () => {
