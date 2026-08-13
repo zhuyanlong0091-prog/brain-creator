@@ -6951,6 +6951,7 @@ function explorationScenarioArg(input: Record<string, unknown>) {
     role: optionalStringArg(record, "role"),
     prerequisiteState: optionalStringArg(record, "prerequisiteState"),
     dataRefs,
+    testDataLeaseIds: optionalStringArrayArg(record, "testDataLeaseIds") ?? [],
     selectorValues: recordArg(record, "selectorValues")
   };
 }

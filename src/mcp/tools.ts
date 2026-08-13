@@ -175,6 +175,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
           role: z.string().optional(),
           prerequisiteState: z.string().optional(),
           dataRefs: z.array(z.string()).default([]),
+          testDataLeaseIds: z.array(z.string()).default([]),
           selectorValues: z.record(z.string(), z.string()).default({})
         })
         .optional(),

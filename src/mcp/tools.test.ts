@@ -135,6 +135,7 @@ describe("BRAIN_CREATOR_TOOLS", () => {
           role: "recruiter",
           prerequisiteState: "empty recruiting form",
           dataRefs: ["fixture:intern-recruiting"],
+          testDataLeaseIds: [],
           selectorValues: { '[id="employee-type"]': "intern" }
         }
       }).success

@@ -232,6 +232,57 @@ describe("System exploration coordinator", () => {
     ).toThrow("Iframe surface is unavailable after page recovery");
   });
 
+  it("rejects unavailable or cross-system scenario data leases before opening a browser", async () => {
+    const fixture = await createFixture();
+    const explorer: SystemExplorer = { explore: vi.fn() };
+    const coordinator = new SystemExplorationCoordinator({
+      repository: fixture.repository,
+      service: fixture.domainService,
+      knowledgeService: fixture.knowledgeService,
+      workDir: fixture.workDir,
+      explorer
+    });
+
+    await expect(
+      coordinator.explore({
+        knowledgeProjectId: fixture.projectId,
+        systemId: fixture.systemId,
+        interactionMode: "safe",
+        scenario: {
+          name: "Requires prepared data",
+          dataRefs: ["fixture:order"],
+          testDataLeaseIds: ["lease-missing"],
+          selectorValues: {}
+        }
+      })
+    ).rejects.toThrow("unavailable or cross-system test data lease");
+    expect(explorer.explore).not.toHaveBeenCalled();
+  });
+
+  it("rejects secret-like scenario selector keys", async () => {
+    const fixture = await createFixture();
+    const coordinator = new SystemExplorationCoordinator({
+      repository: fixture.repository,
+      service: fixture.domainService,
+      knowledgeService: fixture.knowledgeService,
+      workDir: fixture.workDir,
+      explorer: { explore: vi.fn() }
+    });
+
+    await expect(
+      coordinator.explore({
+        knowledgeProjectId: fixture.projectId,
+        systemId: fixture.systemId,
+        scenario: {
+          name: "Invalid secret scenario",
+          dataRefs: [],
+          testDataLeaseIds: [],
+          selectorValues: { password: "should-not-be-here" }
+        }
+      })
+    ).rejects.toThrow("cannot carry secret selector values");
+  });
+
   it("persists safe field transitions and exposes them to case binding", async () => {
     const fixture = await createFixture();
     const cascade = cascadePageResult();
@@ -565,6 +616,7 @@ describe("System exploration coordinator", () => {
             role: "recruiter",
             prerequisiteState: "empty recruiting form",
             dataRefs: ["fixture:intern-recruiting"],
+            testDataLeaseIds: [],
             selectorValues: { '[id="employee-type"]': "intern" }
           },
           budget: {

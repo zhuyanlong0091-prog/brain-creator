@@ -156,6 +156,15 @@ export class SystemExplorationCoordinator {
     if (authProfile && authProfile.status !== "succeeded") {
       throw new Error("Auth profile must be verified before system exploration");
     }
+    const invalidLeaseIds = (scenario?.testDataLeaseIds ?? []).filter((leaseId) => {
+      const lease = repository.testDataLeases.find((item) => item.id === leaseId);
+      return !lease || lease.systemId !== system.id || lease.status !== "active";
+    });
+    if (invalidLeaseIds.length > 0) {
+      throw new Error(
+        `Exploration scenario references unavailable or cross-system test data lease(s): ${invalidLeaseIds.join(", ")}`
+      );
+    }
     const captureAuth = service.getCaptureAuth(request.authProfileId);
     const storageStateValue = captureAuth?.secrets.storageStatePath;
     const storageStatePath = storageStateValue
@@ -1354,6 +1363,14 @@ function normalizeExplorationScenario(
       .filter(([key, value]) => key.trim() && typeof value === "string" && value.trim())
       .map(([key, value]) => [key.trim(), value.trim()])
   );
+  const sensitiveSelector = Object.keys(selectorValues).find((key) =>
+    /password|passwd|token|cookie|secret|api[_-]?key/i.test(key)
+  );
+  if (sensitiveSelector) {
+    throw new Error(
+      `Exploration scenario cannot carry secret selector values: ${sensitiveSelector}`
+    );
+  }
   return {
     id: input.id?.trim() || id("explorationScenario"),
     name,
@@ -1362,6 +1379,9 @@ function normalizeExplorationScenario(
       ? { prerequisiteState: input.prerequisiteState.trim() }
       : {}),
     dataRefs: [...new Set((input.dataRefs ?? []).map((value) => value.trim()).filter(Boolean))],
+    testDataLeaseIds: [
+      ...new Set((input.testDataLeaseIds ?? []).map((value) => value.trim()).filter(Boolean))
+    ],
     selectorValues
   };
 }

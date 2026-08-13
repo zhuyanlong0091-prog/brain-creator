@@ -158,6 +158,7 @@ export type ExplorationScenario = {
   role?: string;
   prerequisiteState?: string;
   dataRefs: string[];
+  testDataLeaseIds: string[];
   selectorValues: Record<string, string>;
 };
 
