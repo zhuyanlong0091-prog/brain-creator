@@ -2074,7 +2074,8 @@ describe("Brain Creator requirement-first facade", () => {
         action: "cancel",
         requirementSuiteRun: expect.objectContaining({
           status: "cancelled",
-          cancelled: 1
+          cancelled: 1,
+          reportPath: expect.stringContaining("suite-report.html")
         })
       })
     );

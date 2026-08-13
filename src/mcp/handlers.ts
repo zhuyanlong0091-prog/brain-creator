@@ -2649,11 +2649,13 @@ async function controlRequirementSuite(
         updated.maxHealAttempts
     });
   }
+  const archive = await archiveRequirementSuiteRun(context, updated);
   return {
     mode: "requirement-suite",
     status: updated.status,
     action,
-    requirementSuiteRun: updated
+    requirementSuiteRun: updated,
+    ...(archive ? { artifactManifest: archive.artifactManifest } : {})
   };
 }
 
@@ -3185,12 +3187,14 @@ async function finalizeRequirementSuiteCase(
         error: reason
       }
     );
+    const archive = await archiveRequirementSuiteRun(context, blockedRun);
     return {
       ...input.completedCase,
       mode: "requirement-suite",
       status: "blocked",
       gap,
-      requirementSuiteRun: blockedRun
+      requirementSuiteRun: blockedRun,
+      ...(archive ? { artifactManifest: archive.artifactManifest } : {})
     };
   }
   if (cleanup.task) {
@@ -3220,57 +3224,8 @@ async function finalizeRequirementSuiteCase(
     input.executableCase.id,
     input.outcome
   );
-  const terminalOrBlocked = isTerminalRequirementSuiteStatus(updatedRun.status) || updatedRun.status === "blocked";
-  const terminalEvidence = terminalOrBlocked
-    ? updatedRun.caseRuns.flatMap((caseRun) => {
-        const evidence = caseRun.executionEvidenceId
-          ? context.repository.executionEvidence.find(
-              (item) => item.id === caseRun.executionEvidenceId
-            )
-          : undefined;
-        return evidence ? [evidence] : [];
-      })
-    : [];
-  const suiteReportPath = terminalOrBlocked
-    ? join(
-        context.workDir,
-        ".brain-creator",
-        "artifacts",
-        run.systemId,
-        input.executableCase.requirementSetId,
-        run.id,
-        "suite-report.html"
-      )
-    : undefined;
-  if (suiteReportPath) {
-    await writeStaticSuiteExecutionReport({
-      outputPath: suiteReportPath,
-      title: `Brain Creator requirement suite ${run.id}`,
-      run: updatedRun,
-      evidence: terminalEvidence,
-      bugs: context.repository.bugReports
-        .filter((bug) => bug.systemId === run.systemId && updatedRun.caseRuns.some((item) => item.executableCaseId === bug.sourceId))
-        .map((bug) => ({ id: bug.id, status: bug.status, caseNo: bug.caseNo, actualResult: bug.actualResult })),
-      gaps: context.repository.gaps
-        .filter((gap) => gap.projectId === run.systemId && (gap.sourceId === run.id || updatedRun.caseRuns.some((item) => item.executableCaseId === gap.sourceId)))
-        .map((gap) => ({ id: gap.id, status: gap.status, caseNo: gap.sourceId, reason: gap.reason }))
-    });
-    updatedRun.reportPath = suiteReportPath;
-    context.repository.persist();
-  }
-  const artifactManifest = terminalOrBlocked
-    ? await writeArtifactManifest({
-        workDir: context.workDir,
-        systemId: run.systemId,
-        requirementSetId: input.executableCase.requirementSetId,
-        suiteRunId: run.id,
-        artifactPaths: [
-          ...terminalEvidence.flatMap((evidence) => evidence.artifactPaths),
-          ...(suiteReportPath ? [suiteReportPath] : [])
-        ],
-        sourceRefs: [input.executableCase.requirementSetId]
-      })
-    : undefined;
+  const archive = await archiveRequirementSuiteRun(context, updatedRun);
+  const artifactManifest = archive?.artifactManifest;
   if (updatedRun.status === "running") {
     const next = await executeNextRequirementSuiteCase(
       context,
@@ -6847,6 +6802,57 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
     requiredStepIds: requiredStepIds as string[] | undefined,
     actorJourneyRoles: actorJourneyRoles as string[] | undefined
   };
+}
+
+async function archiveRequirementSuiteRun(
+  context: BrainCreatorMcpContext,
+  run: RequirementSuiteRun
+) {
+  const shouldArchive = isTerminalRequirementSuiteStatus(run.status) || run.status === "blocked";
+  if (!shouldArchive) return undefined;
+  const executableCaseIds = new Set(run.caseRuns.map((item) => item.executableCaseId));
+  const executableCases = run.caseRuns
+    .map((item) => context.repository.executableCases.find((candidate) => candidate.id === item.executableCaseId))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const requirementSetId = executableCases[0]?.requirementSetId ?? "unscoped";
+  const evidence = run.caseRuns.flatMap((caseRun) => {
+    const item = caseRun.executionEvidenceId
+      ? context.repository.executionEvidence.find((candidate) => candidate.id === caseRun.executionEvidenceId)
+      : undefined;
+    return item ? [item] : [];
+  });
+  const reportPath = join(
+    context.workDir,
+    ".brain-creator",
+    "artifacts",
+    run.systemId,
+    requirementSetId,
+    run.id,
+    "suite-report.html"
+  );
+  await writeStaticSuiteExecutionReport({
+    outputPath: reportPath,
+    title: `Brain Creator requirement suite ${run.id}`,
+    run,
+    evidence,
+    bugs: context.repository.bugReports
+      .filter((bug) => bug.systemId === run.systemId && executableCaseIds.has(bug.sourceId))
+      .map((bug) => ({ id: bug.id, status: bug.status, caseNo: bug.caseNo, actualResult: bug.actualResult })),
+    gaps: context.repository.gaps
+      .filter((gap) => gap.projectId === run.systemId && (gap.sourceId === run.id || executableCaseIds.has(gap.sourceId)))
+      .map((gap) => ({ id: gap.id, status: gap.status, caseNo: gap.sourceId, reason: gap.reason }))
+  });
+  run.reportPath = reportPath;
+  const artifactManifest = await writeArtifactManifest({
+    workDir: context.workDir,
+    systemId: run.systemId,
+    requirementSetId,
+    suiteRunId: run.id,
+    artifactPaths: [reportPath, ...evidence.flatMap((item) => item.artifactPaths)],
+    sourceRefs: requirementSetId === "unscoped" ? [] : [requirementSetId]
+  });
+  context.repository.persist();
+  return { reportPath, artifactManifest };
 }
 
 function createRequirementBugReport(
