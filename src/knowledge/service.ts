@@ -1123,22 +1123,23 @@ export class KnowledgeService {
           .filter((step) => !reporterSteps.some((reported) => reported.id === step.stepId))
           .map((step) => step.stepId)
       : [];
-    const missingTraceEvidence = input.reporterResult?.steps
-      ? await Promise.all(
-          (input.tracePaths ?? []).map(async (tracePath) => {
-            try {
-              await access(
-                input.evidenceRootDir && !isAbsolute(tracePath)
-                  ? join(input.evidenceRootDir, tracePath)
-                  : tracePath
-              );
-              return undefined;
-            } catch {
-              return tracePath;
-            }
-          })
-        ).then((paths) => paths.filter((path): path is string => Boolean(path)))
+    const tracePathsToCheck = input.evidenceRootDir || (input.tracePaths ?? []).some((tracePath) => isAbsolute(tracePath))
+      ? input.tracePaths ?? []
       : [];
+    const missingTraceEvidence = await Promise.all(
+      tracePathsToCheck.map(async (tracePath) => {
+        try {
+          await access(
+            input.evidenceRootDir && !isAbsolute(tracePath)
+              ? join(input.evidenceRootDir, tracePath)
+              : tracePath
+          );
+          return undefined;
+        } catch {
+          return tracePath;
+        }
+      })
+    ).then((paths) => paths.filter((path): path is string => Boolean(path)));
     evidence.evidenceWarnings = [
       ...(missingAssurance.length
         ? [`Assurance evidence incomplete: ${missingAssurance.join(", ")}`]

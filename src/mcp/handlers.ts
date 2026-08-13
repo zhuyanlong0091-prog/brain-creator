@@ -17,6 +17,10 @@ import {
   verifyStoredBrowserAuth,
   type AuthStateVerifier
 } from "../agent/authStateVerifier.js";
+import {
+  materializeBrowserAuthState,
+  type AuthStateMaterializer
+} from "../agent/authStateMaterializer.js";
 import { BrainCreatorError, errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
@@ -114,6 +118,7 @@ export type BrainCreatorMcpContext = {
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
   authStateVerifier: AuthStateVerifier;
+  authStateMaterializer: AuthStateMaterializer;
   authVerificationCache: Map<string, number>;
   feishuReader?: RequirementSourceReader;
 };
@@ -135,6 +140,7 @@ type CreateContextInput = {
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
   authStateVerifier?: AuthStateVerifier;
+  authStateMaterializer?: AuthStateMaterializer;
   knowledgeDir?: string;
   feishuReader?: RequirementSourceReader;
   systemExplorer?: SystemExplorer;
@@ -189,6 +195,7 @@ export function createBrainCreatorMcpContext(
       (input.runner ? commandRunnerAgentBridge(input.runner) : createConfiguredAgentBridge()),
     runner: input.runner,
     authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
+    authStateMaterializer: input.authStateMaterializer ?? materializeBrowserAuthState,
     authVerificationCache: new Map(),
     feishuReader: input.feishuReader ?? configuredFeishuReader()
   };
@@ -2195,7 +2202,23 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
       const profile = findAuthProfileById(context, systemId, authProfileId);
       const system = context.repository.systemProfiles.find((item) => item.id === systemId);
       if (!system) throw new Error("Business system not found");
-      const storageStatePath = context.service.getCaptureAuth(profile.id)?.secrets.storageStatePath;
+      let storageStatePath: string | undefined;
+      try {
+        storageStatePath = await materializeAuthStorageState(context, system, profile, true);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        context.service.failAuthProfileVerification(profile.id, reason);
+        throw new BrainCreatorError({
+          code: "BC_AUTH_MATERIALIZATION_FAILED",
+          message: reason,
+          userMessage: {
+            enUS: "Brain Creator could not materialize this token or cookie into a browser login state.",
+            zhCN: "Token/Cookie cannot be materialized into a browser login state."
+          },
+          nextAction: "capture-auth-checkpoint",
+          retryable: true
+        });
+      }
       if (!storageStatePath) {
         throw new BrainCreatorError({
           code: "BC_AUTH_EVIDENCE_REQUIRED",
@@ -4169,7 +4192,23 @@ async function verifyAuthForExecution(
 ) {
   const capture = context.service.getCaptureAuth(authProfile.id);
   if (!capture) return;
-  const storageStatePath = capture.secrets.storageStatePath;
+  let storageStatePath: string | undefined;
+  try {
+    storageStatePath = await materializeAuthStorageState(context, system, authProfile);
+  } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const pending = context.service.listAuthCheckpoints(system.id, "awaiting-user")
+        .find((checkpoint) => checkpoint.authProfileId === authProfile.id);
+      if (!pending) {
+        context.service.createAuthCheckpoint({
+          systemId: system.id,
+          authProfileId: authProfile.id,
+          reason,
+          resumeInstruction: "Refresh or capture a browser login state, then complete this checkpoint before resuming execution."
+        });
+      }
+      throw new Error(`Authentication state could not be prepared: ${reason}`);
+  }
   if (!storageStatePath) return;
   const cacheTtlMs = Math.max(
     5_000,
@@ -6526,16 +6565,13 @@ async function verifyCaseSourceSuiteAuthState(
   systemId: string
 ) {
   const profile = findAuthProfile(context, systemId);
-  if (profile.loginMethod !== "script") {
-    return undefined;
-  }
-  const storageStatePath = context.service.getCaptureAuth(profile.id)?.secrets.storageStatePath;
-  if (!storageStatePath) {
-    return undefined;
-  }
   const system = context.repository.systemProfiles.find((item) => item.id === systemId);
   if (!system) {
     throw new Error("Business system not found");
+  }
+  const storageStatePath = await materializeAuthStorageState(context, system, profile);
+  if (!storageStatePath) {
+    return undefined;
   }
   return context.authStateVerifier({
     storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
@@ -6700,6 +6736,36 @@ function numberArg(input: Record<string, unknown>, key: string): number {
 
 function optionalBooleanArg(input: Record<string, unknown>, key: string): boolean {
   return input[key] === true;
+}
+
+async function materializeAuthStorageState(
+  context: BrainCreatorMcpContext,
+  system: SystemProfile,
+  authProfile: AuthProfile,
+  force: boolean = false
+) {
+  const capture = context.service.getCaptureAuth(authProfile.id);
+  const existing = capture?.secrets.storageStatePath;
+  if (existing) return existing;
+  if (!force && (!authProfile.verificationEvidence || authProfile.status !== "succeeded")) return undefined;
+  if (!force && authProfile.loginMethod !== "token" && authProfile.loginMethod !== "cookie") {
+    return undefined;
+  }
+  if (authProfile.loginMethod !== "token" && authProfile.loginMethod !== "cookie") {
+    return undefined;
+  }
+  const hasSecret = authProfile.loginMethod === "token"
+    ? Boolean(capture?.secrets.token)
+    : Boolean(capture?.secrets.cookie);
+  if (!hasSecret) return undefined;
+  const materialized = await context.authStateMaterializer({
+    workDir: context.workDir,
+    system,
+    authProfile
+  });
+  context.service.setAuthStorageStatePath(authProfile.id, materialized.storageStatePath);
+  context.authVerificationCache.delete(authProfile.id);
+  return materialized.storageStatePath;
 }
 
 function actorJourneyArg(input: Record<string, unknown>) {

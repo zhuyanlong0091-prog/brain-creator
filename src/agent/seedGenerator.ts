@@ -102,7 +102,7 @@ async function resolveAuthStorageState(
   input: GenerateSeedFileInput,
   storageStatePath: string | undefined
 ) {
-  if (input.authProfile.loginMethod !== "script" || !storageStatePath) {
+  if (!storageStatePath) {
     return undefined;
   }
   const workspace = input.workDir ?? dirname(input.outputDir);

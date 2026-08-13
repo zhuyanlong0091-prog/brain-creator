@@ -731,6 +731,70 @@ describe("KnowledgeService", () => {
     ).toContain("Expected approved status but received draft");
   });
 
+  it("downgrades assurance and records a warning when a declared trace is missing", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    const project = await service.createProject({ name: "Trace evidence", key: "trace-evidence", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-trace",
+      name: "Trace",
+      environment: "test",
+      baseUrl: "https://trace.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://trace.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-trace");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("trace", "Users submit an order.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const executableCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-trace",
+      executableCaseId: executableCase.id,
+      testCaseId: "test-trace",
+      contextPackPath: "context/trace.json"
+    });
+    evidence.assertionContracts = [{
+      id: "assert-workflow",
+      type: "workflow",
+      strength: "strong",
+      requirementRefs: ["requirement:trace"],
+      evidenceRequirements: ["trace"]
+    }];
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "passed",
+      artifactPaths: [],
+      tracePaths: ["missing/trace.zip"],
+      reporterResult: {
+        status: "passed",
+        total: 1,
+        passed: 1,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        assertions: [],
+        steps: [],
+        attachments: [],
+        consoleErrors: [],
+        networkFailures: []
+      },
+      evidenceRootDir: knowledgeDir
+    });
+
+    expect(completed.assuranceLevel).toBe("none");
+    expect(completed.evidenceWarnings).toEqual(
+      expect.arrayContaining([expect.stringContaining("Missing trace artifact")])
+    );
+  });
+
   it("redacts auth values before execution evidence and reports are persisted", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const knowledgeDir = await tempDir();

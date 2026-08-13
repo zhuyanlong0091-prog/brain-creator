@@ -1,8 +1,8 @@
 // @vitest-environment node
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
 
@@ -13,6 +13,132 @@ afterEach(async () => {
 });
 
 describe("facade control plane", () => {
+  it("materializes token auth into a protected browser state before verification", async () => {
+    const workDir = await tempDir();
+    const materialized: string[] = [];
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json"),
+      authStateMaterializer: async ({ authProfile }) => {
+        const storageStatePath = `.brain-creator/auth/${authProfile.id}/storage-state.json`;
+        materialized.push(storageStatePath);
+        return { storageStatePath, method: "token" };
+      },
+      authStateVerifier: async ({ storageStatePath }) => ({
+        status: "valid",
+        finalUrl: "https://orders.example.test/dashboard",
+        title: storageStatePath
+      })
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "system",
+      name: "Orders",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      urlAllowlist: ["https://orders.example.test"]
+    }));
+    const auth = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "auth",
+      operation: "create",
+      systemId: system.id,
+      env: "test",
+      role: "buyer",
+      loginMethod: "token",
+      secrets: { token: "token-secret" }
+    }));
+    const verified = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "auth",
+      operation: "verify",
+      systemId: system.id,
+      authProfileId: auth.id
+    }));
+
+    expect(materialized).toEqual([expect.stringContaining(".brain-creator/auth")]);
+    expect(verified).toEqual(expect.objectContaining({
+      status: "succeeded",
+      verificationEvidence: expect.objectContaining({
+        title: expect.stringContaining("storage-state.json")
+      })
+    }));
+    expect(context.service.getCaptureAuth(auth.id)?.secrets.storageStatePath).toContain("storage-state.json");
+    expect(JSON.stringify(verified)).not.toContain("token-secret");
+  });
+
+  it("materializes verified token auth again at the execution boundary", async () => {
+    const workDir = await tempDir();
+    let materializeCount = 0;
+    let verifyCount = 0;
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json"),
+      authStateMaterializer: async ({ authProfile }) => {
+        materializeCount += 1;
+        const storageStatePath = `.brain-creator/auth/${authProfile.id}/storage-state.json`;
+        await mkdir(dirname(join(workDir, storageStatePath)), { recursive: true });
+        await writeFile(join(workDir, storageStatePath), JSON.stringify({ cookies: [], origins: [] }), "utf8");
+        return {
+          storageStatePath,
+          method: "token"
+        };
+      },
+      authStateVerifier: async () => {
+        verifyCount += 1;
+        return { status: "valid", finalUrl: "https://orders.example.test/dashboard" };
+      },
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (outputIndex >= 0) await writeFile(args[outputIndex + 1], "generated", "utf8");
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => ({ exitCode: 0, stdout: "passed", stderr: "" })
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "system",
+      name: "Orders",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      urlAllowlist: ["https://orders.example.test"]
+    }));
+    const auth = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "auth",
+      operation: "create",
+      systemId: system.id,
+      env: "test",
+      role: "buyer",
+      loginMethod: "token",
+      secrets: { token: "token-secret" }
+    }));
+    const verified = context.service.verifyAuthProfile(auth.id, {
+      targetUrl: system.baseUrl,
+      finalUrl: `${system.baseUrl}/dashboard`
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Run with materialized auth",
+      scenarios: [{
+        id: "scenario-auth-boundary",
+        title: "Authenticated run",
+        priority: "high",
+        steps: [{ action: "assert", target: "dashboard", expected: "visible" }]
+      }],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+
+    const result = dataOf(await handleBrainCreatorTool(context, "bc_run", {
+      mode: "approved-case",
+      caseId: testCase.id,
+      authProfileId: verified.id
+    }));
+
+    expect(result.chainRun.status).toBe("succeeded");
+    expect(materializeCount).toBe(1);
+    expect(verifyCount).toBe(1);
+    expect(context.service.getCaptureAuth(auth.id)?.secrets.storageStatePath)
+      .toContain("storage-state.json");
+  });
+
   it("creates, browser-verifies, and archives auth through bc_configure", async () => {
     const workDir = await tempDir();
     const verificationInputs: Array<Record<string, unknown>> = [];

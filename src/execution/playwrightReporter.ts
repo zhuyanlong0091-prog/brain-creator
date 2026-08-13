@@ -119,6 +119,7 @@ function collectSteps(suites: unknown[], output: NonNullable<StructuredReporterR
 function collectResultSteps(result: Record<string, unknown>, output: NonNullable<StructuredReporterResult["steps"]>) {
   if (!Array.isArray(result.steps)) return;
   const traceRefs = traceRefsFromAttachments(result.attachments);
+  const hasSingleSemanticStep = countSemanticSteps(result.steps) === 1;
   for (const item of result.steps) {
     if (!item || typeof item !== "object") continue;
     const step = item as Record<string, unknown>;
@@ -135,7 +136,7 @@ function collectResultSteps(result: Record<string, unknown>, output: NonNullable
           .filter((attachment): attachment is Record<string, unknown> => Boolean(attachment && typeof attachment === "object"))
           .map((attachment) => attachment.path ?? attachment.name)
           .filter((path): path is string => typeof path === "string"),
-        ...(traceRefs.length > 0 ? { traceRefs } : {}),
+        ...(traceRefs.length > 0 && hasSingleSemanticStep ? { traceRefs } : {}),
         ...(runtime.consoleErrors.length > 0 ? { consoleErrors: runtime.consoleErrors } : {}),
         ...(runtime.networkFailures.length > 0 ? { networkFailures: runtime.networkFailures } : {}),
         ...(typeof step.error === "string" ? { error: step.error } : {})
@@ -143,6 +144,16 @@ function collectResultSteps(result: Record<string, unknown>, output: NonNullable
     }
     collectResultSteps(step, output);
   }
+}
+
+function countSemanticSteps(value: unknown[]): number {
+  return value.reduce<number>((total, item) => {
+    if (!item || typeof item !== "object") return total;
+    const record = item as Record<string, unknown>;
+    const own = typeof record.title === "string" && record.title.startsWith("bc:") ? 1 : 0;
+    const nested = Array.isArray(record.steps) ? countSemanticSteps(record.steps) : 0;
+    return total + own + nested;
+  }, 0);
 }
 
 function traceRefsFromAttachments(value: unknown) {

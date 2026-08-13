@@ -635,6 +635,16 @@ export class BrainCreatorService {
     };
   }
 
+  setAuthStorageStatePath(idValue: string, storageStatePath: string): AuthProfile {
+    const profile = this.repository.authProfiles.find((item) => item.id === idValue);
+    if (!profile) throw new Error("Auth profile not found");
+    const secrets = decryptSecrets(migrateEncryptedSecrets(profile.encryptedSecrets).encryptedSecrets);
+    profile.encryptedSecrets = encryptSecrets({ ...secrets, storageStatePath });
+    profile.updatedAt = timestamp();
+    this.repository.persist();
+    return publicAuthProfile(profile);
+  }
+
   discoverPageModel(input: DiscoverPageInput): {
     pageModel: PageModel;
     locatorPoints: LocatorPoint[];
