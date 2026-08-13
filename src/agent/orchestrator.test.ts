@@ -324,6 +324,50 @@ describe("runChain", () => {
     expect(result.chainRun.status).toBe("failed");
   });
 
+  it("scans and redacts every Agent output path at the shared bridge boundary", async () => {
+    const workDir = await tempDir();
+    const outputPath = join(workDir, "planner.md");
+    const result = await runAgent({
+      systemId: "system_1",
+      agent: "planner",
+      inputSummary: "sensitive output check",
+      args: [],
+      outputPaths: [outputPath],
+      cwd: workDir,
+      protectedSecrets: { token: "long-lived-token-123" },
+      agentBridge: async () => {
+        await writeFile(outputPath, 'token = "long-lived-token-123"', "utf8");
+        return { exitCode: 0, stdout: "ok", stderr: "" };
+      }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("sensitive material");
+    expect(await readFile(outputPath, "utf8")).toContain("[REDACTED]");
+    expect(await readFile(outputPath, "utf8")).not.toContain("long-lived-token-123");
+  });
+
+  it("rejects Agent output paths outside the working directory before bridge execution", async () => {
+    const workDir = await tempDir();
+    let bridgeCalled = false;
+    const result = await runAgent({
+      systemId: "system_1",
+      agent: "planner",
+      inputSummary: "path boundary",
+      args: [],
+      outputPaths: [join(workDir, "..", "outside.md")],
+      cwd: workDir,
+      agentBridge: async () => {
+        bridgeCalled = true;
+        return { exitCode: 0, stdout: "ok", stderr: "" };
+      }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("inside the workdir");
+    expect(bridgeCalled).toBe(false);
+  });
+
   it("records Playwright stdout as the failure reason when stderr is empty", async () => {
     const workDir = await tempDir();
     const result = await runChain({

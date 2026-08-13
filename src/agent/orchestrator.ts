@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { buildAgentPrompt } from "./promptBuilder.js";
 import { generateSeedFile } from "./seedGenerator.js";
 import { formatScenariosAsMarkdown, parseSpecMarkdown } from "./caseFormatter.js";
@@ -164,6 +164,26 @@ type RunChainInput = {
 
 export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
   const start = Date.now();
+  const invalidOutputPaths = input.outputPaths.filter((outputPath) => {
+    const root = resolve(input.cwd ?? process.cwd());
+    const offset = relative(root, resolve(root, outputPath));
+    return offset.startsWith("..") || /^[A-Za-z]:/.test(offset);
+  });
+  if (invalidOutputPaths.length > 0) {
+    const message = `Agent output path must stay inside the workdir: ${invalidOutputPaths.join(", ")}`;
+    return {
+      id: id("agent"),
+      systemId: input.systemId,
+      agent: input.agent,
+      status: "failed",
+      inputSummary: input.inputSummary,
+      outputPaths: input.outputPaths,
+      duration: Date.now() - start,
+      logs: [message],
+      error: message,
+      createdAt: new Date().toISOString()
+    };
+  }
   const agentBridge = input.agentBridge ?? missingAgentBridge;
   let result: CommandResult;
   try {
@@ -187,7 +207,13 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
   const stdout = redact(result.stdout);
   const stderr = redact(result.stderr);
   const logs = [stdout, stderr].map((entry) => entry.trim()).filter(Boolean);
-  const status = result.exitCode === 0 ? "succeeded" : "failed";
+  const outputFindings = await scanAgentOutputFiles(input);
+  if (outputFindings.length > 0) {
+    logs.push(
+      `Sensitive values were redacted from Agent output(s): ${outputFindings.join(", ")}`
+    );
+  }
+  const status = result.exitCode === 0 && outputFindings.length === 0 ? "succeeded" : "failed";
 
   return {
     id: id("agent"),
@@ -198,7 +224,12 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
     outputPaths: input.outputPaths,
     duration: Date.now() - start,
     logs,
-    error: status === "failed" ? stderr || stdout || "Agent command failed" : undefined,
+    error:
+      status === "failed"
+        ? outputFindings.length > 0
+          ? `Agent output contained sensitive material: ${outputFindings.join(", ")}`
+          : stderr || stdout || "Agent command failed"
+        : undefined,
     createdAt: new Date().toISOString()
   };
 }
@@ -444,6 +475,35 @@ export async function runChain(input: RunChainInput) {
     testPath,
     testResult
   };
+}
+
+async function scanAgentOutputFiles(input: RunAgentInput) {
+  const findings: string[] = [];
+  const root = resolve(input.cwd ?? process.cwd());
+  for (const outputPath of [...new Set(input.outputPaths)]) {
+    const path = resolve(root, outputPath);
+    const offset = relative(root, path);
+    if (offset.startsWith("..") || /^[A-Za-z]:/.test(offset)) {
+      findings.push(`${outputPath} (outside-workdir)`);
+      continue;
+    }
+    let source: string;
+    try {
+      source = await readFile(path, "utf8");
+    } catch {
+      continue;
+    }
+    const matches = [
+      ...scanSensitiveValues(source, input.protectedSecrets ?? {}).map(
+        (finding) => `credential:${finding.secretKey}`
+      ),
+      ...scanSensitivePatterns(source).map((finding) => `pattern:${finding.rule}`)
+    ];
+    if (matches.length === 0) continue;
+    await writeFile(path, redactSensitiveText(source, input.protectedSecrets ?? {}), "utf8");
+    findings.push(`${outputPath} (${[...new Set(matches)].join(", ")})`);
+  }
+  return findings;
 }
 
 async function readGeneratedSource(path: string) {
