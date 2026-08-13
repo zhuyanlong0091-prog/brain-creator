@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryBrainCreatorRepository, JsonFileBrainCreatorRepository } from "../domain/repository.js";
 import type { RequirementContentPackage } from "../domain/types.js";
+import { encryptSecrets } from "../shared/crypto.js";
 import { KnowledgeService } from "./service.js";
 
 const tempDirs: string[] = [];
@@ -728,6 +729,92 @@ describe("KnowledgeService", () => {
         "utf8"
       )
     ).toContain("Expected approved status but received draft");
+  });
+
+  it("redacts auth values before execution evidence and reports are persisted", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    const project = await service.createProject({ name: "Redacted evidence", key: "redacted-evidence", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-redacted",
+      name: "Redacted",
+      environment: "test",
+      baseUrl: "https://redacted.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://redacted.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    repository.authProfiles.push({
+      id: "auth-redacted",
+      projectId: "system-redacted",
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      encryptedSecrets: encryptSecrets({ token: "runtime-secret-value" }),
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-redacted");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("redacted", "Users create a record.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const executableCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-redacted",
+      executableCaseId: executableCase.id,
+      testCaseId: "test-redacted",
+      contextPackPath: "context/redacted.json"
+    });
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "failed",
+      actualResult: "token=runtime-secret-value",
+      artifactPaths: [],
+      consoleErrors: ["Authorization runtime-secret-value"],
+      networkFailures: ["GET /records?token=runtime-secret-value"],
+      reporterResult: {
+        status: "failed",
+        total: 1,
+        passed: 0,
+        failed: 1,
+        skipped: 0,
+        durationMs: 1,
+        assertions: [{
+          id: "assert-secret",
+          status: "failed",
+          actual: "runtime-secret-value",
+          expected: "runtime-secret-value",
+          evidenceRefs: []
+        }],
+        steps: [{
+          id: "step-secret",
+          title: "bc:secret",
+          status: "failed",
+          evidenceRefs: [],
+          error: "token=runtime-secret-value",
+          consoleErrors: ["runtime-secret-value"],
+          networkFailures: ["runtime-secret-value"]
+        }],
+        attachments: [],
+        consoleErrors: ["runtime-secret-value"],
+        networkFailures: ["runtime-secret-value"]
+      }
+    });
+
+    expect(completed.actualResult).toBe("token=[REDACTED]");
+    expect(completed.consoleErrors).toEqual(["Authorization [REDACTED]"]);
+    expect(completed.networkFailures).toEqual(["GET /records?token=[REDACTED]"]);
+    expect(completed.reporterResult?.assertions[0].actual).toBe("[REDACTED]");
+    expect(completed.reporterResult?.steps?.[0].error).toBe("token=[REDACTED]");
+    const report = await readFile(join(knowledgeDir, "redacted-evidence", "reports", evidence.id, "summary.md"), "utf8");
+    expect(report).not.toContain("runtime-secret-value");
   });
 
   it("downgrades assurance when structured reporter omits a declared step", async () => {

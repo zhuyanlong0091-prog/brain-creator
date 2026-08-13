@@ -6500,9 +6500,7 @@ async function verifyCaseSourceSuiteAuthState(
     throw new Error("Business system not found");
   }
   return context.authStateVerifier({
-    storageStatePath: isAbsolute(storageStatePath)
-      ? resolve(storageStatePath)
-      : resolve(context.workDir, storageStatePath),
+    storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
     targetUrl: system.baseUrl,
     allowedUrls: system.urlAllowlist
   });

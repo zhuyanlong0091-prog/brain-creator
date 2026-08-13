@@ -46,6 +46,7 @@ import {
 import { planWorkflowPath } from "./workflowPathPlanner.js";
 import { buildAssertionContracts, determineAssuranceLevel } from "../execution/assurance.js";
 import { writeStaticExecutionReport } from "../execution/staticReport.js";
+import { decryptSecrets } from "../shared/crypto.js";
 
 export class KnowledgeService {
   constructor(
@@ -1086,15 +1087,18 @@ export class KnowledgeService {
   ) {
     const evidence = this.repository.executionEvidence.find((item) => item.id === evidenceId);
     if (!evidence) throw new Error("Execution evidence not found");
+    const redact = executionSecretRedactor(this.repository, evidence.systemId);
     evidence.status = input.status;
     evidence.chainRunId = input.chainRunId;
-    evidence.actualResult = input.actualResult;
+    evidence.actualResult = input.actualResult === undefined ? undefined : redact(input.actualResult);
     evidence.artifactPaths = [...new Set([...evidence.artifactPaths, ...input.artifactPaths])];
     evidence.tracePaths = [...new Set(input.tracePaths ?? [])];
-    evidence.consoleErrors = input.consoleErrors ?? [];
-    evidence.networkFailures = input.networkFailures ?? [];
+    evidence.consoleErrors = (input.consoleErrors ?? []).map(redact);
+    evidence.networkFailures = (input.networkFailures ?? []).map(redact);
     evidence.reporterPath = input.reporterPath;
-    evidence.reporterResult = input.reporterResult;
+    evidence.reporterResult = input.reporterResult
+      ? redactReporterResult(input.reporterResult, redact)
+      : undefined;
     if (input.actorRoleEvidencePath) {
       evidence.artifactPaths = [...new Set([...evidence.artifactPaths, input.actorRoleEvidencePath])];
     }
@@ -1102,7 +1106,7 @@ export class KnowledgeService {
       evidence.assertionContracts ?? [],
       input.reporterResult
     );
-    const reporterSteps = input.reporterResult?.steps;
+    const reporterSteps = evidence.reporterResult?.steps;
     const missingStepEvidence = reporterSteps
       ? evidence.steps
           .filter((step) => !reporterSteps.some((reported) => reported.id === step.stepId))
@@ -1149,7 +1153,7 @@ export class KnowledgeService {
           : step.action === "assert"
             ? input.status
             : "blocked";
-      if (step.action === "assert") step.actual = input.actualResult;
+      if (step.action === "assert") step.actual = input.actualResult === undefined ? undefined : redact(input.actualResult);
     }
     if (reporterSteps !== undefined) {
       const requiredCoverage = evidence.coverage?.required ?? ["workflow"];
@@ -2181,6 +2185,49 @@ function executableCaseCompileKey(
 
 function timestamp() {
   return new Date().toISOString();
+}
+
+function executionSecretRedactor(
+  repository: InMemoryBrainCreatorRepository,
+  systemId: string
+) {
+  const values = repository.authProfiles
+    .filter((profile) => profile.projectId === systemId)
+    .flatMap((profile) => {
+      try {
+        return Object.values(decryptSecrets(profile.encryptedSecrets));
+      } catch {
+        return [];
+      }
+    })
+    .filter((value) => value.length >= 4)
+    .sort((left, right) => right.length - left.length);
+  return (value: string) => values.reduce(
+    (result, secret) => result.split(secret).join("[REDACTED]"),
+    value
+  );
+}
+
+function redactReporterResult(
+  reporter: NonNullable<ExecutionEvidence["reporterResult"]>,
+  redact: (value: string) => string
+): NonNullable<ExecutionEvidence["reporterResult"]> {
+  return {
+    ...reporter,
+    assertions: reporter.assertions.map((assertion) => ({
+      ...assertion,
+      ...(assertion.actual === undefined ? {} : { actual: redact(assertion.actual) }),
+      ...(assertion.expected === undefined ? {} : { expected: redact(assertion.expected) })
+    })),
+    steps: reporter.steps?.map((step) => ({
+      ...step,
+      ...(step.error === undefined ? {} : { error: redact(step.error) }),
+      ...(step.consoleErrors === undefined ? {} : { consoleErrors: step.consoleErrors.map(redact) }),
+      ...(step.networkFailures === undefined ? {} : { networkFailures: step.networkFailures.map(redact) })
+    })),
+    consoleErrors: reporter.consoleErrors.map(redact),
+    networkFailures: reporter.networkFailures.map(redact)
+  };
 }
 
 function verifiedCoverageDimensions(

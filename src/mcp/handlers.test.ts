@@ -2921,6 +2921,39 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.listCaseSuites(system.id)).toEqual([]);
   });
 
+  it("rejects document-suite auth storage outside the Brain Creator workspace", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      authStateVerifier: async () => ({ status: "valid", finalUrl: "https://hrms.example.test" })
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "Protected HRMS",
+      environment: "test",
+      baseUrl: "https://hrms.example.test",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://hrms.example.test"]
+    }));
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "script",
+      secrets: { storageStatePath: "..\\outside-storage-state.json" }
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    await expect(
+      handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true
+      })
+    ).resolves.toEqual(expect.objectContaining({ isError: true }));
+  });
+
   it("filters document case suites by case number, module, and priority", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
