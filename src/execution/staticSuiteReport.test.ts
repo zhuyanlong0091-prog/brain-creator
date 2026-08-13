@@ -18,6 +18,7 @@ describe("static suite execution report", () => {
         contextPackPath: "context.json",
         status: "passed",
         assuranceLevel: "strong",
+        evidenceWarnings: [],
         steps: [],
         tracePaths: ["trace.zip"],
         artifactPaths: ["report.html", "trace.zip"],
@@ -31,6 +32,7 @@ describe("static suite execution report", () => {
 
     expect(html).toContain("Orders &lt;suite&gt;");
     expect(html).toContain("strong");
+    expect(html).toContain("Assurance: <strong>strong 1</strong> | limited 0 | none 0");
     expect(html).toContain("trace.zip");
     expect(html).toContain("bug-1");
     expect(html).toContain("gap-1");
@@ -63,6 +65,7 @@ describe("static suite execution report", () => {
 
     expect(html).toContain("Auth checkpoint required");
     expect(html).toContain("Queued case");
+    expect(html).toContain("Not executed");
     expect(html).toContain("blocked");
   });
 });
