@@ -750,11 +750,14 @@ async function collectInteractionCandidates(
   const frames = await Promise.all(
     page.frames()
       .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
-      .map((frame) => collectInteractionCandidatesFromSurface(frame, {
-        kind: "iframe",
-        url: canonicalUrl(frame.url()),
-        parentUrl: canonicalUrl(page.url())
-      }))
+      .map((frame, frameIndex) =>
+        collectInteractionCandidatesFromSurface(frame, {
+          kind: "iframe",
+          url: canonicalUrl(frame.url()),
+          parentUrl: canonicalUrl(page.url()),
+          frameIndex
+        })
+      )
   );
   const shadow = await collectOpenShadowInteractionCandidates(page, {
     kind: "shadow-root",
@@ -972,9 +975,18 @@ function interactionLocator(
   candidate: SafeInteractionCandidate
 ) {
   if (candidate.surface?.kind === "iframe") {
-    const frame = page.frames().find(
-      (item) => canonicalUrl(item.url()) === candidate.surface?.url
-    );
+    const childFrames = page
+      .frames()
+      .filter((item) => item !== page.mainFrame() && Boolean(item.url()));
+    const indexedFrame =
+      candidate.surface.frameIndex === undefined
+        ? undefined
+        : childFrames[candidate.surface.frameIndex];
+    const frame =
+      indexedFrame &&
+      canonicalUrl(indexedFrame.url()) === candidate.surface.url
+        ? indexedFrame
+        : childFrames.find((item) => canonicalUrl(item.url()) === candidate.surface?.url);
     if (frame) return frame.locator(candidate.selector);
   }
   return page.locator(candidate.selector);
@@ -1179,11 +1191,12 @@ async function capturePage(
   const frameInteractiveElements = await Promise.all(
     page.frames()
       .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
-      .map(async (frame) => {
+      .map(async (frame, frameIndex) => {
         const surface = {
           kind: "iframe" as const,
           url: canonicalUrl(frame.url()),
-          parentUrl: finalUrl
+          parentUrl: finalUrl,
+          frameIndex
         };
         const elements = await frame.locator(
           'button, input, select, textarea, a[href], [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="radio"]'

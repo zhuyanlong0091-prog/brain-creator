@@ -434,6 +434,7 @@ describe("System exploration coordinator", () => {
                 <input id="replacement" aria-label="Replacement Employee" hidden>
               </div>
               <iframe src="/frame" title="Embedded form"></iframe>
+              <iframe src="/frame" title="Embedded form duplicate"></iframe>
               <div id="shadow-host"></div>
               <wujie-app id="wujie-host"></wujie-app>
               <label>
@@ -573,15 +574,23 @@ describe("System exploration coordinator", () => {
             expect.objectContaining({ kind: "wujie" })
           ])
         );
-        const frameMode = result.exploration.interactionTransitions.find(
+        const frameModes = result.exploration.interactionTransitions.filter(
           (transition) => transition.targetName === "Frame Mode"
         );
-        expect(frameMode).toEqual(
-          expect.objectContaining({
-            status: "observed",
-            surface: expect.objectContaining({ kind: "iframe" }),
-            visibleAdded: expect.arrayContaining(["Advanced Mode"])
-          })
+        expect(frameModes).toHaveLength(2);
+        expect(frameModes).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              status: "observed",
+              surface: expect.objectContaining({ kind: "iframe", frameIndex: 0 }),
+              visibleAdded: expect.arrayContaining(["Advanced Mode"])
+            }),
+            expect.objectContaining({
+              status: "observed",
+              surface: expect.objectContaining({ kind: "iframe", frameIndex: 1 }),
+              visibleAdded: expect.arrayContaining(["Advanced Mode"])
+            })
+          ])
         );
         const shadowDetails = result.exploration.interactionTransitions.find(
           (transition) => transition.targetName === "Shadow details"

@@ -166,6 +166,8 @@ export type InteractionSurfaceRef = {
   kind: "document" | "iframe" | "shadow-root" | "wujie";
   url: string;
   parentUrl?: string;
+  /** Stable ordinal among child frames on the captured page. */
+  frameIndex?: number;
 };
 
 export type SystemExplorationInteractionTransition = {
