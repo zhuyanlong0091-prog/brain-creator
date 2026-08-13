@@ -42,6 +42,23 @@ describe("artifact archive", () => {
     expect(manifest.path).toContain(join(".brain-creator", "artifacts", "system_orders", "requirement_orders", "suite_run_1"));
   });
 
+  it("blocks sensitive artifacts before they enter the evidence manifest", async () => {
+    const root = await tempDir();
+    const artifact = join(root, "playwright-report.json");
+    await writeFile(artifact, '{"token":"long-lived-token-123"}', "utf8");
+
+    await expect(
+      writeArtifactManifest({
+        workDir: root,
+        systemId: "system_orders",
+        artifactPaths: [artifact],
+        protectedSecrets: { token: "long-lived-token-123" }
+      })
+    ).rejects.toThrow(
+      "Artifact manifest blocked because sensitive values were found in: playwright-report.json"
+    );
+  });
+
   it("exports a suite run with manifest and available evidence without secrets", async () => {
     const root = await tempDir();
     const artifact = join(root, "report.html");

@@ -31,6 +31,7 @@ export type ArtifactManifestInput = {
   suiteRunId?: string;
   artifactPaths: string[];
   sourceRefs?: string[];
+  protectedSecrets?: Record<string, string>;
 };
 
 export async function writeArtifactManifest(input: ArtifactManifestInput): Promise<ArtifactManifest> {
@@ -44,6 +45,18 @@ export async function writeArtifactManifest(input: ArtifactManifestInput): Promi
   ];
   const manifestPath = resolve(input.workDir, ...ownership, "manifest.json");
   const artifacts = await describeArtifacts(input.workDir, input.artifactPaths);
+  const secretFindings = await scanArtifactSecrets(
+    input.workDir,
+    artifacts.filter((item) => item.status === "present"),
+    Object.entries(input.protectedSecrets ?? {})
+  );
+  if (secretFindings.length > 0) {
+    throw new Error(
+      `Artifact manifest blocked because sensitive values were found in: ${secretFindings
+        .map((finding) => finding.path)
+        .join(", ")}`
+    );
+  }
   const manifest: ArtifactManifest = {
     path: manifestPath,
     systemId: input.systemId,

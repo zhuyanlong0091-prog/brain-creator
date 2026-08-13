@@ -21,7 +21,7 @@ Status meanings:
 | A8 | Upgrade and migration had no safe path | resolved | PR B | Schema 16 migration creates a timestamped backup; schema 17 validation, doctor checks, index rebuild, and Suite export are covered |
 | B1 | SPA exploration missed navigation transitions | partial | PR E | Link navigation and observed safe-interaction URL changes now create queued targets; popup and full remount recovery remain |
 | B2 | Shared labels produced ambiguous page selection | resolved | PR A/PR E | Confirmed page binding exists; candidate score breakdown and matched evidence are returned for ambiguity diagnostics |
-| B3 | Shadow DOM actions were not reliably reachable | resolved | PR E | Open Shadow DOM and same-origin iframe candidates now carry surface-scoped evidence, safe actions, state changes, and System Brain transitions; Wujie remains detection-only |
+| B3 | Shadow DOM actions were not reliably reachable | resolved | PR E | Open Shadow DOM, Wujie-like open containers, and same-origin iframe candidates now carry surface-scoped evidence, safe actions, state changes, and System Brain transitions; closed or cross-origin surfaces remain observational |
 | B4 | SPA remount invalidated the active Page | partial | PR E | Safe exploration now reacquires a closed/invalid active page before continuing, retries a stale safe target once, and covers a real SPA root-remount fixture; popup-close and cross-surface recovery remain |
 | B5 | Initial-state exploration missed conditional actions | partial | PR E | ExplorationScenario discovers state- and data-dependent controls |
 | C1 | Short-lived login state expired during suites | partial | PR D | Fresh-context preflight detects expiry and creates AuthCheckpoint; provider-specific automatic refresh remains |

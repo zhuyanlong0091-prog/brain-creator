@@ -1554,7 +1554,8 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     systemId,
     suiteRunId: suiteRun.id,
     artifactPaths: suiteRun.artifactPaths,
-    sourceRefs: [caseSource.id, suite.id]
+    sourceRefs: [caseSource.id, suite.id],
+    protectedSecrets: protectedSecretsForSystem(context, systemId)
   });
   context.service.updateCaseSuiteStatus(
     suite.id,
@@ -5346,16 +5347,24 @@ function redactHostAgentText(
   systemId: string,
   text: string
 ) {
-  const secrets = context.repository.authProfiles
-    .filter((profile) => profile.projectId === systemId)
-    .flatMap((profile) => {
-      try {
-        return Object.entries(decryptSecrets(profile.encryptedSecrets));
-      } catch {
-        return [];
-      }
-    });
-  return redactSensitiveText(text, Object.fromEntries(secrets));
+  return redactSensitiveText(text, protectedSecretsForSystem(context, systemId));
+}
+
+function protectedSecretsForSystem(
+  context: BrainCreatorMcpContext,
+  systemId: string
+) {
+  return Object.fromEntries(
+    context.repository.authProfiles
+      .filter((profile) => profile.projectId === systemId)
+      .flatMap((profile) => {
+        try {
+          return Object.entries(decryptSecrets(profile.encryptedSecrets));
+        } catch {
+          return [];
+        }
+      })
+  );
 }
 
 function parseHostReporter(output: string) {
@@ -5371,15 +5380,7 @@ function scanGeneratedTestSecrets(
   systemId: string,
   source: string
 ) {
-  const protectedValues = context.repository.authProfiles
-    .filter((profile) => profile.projectId === systemId)
-    .flatMap((profile) => {
-      try {
-        return Object.entries(decryptSecrets(profile.encryptedSecrets));
-      } catch {
-        return [];
-      }
-    });
+  const protectedValues = Object.entries(protectedSecretsForSystem(context, systemId));
   return [
     ...scanSensitiveValues(source, Object.fromEntries(protectedValues)).map(
       (finding) => `credential:${finding.secretKey}`
@@ -7056,7 +7057,8 @@ async function archiveRequirementSuiteRun(
     requirementSetId,
     suiteRunId: run.id,
     artifactPaths: [reportPath, ...evidence.flatMap((item) => item.artifactPaths)],
-    sourceRefs: requirementSetId === "unscoped" ? [] : [requirementSetId]
+    sourceRefs: requirementSetId === "unscoped" ? [] : [requirementSetId],
+    protectedSecrets: protectedSecretsForSystem(context, run.systemId)
   });
   context.repository.persist();
   return { reportPath, artifactManifest };

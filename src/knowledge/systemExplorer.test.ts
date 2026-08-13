@@ -430,6 +430,7 @@ describe("System exploration coordinator", () => {
               </div>
               <iframe src="/frame" title="Embedded form"></iframe>
               <div id="shadow-host"></div>
+              <wujie-app id="wujie-host"></wujie-app>
               <label>
                 Sync Type
                 <select id="sync-type" onchange="fetch('/api/sync', { method: 'POST' }).catch(() => {})">
@@ -463,6 +464,19 @@ describe("System exploration coordinator", () => {
                   shadowPanel.hidden = false;
                 };
                 root.append(shadowButton, shadowPanel);
+                const wujieRoot = document.querySelector('#wujie-host').attachShadow({ mode: 'open' });
+                const wujieButton = document.createElement('button');
+                wujieButton.id = 'wujie-details';
+                wujieButton.setAttribute('aria-expanded', 'false');
+                wujieButton.textContent = 'Wujie details';
+                const wujiePanel = document.createElement('span');
+                wujiePanel.hidden = true;
+                wujiePanel.textContent = 'Wujie panel';
+                wujieButton.onclick = () => {
+                  wujieButton.setAttribute('aria-expanded', 'true');
+                  wujiePanel.hidden = false;
+                };
+                wujieRoot.append(wujieButton, wujiePanel);
               </script>
             </body>
           </html>
@@ -518,7 +532,7 @@ describe("System exploration coordinator", () => {
           )
         ).toBe(false);
         expect(result.brain.stateTransitions.map((transition) => transition.targetName)).toEqual(
-          expect.arrayContaining(["Employee Type", "Frame Mode", "Shadow details"])
+          expect.arrayContaining(["Employee Type", "Frame Mode", "Shadow details", "Wujie details"])
         );
         expect(result.brain.stateTransitions).toEqual(
           expect.arrayContaining([
@@ -529,6 +543,10 @@ describe("System exploration coordinator", () => {
             expect.objectContaining({
               targetName: "Shadow details",
               surface: expect.objectContaining({ kind: "shadow-root" })
+            }),
+            expect.objectContaining({
+              targetName: "Wujie details",
+              surface: expect.objectContaining({ kind: "wujie" })
             })
           ])
         );
@@ -539,7 +557,8 @@ describe("System exploration coordinator", () => {
           expect.arrayContaining([
             expect.objectContaining({ kind: "iframe" }),
             expect.objectContaining({ kind: "shadow-root" }),
-            expect.objectContaining({ kind: "popup" })
+            expect.objectContaining({ kind: "popup" }),
+            expect.objectContaining({ kind: "wujie" })
           ])
         );
         const frameMode = result.exploration.interactionTransitions.find(
