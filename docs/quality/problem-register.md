@@ -48,7 +48,7 @@ Status meanings:
 | F3 | One JSON file grew without partitioning | resolved | PR B | Schema 17 sharded repository, atomic writes, migration backup, missing-shard detection, and index rebuild are covered |
 | F4 | Local assets had no collaboration model | deferred | post-2.2 | Revisit only when remote multi-writer collaboration is required |
 | F5 | Multiple requirements could contaminate assets | partial | PR A/PR B | Compile ownership and supersession exist; sharded indexes and multi-requirement Eval remain |
-| G1 | Facade responses consumed excessive context | partial | PR A | `responseMode=summary` and paged CompileRun review exist; expand to all large facade results |
+| G1 | Facade responses consumed excessive context | partial | PR A/PR C | `responseMode=summary` and explicit paging now cover CompileRun plus requirement, TestIntent, ExecutableCase, ExecutionPlan, SuiteRun, Ledger, exploration, and evidence reviews; status/diagnosis and nested suite payloads still need bounded summary contracts |
 | G2 | Documentation and runtime behavior diverged | partial | every PR | Package Skill, English docs, and Chinese docs must be checked in the same PR |
 | G3 | Internal concepts dominated the user experience | deferred | post-2.2 | Natural-language role-oriented review remains a later UX pass |
 | G4 | Error and time presentation was not localized | partial | PR A/PR C | New errors are bilingual and static reports are searchable; locale-aware timestamps and the complete catalog remain |

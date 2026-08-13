@@ -198,6 +198,14 @@ describe("facade control plane", () => {
         limit: 1
       })
     );
+    const intentPage = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "test-intent",
+        knowledgeProjectId: project.id,
+        limit: 1,
+        offset: 0
+      })
+    );
 
     expect(summary).toEqual(
       expect.objectContaining({
@@ -215,6 +223,15 @@ describe("facade control plane", () => {
         items: [expect.objectContaining({ testIntentId: expect.any(String) })]
       })
     ]);
+    expect(intentPage).toEqual(
+      expect.objectContaining({
+        totalItems: design.testIntents.length,
+        returnedItems: 1,
+        offset: 0,
+        items: [expect.objectContaining({ id: expect.any(String) })]
+      })
+    );
+    if (design.testIntents.length > 1) expect(intentPage.nextOffset).toBe(1);
   });
 
   it("reloads the persistent store without restarting the MCP context", async () => {

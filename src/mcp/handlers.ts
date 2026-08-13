@@ -3682,42 +3682,46 @@ function knowledgeReview(
     );
     return {
       project,
-      items,
+      ...paginateReviewItems(items, input),
       impacts: items.map((item) => context.knowledgeService.requirementImpact(item.id))
     };
   }
   if (target === "test-intent") {
+    const items = context.knowledgeService
+      .listTestIntents(projectId)
+      .filter((item) => !idValue || item.id === idValue);
     return {
       project,
-      items: context.knowledgeService
-        .listTestIntents(projectId)
-        .filter((item) => !idValue || item.id === idValue)
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "executable-case") {
+    const items = context.knowledgeService
+      .listExecutableCases(projectId)
+      .filter((item) => !idValue || item.id === idValue);
     return {
       project,
-      items: context.knowledgeService
-        .listExecutableCases(projectId)
-        .filter((item) => !idValue || item.id === idValue)
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "execution-plan") {
+    const items = context.repository.executionPlans.filter(
+      (item) =>
+        item.knowledgeProjectId === projectId &&
+        (!idValue || item.id === idValue)
+    );
     return {
       project,
-      items: context.repository.executionPlans.filter(
-        (item) =>
-          item.knowledgeProjectId === projectId &&
-          (!idValue || item.id === idValue)
-      )
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "requirement-suite-run") {
+    const items = context.requirementSuiteRuns
+      .list(projectId)
+      .filter((item) => !idValue || item.id === idValue);
     return {
       project,
-      items: context.requirementSuiteRuns
-        .list(projectId)
-        .filter((item) => !idValue || item.id === idValue)
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "run-ledger") {
@@ -3731,10 +3735,19 @@ function knowledgeReview(
         entry.requirementSuiteRunId ? [entry.requirementSuiteRunId] : []
       )
     )];
+    const summaries = runIds.map((runId) => context.runLedger.summary(runId));
+    const pagedEntries = paginateReviewItems(entries, input);
+    const pagedSummaries = paginateReviewItems(summaries, input);
     return {
       project,
-      summaries: runIds.map((runId) => context.runLedger.summary(runId)),
-      entries
+      summaries: pagedSummaries.items,
+      entries: pagedEntries.items,
+      ...(pagedEntries.totalItems === undefined
+        ? {}
+        : {
+            summaryPage: pagedSummaries,
+            entryPage: pagedEntries
+          })
     };
   }
   if (target === "execution-diagnosis") {
@@ -3827,26 +3840,51 @@ function knowledgeReview(
     };
   }
   if (target === "system-exploration") {
+    const items = context.systemExploration
+      .list(projectId)
+      .filter((item) => !idValue || item.id === idValue);
     return {
       project,
-      items: context.systemExploration
-        .list(projectId)
-        .filter((item) => !idValue || item.id === idValue)
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "evidence") {
+    const executionEvidence = context.knowledgeService.listExecutionEvidence(projectId);
+    const artifacts = project.systemIds.flatMap((systemId) => [
+      ...context.service.listTestSpecs(systemId),
+      ...context.service.listTestFiles(systemId),
+      ...context.service.listChainRuns(systemId)
+    ]);
+    const pagedEvidence = paginateReviewItems(executionEvidence, input);
+    const pagedArtifacts = paginateReviewItems(artifacts, input);
     return {
       project,
       systems: project.systemIds,
-      executionEvidence: context.knowledgeService.listExecutionEvidence(projectId),
-      artifacts: project.systemIds.flatMap((systemId) => [
-        ...context.service.listTestSpecs(systemId),
-        ...context.service.listTestFiles(systemId),
-        ...context.service.listChainRuns(systemId)
-      ])
+      executionEvidence: pagedEvidence.items,
+      artifacts: pagedArtifacts.items,
+      ...(pagedEvidence.totalItems === undefined
+        ? {}
+        : {
+            executionEvidencePage: pagedEvidence,
+            artifactPage: pagedArtifacts
+          })
     };
   }
   return { ...status.knowledge };
+}
+
+function paginateReviewItems<T>(items: T[], input: Record<string, unknown>) {
+  const limit = optionalNumberArg(input, "limit");
+  if (limit === undefined) return { items };
+  const offset = optionalNumberArg(input, "offset") ?? 0;
+  const page = items.slice(offset, offset + limit);
+  return {
+    items: page,
+    totalItems: items.length,
+    returnedItems: page.length,
+    offset,
+    nextOffset: offset + page.length < items.length ? offset + page.length : undefined
+  };
 }
 
 function reportKnowledgeGap(
