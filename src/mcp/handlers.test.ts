@@ -2921,6 +2921,45 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.listCaseSuites(system.id)).toEqual([]);
   });
 
+  it("bounds nested bc_status history while preserving counts", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "system",
+      name: "Bounded status",
+      environment: "test",
+      baseUrl: "https://bounded.example.test",
+      urlAllowlist: ["https://bounded.example.test"]
+    }));
+    for (let index = 0; index < 15; index += 1) {
+      context.repository.agentTasks.push({
+        id: `task-${index}`,
+        systemId: system.id,
+        agent: "generator",
+        status: "pending",
+        inputSummary: `task-${index}`,
+        args: [],
+        outputPaths: [],
+        promptPath: "prompt.md",
+        contextPath: "context.json",
+        submitTool: "bc_submit_agent_output",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      systemId: system.id,
+      responseMode: "full"
+    }));
+
+    expect(status.agentTasks.pending).toHaveLength(10);
+    expect(status.agentTasks.pendingTruncated).toBe(true);
+    expect(status.userSummary.counts.pendingAgentTasks).toBe(15);
+  });
+
   it("rejects document-suite auth storage outside the Brain Creator workspace", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({

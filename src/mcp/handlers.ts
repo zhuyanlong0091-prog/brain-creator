@@ -1119,7 +1119,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     suites: {
       total: suites.length,
       byStatus: countBy(suites, (suite) => suite.status),
-      unfinished: unfinishedSuites,
+      unfinished: unfinishedSuites.slice(-10),
+      unfinishedTruncated: unfinishedSuites.length > 10,
       recent: suites.slice(-5)
     },
     suiteRuns: {
@@ -1136,10 +1137,12 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
         )
           ? context.runLedger.summary(activeDocumentSuite.suiteId)
           : undefined,
-      recent: documentRunLedgerEntries.slice(-20)
+      recent: documentRunLedgerEntries.slice(-20),
+      recentTruncated: documentRunLedgerEntries.length > 20
     },
     agentTasks: {
-      pending: pendingAgentTasks
+      pending: pendingAgentTasks.slice(-10),
+      pendingTruncated: pendingAgentTasks.length > 10
     },
     bugs: {
       total: bugs.length,
@@ -1149,6 +1152,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     executionDiagnoses: {
       ...context.executionDiagnosis.summary({ systemId }),
       recent: executionDiagnoses.slice(-10),
+      recentTruncated: executionDiagnoses.length > 10,
       legacyAudit: legacyDiagnosisAudit.summary,
       legacyReviews: context.executionDiagnosis.legacyReviewSummary(systemId),
       humanAdjudicationEval:
@@ -4207,7 +4211,16 @@ async function verifyAuthForExecution(
           resumeInstruction: "Refresh or capture a browser login state, then complete this checkpoint before resuming execution."
         });
       }
-      throw new Error(`Authentication state could not be prepared: ${reason}`);
+      throw new BrainCreatorError({
+        code: "BC_AUTH_MATERIALIZATION_FAILED",
+        message: reason,
+        userMessage: {
+          enUS: "Authentication state could not be prepared for execution.",
+          zhCN: "执行前无法准备鉴权状态。"
+        },
+        nextAction: "complete-auth-checkpoint",
+        retryable: true
+      });
   }
   if (!storageStatePath) return;
   const cacheTtlMs = Math.max(
@@ -4236,9 +4249,18 @@ async function verifyAuthForExecution(
       resumeInstruction: "Refresh the browser login state, then complete this checkpoint before resuming execution."
     });
   }
-  throw new Error(
-    verification.reason ?? "Stored browser authentication requires user intervention before execution."
-  );
+  throw new BrainCreatorError({
+    code: verification.status === "expired"
+      ? "BC_AUTH_STATE_EXPIRED"
+      : "BC_AUTH_STATE_UNAVAILABLE",
+    message: verification.reason ?? "Stored browser authentication requires user intervention before execution.",
+    userMessage: {
+      enUS: "Stored browser authentication requires user intervention before execution.",
+      zhCN: "保存的浏览器鉴权状态需要人工处理后才能执行。"
+    },
+    nextAction: "complete-auth-checkpoint",
+    retryable: verification.status === "unavailable"
+  });
 }
 
 /**

@@ -245,7 +245,7 @@ describe("runChain", () => {
 
     expect(commands).toEqual([
       expect.arrayContaining(["playwright", "agent", "generator"]),
-      ["playwright", "test", `tests/generated/${testCase.id}.spec.ts`]
+      ["playwright", "test", `tests/generated/${testCase.id}.spec.ts`, "--workers=1"]
     ]);
     expect(result.chainRun).toEqual(
       expect.objectContaining({
@@ -351,9 +351,9 @@ describe("runChain", () => {
 
     expect(commands).toEqual([
       expect.arrayContaining(["playwright", "agent", "generator"]),
-      ["playwright", "test", "tests/generated/case_1.spec.ts"],
+      ["playwright", "test", "tests/generated/case_1.spec.ts", "--workers=1"],
       expect.arrayContaining(["playwright", "agent", "healer"]),
-      ["playwright", "test", "tests/generated/case_1.spec.ts"]
+      ["playwright", "test", "tests/generated/case_1.spec.ts", "--workers=1"]
     ]);
     expect(commands[2]).toEqual(
       expect.arrayContaining(["--seed", expect.stringContaining("seed-system_1.spec.ts")])

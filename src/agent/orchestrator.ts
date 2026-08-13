@@ -328,7 +328,7 @@ export async function runChain(input: RunChainInput) {
         return { exitCode: 1, stdout: "", stderr: instrumentationCheck.reason };
       }
     }
-    const args = ["playwright", "test", testRunPath];
+    const args = ["playwright", "test", testRunPath, "--workers=1"];
     if (structuredReporterEnabled) args.push("--reporter=json", "--trace=on");
     const result = await runner("npx", args, { cwd: input.workDir });
     if (!structuredReporterEnabled) return result;

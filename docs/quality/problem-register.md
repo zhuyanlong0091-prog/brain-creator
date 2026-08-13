@@ -17,7 +17,7 @@ Status meanings:
 | A4 | State changes required MCP restarts | partial | PR A/PR B | Store reload is in-process and blocked during active runs; sharded repository must remove whole-store reload pressure |
 | A5 | Generated output had no ownership hierarchy | resolved | PR B | Every artifact has system, requirement, suite, hash, source, and manifest ownership; artifact manifest and shard ownership tests |
 | A6 | Gaps had no usable lifecycle | resolved | PR A | Resolve, dismiss, and reopen require a note and evidence references; `service.test.ts`, `controlPlane.test.ts` |
-| A7 | Errors described state but not recovery | partial | PR A/PR C | Stable code, bilingual message, nextAction, retryable, and UUID trace are present; expand catalog with Harness errors |
+| A7 | Errors described state but not recovery | partial | PR A/PR C | Facade and execution auth errors now return stable codes, bilingual messages, nextAction, retryable, and UUID trace; broader Harness error catalog remains |
 | A8 | Upgrade and migration had no safe path | resolved | PR B | Schema 16 migration creates a timestamped backup; schema 17 validation, doctor checks, index rebuild, and Suite export are covered |
 | B1 | SPA exploration missed navigation transitions | partial | PR E | Link navigation and observed safe-interaction URL changes now create queued targets; popup and full remount recovery remain |
 | B2 | Shared labels produced ambiguous page selection | resolved | PR A/PR E | Confirmed page binding exists; candidate score breakdown and matched evidence are returned for ambiguity diagnostics |
@@ -27,7 +27,7 @@ Status meanings:
 | C1 | Short-lived login state expired during suites | partial | PR D | Fresh-context preflight detects expiry and creates AuthCheckpoint; provider-specific automatic refresh remains |
 | C2 | Generated seed omitted a supported auth reference | resolved | PR D | Verified Token/Cookie profiles materialize protected storageState before execution; seed and execution-boundary integration tests cover the path |
 | C3 | Test credentials appeared in generated files | partial | PR D/PR E | Token/cookie values are removed from generated seeds; Host Agent submission and Suite export block known values plus high-confidence credential patterns; subprocess and full artifact lifecycle scan remains |
-| C4 | Authentication overhead limited suite throughput | partial | PR D | Verified storageState is cached for a bounded TTL while each test still gets an isolated context; controlled concurrency remains gated by data isolation |
+| C4 | Authentication overhead limited suite throughput | partial | PR D | Verified storageState is cached for a bounded TTL, each test keeps an isolated context, and Playwright defaults to `--workers=1`; controlled parallelism remains gated by data isolation |
 | D1 | Unread attachments were misclassified as model limitations | resolved | PR F | Source ledger inventories attachments as `unread` with an explicit no-OCR/vision reason |
 | D2 | Requirements omitted concrete UI paths | partial | PR E/PR F | Missing paths are supplied by confirmed System Brain evidence or remain explicit Gap items |
 | D3 | Source fields could not be reconciled to analysis | resolved | PR F | Source ledger reconciles blocks, requirements, nodes, intents, cases, evidence, and attachments |
@@ -57,8 +57,8 @@ Status meanings:
 
 | Status | Count |
 |---|---:|
-| resolved | 14 |
-| partial | 25 |
+| resolved | 16 |
+| partial | 23 |
 | open | 0 |
 | deferred | 2 |
 | total | 41 |
