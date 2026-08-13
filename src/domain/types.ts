@@ -1159,6 +1159,11 @@ export type ExecutionStepEvidence = {
   order: number;
   action: ExecutableCaseStep["action"];
   instruction: string;
+  targetSemantic?: string;
+  value?: string;
+  pageModelId?: string;
+  locatorPointId?: string;
+  dataProfileId?: string;
   expected?: string;
   actual?: string;
   assertionStatus: "pending" | "passed" | "failed" | "blocked";

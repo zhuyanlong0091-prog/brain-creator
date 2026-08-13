@@ -31,6 +31,29 @@ describe("static execution report", () => {
     expect(html).toContain("gap-1");
   });
 
+  it("renders business target and execution bindings for each step", () => {
+    const html = renderStaticExecutionReport({
+      title: "Orders",
+      evidence: {
+        ...evidence(),
+        steps: [{
+          ...evidence().steps[0],
+          targetSemantic: "Order total",
+          value: "42",
+          pageModelId: "page-order-form",
+          locatorPointId: "locator-total",
+          dataProfileId: "data-order-total"
+        }]
+      }
+    });
+
+    expect(html).toContain("Business target");
+    expect(html).toContain("Order total");
+    expect(html).toContain("page-order-form");
+    expect(html).toContain("locator-total");
+    expect(html).toContain("data-order-total");
+  });
+
   it("writes a standalone HTML file", async () => {
     const root = await mkdtemp(join(tmpdir(), "brain-static-report-"));
     tempDirs.push(root);

@@ -830,6 +830,16 @@ describe("KnowledgeService", () => {
     const design = await service.generateTestDesign(ingested.requirementSet.id);
     service.approveRequirementSet(ingested.requirementSet.id);
     const executableCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const persistedCase = repository.executableCases.find((item) => item.id === executableCase.id);
+    if (!persistedCase) throw new Error("Expected compiled case to be persisted");
+    persistedCase.steps[0] = {
+      ...persistedCase.steps[0],
+      targetSemantic: "Protected token field",
+      value: "runtime-secret-value",
+      pageModelId: "page-redacted",
+      locatorPointId: "locator-token",
+      dataProfileId: "data-token"
+    };
     const evidence = service.createExecutionEvidence({
       projectId: project.id,
       systemId: "system-redacted",
@@ -837,6 +847,13 @@ describe("KnowledgeService", () => {
       testCaseId: "test-redacted",
       contextPackPath: "context/redacted.json"
     });
+    expect(evidence.steps[0]).toEqual(expect.objectContaining({
+      targetSemantic: "Protected token field",
+      value: "[REDACTED]",
+      pageModelId: "page-redacted",
+      locatorPointId: "locator-token",
+      dataProfileId: "data-token"
+    }));
     const completed = await service.completeExecutionEvidence(evidence.id, {
       status: "failed",
       actualResult: "token=runtime-secret-value",

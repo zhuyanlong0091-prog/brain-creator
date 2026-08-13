@@ -1041,6 +1041,7 @@ export class KnowledgeService {
       throw new Error("Execution plan does not match the evidence context");
     }
     const executionSteps = executionPlan?.steps ?? executableCase.steps;
+    const redact = executionSecretRedactor(this.repository, input.systemId);
     const evidence: ExecutionEvidence = {
       id: id("executionEvidence"),
       knowledgeProjectId: project.id,
@@ -1055,6 +1056,11 @@ export class KnowledgeService {
         order: step.order,
         action: step.action,
         instruction: step.instruction,
+        targetSemantic: step.targetSemantic,
+        ...(step.value === undefined ? {} : { value: redact(step.value) }),
+        ...(step.pageModelId === undefined ? {} : { pageModelId: step.pageModelId }),
+        ...(step.locatorPointId === undefined ? {} : { locatorPointId: step.locatorPointId }),
+        ...(step.dataProfileId === undefined ? {} : { dataProfileId: step.dataProfileId }),
         expected: step.expected,
         assertionStatus: "pending",
         evidenceRefs: [],

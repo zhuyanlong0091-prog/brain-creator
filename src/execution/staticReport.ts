@@ -26,14 +26,26 @@ export function renderStaticExecutionReport(input: {
   const reporterAssertions = evidence.reporterResult?.assertions ?? [];
   const strong = contracts.filter((contract) => contract.strength === "strong").length;
   const limited = contracts.filter((contract) => contract.strength === "limited").length;
-  const searchable = [input.title, evidence.actualResult, ...evidence.steps.map((step) => step.instruction)].join(" ");
+  const searchable = [
+    input.title,
+    evidence.actualResult,
+    ...evidence.steps.flatMap((step) => [
+      step.instruction,
+      step.targetSemantic,
+      step.value,
+      step.pageModelId,
+      step.locatorPointId,
+      step.dataProfileId,
+      ...(step.sourceRefs ?? [])
+    ])
+  ].filter(Boolean).join(" ");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(input.title)}</title>
 <style>body{font:14px system-ui,sans-serif;max-width:1100px;margin:2rem auto;padding:0 1rem;color:#17202a}header{border-bottom:1px solid #ddd;margin-bottom:1rem}input{width:100%;padding:.6rem;margin:1rem 0}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:.5rem;text-align:left;vertical-align:top}.passed{color:#087f5b}.failed{color:#c92a2a}.blocked{color:#a15c00}.muted{color:#667085}</style></head>
 <body data-searchable="${escapeHtml(searchable)}"><header><h1>${escapeHtml(input.title)}</h1><p>Status: <strong class="${evidence.status}">${escapeHtml(evidence.status)}</strong> | Assurance: <strong>${escapeHtml(evidence.assuranceLevel ?? "none")}</strong></p><p>Strong assertions: ${strong} | Limited assertions: ${limited}</p></header>
 <label for="search">Search report</label><input id="search" type="search" placeholder="step, assertion, evidence" oninput="filterReport(this.value)">
-<h2>Steps</h2><table id="steps"><thead><tr><th>#</th><th>Action</th><th>Instruction</th><th>Expected</th><th>Actual</th><th>Status</th><th>Screenshot</th><th>Evidence</th><th>Trace</th><th>Console</th><th>Network</th></tr></thead><tbody>${evidence.steps.map((step) => { const runtime = evidence.reporterResult?.steps?.find((item) => item.id === step.stepId); return `<tr class="searchable-row"><td>${step.order}</td><td>${escapeHtml(step.action)}</td><td>${escapeHtml(step.instruction)}</td><td>${escapeHtml(step.expected ?? "")}</td><td>${escapeHtml(step.actual ?? "")}</td><td class="${step.assertionStatus}">${escapeHtml(step.assertionStatus)}</td><td>${escapeHtml(step.screenshotPath ?? "")}</td><td>${escapeHtml((step.evidenceRefs ?? []).join(", "))}</td><td>${escapeHtml((step.traceRefs ?? runtime?.traceRefs ?? []).join(", "))}</td><td>${escapeHtml((runtime?.consoleErrors ?? []).join("; "))}</td><td>${escapeHtml((runtime?.networkFailures ?? []).join("; "))}</td></tr>`; }).join("")}</tbody></table>
+<h2>Steps</h2><table id="steps"><thead><tr><th>#</th><th>Action</th><th>Business target</th><th>Instruction</th><th>Input</th><th>Expected</th><th>Actual</th><th>Status</th><th>Page model</th><th>Locator</th><th>Data profile</th><th>Sources</th><th>Screenshot</th><th>Evidence</th><th>Trace</th><th>Console</th><th>Network</th></tr></thead><tbody>${evidence.steps.map((step) => { const runtime = evidence.reporterResult?.steps?.find((item) => item.id === step.stepId); return `<tr class="searchable-row"><td>${step.order}</td><td>${escapeHtml(step.action)}</td><td>${escapeHtml(step.targetSemantic ?? "")}</td><td>${escapeHtml(step.instruction)}</td><td>${escapeHtml(step.value ?? "")}</td><td>${escapeHtml(step.expected ?? "")}</td><td>${escapeHtml(step.actual ?? "")}</td><td class="${step.assertionStatus}">${escapeHtml(step.assertionStatus)}</td><td>${escapeHtml(step.pageModelId ?? "")}</td><td>${escapeHtml(step.locatorPointId ?? "")}</td><td>${escapeHtml(step.dataProfileId ?? "")}</td><td>${escapeHtml((step.sourceRefs ?? []).join(", "))}</td><td>${escapeHtml(step.screenshotPath ?? "")}</td><td>${escapeHtml((step.evidenceRefs ?? []).join(", "))}</td><td>${escapeHtml((step.traceRefs ?? runtime?.traceRefs ?? []).join(", "))}</td><td>${escapeHtml((runtime?.consoleErrors ?? []).join("; "))}</td><td>${escapeHtml((runtime?.networkFailures ?? []).join("; "))}</td></tr>`; }).join("")}</tbody></table>
 <h2>Assertions</h2><ul>${contracts.map((contract) => `<li class="searchable-row">${escapeHtml(contract.type)} / ${escapeHtml(contract.strength)} / refs: ${escapeHtml(contract.requirementRefs.join(", "))}</li>`).join("") || "<li class=muted>No assertion contract</li>"}</ul>
 <h2>Coverage dimensions</h2><p>Required: ${escapeHtml((evidence.coverage?.required ?? []).join(", ") || "not declared")}; Verified: ${escapeHtml((evidence.coverage?.verified ?? []).join(", ") || "none")}; Missing: ${escapeHtml((evidence.coverage?.missing ?? []).join(", ") || "none")}</p>
 <h2>Structured Reporter</h2><p>${evidence.reporterResult ? `Status: ${escapeHtml(evidence.reporterResult.status)}; ${evidence.reporterResult.passed}/${evidence.reporterResult.total} passed; ${evidence.reporterResult.skipped} skipped` : "No structured reporter result; assurance is not strong."}</p><table><thead><tr><th>Assertion</th><th>Status</th><th>Expected</th><th>Actual</th><th>Evidence</th></tr></thead><tbody>${reporterAssertions.map((assertion) => `<tr class="searchable-row"><td>${escapeHtml(assertion.id)}</td><td class="${assertion.status}">${escapeHtml(assertion.status)}</td><td>${escapeHtml(assertion.expected ?? "")}</td><td>${escapeHtml(assertion.actual ?? "")}</td><td>${escapeHtml(assertion.evidenceRefs.join(", "))}</td></tr>`).join("") || "<tr><td colspan=5 class=muted>No reporter assertions</td></tr>"}</tbody></table>
