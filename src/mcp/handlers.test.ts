@@ -1189,7 +1189,7 @@ describe("handleBrainCreatorTool", () => {
 
     await writeFile(
       taskPackage.testPath,
-      "import { test, expect } from '../seed';\n// bc.step(\"step-ready\", page, action);\nconst config = { password: \"do-not-export-this\" };\n",
+      "import { test, expect } from '../seed';\nawait bc.step(\"step-ready\", page, action);\nconst config = { password: \"do-not-export-this\" };\n",
       "utf8"
     );
     const secretRejected = await handleBrainCreatorTool(context, "bc_submit_agent_output", {

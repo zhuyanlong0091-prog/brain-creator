@@ -482,11 +482,12 @@ export function validateActorJourneyUsage(
 }
 
 export function validateStepInstrumentation(source: string, stepIds: string[]) {
+  const executableSource = removeSourceComments(source);
   const missingStepIds = stepIds.filter(
     (stepId) =>
-      !source.includes(`bc.step(${JSON.stringify(stepId)}`) &&
-      !source.includes(`bc.step('${stepId}'`) &&
-      !source.includes(`bc.step("${stepId}"`)
+      !executableSource.includes(`bc.step(${JSON.stringify(stepId)}`) &&
+      !executableSource.includes(`bc.step('${stepId}'`) &&
+      !executableSource.includes(`bc.step("${stepId}"`)
   );
   return missingStepIds.length
     ? {
@@ -494,6 +495,12 @@ export function validateStepInstrumentation(source: string, stepIds: string[]) {
         reason: `Generated test is missing bc.step instrumentation for: ${missingStepIds.join(", ")}.`
       }
     : { valid: true as const };
+}
+
+function removeSourceComments(source: string) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\n)\s*\/\/.*$/gm, "$1");
 }
 
 async function writeActorRoleEvidence(

@@ -55,6 +55,8 @@ describe("step instrumentation guard", () => {
       });
     expect(validateStepInstrumentation("await bc.step(\"step-create\", page, action);", ["step-create"]))
       .toEqual({ valid: true });
+    expect(validateStepInstrumentation("// bc.step(\"step-create\", page, action);", ["step-create"]).valid)
+      .toBe(false);
   });
 });
 

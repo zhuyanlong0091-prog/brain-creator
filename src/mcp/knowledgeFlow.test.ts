@@ -1483,7 +1483,7 @@ describe("Brain Creator requirement-first facade", () => {
           .filter((step: { action: string }) => step.action !== "api")
           .map(
             (step: { id: string }) =>
-              `// bc.step(${JSON.stringify(step.id)}, page, action);`
+              `await bc.step(${JSON.stringify(step.id)}, page, action);`
           ),
         'test("requirement mismatch", async () => { expect("draft").toBe("approved"); });'
       ].join("\n"),
@@ -1609,7 +1609,7 @@ describe("Brain Creator requirement-first facade", () => {
       [
         `import { test, expect } from "../${basename(completed.seedPath)}";`,
         ...(completed.task.chainContext?.requiredStepIds ?? []).map(
-          (stepId: string) => `// bc.step(${JSON.stringify(stepId)}, page, action);`
+          (stepId: string) => `await bc.step(${JSON.stringify(stepId)}, page, action);`
         ),
         'test("sibling scenario", async () => { expect("approved").toBe("approved"); });'
       ].join("\n"),
@@ -1878,7 +1878,7 @@ describe("Brain Creator requirement-first facade", () => {
           .filter((step: { action: string }) => step.action !== "api")
           .map(
             (step: { id: string }) =>
-              `// bc.step(${JSON.stringify(step.id)}, page, action);`
+              `await bc.step(${JSON.stringify(step.id)}, page, action);`
           ),
         'test("created data", async () => { expect(true).toBe(true); });'
       ].join("\n"),
