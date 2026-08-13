@@ -970,7 +970,7 @@ async function collectInteractionCandidatesFromSurface(
   );
 }
 
-function interactionLocator(
+export function interactionLocator(
   page: import("@playwright/test").Page,
   candidate: SafeInteractionCandidate
 ) {
@@ -987,7 +987,12 @@ function interactionLocator(
       canonicalUrl(indexedFrame.url()) === candidate.surface.url
         ? indexedFrame
         : childFrames.find((item) => canonicalUrl(item.url()) === candidate.surface?.url);
-    if (frame) return frame.locator(candidate.selector);
+    if (!frame) {
+      throw new Error(
+        `Iframe surface is unavailable after page recovery: ${candidate.surface.url}`
+      );
+    }
+    return frame.locator(candidate.selector);
   }
   return page.locator(candidate.selector);
 }

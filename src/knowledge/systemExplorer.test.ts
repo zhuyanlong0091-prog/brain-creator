@@ -13,6 +13,7 @@ import {
   classifySafeInteractionCandidate,
   isAllowedExplorationUrl,
   isReadOnlyNavigationUrl,
+  interactionLocator,
   PlaywrightSystemExplorer,
   SystemExplorationCoordinator,
   type SystemExplorer
@@ -180,6 +181,26 @@ describe("System exploration coordinator", () => {
         })
       ).toEqual(expect.objectContaining({ allowed: false }));
     }
+  });
+
+  it("does not fall back to the main document when an iframe surface is missing", () => {
+    const page = {
+      frames: () => []
+    } as unknown as import("@playwright/test").Page;
+
+    expect(() =>
+      interactionLocator(page, {
+        name: "Frame Mode",
+        role: "combobox",
+        selector: '[id="frame-mode"]',
+        tag: "select",
+        surface: {
+          kind: "iframe",
+          url: "https://orders.example.test/frame",
+          frameIndex: 1
+        }
+      })
+    ).toThrow("Iframe surface is unavailable after page recovery");
   });
 
   it("persists safe field transitions and exposes them to case binding", async () => {
@@ -603,6 +624,7 @@ describe("System exploration coordinator", () => {
           })
         );
         expect(writeRequests).toBe(0);
+
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve()))
