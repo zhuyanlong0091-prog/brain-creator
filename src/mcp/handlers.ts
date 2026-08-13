@@ -31,6 +31,7 @@ import {
 } from "../knowledge/sourceAdapters.js";
 import { FeishuOpenApiAdapter } from "../knowledge/feishuAdapter.js";
 import { writeArtifactManifest } from "../storage/artifactArchive.js";
+import { writeStaticSuiteExecutionReport } from "../execution/staticSuiteReport.js";
 import { normalizeHostSkillAnalysis } from "../knowledge/policies.js";
 import { buildContextPack } from "../knowledge/retriever.js";
 import {
@@ -1989,7 +1990,8 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
         : optionalStringArg(input, "id"),
       optionalNumberArg(input, "limit") ?? 50,
       optionalNumberArg(input, "minSampleSize") ?? 20,
-      optionalNumberArg(input, "offset") ?? 0
+      optionalNumberArg(input, "offset") ?? 0,
+      input
     );
   }
   if (!knowledgeProjectId && requestedTarget === "run-ledger") {
@@ -3218,20 +3220,54 @@ async function finalizeRequirementSuiteCase(
     input.executableCase.id,
     input.outcome
   );
-  const artifactManifest = isTerminalRequirementSuiteStatus(updatedRun.status)
+  const terminalOrBlocked = isTerminalRequirementSuiteStatus(updatedRun.status) || updatedRun.status === "blocked";
+  const terminalEvidence = terminalOrBlocked
+    ? updatedRun.caseRuns.flatMap((caseRun) => {
+        const evidence = caseRun.executionEvidenceId
+          ? context.repository.executionEvidence.find(
+              (item) => item.id === caseRun.executionEvidenceId
+            )
+          : undefined;
+        return evidence ? [evidence] : [];
+      })
+    : [];
+  const suiteReportPath = terminalOrBlocked
+    ? join(
+        context.workDir,
+        ".brain-creator",
+        "artifacts",
+        run.systemId,
+        input.executableCase.requirementSetId,
+        run.id,
+        "suite-report.html"
+      )
+    : undefined;
+  if (suiteReportPath) {
+    await writeStaticSuiteExecutionReport({
+      outputPath: suiteReportPath,
+      title: `Brain Creator requirement suite ${run.id}`,
+      run: updatedRun,
+      evidence: terminalEvidence,
+      bugs: context.repository.bugReports
+        .filter((bug) => bug.systemId === run.systemId && updatedRun.caseRuns.some((item) => item.executableCaseId === bug.sourceId))
+        .map((bug) => ({ id: bug.id, status: bug.status, caseNo: bug.caseNo, actualResult: bug.actualResult })),
+      gaps: context.repository.gaps
+        .filter((gap) => gap.projectId === run.systemId && (gap.sourceId === run.id || updatedRun.caseRuns.some((item) => item.executableCaseId === gap.sourceId)))
+        .map((gap) => ({ id: gap.id, status: gap.status, caseNo: gap.sourceId, reason: gap.reason }))
+    });
+    updatedRun.reportPath = suiteReportPath;
+    context.repository.persist();
+  }
+  const artifactManifest = terminalOrBlocked
     ? await writeArtifactManifest({
         workDir: context.workDir,
         systemId: run.systemId,
         requirementSetId: input.executableCase.requirementSetId,
         suiteRunId: run.id,
-        artifactPaths: updatedRun.caseRuns.flatMap((caseRun) => {
-          const evidence = caseRun.executionEvidenceId
-            ? context.repository.executionEvidence.find(
-                (item) => item.id === caseRun.executionEvidenceId
-              )
-            : undefined;
-          return evidence?.artifactPaths ?? [];
-        }),
+        artifactPaths: [
+          ...terminalEvidence.flatMap((evidence) => evidence.artifactPaths),
+          ...(suiteReportPath ? [suiteReportPath] : [])
+        ],
         sourceRefs: [input.executableCase.requirementSetId]
       })
     : undefined;
@@ -3647,7 +3683,8 @@ function knowledgeReview(
   idValue?: string,
   limit = 50,
   minSampleSize = 20,
-  offset = 0
+  offset = 0,
+  input: Record<string, unknown> = {}
 ) {
   const status = knowledgeStatus(context, projectId);
   const project = status.knowledge.project;
@@ -3776,6 +3813,26 @@ function knowledgeReview(
     const sets = context.repository.requirementSets.filter(
       (item) => item.knowledgeProjectId === projectId && item.status !== "superseded"
     );
+    const executionLedger = context.knowledgeService.testIntentCoverage(projectId);
+    const requestedLimit = optionalNumberArg(input, "limit");
+    const requestedOffset = optionalNumberArg(input, "offset") ?? 0;
+    const nextOffset = requestedLimit !== undefined &&
+      requestedOffset + requestedLimit < executionLedger.items.length
+      ? requestedOffset + requestedLimit
+      : undefined;
+    const pagedLedger = requestedLimit === undefined
+      ? executionLedger
+      : {
+          ...executionLedger,
+          items: executionLedger.items.slice(requestedOffset, requestedOffset + requestedLimit),
+          totalItems: executionLedger.items.length,
+          returnedItems: Math.min(
+            Math.max(executionLedger.items.length - requestedOffset, 0),
+            requestedLimit
+          ),
+          offset: requestedOffset,
+          nextOffset
+        };
     return {
       project,
       requirements: sets.length,
@@ -3784,11 +3841,21 @@ function knowledgeReview(
         (item) => item.requirementRefs.length > 0 && item.knowledgeNodeRefs.length > 0
       ).length,
       totalIntents: intents.length,
-      executionLedger: context.knowledgeService.testIntentCoverage(projectId),
+      executionLedger: pagedLedger,
       dimensionSummary: summarizeCoverageDimensions(
-        context.knowledgeService.testIntentCoverage(projectId).items
+        executionLedger.items
       ),
-      sourceLedger: context.knowledgeService.requirementSourceLedger(projectId)
+      sourceLedger: context.knowledgeService.requirementSourceLedger(projectId),
+      ...(requestedLimit === undefined
+        ? {}
+        : {
+            itemPage: {
+              limit: requestedLimit,
+              offset: requestedOffset,
+              total: executionLedger.items.length,
+              nextOffset
+            }
+          })
     };
   }
   if (target === "requirement-eval-accuracy") {

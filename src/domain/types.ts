@@ -1105,6 +1105,7 @@ export type RequirementSuiteRun = {
   skipped: number;
   cancelled: number;
   currentExecutableCaseId?: string;
+  reportPath?: string;
   caseRuns: RequirementSuiteCaseRun[];
   createdAt: string;
   updatedAt: string;

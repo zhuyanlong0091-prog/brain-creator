@@ -534,6 +534,14 @@ describe("Brain Creator requirement-first facade", () => {
         testIntentId: designed.testIntents[0].id
       })
     );
+    const coveragePage = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "coverage",
+        knowledgeProjectId: project.id,
+        limit: 1,
+        offset: 0
+      })
+    );
 
     expect(ingested.requirementSet.status).toBe("draft");
     expect(designed.evaluation.verdict).toBe("pass");
@@ -546,6 +554,14 @@ describe("Brain Creator requirement-first facade", () => {
     expect(compiled.workflowPath).toBeUndefined();
     expect(compiled.stateActions).toBeUndefined();
     expect(compiled.nextAction).toBe("preview-requirement-suite");
+    expect(coveragePage.executionLedger.items).toHaveLength(1);
+    expect(coveragePage.executionLedger.totalItems).toBe(2);
+    expect(coveragePage.itemPage).toEqual({
+      limit: 1,
+      offset: 0,
+      total: 2,
+      nextOffset: 1
+    });
   });
 
   it("surfaces and resolves a test data plan through the prepare facade", async () => {
