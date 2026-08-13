@@ -61,6 +61,8 @@ The Agent first calls `bc_prepare action=explore-system`. Brain Creator performs
 
 The exploration creates versioned PageModels, LocatorPoints, ProbeResults, navigation edges, and safe interaction state transitions, then refreshes `systems/<system-id>/brain.md`. Safe probes reject write-like labels and unstable selectors, block non-read HTTP methods and dangerous URLs, restore the page after each probe, and preserve blocked requests as evidence. The Agent must disclose that a misdesigned GET endpoint can still carry residual side-effect risk. For complex menus, data entry, or business workflows, the host Agent supplements evidence through `bc_prepare action=record-page-evidence` and `record-training-evidence`.
 
+For a conditional state that must be explored, the host may include an approved `explorationScenario` with a role, prerequisite state, reusable `dataRefs`, and non-secret `selectorValues`. Brain Creator records the scenario id with each observed transition and System Brain state. If a requested option is unavailable, the probe is blocked rather than choosing a different value. `dataRefs` identify reusable data; they do not create or persist credentials, and data preparation remains a separate test-data step.
+
 ### 6. Compile Executable Cases
 
 The Agent calls `bc_prepare action=compile-cases` with a `requirementSetId`, explicit `testIntentIds`, or one compatible `testIntentId`, plus `systemId` and `responseMode=summary`. Brain Creator creates a bounded CompileRun and compiles unchanged inputs idempotently. Review details with `bc_review target=compile-run`, `limit`, and `offset`.

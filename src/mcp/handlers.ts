@@ -21,6 +21,7 @@ import {
   materializeBrowserAuthState,
   type AuthStateMaterializer
 } from "../agent/authStateMaterializer.js";
+import type { AuthStateRefresher } from "../agent/authStateRefresh.js";
 import { BrainCreatorError, errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
@@ -123,6 +124,7 @@ export type BrainCreatorMcpContext = {
   runner?: CommandRunner;
   authStateVerifier: AuthStateVerifier;
   authStateMaterializer: AuthStateMaterializer;
+  authStateRefresher?: AuthStateRefresher;
   authVerificationCache: Map<string, number>;
   feishuReader?: RequirementSourceReader;
 };
@@ -145,6 +147,7 @@ type CreateContextInput = {
   runner?: CommandRunner;
   authStateVerifier?: AuthStateVerifier;
   authStateMaterializer?: AuthStateMaterializer;
+  authStateRefresher?: AuthStateRefresher;
   knowledgeDir?: string;
   feishuReader?: RequirementSourceReader;
   systemExplorer?: SystemExplorer;
@@ -200,6 +203,7 @@ export function createBrainCreatorMcpContext(
     runner: input.runner,
     authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
     authStateMaterializer: input.authStateMaterializer ?? materializeBrowserAuthState,
+    authStateRefresher: input.authStateRefresher,
     authVerificationCache: new Map(),
     feishuReader: input.feishuReader ?? configuredFeishuReader()
   };
@@ -4246,7 +4250,7 @@ async function verifyAuthForExecution(
   );
   const cachedUntil = context.authVerificationCache.get(authProfile.id) ?? 0;
   if (cachedUntil > Date.now()) return;
-  const verification = await context.authStateVerifier({
+  let verification = await context.authStateVerifier({
     storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
     targetUrl: system.baseUrl,
     allowedUrls: system.urlAllowlist
@@ -4255,6 +4259,12 @@ async function verifyAuthForExecution(
     context.authVerificationCache.set(authProfile.id, Date.now() + cacheTtlMs);
     return;
   }
+  const refreshed = await refreshAndVerifyAuthState(context, system, authProfile, verification.reason);
+  if (refreshed?.status === "valid") {
+    context.authVerificationCache.set(authProfile.id, Date.now() + cacheTtlMs);
+    return;
+  }
+  if (refreshed) verification = refreshed;
   context.authVerificationCache.delete(authProfile.id);
   const pending = context.service.listAuthCheckpoints(system.id, "awaiting-user")
     .find((checkpoint) => checkpoint.authProfileId === authProfile.id);
@@ -6680,11 +6690,44 @@ async function verifyCaseSourceSuiteAuthState(
   if (!storageStatePath) {
     return undefined;
   }
-  return context.authStateVerifier({
+  const verification = await context.authStateVerifier({
     storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
     targetUrl: system.baseUrl,
     allowedUrls: system.urlAllowlist
   });
+  if (verification.status === "valid") return verification;
+  return (
+    (await refreshAndVerifyAuthState(context, system, profile, verification.reason)) ?? verification
+  );
+}
+
+async function refreshAndVerifyAuthState(
+  context: BrainCreatorMcpContext,
+  system: SystemProfile,
+  authProfile: AuthProfile,
+  reason = "Stored browser authentication is no longer valid."
+) {
+  if (!context.authStateRefresher) return undefined;
+  try {
+    const refreshed = await context.authStateRefresher({
+      workDir: context.workDir,
+      system,
+      authProfile,
+      reason
+    });
+    const safePath = await resolveProtectedStorageStatePath(
+      context.workDir,
+      refreshed.storageStatePath
+    );
+    context.service.setAuthStorageStatePath(authProfile.id, refreshed.storageStatePath);
+    return context.authStateVerifier({
+      storageStatePath: safePath,
+      targetUrl: system.baseUrl,
+      allowedUrls: system.urlAllowlist
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function findAuthProfile(context: BrainCreatorMcpContext, systemId: string): AuthProfile {

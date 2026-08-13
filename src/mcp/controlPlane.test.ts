@@ -139,6 +139,85 @@ describe("facade control plane", () => {
       .toContain("storage-state.json");
   });
 
+  it("refreshes expired auth once through the host refresher before execution", async () => {
+    const workDir = await tempDir();
+    let verifyCount = 0;
+    let refreshCount = 0;
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json"),
+      authStateMaterializer: async ({ authProfile }) => {
+        const storageStatePath = `.brain-creator/auth/${authProfile.id}/storage-state.json`;
+        await mkdir(dirname(join(workDir, storageStatePath)), { recursive: true });
+        await writeFile(join(workDir, storageStatePath), JSON.stringify({ cookies: [], origins: [] }), "utf8");
+        return { storageStatePath, method: "token" };
+      },
+      authStateRefresher: async ({ authProfile }) => {
+        refreshCount += 1;
+        const storageStatePath = `.brain-creator/auth/${authProfile.id}/refreshed.json`;
+        await writeFile(join(workDir, storageStatePath), JSON.stringify({ cookies: [], origins: [] }), "utf8");
+        return { storageStatePath, provider: "host-test" };
+      },
+      authStateVerifier: async ({ storageStatePath }) => {
+        verifyCount += 1;
+        return verifyCount === 1
+          ? { status: "expired", reason: "Short-lived session expired." }
+          : { status: "valid", finalUrl: "https://orders.example.test/dashboard" };
+      },
+      agentBridge: async ({ agent, args }) => {
+        const outputIndex = args.indexOf("--output");
+        if (outputIndex >= 0) await writeFile(args[outputIndex + 1], "generated", "utf8");
+        return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
+      },
+      runner: async () => ({ exitCode: 0, stdout: "passed", stderr: "" })
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "system",
+      name: "Orders",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      urlAllowlist: ["https://orders.example.test"]
+    }));
+    const auth = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "auth",
+      operation: "create",
+      systemId: system.id,
+      env: "test",
+      role: "buyer",
+      loginMethod: "token",
+      secrets: { token: "token-secret" }
+    }));
+    const verified = context.service.verifyAuthProfile(auth.id, {
+      targetUrl: system.baseUrl,
+      finalUrl: `${system.baseUrl}/dashboard`
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Run after auth refresh",
+      scenarios: [{
+        id: "scenario-auth-refresh",
+        title: "Authenticated run",
+        priority: "high",
+        steps: [{ action: "assert", target: "dashboard", expected: "visible" }]
+      }],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+
+    const result = dataOf(await handleBrainCreatorTool(context, "bc_run", {
+      mode: "approved-case",
+      caseId: testCase.id,
+      authProfileId: verified.id
+    }));
+
+    expect(result.chainRun.status).toBe("succeeded");
+    expect(refreshCount).toBe(1);
+    expect(verifyCount).toBe(2);
+    expect(context.service.getCaptureAuth(auth.id)?.secrets.storageStatePath)
+      .toContain("refreshed.json");
+  });
+
   it("creates, browser-verifies, and archives auth through bc_configure", async () => {
     const workDir = await tempDir();
     const verificationInputs: Array<Record<string, unknown>> = [];
