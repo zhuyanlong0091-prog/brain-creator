@@ -119,5 +119,20 @@ describe("TestIntent coverage ledger", () => {
         })
       ])
     );
+
+    repository.executableCases[0].systemId = "system-a";
+    repository.executionEvidence[0].systemId = "system-a";
+    const systemLedger = service.testIntentCoverage(project.id, "system-a");
+    expect(systemLedger.counts).toEqual({
+      "strong-verified": 1,
+      "not-selected": 3,
+      superseded: 1
+    });
+    expect(systemLedger.items.find((item) => item.testIntentId === "intent-0")).toEqual(
+      expect.objectContaining({ classification: "strong-verified" })
+    );
+    expect(systemLedger.items.find((item) => item.testIntentId === "intent-1")).toEqual(
+      expect.objectContaining({ classification: "not-selected" })
+    );
   });
 });

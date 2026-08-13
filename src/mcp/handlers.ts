@@ -3804,11 +3804,12 @@ function knowledgeReview(
     };
   }
   if (target === "coverage") {
+    const requestedSystemId = optionalStringArg(input, "systemId");
     const intents = context.knowledgeService.listTestIntents(projectId);
     const sets = context.repository.requirementSets.filter(
       (item) => item.knowledgeProjectId === projectId && item.status !== "superseded"
     );
-    const executionLedger = context.knowledgeService.testIntentCoverage(projectId);
+    const executionLedger = context.knowledgeService.testIntentCoverage(projectId, requestedSystemId);
     const requestedLimit = optionalNumberArg(input, "limit");
     const requestedOffset = optionalNumberArg(input, "offset") ?? 0;
     const nextOffset = requestedLimit !== undefined &&
@@ -3830,6 +3831,7 @@ function knowledgeReview(
         };
     return {
       project,
+      ...(requestedSystemId ? { systemId: requestedSystemId } : {}),
       requirements: sets.length,
       coveredRequirements: new Set(intents.map((item) => item.requirementSetId)).size,
       traceableIntents: intents.filter(

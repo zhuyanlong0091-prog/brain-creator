@@ -559,24 +559,105 @@ function backupStamp() {
 }
 
 function systemAssets(repository: InMemoryBrainCreatorRepository, systemId: string) {
+  const pageModelIds = new Set(
+    repository.pageModels
+      .filter((item) => item.projectId === systemId)
+      .map((item) => item.id)
+  );
+  const sessionIds = new Set(
+    repository.trainingSessions
+      .filter((item) => item.projectId === systemId)
+      .map((item) => item.id)
+  );
+  const knowledgeProjectIds = new Set(
+    repository.knowledgeProjects
+      .filter((item) => item.systemIds.includes(systemId))
+      .map((item) => item.id)
+  );
+  const requirementSetIds = new Set(
+    repository.requirementSets
+      .filter((item) => knowledgeProjectIds.has(item.knowledgeProjectId))
+      .map((item) => item.id)
+  );
+  const visibleKnowledgeNodeIds = new Set(
+    repository.knowledgeNodes
+      .filter(
+        (item) =>
+          knowledgeProjectIds.has(item.knowledgeProjectId) &&
+          (!item.systemId || item.systemId === systemId)
+      )
+      .map((item) => item.id)
+  );
   return {
     authProfiles: repository.authProfiles.filter((item) => item.projectId === systemId),
+    authCheckpoints: repository.authCheckpoints.filter((item) => item.systemId === systemId),
+    systemExplorations: repository.systemExplorations.filter((item) => item.systemId === systemId),
     pageModels: repository.pageModels.filter((item) => item.projectId === systemId),
+    locatorPoints: repository.locatorPoints.filter((item) => pageModelIds.has(item.pageModelId)),
+    probeResults: repository.probeResults.filter((item) => pageModelIds.has(item.pageModelId)),
+    trainingSessions: repository.trainingSessions.filter((item) => item.projectId === systemId),
+    actionSteps: repository.actionSteps.filter((item) => sessionIds.has(item.sessionId)),
+    apiFlows: repository.apiFlows.filter((item) => sessionIds.has(item.sessionId)),
     gaps: repository.gaps.filter((item) => item.projectId === systemId),
+    generatedCases: repository.generatedCases.filter((item) => item.projectId === systemId),
+    glossaryTerms: repository.glossaryTerms.filter((item) => item.projectId === systemId),
+    businessRules: repository.businessRules.filter((item) => item.systemId === systemId),
     testCases: repository.testCases.filter((item) => item.systemId === systemId),
+    agentRuns: repository.agentRuns.filter((item) => item.systemId === systemId),
+    agentTasks: repository.agentTasks.filter((item) => item.systemId === systemId),
+    chainRuns: repository.chainRuns.filter((item) => item.systemId === systemId),
     caseSources: repository.caseSources.filter((item) => item.systemId === systemId),
     caseSuites: repository.caseSuites.filter((item) => item.systemId === systemId),
     caseSuiteRuns: repository.caseSuiteRuns.filter((item) => item.systemId === systemId),
-    bugReports: repository.bugReports.filter((item) => item.systemId === systemId)
+    bugReports: repository.bugReports.filter((item) => item.systemId === systemId),
+    knowledgeProjects: repository.knowledgeProjects.filter((item) => knowledgeProjectIds.has(item.id)),
+    requirementSources: repository.requirementSources.filter((item) => knowledgeProjectIds.has(item.knowledgeProjectId)),
+    requirementSets: repository.requirementSets.filter((item) => requirementSetIds.has(item.id)),
+    knowledgeNodes: repository.knowledgeNodes.filter((item) => visibleKnowledgeNodeIds.has(item.id)),
+    knowledgeEdges: repository.knowledgeEdges.filter(
+      (item) => visibleKnowledgeNodeIds.has(item.fromNodeId) && visibleKnowledgeNodeIds.has(item.toNodeId)
+    ),
+    testIntents: repository.testIntents.filter((item) => knowledgeProjectIds.has(item.knowledgeProjectId)),
+    testDataProfiles: repository.testDataProfiles.filter((item) => knowledgeProjectIds.has(item.knowledgeProjectId)),
+    testDataTasks: repository.testDataTasks.filter((item) => item.systemId === systemId),
+    testDataLeases: repository.testDataLeases.filter((item) => item.systemId === systemId),
+    executableCases: repository.executableCases.filter((item) => item.systemId === systemId),
+    executionPlans: repository.executionPlans.filter((item) => item.systemId === systemId),
+    requirementSuiteRuns: repository.requirementSuiteRuns.filter((item) => item.systemId === systemId),
+    executionEvidence: repository.executionEvidence.filter((item) => item.systemId === systemId),
+    executionDiagnoses: repository.executionDiagnoses.filter((item) => item.systemId === systemId),
+    executionDiagnosisReviews: repository.executionDiagnosisReviews.filter((item) => item.systemId === systemId),
+    runLedgerEntries: repository.runLedgerEntries.filter((item) => item.systemId === systemId),
+    compileRuns: repository.compileRuns.filter((item) => item.systemId === systemId),
+    pageBindingDecisions: repository.pageBindingDecisions.filter((item) => item.systemId === systemId)
   };
 }
 
 function buildAssetIndex(repository: InMemoryBrainCreatorRepository) {
+  const executableCaseById = new Map(repository.executableCases.map((item) => [item.id, item]));
   return [
     ...repository.systemProfiles.map((item) => ({ id: item.id, type: "system-profile", systemId: item.id, label: item.name })),
+    ...repository.authProfiles.map((item) => ({ id: item.id, type: "auth-profile", systemId: item.projectId, label: `${item.env}:${item.role}` })),
     ...repository.pageModels.map((item) => ({ id: item.id, type: "page-model", systemId: item.projectId, label: item.name })),
+    ...repository.locatorPoints.map((item) => ({ id: item.id, type: "locator-point", pageModelId: item.pageModelId, label: item.name })),
+    ...repository.probeResults.map((item) => ({ id: item.id, type: "probe-result", pageModelId: item.pageModelId, label: item.type })),
+    ...repository.trainingSessions.map((item) => ({ id: item.id, type: "training-session", systemId: item.projectId, label: item.id })),
+    ...repository.apiFlows.map((item) => ({ id: item.id, type: "api-flow", sessionId: item.sessionId, label: item.name })),
+    ...repository.generatedCases.map((item) => ({ id: item.id, type: "generated-case", systemId: item.projectId, pageModelId: item.pageModelId, label: item.sourceRequirement })),
+    ...repository.glossaryTerms.map((item) => ({ id: item.id, type: "glossary-term", systemId: item.projectId, label: item.key })),
+    ...repository.businessRules.map((item) => ({ id: item.id, type: "business-rule", systemId: item.systemId, label: item.name })),
+    ...repository.testCases.map((item) => ({ id: item.id, type: "test-case", systemId: item.systemId, label: item.requirement })),
+    ...repository.agentRuns.map((item) => ({ id: item.id, type: "agent-run", systemId: item.systemId, label: item.agent })),
+    ...repository.agentTasks.map((item) => ({ id: item.id, type: "agent-task", systemId: item.systemId, label: item.agent })),
+    ...repository.chainRuns.map((item) => ({ id: item.id, type: "chain-run", systemId: item.systemId, label: item.testCaseId })),
+    ...repository.caseSources.map((item) => ({ id: item.id, type: "case-source", systemId: item.systemId, label: item.source })),
+    ...repository.caseSuites.map((item) => ({ id: item.id, type: "case-suite", systemId: item.systemId, label: item.id })),
+    ...repository.caseSuiteRuns.map((item) => ({ id: item.id, type: "case-suite-run", systemId: item.systemId, label: item.id })),
+    ...repository.bugReports.map((item) => ({ id: item.id, type: "bug-report", systemId: item.systemId, label: item.caseNo })),
     ...repository.requirementSets.map((item) => ({ id: item.id, type: "requirement-set", projectId: item.knowledgeProjectId, label: item.title })),
-    ...repository.executableCases.map((item) => ({ id: item.id, type: "executable-case", systemId: item.systemId, label: item.title })),
+    ...repository.testIntents.map((item) => ({ id: item.id, type: "test-intent", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
+    ...repository.executableCases.map((item) => ({ id: item.id, type: "executable-case", systemId: item.systemId, requirementSetId: item.requirementSetId, testIntentId: item.testIntentId, label: item.title })),
+    ...repository.executionEvidence.map((item) => ({ id: item.id, type: "execution-evidence", systemId: item.systemId, executableCaseId: item.executableCaseId, requirementSetId: executableCaseById.get(item.executableCaseId)?.requirementSetId, label: item.id })),
     ...repository.gaps.map((item) => ({ id: item.id, type: "gap", systemId: item.projectId, label: item.reason }))
   ];
 }

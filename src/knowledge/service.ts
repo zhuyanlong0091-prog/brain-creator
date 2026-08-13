@@ -887,14 +887,18 @@ export class KnowledgeService {
     return this.repository.testIntents.filter((item) => item.knowledgeProjectId === projectId);
   }
 
-  testIntentCoverage(projectId: string) {
+  testIntentCoverage(projectId: string, systemId?: string) {
     this.getProject(projectId);
     const intents = this.listTestIntents(projectId);
     const executableCases = this.repository.executableCases.filter(
-      (item) => item.knowledgeProjectId === projectId
+      (item) =>
+        item.knowledgeProjectId === projectId &&
+        (systemId === undefined || item.systemId === systemId)
     );
     const evidence = this.repository.executionEvidence.filter(
-      (item) => item.knowledgeProjectId === projectId
+      (item) =>
+        item.knowledgeProjectId === projectId &&
+        (systemId === undefined || item.systemId === systemId)
     );
     const items = intents.map((intent) => {
       const requirementSet = this.repository.requirementSets.find(

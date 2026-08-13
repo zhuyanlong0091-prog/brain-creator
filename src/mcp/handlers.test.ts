@@ -2651,6 +2651,87 @@ describe("handleBrainCreatorTool", () => {
     );
   });
 
+  it("scopes coverage review to the requested system", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "System-scoped coverage",
+      key: "system-scoped-coverage",
+      defaultLocale: "en-US"
+    });
+    const first = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "System A",
+        environment: "test",
+        baseUrl: "https://a.example.test",
+        defaultLocale: "en-US",
+        urlAllowlist: []
+      })
+    );
+    const second = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "System B",
+        environment: "test",
+        baseUrl: "https://b.example.test",
+        defaultLocale: "en-US",
+        urlAllowlist: []
+      })
+    );
+    context.knowledgeService.bindSystem(project.id, first.id);
+    context.knowledgeService.bindSystem(project.id, second.id);
+    const ingested = await context.knowledgeService.ingestRequirement({
+      projectId: project.id,
+      contentPackage: {
+        title: "System scoped requirement",
+        content: "Users submit a request.",
+        blocks: [{ type: "paragraph", text: "Users submit a request." }],
+        attachments: [],
+        source: "system-scoped.md",
+        sourceType: "local-file",
+        contentHash: "system-scoped-hash",
+        warnings: []
+      }
+    });
+    const design = await context.knowledgeService.generateTestDesign(ingested.requirementSet.id);
+    context.knowledgeService.approveRequirementSet(ingested.requirementSet.id);
+    const executable = context.knowledgeService.compileExecutableCases(
+      design.testIntents[0].id,
+      first.id
+    ).executableCase;
+    const evidence = context.knowledgeService.createExecutionEvidence({
+      projectId: project.id,
+      systemId: first.id,
+      executableCaseId: executable.id,
+      testCaseId: "test-system-scoped",
+      contextPackPath: "context.json"
+    });
+    await context.knowledgeService.completeExecutionEvidence(evidence.id, {
+      status: "blocked",
+      artifactPaths: [],
+      tracePaths: []
+    });
+
+    const scoped = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "coverage",
+        knowledgeProjectId: project.id,
+        systemId: second.id
+      })
+    );
+    expect(scoped.systemId).toBe(second.id);
+    expect(scoped.executionLedger.counts).toEqual({ "not-selected": 1 });
+    const all = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "coverage",
+        knowledgeProjectId: project.id
+      })
+    );
+    expect(all.executionLedger.counts).toEqual({ blocked: 1 });
+  });
+
   it("previews natural-language entrypoints as facade calls without executing", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
