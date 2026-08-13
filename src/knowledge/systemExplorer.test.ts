@@ -394,6 +394,11 @@ describe("System exploration coordinator", () => {
     async () => {
       let writeRequests = 0;
       const server = createServer((request, response) => {
+        if (request.url === "/popup?close=1") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end("<title>Closing popup</title><script>window.close()</script>");
+          return;
+        }
         if (request.url === "/popup") {
           response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
           response.end("<title>Popup details</title><button>Popup action</button>");
@@ -443,6 +448,9 @@ describe("System exploration coordinator", () => {
               </button>
               <button id="details" aria-controls="popup" aria-expanded="false" onclick="window.open('/popup', '_blank')">
                 Open details
+              </button>
+              <button id="closing-details" aria-controls="closing-popup" aria-expanded="false" onclick="window.open('/popup?close=1', '_blank')">
+                Open closing details
               </button>
               <script>
                 const root = document.querySelector('#shadow-host').attachShadow({ mode: 'open' });
@@ -513,6 +521,10 @@ describe("System exploration coordinator", () => {
         );
         const syncType = result.exploration.interactionTransitions.find(
           (transition) => transition.targetName === "Sync Type"
+        );
+        expect(result.brain.pages).toHaveLength(1);
+        expect(result.exploration.warnings).toEqual(
+          expect.arrayContaining([expect.stringContaining("Popup closed before capture")])
         );
         expect(employeeType).toEqual(
           expect.objectContaining({

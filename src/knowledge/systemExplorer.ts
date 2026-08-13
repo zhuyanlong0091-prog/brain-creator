@@ -433,36 +433,51 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
                   pageIndex: pages.length,
                   limit: input.budget.maxInteractionsPerPage,
                   deadline,
+                  warnings,
                   popups
                 })
               : [];
           for (const popup of popups) {
-            await popup.waitForLoadState("domcontentloaded").catch(() => undefined);
-            const popupUrl = safeCanonicalUrl(popup.url());
-            if (!popupUrl || !isAllowedExplorationUrl(popupUrl, input.allowedUrls)) {
-              warnings.push(`Ignored popup outside allowlist: ${popup.url() || "unknown"}`);
-              await popup.close().catch(() => undefined);
-              continue;
-            }
-            capture.surfaces = [
-              ...(capture.surfaces ?? []),
-              {
-                kind: "popup",
-                url: popupUrl,
-                parentUrl: finalUrl,
-                accessible: true,
-                interactiveCount: await popup
-                  .locator('button, input, select, textarea, a[href]')
-                  .count()
-                  .catch(() => 0),
-                evidence: "Popup opened by a safe interaction"
+            try {
+              if (popup.isClosed()) {
+                warnings.push("Popup closed before capture; main page evidence was retained.");
+                continue;
               }
-            ];
-            if (!queued.has(popupUrl) && !visited.has(popupUrl)) {
-              queued.add(popupUrl);
-              queue.push({ url: popupUrl, depth: candidate.depth + 1 });
+              await popup.waitForLoadState("domcontentloaded").catch(() => undefined);
+              if (popup.isClosed()) {
+                warnings.push("Popup closed before capture; main page evidence was retained.");
+                continue;
+              }
+              const popupUrl = safeCanonicalUrl(popup.url());
+              if (!popupUrl || !isAllowedExplorationUrl(popupUrl, input.allowedUrls)) {
+                warnings.push(`Ignored popup outside allowlist: ${popup.url() || "unknown"}`);
+                continue;
+              }
+              capture.surfaces = [
+                ...(capture.surfaces ?? []),
+                {
+                  kind: "popup",
+                  url: popupUrl,
+                  parentUrl: finalUrl,
+                  accessible: true,
+                  interactiveCount: await popup
+                    .locator('button, input, select, textarea, a[href]')
+                    .count()
+                    .catch(() => 0),
+                  evidence: "Popup opened by a safe interaction"
+                }
+              ];
+              if (!queued.has(popupUrl) && !visited.has(popupUrl)) {
+                queued.add(popupUrl);
+                queue.push({ url: popupUrl, depth: candidate.depth + 1 });
+              }
+            } catch (error) {
+              warnings.push(
+                `Could not capture popup: ${error instanceof Error ? error.message : String(error)}`
+              );
+            } finally {
+              await popup.close().catch(() => undefined);
             }
-            await popup.close().catch(() => undefined);
           }
           pages.push({
             depth: candidate.depth,
@@ -560,6 +575,7 @@ async function probeSafeInteractions(input: {
   pageIndex: number;
   limit: number;
   deadline: number;
+  warnings: string[];
   popups: Array<import("@playwright/test").Page>;
 }): Promise<SystemInteractionEvidence[]> {
   let activePage = input.page;
