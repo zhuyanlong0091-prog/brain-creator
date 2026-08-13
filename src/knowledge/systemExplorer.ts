@@ -252,6 +252,7 @@ export class SystemExplorationCoordinator {
           urlChanged: transition.urlChanged,
           blockedRequests: transition.blockedRequests,
           status: transition.status,
+          reacquiredPage: transition.reacquiredPage,
           screenshotPath: transition.screenshotPath
         }));
       });

@@ -188,6 +188,7 @@ export type SystemExplorationInteractionTransition = {
   urlChanged: boolean;
   blockedRequests: Array<{ method: string; url: string }>;
   status: "observed" | "no-change" | "blocked" | "failed";
+  reacquiredPage?: boolean;
   screenshotPath?: string;
 };
 

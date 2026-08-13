@@ -184,9 +184,11 @@ describe("System exploration coordinator", () => {
 
   it("persists safe field transitions and exposes them to case binding", async () => {
     const fixture = await createFixture();
+    const cascade = cascadePageResult();
+    (cascade.interactions[0] as { reacquiredPage?: boolean }).reacquiredPage = true;
     const explorer: SystemExplorer = {
       explore: vi.fn().mockResolvedValue({
-        pages: [cascadePageResult()],
+        pages: [cascade],
         blockers: [],
         warnings: [],
         budgetExhausted: false
@@ -245,7 +247,8 @@ describe("System exploration coordinator", () => {
         action: "select",
         inputValue: "intern",
         visibleAdded: ["Replacement Employee"],
-        status: "observed"
+        status: "observed",
+        reacquiredPage: true
       })
     ]);
     expect(result.brain.stateTransitions).toEqual([
