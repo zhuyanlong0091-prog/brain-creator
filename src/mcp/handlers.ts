@@ -914,6 +914,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemId: stringArg(input, "systemId"),
       authProfileId: optionalStringArg(input, "authProfileId"),
       startUrl: optionalStringArg(input, "startUrl"),
+      scenario: explorationScenarioArg(input),
       interactionMode: explorationInteractionModeArg(input, "interactionMode"),
       budget: {
         maxPages: optionalNumberArg(input, "maxPages"),
@@ -6890,6 +6891,25 @@ function actorJourneyArg(input: Record<string, unknown>) {
       sourceRefs: optionalStringArrayArg(record, "sourceRefs") ?? []
     };
   });
+}
+
+function explorationScenarioArg(input: Record<string, unknown>) {
+  const value = input.explorationScenario;
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("explorationScenario must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  const name = stringArg(record, "name");
+  const dataRefs = optionalStringArrayArg(record, "dataRefs") ?? [];
+  return {
+    id: optionalStringArg(record, "id"),
+    name,
+    role: optionalStringArg(record, "role"),
+    prerequisiteState: optionalStringArg(record, "prerequisiteState"),
+    dataRefs,
+    selectorValues: recordArg(record, "selectorValues")
+  };
 }
 
 function summarizeCoverageDimensions(

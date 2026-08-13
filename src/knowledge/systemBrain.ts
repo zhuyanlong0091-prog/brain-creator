@@ -96,6 +96,7 @@ export type SystemBrainStateTransition = {
   urlChanged: boolean;
   reacquiredPage?: boolean;
   screenshotPath?: string;
+  scenarioId?: string;
   sourceRefs: string[];
 };
 
@@ -295,6 +296,7 @@ export function buildSystemBrain(
           urlChanged: transition.urlChanged,
           reacquiredPage: transition.reacquiredPage,
           screenshotPath: transition.screenshotPath,
+          scenarioId: transition.scenarioId,
             sourceRefs: [
               `system-exploration:${exploration.id}`,
               `system-interaction:${transition.id}`,

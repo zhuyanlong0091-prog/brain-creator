@@ -6,6 +6,7 @@ import { browserExecutablePath } from "../agent/authStateVerifier.js";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type { BrainCreatorService } from "../domain/service.js";
 import type {
+  ExplorationScenario,
   Gap,
   InteractionSurfaceRef,
   PageCaptureEvidence,
@@ -46,6 +47,7 @@ export type SystemInteractionEvidence = {
   surface?: InteractionSurfaceRef;
   reacquiredPage?: boolean;
   screenshotPath?: string;
+  scenarioId?: string;
 };
 
 export type SafeInteractionCandidate = {
@@ -73,6 +75,7 @@ export type SystemExplorerInput = {
   allowedUrls: string[];
   budget: SystemExplorationBudget;
   interactionMode: "off" | "safe";
+  scenario?: ExplorationScenario;
   artifactDir: string;
   storageStatePath?: string;
 };
@@ -95,6 +98,7 @@ type ExploreInput = {
   authProfileId?: string;
   startUrl?: string;
   interactionMode?: "off" | "safe";
+  scenario?: Omit<ExplorationScenario, "id"> & { id?: string };
   budget?: Partial<SystemExplorationBudget>;
 };
 
@@ -136,6 +140,7 @@ export class SystemExplorationCoordinator {
     }
     const budget = normalizeBudget(request.budget);
     const interactionMode = request.interactionMode ?? "off";
+    const scenario = normalizeExplorationScenario(request.scenario);
     if (interactionMode === "off" && budget.maxInteractionsPerPage > 0) {
       throw new Error("maxInteractionsPerPage requires interactionMode=safe");
     }
@@ -172,6 +177,7 @@ export class SystemExplorationCoordinator {
       startUrl,
       status: "running",
       interactionMode,
+      ...(scenario ? { scenario } : {}),
       budget,
       pageModelIds: [],
       navigationEdges: [],
@@ -193,6 +199,7 @@ export class SystemExplorationCoordinator {
         allowedUrls,
         budget,
         interactionMode,
+        scenario,
         artifactDir,
         storageStatePath
       });
@@ -253,7 +260,8 @@ export class SystemExplorationCoordinator {
           blockedRequests: transition.blockedRequests,
           status: transition.status,
           reacquiredPage: transition.reacquiredPage,
-          screenshotPath: transition.screenshotPath
+          screenshotPath: transition.screenshotPath,
+          scenarioId: transition.scenarioId
         }));
       });
       exploration.warnings = [
@@ -434,7 +442,8 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
                   limit: input.budget.maxInteractionsPerPage,
                   deadline,
                   warnings,
-                  popups
+                  popups,
+                  scenario: input.scenario
                 })
               : [];
           for (const popup of popups) {
@@ -533,7 +542,10 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
   }
 }
 
-export function classifySafeInteractionCandidate(candidate: SafeInteractionCandidate):
+export function classifySafeInteractionCandidate(
+  candidate: SafeInteractionCandidate,
+  scenario?: Pick<ExplorationScenario, "selectorValues">
+):
   | { allowed: true; action: "click"; kind: "tab" | "disclosure" }
   | { allowed: true; action: "select"; kind: "select"; inputValue: string }
   | { allowed: false; reason: string } {
@@ -545,12 +557,25 @@ export function classifySafeInteractionCandidate(candidate: SafeInteractionCandi
     return { allowed: false, reason: "The control has no stable selector" };
   }
   if (candidate.tag === "select") {
-    const option = candidate.options?.find(
-      (item) => !item.disabled && item.value !== candidate.currentValue && item.value !== ""
-    );
+    const requestedValue = scenario?.selectorValues[candidate.selector] ??
+      scenario?.selectorValues[candidate.name];
+    const option = requestedValue
+      ? candidate.options?.find(
+          (item) =>
+            !item.disabled &&
+            (item.value === requestedValue || item.label === requestedValue)
+        )
+      : candidate.options?.find(
+          (item) => !item.disabled && item.value !== candidate.currentValue && item.value !== ""
+        );
     return option
       ? { allowed: true, action: "select", kind: "select", inputValue: option.value }
-      : { allowed: false, reason: "The select has no safe alternative option" };
+      : {
+          allowed: false,
+          reason: requestedValue
+            ? `The requested scenario value is unavailable: ${requestedValue}`
+            : "The select has no safe alternative option"
+        };
   }
   if (
     candidate.role.toLowerCase() === "tab" ||
@@ -577,13 +602,17 @@ async function probeSafeInteractions(input: {
   deadline: number;
   warnings: string[];
   popups: Array<import("@playwright/test").Page>;
+  scenario?: ExplorationScenario;
 }): Promise<SystemInteractionEvidence[]> {
   let activePage = input.page;
   const registerPopupListener = (page: import("@playwright/test").Page) => {
     page.on("popup", (popup) => input.popups.push(popup));
   };
   const candidates = (await collectInteractionCandidates(activePage))
-    .map((candidate) => ({ candidate, decision: classifySafeInteractionCandidate(candidate) }))
+    .map((candidate) => ({
+      candidate,
+      decision: classifySafeInteractionCandidate(candidate, input.scenario)
+    }))
     .filter(
       (
         item
@@ -724,7 +753,8 @@ async function probeSafeInteractions(input: {
       status,
       surface: candidate.surface,
       ...(reacquiredPage ? { reacquiredPage: true } : {}),
-      screenshotPath
+      screenshotPath,
+      ...(input.scenario ? { scenarioId: input.scenario.id } : {})
     });
     if (Date.now() < input.deadline) {
       await activePage
@@ -1311,6 +1341,29 @@ async function isLoginOrChallengePage(
   }
   const text = await page.locator("body").innerText().catch(() => "");
   return /\b(?:captcha|two-factor|2fa)\b|验证码|人机验证/i.test(text.slice(0, 10_000));
+}
+
+function normalizeExplorationScenario(
+  input?: Omit<ExplorationScenario, "id"> & { id?: string }
+): ExplorationScenario | undefined {
+  if (!input) return undefined;
+  const name = input.name.trim();
+  if (!name) throw new Error("Exploration scenario name is required");
+  const selectorValues = Object.fromEntries(
+    Object.entries(input.selectorValues ?? {})
+      .filter(([key, value]) => key.trim() && typeof value === "string" && value.trim())
+      .map(([key, value]) => [key.trim(), value.trim()])
+  );
+  return {
+    id: input.id?.trim() || id("explorationScenario"),
+    name,
+    ...(input.role?.trim() ? { role: input.role.trim() } : {}),
+    ...(input.prerequisiteState?.trim()
+      ? { prerequisiteState: input.prerequisiteState.trim() }
+      : {}),
+    dataRefs: [...new Set((input.dataRefs ?? []).map((value) => value.trim()).filter(Boolean))],
+    selectorValues
+  };
 }
 
 function normalizeBudget(input?: Partial<SystemExplorationBudget>): SystemExplorationBudget {

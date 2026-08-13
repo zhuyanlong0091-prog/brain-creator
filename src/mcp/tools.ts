@@ -168,6 +168,16 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
           })
         )
         .optional(),
+      explorationScenario: z
+        .object({
+          id: z.string().optional(),
+          name: z.string().min(1),
+          role: z.string().optional(),
+          prerequisiteState: z.string().optional(),
+          dataRefs: z.array(z.string()).default([]),
+          selectorValues: z.record(z.string(), z.string()).default({})
+        })
+        .optional(),
       startUrl: z.string().url().optional(),
       maxPages: z.number().int().min(1).max(25).optional(),
       maxDepth: z.number().int().min(0).max(4).optional(),

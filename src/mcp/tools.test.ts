@@ -125,6 +125,21 @@ describe("BRAIN_CREATOR_TOOLS", () => {
       }).success
     ).toBe(true);
     expect(
+      prepare?.inputSchema.safeParse({
+        action: "explore-system",
+        knowledgeProjectId: "project-1",
+        systemId: "system-1",
+        interactionMode: "safe",
+        explorationScenario: {
+          name: "Intern replacement field discovery",
+          role: "recruiter",
+          prerequisiteState: "empty recruiting form",
+          dataRefs: ["fixture:intern-recruiting"],
+          selectorValues: { '[id="employee-type"]': "intern" }
+        }
+      }).success
+    ).toBe(true);
+    expect(
       configure?.inputSchema.safeParse({
         target: "auth",
         operation: "verify",

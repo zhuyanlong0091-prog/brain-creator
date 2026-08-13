@@ -170,6 +170,35 @@ describe("System exploration coordinator", () => {
     ).toEqual(
       expect.objectContaining({ allowed: true, action: "select", inputValue: "intern" })
     );
+    expect(
+      classifySafeInteractionCandidate(
+        {
+          name: "Employee Type",
+          role: "combobox",
+          selector: '[name="employeeType"]',
+          tag: "select",
+          currentValue: "employee",
+          options: [
+            { value: "employee", label: "Employee", disabled: false },
+            { value: "intern", label: "Intern", disabled: false }
+          ]
+        },
+        { selectorValues: { '[name="employeeType"]': "Intern" } }
+      )
+    ).toEqual(expect.objectContaining({ allowed: true, inputValue: "intern" }));
+    expect(
+      classifySafeInteractionCandidate(
+        {
+          name: "Employee Type",
+          role: "combobox",
+          selector: '[name="employeeType"]',
+          tag: "select",
+          currentValue: "employee",
+          options: [{ value: "employee", label: "Employee", disabled: false }]
+        },
+        { selectorValues: { '[name="employeeType"]': "Intern" } }
+      )
+    ).toEqual(expect.objectContaining({ allowed: false, reason: expect.stringContaining("Intern") }));
     for (const name of ["Save", "Delete", "Approve", "Submit", "创建", "删除", "审批"]) {
       expect(
         classifySafeInteractionCandidate({
@@ -530,6 +559,14 @@ describe("System exploration coordinator", () => {
           knowledgeProjectId: fixture.projectId,
           systemId: fixture.systemId,
           interactionMode: "safe",
+          scenario: {
+            id: "intern-replacement",
+            name: "Intern replacement field discovery",
+            role: "recruiter",
+            prerequisiteState: "empty recruiting form",
+            dataRefs: ["fixture:intern-recruiting"],
+            selectorValues: { '[id="employee-type"]': "intern" }
+          },
           budget: {
             maxPages: 1,
             maxDepth: 0,
@@ -545,15 +582,28 @@ describe("System exploration coordinator", () => {
           (transition) => transition.targetName === "Sync Type"
         );
         expect(result.brain.pages).toHaveLength(1);
+        expect(result.exploration.scenario).toEqual(
+          expect.objectContaining({
+            id: "intern-replacement",
+            role: "recruiter",
+            dataRefs: ["fixture:intern-recruiting"]
+          })
+        );
         expect(result.exploration.warnings).toEqual(
           expect.arrayContaining([expect.stringContaining("Popup closed before capture")])
         );
         expect(employeeType).toEqual(
           expect.objectContaining({
             status: "observed",
+            scenarioId: "intern-replacement",
             visibleAdded: expect.arrayContaining(["Replacement Employee", "App remounted"])
           })
         );
+        expect(
+          result.brain.stateTransitions.find(
+            (transition) => transition.targetName === "Employee Type"
+          )
+        ).toEqual(expect.objectContaining({ scenarioId: "intern-replacement" }));
         expect(syncType).toEqual(
           expect.objectContaining({
             status: "blocked",
@@ -572,6 +622,7 @@ describe("System exploration coordinator", () => {
           expect.arrayContaining([
             expect.objectContaining({
               targetName: "Frame Mode",
+              scenarioId: "intern-replacement",
               surface: expect.objectContaining({ kind: "iframe" })
             }),
             expect.objectContaining({

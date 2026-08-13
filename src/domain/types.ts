@@ -147,6 +147,20 @@ export type SystemExplorationBudget = {
   maxInteractionsPerPage: number;
 };
 
+/**
+ * A user-approved exploration context. Selector values are non-secret values
+ * used to reveal conditional UI states; reusable test data stays referenced by
+ * id instead of being copied into browser or report output.
+ */
+export type ExplorationScenario = {
+  id: string;
+  name: string;
+  role?: string;
+  prerequisiteState?: string;
+  dataRefs: string[];
+  selectorValues: Record<string, string>;
+};
+
 export type SystemExplorationNavigationEdge = {
   fromUrl: string;
   toUrl: string;
@@ -192,6 +206,7 @@ export type SystemExplorationInteractionTransition = {
   status: "observed" | "no-change" | "blocked" | "failed";
   reacquiredPage?: boolean;
   screenshotPath?: string;
+  scenarioId?: string;
 };
 
 export type SystemExploration = {
@@ -202,6 +217,7 @@ export type SystemExploration = {
   startUrl: string;
   status: "running" | "completed" | "partial" | "blocked" | "cancelled";
   interactionMode: "off" | "safe";
+  scenario?: ExplorationScenario;
   budget: SystemExplorationBudget;
   pageModelIds: string[];
   navigationEdges: SystemExplorationNavigationEdge[];
