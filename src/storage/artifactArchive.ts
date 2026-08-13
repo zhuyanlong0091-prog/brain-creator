@@ -67,6 +67,15 @@ export async function exportCaseSuiteArchive(input: {
   const suiteRun = input.repository.caseSuiteRuns.find((item) => item.id === input.suiteRunId);
   if (!suiteRun) throw new Error("Case suite run not found");
   const described = await describeArtifacts(input.workDir, suiteRun.artifactPaths);
+  const protectedArtifacts = described
+    .filter((item) => item.status === "present" && isProtectedAuthArtifact(item.path));
+  if (protectedArtifacts.length > 0) {
+    throw new Error(
+      `Artifact export blocked because protected authentication state cannot be exported: ${protectedArtifacts
+        .map((item) => item.path)
+        .join(", ")}`
+    );
+  }
   const secretFindings = await scanArtifactSecrets(
     input.workDir,
     described.filter((item) => item.status === "present"),
@@ -173,4 +182,8 @@ function safePart(value: string) {
 
 function normalizeArchivePath(value: string) {
   return value.split(sep).join("/");
+}
+
+function isProtectedAuthArtifact(path: string) {
+  return /(?:^|\/)\.brain-creator\/auth\//i.test(normalizeArchivePath(path));
 }

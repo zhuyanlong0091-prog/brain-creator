@@ -3,7 +3,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import AdmZip from "adm-zip";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryBrainCreatorRepository } from "../domain/repository.js";
@@ -166,6 +166,43 @@ describe("artifact archive", () => {
         outputPath: join(root, "exports", "suite.zip")
       })
     ).rejects.toThrow("Artifact export blocked because sensitive values were found in: generated.spec.ts");
+  });
+
+  it("never exports protected browser authentication state", async () => {
+    const root = await tempDir();
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.caseSuiteRuns.push({
+      id: "suite_run_1",
+      systemId: "system_orders",
+      suiteId: "suite_1",
+      sourceId: "source_1",
+      status: "completed",
+      total: 1,
+      passed: 1,
+      failed: 0,
+      blocked: 0,
+      caseResults: [],
+      artifactPaths: [],
+      bugReportIds: [],
+      gapIds: [],
+      createdAt: "2026-08-12T00:00:00.000Z",
+      completedAt: "2026-08-12T00:01:00.000Z"
+    });
+    const authState = join(root, ".brain-creator", "auth", "system-1", "storage-state.json");
+    await mkdir(dirname(authState), { recursive: true });
+    await writeFile(authState, JSON.stringify({ cookies: [], origins: [] }), "utf8");
+    repository.caseSuiteRuns[0].artifactPaths = [
+      ".brain-creator/auth/system-1/storage-state.json"
+    ];
+
+    await expect(
+      exportCaseSuiteArchive({
+        repository,
+        workDir: root,
+        suiteRunId: "suite_run_1",
+        outputPath: join(root, "exports", "suite.zip")
+      })
+    ).rejects.toThrow("protected authentication state cannot be exported");
   });
 });
 
