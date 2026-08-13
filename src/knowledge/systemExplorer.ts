@@ -563,6 +563,9 @@ async function probeSafeInteractions(input: {
   popups: Array<import("@playwright/test").Page>;
 }): Promise<SystemInteractionEvidence[]> {
   let activePage = input.page;
+  const registerPopupListener = (page: import("@playwright/test").Page) => {
+    page.on("popup", (popup) => input.popups.push(popup));
+  };
   const candidates = (await collectInteractionCandidates(activePage))
     .map((candidate) => ({ candidate, decision: classifySafeInteractionCandidate(candidate) }))
     .filter(
@@ -585,6 +588,7 @@ async function probeSafeInteractions(input: {
       const replacement = await reacquirePage(input.context, input.pageUrl, input.deadline);
       if (!replacement) break;
       activePage = replacement;
+      registerPopupListener(activePage);
       reacquiredPage = true;
     }
     const { candidate, decision } = candidates[index];
@@ -642,7 +646,7 @@ async function probeSafeInteractions(input: {
           if (!replacement) throw error;
           await activePage.unroute("**/*", routeHandler).catch(() => undefined);
           activePage = replacement;
-          activePage.on("popup", (popup) => input.popups.push(popup));
+          registerPopupListener(activePage);
           routedPages.add(activePage);
           await activePage.route("**/*", routeHandler);
           reacquiredPage = true;
@@ -654,7 +658,7 @@ async function probeSafeInteractions(input: {
         const replacement = await reacquirePage(input.context, input.pageUrl, input.deadline);
         if (!replacement) throw new Error("Active page closed and could not be reacquired");
         activePage = replacement;
-        activePage.on("popup", (popup) => input.popups.push(popup));
+        registerPopupListener(activePage);
         reacquiredPage = true;
       }
       after = await captureInteractionState(activePage);
