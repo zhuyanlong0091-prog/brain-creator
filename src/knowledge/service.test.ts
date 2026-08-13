@@ -1050,6 +1050,14 @@ describe("KnowledgeService", () => {
       testCaseId: "test-pass",
       contextPackPath: "context/pass.json"
     });
+    passEvidence.assertionContracts = [{
+      id: "assertion-pass",
+      type: "workflow",
+      strength: "strong",
+      expected: "Customer record created",
+      requirementRefs: [ingested.requirementSet.id],
+      evidenceRequirements: ["actual-value", "screenshot", "trace"]
+    }];
     await service.completeExecutionEvidence(passEvidence.id, {
       status: "passed",
       chainRunId: "chain-pass",
@@ -1063,11 +1071,18 @@ describe("KnowledgeService", () => {
         failed: 0,
         skipped: 0,
         durationMs: 10,
-        assertions: (passEvidence.assertionContracts ?? []).map((contract) => ({
-          id: contract.id,
+        assertions: [{
+          id: "assertion-pass",
           status: "passed" as const,
           actual: "Customer record created",
           evidenceRefs: ["evidence/pass.png", "evidence/pass-trace.zip"]
+        }],
+        steps: passEvidence.steps.map((step) => ({
+          id: step.stepId,
+          title: `bc:${step.stepId}`,
+          status: "passed" as const,
+          evidenceRefs: ["evidence/pass.png"],
+          traceRefs: ["evidence/pass-trace.zip"]
         })),
         attachments: ["evidence/pass.png", "evidence/pass-trace.zip"],
         consoleErrors: [],
@@ -1141,14 +1156,32 @@ describe("KnowledgeService", () => {
       networkFailures: ["GET /customers 503"]
     });
 
+    const unassuredCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const unassuredEvidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-history",
+      executableCaseId: unassuredCase.id,
+      testCaseId: "test-unassured",
+      contextPackPath: "context/unassured.json"
+    });
+    await service.completeExecutionEvidence(unassuredEvidence.id, {
+      status: "passed",
+      actualResult: "The runner completed without structured assertion evidence",
+      artifactPaths: []
+    });
+
     expect(service.requirementEvalAccuracy(project.id)).toEqual(
       expect.objectContaining({
-        totalEvidence: 4,
+        totalEvidence: 5,
+        executionPassed: 2,
+        strongVerified: 1,
+        limitedOrUnassuredPassed: 1,
         validated: 2,
         contradicted: 1,
-        inconclusive: 1,
+        inconclusive: 2,
         accuracyRate: 2 / 3,
-        systemConformanceRate: 1 / 2,
+        systemConformanceRate: 2 / 3,
+        strongVerificationRate: 1 / 5,
         traceabilityRate: 1
       })
     );
@@ -1157,7 +1190,8 @@ describe("KnowledgeService", () => {
         requirementSetId: ingested.requirementSet.id,
         validated: 2,
         contradicted: 1,
-        inconclusive: 1
+        inconclusive: 2,
+        strongVerified: 1
       })
     ]);
   });

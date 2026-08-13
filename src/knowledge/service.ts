@@ -1259,10 +1259,15 @@ export class KnowledgeService {
       );
       const technicalFailure =
         item.consoleErrors.length > 0 || item.networkFailures.length > 0 || linkedGap;
+      const stronglyVerified =
+        executableCase !== undefined &&
+        item.status === "passed" &&
+        item.assuranceLevel === "strong" &&
+        (item.coverage?.missing.length ?? 0) === 0;
       let outcome: "validated" | "contradicted" | "inconclusive" = "inconclusive";
       if (
         executableCase &&
-        (item.status === "passed" || (item.status === "failed" && linkedBug))
+        (stronglyVerified || (item.status === "failed" && linkedBug))
       ) {
         outcome = "validated";
       } else if (executableCase && item.status === "failed" && !technicalFailure) {
@@ -1272,6 +1277,8 @@ export class KnowledgeService {
         evidence: item,
         requirementSetId: executableCase?.requirementSetId,
         outcome,
+        executionPassed: item.status === "passed",
+        stronglyVerified,
         linkedBug,
         traceable:
           executableCase !== undefined &&
@@ -1283,6 +1290,11 @@ export class KnowledgeService {
       };
     });
     const summarize = (items: typeof classified) => {
+      const executionPassed = items.filter((item) => item.executionPassed).length;
+      const strongVerified = items.filter((item) => item.stronglyVerified).length;
+      const limitedOrUnassuredPassed = items.filter(
+        (item) => item.executionPassed && !item.stronglyVerified
+      ).length;
       const validated = items.filter((item) => item.outcome === "validated").length;
       const contradicted = items.filter((item) => item.outcome === "contradicted").length;
       const inconclusive = items.filter((item) => item.outcome === "inconclusive").length;
@@ -1294,6 +1306,9 @@ export class KnowledgeService {
       );
       return {
         totalEvidence: items.length,
+        executionPassed,
+        strongVerified,
+        limitedOrUnassuredPassed,
         validated,
         contradicted,
         inconclusive,
@@ -1305,6 +1320,7 @@ export class KnowledgeService {
             ? null
             : conformanceOutcomes.filter((item) => item.evidence.status === "passed").length /
               conformanceOutcomes.length,
+        strongVerificationRate: items.length === 0 ? null : strongVerified / items.length,
         traceabilityRate:
           items.length === 0
             ? null
@@ -1322,7 +1338,7 @@ export class KnowledgeService {
     return {
       ...summarize(classified),
       methodology:
-        "Passed evidence and failed evidence linked to a BugReport validate the requirement expectation. Unclassified semantic failures contradict it. Blocked, Gap-linked, or technical failures are inconclusive.",
+        "A passed run counts as strongly verified only when its assuranceLevel is strong and no required coverage is missing. Passed runs with limited or no assurance are execution successes but remain inconclusive for requirement validation. Failed evidence linked to a BugReport validates the recorded product-defect classification; unclassified semantic failures contradict the expectation. Blocked, Gap-linked, or technical failures are inconclusive.",
       byRequirementSet: requirementSetIds.map((setId) => ({
         requirementSetId: setId,
         title:
