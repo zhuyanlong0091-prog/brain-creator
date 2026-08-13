@@ -918,6 +918,12 @@ export class KnowledgeService {
                 : results.some((item) => item.status === "blocked") || cases.some((item) => item.status === "blocked")
                   ? "blocked"
                   : "not-selected";
+      const classificationReason = coverageClassificationReason({
+        classification,
+        requirementSetStatus: requirementSet?.status,
+        cases,
+        results
+      });
       return {
         testIntentId: intent.id,
         requirementSetId: intent.requirementSetId,
@@ -925,6 +931,7 @@ export class KnowledgeService {
         module: intent.module,
         priority: intent.priority,
         classification,
+        classificationReason,
         executableCaseIds: caseIds,
         evidenceIds: results.map((item) => item.id),
         requirementRefs: intent.requirementRefs,
@@ -2228,6 +2235,30 @@ function redactReporterResult(
     consoleErrors: reporter.consoleErrors.map(redact),
     networkFailures: reporter.networkFailures.map(redact)
   };
+}
+
+function coverageClassificationReason(input: {
+  classification: string;
+  requirementSetStatus?: RequirementSet["status"];
+  cases: ExecutableCase[];
+  results: ExecutionEvidence[];
+}) {
+  switch (input.classification) {
+    case "superseded":
+      return "The requirement baseline is superseded, so its historical execution is excluded from active coverage.";
+    case "not-selected":
+      return "No active ExecutableCase is linked to this TestIntent.";
+    case "strong-verified":
+      return "At least one linked execution has strong assurance and no missing coverage dimension.";
+    case "limited":
+      return "Linked execution produced only limited assurance; strong assertion evidence is incomplete.";
+    case "failed":
+      return "A linked execution failed before strong coverage was established.";
+    case "blocked":
+      return "A linked execution or case is blocked and has not established the required evidence.";
+    default:
+      return `Coverage classification '${input.classification}' was derived from ${input.cases.length} case(s) and ${input.results.length} evidence record(s).`;
+  }
 }
 
 function verifiedCoverageDimensions(

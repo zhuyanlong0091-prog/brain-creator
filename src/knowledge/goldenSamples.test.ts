@@ -243,6 +243,13 @@ describe("Requirement Brain golden samples", () => {
     expect(ledger.total).toBe(fixture.testIntentCount);
     expect(ledger.counts).toEqual(fixture.classifications);
     expect(ledger.items).toHaveLength(fixture.testIntentCount);
+    expect(ledger.items.every((item) => item.classificationReason.length > 0)).toBe(true);
+    expect(ledger.items.find((item) => item.classification === "strong-verified")?.classificationReason)
+      .toContain("strong assurance");
+    expect(ledger.items.find((item) => item.classification === "not-selected")?.classificationReason)
+      .toContain("No active ExecutableCase");
+    expect(ledger.items.find((item) => item.classification === "superseded")?.classificationReason)
+      .toContain("superseded");
     expect(ledger.items.filter((item) => item.classification === "strong-verified")).toHaveLength(40);
     expect(ledger.items.filter((item) => item.classification === "superseded")).toHaveLength(22);
   });
