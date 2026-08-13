@@ -43,10 +43,33 @@ describe("assertion assurance", () => {
         contracts,
         reporter({
           status: "passed",
-          assertions: [{ id: contracts[0].id, status: "passed", evidenceRefs: ["step-1.png"] }]
+          assertions: [{
+            id: contracts[0].id,
+            status: "passed",
+            actual: "42",
+            evidenceRefs: ["step-1.png", "trace.zip"]
+          }],
+          attachments: ["trace.zip"]
         })
       )
     ).toBe("strong");
+  });
+
+  it("downgrades a passing reporter when declared evidence is incomplete", () => {
+    const contracts = buildAssertionContracts([assertionStep()]);
+    expect(
+      determineAssuranceLevel(
+        contracts,
+        reporter({
+          status: "passed",
+          assertions: [{
+            id: contracts[0].id,
+            status: "passed",
+            evidenceRefs: ["step-1.png"]
+          }]
+        })
+      )
+    ).toBe("limited");
   });
 });
 

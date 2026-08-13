@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -875,6 +875,7 @@ describe("KnowledgeService", () => {
 
     expect(completed.assuranceLevel).toBe("limited");
     expect(completed.evidenceWarnings).toEqual([
+      expect.stringContaining("Assurance evidence incomplete: actual-value, screenshot, trace"),
       expect.stringContaining("Missing structured Reporter evidence for step(s):")
     ]);
     expect(completed.evidenceWarnings?.some((warning) => warning.includes("Missing trace artifact"))).toBe(false);
@@ -882,7 +883,10 @@ describe("KnowledgeService", () => {
 
   it("records field and workflow coverage only from step evidence", async () => {
     const repository = new InMemoryBrainCreatorRepository();
-    const service = new KnowledgeService(repository, await tempDir());
+    const knowledgeDir = await tempDir();
+    await mkdir(join(knowledgeDir, "evidence"), { recursive: true });
+    await writeFile(join(knowledgeDir, "evidence", "trace.zip"), "trace", "utf8");
+    const service = new KnowledgeService(repository, knowledgeDir);
     const project = await service.createProject({ name: "Coverage dimensions", key: "coverage-dimensions", defaultLocale: "en-US" });
     repository.systemProfiles.push({
       id: "system-coverage-dimensions",
@@ -912,7 +916,10 @@ describe("KnowledgeService", () => {
     });
     const completed = await service.completeExecutionEvidence(evidence.id, {
       status: "passed",
-      artifactPaths: [],
+      actualResult: "Customer form saved",
+      artifactPaths: ["evidence/step.png", "evidence/trace.zip"],
+      tracePaths: ["evidence/trace.zip"],
+      evidenceRootDir: knowledgeDir,
       reporterResult: {
         status: "passed",
         total: evidence.assertionContracts?.length ?? 0,
@@ -923,7 +930,8 @@ describe("KnowledgeService", () => {
         assertions: (evidence.assertionContracts ?? []).map((contract) => ({
           id: contract.id,
           status: "passed" as const,
-          evidenceRefs: ["evidence/assertion.png"]
+          actual: "Customer form saved",
+          evidenceRefs: ["evidence/assertion.png", "evidence/trace.zip"]
         })),
         steps: evidence.steps.map((step) => ({
           id: step.stepId,
@@ -931,7 +939,7 @@ describe("KnowledgeService", () => {
           status: "passed" as const,
           evidenceRefs: ["evidence/step.png"]
         })),
-        attachments: ["evidence/step.png"],
+        attachments: ["evidence/step.png", "evidence/trace.zip"],
         consoleErrors: [],
         networkFailures: []
       }
@@ -982,7 +990,8 @@ describe("KnowledgeService", () => {
       status: "passed",
       chainRunId: "chain-pass",
       actualResult: "Customer record created",
-      artifactPaths: [],
+      artifactPaths: ["evidence/pass.png", "evidence/pass-trace.zip"],
+      tracePaths: ["evidence/pass-trace.zip"],
       reporterResult: {
         status: "passed",
         total: passEvidence.assertionContracts?.length ?? 0,
@@ -993,9 +1002,10 @@ describe("KnowledgeService", () => {
         assertions: (passEvidence.assertionContracts ?? []).map((contract) => ({
           id: contract.id,
           status: "passed" as const,
-          evidenceRefs: []
+          actual: "Customer record created",
+          evidenceRefs: ["evidence/pass.png", "evidence/pass-trace.zip"]
         })),
-        attachments: [],
+        attachments: ["evidence/pass.png", "evidence/pass-trace.zip"],
         consoleErrors: [],
         networkFailures: []
       }

@@ -44,7 +44,7 @@ import {
   type TestDataResolution
 } from "./testDataPlanner.js";
 import { planWorkflowPath } from "./workflowPathPlanner.js";
-import { buildAssertionContracts, determineAssuranceLevel } from "../execution/assurance.js";
+import { buildAssertionContracts, determineAssuranceLevel, missingAssuranceEvidence } from "../execution/assurance.js";
 import { writeStaticExecutionReport } from "../execution/staticReport.js";
 import { decryptSecrets } from "../shared/crypto.js";
 
@@ -1113,6 +1113,10 @@ export class KnowledgeService {
       evidence.assertionContracts ?? [],
       input.reporterResult
     );
+    const missingAssurance = missingAssuranceEvidence(
+      evidence.assertionContracts ?? [],
+      input.reporterResult
+    );
     const reporterSteps = evidence.reporterResult?.steps;
     const missingStepEvidence = reporterSteps
       ? evidence.steps
@@ -1136,6 +1140,9 @@ export class KnowledgeService {
         ).then((paths) => paths.filter((path): path is string => Boolean(path)))
       : [];
     evidence.evidenceWarnings = [
+      ...(missingAssurance.length
+        ? [`Assurance evidence incomplete: ${missingAssurance.join(", ")}`]
+        : []),
       ...(missingStepEvidence.length
         ? [`Missing structured Reporter evidence for step(s): ${missingStepEvidence.join(", ")}`]
         : []),
