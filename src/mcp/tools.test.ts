@@ -145,6 +145,8 @@ describe("BRAIN_CREATOR_TOOLS", () => {
         limit: 25
       }).success
     ).toBe(true);
+    expect(prepare?.inputSchema.parse({ action: "approve-baseline" }).responseMode).toBe("summary");
+    expect(review?.inputSchema.parse({ target: "test-intent" }).responseMode).toBe("summary");
   });
 
   it("registers facade inspection tools as read-only", () => {

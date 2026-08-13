@@ -156,7 +156,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       role: z.string().optional(),
       gapId: z.string().optional(),
       evidenceRefs: z.array(z.string()).default([]),
-      responseMode: z.enum(["summary", "full"]).default("full"),
+      responseMode: z.enum(["summary", "full"]).default("summary"),
       authProfileId: z.string().optional(),
       actorJourney: z
         .array(
@@ -353,7 +353,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       systemName: z.string().optional(),
       environment: z.string().optional(),
       include: z.array(z.string()).default([]),
-      responseMode: z.enum(["summary", "full"]).default("full")
+      responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
   {
@@ -390,7 +390,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       operator: z.string().optional(),
       provider: z.string().optional(),
       sessionId: z.string().optional(),
-      responseMode: z.enum(["summary", "full"]).default("full")
+      responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
   {
@@ -444,7 +444,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
           ])
         )
         .default([]),
-      responseMode: z.enum(["summary", "full"]).default("full")
+      responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
   {
@@ -477,7 +477,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       testCaseId: z.string().optional(),
       reason: z.string().optional(),
       resumeInstruction: z.string().optional(),
-      responseMode: z.enum(["summary", "full"]).default("full")
+      responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
   {
