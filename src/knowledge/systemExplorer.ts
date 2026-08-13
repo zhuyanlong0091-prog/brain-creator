@@ -432,7 +432,8 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
                   artifactDir: input.artifactDir,
                   pageIndex: pages.length,
                   limit: input.budget.maxInteractionsPerPage,
-                  deadline
+                  deadline,
+                  popups
                 })
               : [];
           for (const popup of popups) {
@@ -559,6 +560,7 @@ async function probeSafeInteractions(input: {
   pageIndex: number;
   limit: number;
   deadline: number;
+  popups: Array<import("@playwright/test").Page>;
 }): Promise<SystemInteractionEvidence[]> {
   let activePage = input.page;
   const candidates = (await collectInteractionCandidates(activePage))
@@ -640,6 +642,7 @@ async function probeSafeInteractions(input: {
           if (!replacement) throw error;
           await activePage.unroute("**/*", routeHandler).catch(() => undefined);
           activePage = replacement;
+          activePage.on("popup", (popup) => input.popups.push(popup));
           routedPages.add(activePage);
           await activePage.route("**/*", routeHandler);
           reacquiredPage = true;
@@ -651,6 +654,7 @@ async function probeSafeInteractions(input: {
         const replacement = await reacquirePage(input.context, input.pageUrl, input.deadline);
         if (!replacement) throw new Error("Active page closed and could not be reacquired");
         activePage = replacement;
+        activePage.on("popup", (popup) => input.popups.push(popup));
         reacquiredPage = true;
       }
       after = await captureInteractionState(activePage);
