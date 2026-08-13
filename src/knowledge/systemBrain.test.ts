@@ -38,7 +38,10 @@ describe("System Brain", () => {
       expect.objectContaining({
         pageModelId: "page-list",
         score: expect.any(Number),
-        matchedEvidence: expect.arrayContaining(["Recruiting List", "Create Request"])
+        matchedEvidence: expect.arrayContaining(["Recruiting List", "Create Request"]),
+        scoreBreakdown: expect.arrayContaining([
+          expect.objectContaining({ evidence: "Recruiting List", contribution: expect.any(Number) })
+        ])
       }),
       expect.objectContaining({ pageModelId: "page-offer" })
     ]);

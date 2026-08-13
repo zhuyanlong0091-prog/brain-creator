@@ -948,7 +948,8 @@ export class KnowledgeService {
           rate: results.length > 0
             ? results.filter((item) => item.status === "passed" && item.assuranceLevel === "strong" && (item.coverage?.missing.length ?? 0) === 0).length / results.length
             : undefined,
-          repeated: results.length >= 2
+          repeated: results.length >= 2,
+          verdict: stabilityVerdict(results)
         }
       } as const;
     });
@@ -2170,6 +2171,18 @@ function observationIdentityRef(sourceRefs: string[]) {
     if (match) return match;
   }
   return [...sourceRefs].sort()[0] ?? "";
+}
+
+function stabilityVerdict(
+  results: Array<{ status: string; assuranceLevel?: string; coverage?: { missing: string[] } }>
+) {
+  if (results.length < 2) return "insufficient-sample" as const;
+  const strongPasses = results.filter(
+    (item) => item.status === "passed" && item.assuranceLevel === "strong" && (item.coverage?.missing.length ?? 0) === 0
+  ).length;
+  if (strongPasses === results.length) return "stable" as const;
+  if (results.some((item) => item.status === "blocked")) return "blocked" as const;
+  return "unstable" as const;
 }
 
 function executableCaseCompileKey(

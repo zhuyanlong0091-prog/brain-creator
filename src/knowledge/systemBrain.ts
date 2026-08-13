@@ -25,6 +25,7 @@ export type PageCandidateScore = {
   route: string;
   score: number;
   matchedEvidence: string[];
+  scoreBreakdown: Array<{ evidence: string; contribution: number }>;
 };
 
 export type SystemBrainWorkflow = {
@@ -536,7 +537,7 @@ export function bindStepsToSystemBrain(
             ? "System Brain has no page evidence"
             : `System Brain has no unambiguous page evidence; candidates: ${candidates
                 .slice(0, 3)
-                .map((candidate) => `${candidate.pageName} (${candidate.score})`)
+                .map((candidate) => `${candidate.pageName} (${candidate.score}; evidence: ${candidate.matchedEvidence.join(", ") || "none"})`)
                 .join(", ")}`
       }))
     };
@@ -724,7 +725,10 @@ export function scorePageCandidates(
         pageName: page.name,
         route: page.route,
         score: tokenOverlap(normalizedQuery, evidence.join(" ").toLowerCase()),
-        matchedEvidence
+        matchedEvidence,
+        scoreBreakdown: evidence
+          .map((value) => ({ evidence: value, contribution: tokenOverlap(normalizedQuery, value.toLowerCase()) }))
+          .filter((item) => item.contribution > 0)
       };
     })
     .sort((left, right) => right.score - left.score || left.pageName.localeCompare(right.pageName));

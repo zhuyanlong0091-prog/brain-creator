@@ -250,6 +250,7 @@ describe("Requirement Brain golden samples", () => {
       .toContain("No active ExecutableCase");
     expect(ledger.items.find((item) => item.classification === "superseded")?.classificationReason)
       .toContain("superseded");
+    expect(ledger.items.every((item) => item.stability.verdict === "insufficient-sample")).toBe(true);
     expect(ledger.items.filter((item) => item.classification === "strong-verified")).toHaveLength(40);
     expect(ledger.items.filter((item) => item.classification === "superseded")).toHaveLength(22);
   });
