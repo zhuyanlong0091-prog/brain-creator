@@ -49,3 +49,19 @@ export function scanSensitivePatterns(content: string): SecretPatternFinding[] {
     return match ? [{ rule, matchedLength: match[0].length }] : [];
   });
 }
+
+export function redactSensitiveText(
+  content: string,
+  secrets: Record<string, string>
+): string {
+  let redacted = Object.values(secrets)
+    .filter((value) => value.length >= 8)
+    .reduce((value, secret) => value.split(secret).join("[REDACTED]"), content);
+  redacted = redacted.replace(/-----BEGIN (?:RSA |OPENSSH |EC |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |OPENSSH |EC |PGP )?PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]");
+  redacted = redacted.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}/gi, "Bearer [REDACTED]");
+  redacted = redacted.replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[REDACTED_JWT]");
+  return redacted.replace(
+    /\b(password|passwd|token|cookie|secret|api[_-]?key)(\s*[:=]\s*)(["'][^"'\r\n]{8,}["'])/gi,
+    "$1$2\"[REDACTED]\""
+  );
+}

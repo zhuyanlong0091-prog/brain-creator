@@ -67,12 +67,16 @@ import {
   type CommandResult,
   type CommandRunner
 } from "../agent/orchestrator.js";
+import {
+  normalizeReporterExitCode,
+  parsePlaywrightJsonReport
+} from "../execution/playwrightReporter.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
 import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import { id } from "../shared/id.js";
 import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
 import { decryptSecrets } from "../shared/crypto.js";
-import { scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
+import { redactSensitiveText, scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
 import type {
   AgentRun,
   AgentTask,
@@ -3390,7 +3394,16 @@ async function completeRequirementEvidence(
 ) {
   const output = [testResult?.stdout, testResult?.stderr].filter(Boolean).join("\n").trim();
   const reporter = testResult?.structuredReporter;
-  const artifactPaths = [...new Set([...baseArtifactPaths, ...(reporter?.attachments ?? [])])];
+  const artifactPaths = [
+    ...new Set(
+      [
+        ...baseArtifactPaths,
+        testResult?.reporterPath,
+        testResult?.actorRoleEvidencePath,
+        ...(reporter?.attachments ?? [])
+      ].filter((path): path is string => typeof path === "string")
+    )
+  ];
   const status =
     reporter?.status === "failed"
       ? "failed"
@@ -4627,11 +4640,21 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       );
     }
   }
+  const stdout = redactHostAgentText(
+    context,
+    pendingTask.systemId,
+    optionalStringArg(input, "stdout") ?? ""
+  );
+  const stderr = redactHostAgentText(
+    context,
+    pendingTask.systemId,
+    optionalStringArg(input, "stderr") ?? ""
+  );
   const result = context.service.submitAgentTask({
     taskId,
     status: agentOutputStatusArg(input, "status"),
-    stdout: optionalStringArg(input, "stdout") ?? "",
-    stderr: optionalStringArg(input, "stderr") ?? "",
+    stdout,
+    stderr,
     outputPaths: optionalStringArrayArg(input, "outputPaths")
   });
   if (result.task.planContext) {
@@ -4644,7 +4667,7 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
   const testResult =
     result.agentRun.status === "succeeded" &&
     (result.task.agent === "generator" || result.task.agent === "healer")
-      ? await runSubmittedTest(context, chainContext.testPath)
+      ? await runSubmittedTest(context, chainContext.testPath, result.task.id)
       : undefined;
   const healAttempts = chainContext.healAttempts ?? 0;
   const maxHealAttempts = chainContext.maxHealAttempts ?? 1;
@@ -4740,7 +4763,13 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       ? hostAgentFailureReason(result.task.agent, result.agentRun.error, testResult)
       : undefined;
   const chainRunId = id("chain");
-  const artifactPaths = [chainContext.specPath, chainContext.testPath];
+  const artifactPaths = [
+    chainContext.specPath,
+    chainContext.testPath,
+    testResult?.reporterPath,
+    testResult?.actorRoleEvidencePath,
+    ...(testResult?.structuredReporter?.attachments ?? [])
+  ].filter((path): path is string => typeof path === "string");
   const terminalDiagnosis =
     status === "failed" &&
     failureReason &&
@@ -5269,19 +5298,71 @@ function hostAgentFailureReason(
   return detail;
 }
 
-async function runSubmittedTest(context: BrainCreatorMcpContext, testPath: string) {
+async function runSubmittedTest(
+  context: BrainCreatorMcpContext,
+  testPath: string,
+  runId = "host-agent"
+) {
   const runner = context.runner ?? spawnCommand;
   const testRunPath = relative(context.workDir, testPath).replace(/\\/g, "/");
   try {
-    return await runner("npx", ["playwright", "test", testRunPath], {
+    const result = await runner(
+      "npx",
+      ["playwright", "test", testRunPath, "--workers=1", "--reporter=json", "--trace=on"],
+      {
       cwd: context.workDir
-    });
+      }
+    );
+    const reporter = result.structuredReporter ?? parseHostReporter(result.stdout);
+    if (!reporter) return result;
+    const reporterPath = result.reporterPath ?? join(
+      context.workDir,
+      ".brain-creator",
+      "runs",
+      runId,
+      "playwright-report.json"
+    );
+    await mkdir(dirname(reporterPath), { recursive: true });
+    if (!result.reporterPath) {
+      await writeFile(reporterPath, `${JSON.stringify(reporter, null, 2)}\n`, "utf8");
+    }
+    return {
+      ...result,
+      exitCode: normalizeReporterExitCode(result.exitCode, reporter),
+      structuredReporter: reporter,
+      reporterPath
+    };
   } catch (error) {
     return {
       exitCode: 1,
       stdout: "",
       stderr: error instanceof Error ? error.message : String(error)
     };
+  }
+}
+
+function redactHostAgentText(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  text: string
+) {
+  const secrets = context.repository.authProfiles
+    .filter((profile) => profile.projectId === systemId)
+    .flatMap((profile) => {
+      try {
+        return Object.entries(decryptSecrets(profile.encryptedSecrets));
+      } catch {
+        return [];
+      }
+    });
+  return redactSensitiveText(text, Object.fromEntries(secrets));
+}
+
+function parseHostReporter(output: string) {
+  try {
+    return parsePlaywrightJsonReport(JSON.parse(output));
+  } catch {
+    return undefined;
   }
 }
 

@@ -1,9 +1,20 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { parsePlaywrightJsonReport } from "./playwrightReporter.js";
+import { normalizeReporterExitCode, parsePlaywrightJsonReport } from "./playwrightReporter.js";
 
 describe("Playwright JSON reporter", () => {
+  it("does not treat a failed structured report as a successful process", () => {
+    const reporter = parsePlaywrightJsonReport({
+      stats: { expected: 1, unexpected: 1, skipped: 0 },
+      suites: [{ specs: [{ title: "failed", tests: [{ results: [{ status: "failed" }] }] }] }]
+    });
+
+    expect(normalizeReporterExitCode(0, reporter)).toBe(1);
+    expect(normalizeReporterExitCode(1, reporter)).toBe(1);
+    expect(normalizeReporterExitCode(0, undefined)).toBe(0);
+  });
+
   it("normalizes structured test results without parsing stdout", () => {
     const result = parsePlaywrightJsonReport({
       stats: { duration: 123, expected: 1, unexpected: 0, skipped: 0 },

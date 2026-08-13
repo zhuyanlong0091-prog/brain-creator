@@ -7,9 +7,12 @@ import { formatScenariosAsMarkdown, parseSpecMarkdown } from "./caseFormatter.js
 import { checkBusinessRules } from "./qualityGate.js";
 import { extractCandidateTerms } from "./termExtractor.js";
 import { id } from "../shared/id.js";
-import { parsePlaywrightJsonReport } from "../execution/playwrightReporter.js";
+import {
+  normalizeReporterExitCode,
+  parsePlaywrightJsonReport
+} from "../execution/playwrightReporter.js";
 import { decryptSecrets } from "../shared/crypto.js";
-import { scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
+import { redactSensitiveText, scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
 import type {
   AgentRun,
   AuthProfile,
@@ -131,6 +134,7 @@ type RunAgentInput = {
   agentBridge?: AgentBridge;
   cwd?: string;
   timeoutMs?: number;
+  protectedSecrets?: Record<string, string>;
 };
 
 type GeneratePlanDraftInput = {
@@ -179,7 +183,10 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
       createdAt: new Date().toISOString()
     };
   }
-  const logs = [result.stdout, result.stderr].map((entry) => entry.trim()).filter(Boolean);
+  const redact = (value: string) => redactSensitiveText(value, input.protectedSecrets ?? {});
+  const stdout = redact(result.stdout);
+  const stderr = redact(result.stderr);
+  const logs = [stdout, stderr].map((entry) => entry.trim()).filter(Boolean);
   const status = result.exitCode === 0 ? "succeeded" : "failed";
 
   return {
@@ -191,7 +198,7 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
     outputPaths: input.outputPaths,
     duration: Date.now() - start,
     logs,
-    error: status === "failed" ? result.stderr || result.stdout || "Agent command failed" : undefined,
+    error: status === "failed" ? stderr || stdout || "Agent command failed" : undefined,
     createdAt: new Date().toISOString()
   };
 }
@@ -230,7 +237,8 @@ export async function generatePlanDraft(input: GeneratePlanDraftInput) {
     args: ["--prompt", prompt.promptPath, "--seed", seed.seedPath, "--output", input.specPath],
     outputPaths: [input.specPath],
     cwd: input.workDir,
-    agentBridge: input.agentBridge
+    agentBridge: input.agentBridge,
+    protectedSecrets: decryptSecrets(input.authProfile.encryptedSecrets)
   });
   if (agentRun.status !== "succeeded") {
     throw new Error(agentRun.error ?? "Planner agent failed");
@@ -294,7 +302,11 @@ export async function runChain(input: RunChainInput) {
     args: ["--spec", specPath, "--seed", seed.seedPath, "--output", testPath],
     outputPaths: [testPath],
     cwd: input.workDir,
-    agentBridge: input.agentBridge
+    agentBridge: input.agentBridge,
+    protectedSecrets: Object.fromEntries(
+      [input.authProfile, ...(input.actorJourney ?? []).map((actor) => actor.authProfile)]
+        .flatMap((profile) => Object.entries(decryptSecrets(profile.encryptedSecrets)))
+    )
   });
 
   const runner = input.runner ?? spawnCommand;
@@ -349,6 +361,7 @@ export async function runChain(input: RunChainInput) {
         : undefined;
     return {
       ...result,
+      exitCode: normalizeReporterExitCode(result.exitCode, reporter),
       structuredReporter: reporter,
       reporterPath,
       ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {})
@@ -384,7 +397,11 @@ export async function runChain(input: RunChainInput) {
       ],
       outputPaths: [testPath],
       cwd: input.workDir,
-      agentBridge: input.agentBridge
+      agentBridge: input.agentBridge,
+      protectedSecrets: Object.fromEntries(
+        [input.authProfile, ...(input.actorJourney ?? []).map((actor) => actor.authProfile)]
+          .flatMap((profile) => Object.entries(decryptSecrets(profile.encryptedSecrets)))
+      )
     });
     healerRuns.push(healerRun);
     if (healerRun.status !== "succeeded") {

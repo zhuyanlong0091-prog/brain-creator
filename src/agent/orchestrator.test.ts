@@ -223,6 +223,26 @@ describe("runChain", () => {
     expect(await readFile(result.testResult.reporterPath!, "utf8")).toContain('"status": "passed"');
   });
 
+  it("redacts protected values from bridge logs", async () => {
+    const run = await runAgent({
+      systemId: "system_1",
+      agent: "planner",
+      inputSummary: "redact bridge output",
+      args: [],
+      outputPaths: [],
+      protectedSecrets: { token: "secret-token-123" },
+      agentBridge: async () => ({
+        exitCode: 1,
+        stdout: "token=secret-token-123",
+        stderr: "Bearer abcdefghijklmnopqrstuvwxyz1234"
+      })
+    });
+
+    expect(run.logs.join("\n")).not.toContain("secret-token-123");
+    expect(run.logs.join("\n")).not.toContain("abcdefghijklmnopqrstuvwxyz1234");
+    expect(run.error).toContain("[REDACTED]");
+  });
+
   it("serializes an approved test case, runs generator, and executes the generated test", async () => {
     const workDir = await tempDir();
     const commands: string[][] = [];

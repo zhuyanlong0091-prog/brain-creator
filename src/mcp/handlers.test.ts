@@ -848,7 +848,7 @@ describe("handleBrainCreatorTool", () => {
         await handleBrainCreatorTool(context, "bc_submit_agent_output", {
           taskId: taskPackage.task.id,
           status: "succeeded",
-          stdout: "generated test",
+          stdout: "generated test secret-token",
           stderr: "",
           outputPaths: [taskPackage.testPath]
         })
@@ -864,6 +864,8 @@ describe("handleBrainCreatorTool", () => {
           testPath: taskPackage.testPath
         })
       );
+      expect(submitted.agentRun.logs.join("\n")).not.toContain("secret-token");
+      expect(submitted.agentRun.logs.join("\n")).toContain("[REDACTED]");
       expect(context.service.getTestCase(testCase.id).status).toBe("passed");
       expect(context.service.listChainRuns(system.id)).toEqual([
         expect.objectContaining({ id: submitted.chainRun.id })
@@ -899,7 +901,20 @@ describe("handleBrainCreatorTool", () => {
       agentBridge: hostBridge,
       runner: async (command, args) => {
         calls.push([command, ...args]);
-        return { exitCode: 0, stdout: "playwright passed", stderr: "" };
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            stats: { duration: 12, expected: 1, unexpected: 0, skipped: 0 },
+            suites: [{
+              specs: [{
+                id: "host-assertion",
+                title: "Host assertion",
+                tests: [{ results: [{ status: "passed" }] }]
+              }]
+            }]
+          }),
+          stderr: ""
+        };
       }
     });
     const system = dataOf(
@@ -951,14 +966,89 @@ describe("handleBrainCreatorTool", () => {
     );
 
     expect(calls).toEqual([
-      ["npx", "playwright", "test", `tests/generated/${testCase.id}.spec.ts`]
+      [
+        "npx",
+        "playwright",
+        "test",
+        `tests/generated/${testCase.id}.spec.ts`,
+        "--workers=1",
+        "--reporter=json",
+        "--trace=on"
+      ]
     ]);
     expect(submitted.testResult).toEqual(
-      expect.objectContaining({ exitCode: 0, stdout: "playwright passed" })
+      expect.objectContaining({
+        exitCode: 0,
+        structuredReporter: expect.objectContaining({ status: "passed", total: 1 }),
+        reporterPath: expect.stringContaining("playwright-report.json")
+      })
     );
+    expect(
+      await readFile(submitted.testResult.reporterPath, "utf8")
+    ).toContain('"status": "passed"');
     expect(submitted.chainRun).toEqual(
       expect.objectContaining({ status: "succeeded", testCaseId: testCase.id })
     );
+  });
+
+  it("does not complete a host-agent chain when Reporter says blocked", async () => {
+    const workDir = await tempDir();
+    const hostBridge = Object.assign(
+      async () => ({ exitCode: 1, stdout: "", stderr: "host-agent handoff" }),
+      { provider: "host-agent", preflight: async () => ({ ok: true }) }
+    );
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: hostBridge,
+      runner: async () => ({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          stats: { duration: 5, expected: 0, unexpected: 0, skipped: 1 },
+          suites: [{ specs: [{ title: "blocked", tests: [{ results: [{ status: "skipped" }] }] }] }]
+        }),
+        stderr: ""
+      })
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "Blocked host system",
+      environment: "test",
+      baseUrl: "https://blocked.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: []
+    }));
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Blocked host case",
+      scenarios: [{ id: "blocked-scenario", title: "Blocked", priority: "critical", steps: [] }],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+    const taskPackage = dataOf(await handleBrainCreatorTool(context, "bc_run_chain", {
+      caseId: testCase.id,
+      maxHealAttempts: 0
+    }));
+    await writeFile(taskPackage.testPath, "import { test } from '../seed';\n", "utf8");
+
+    const result = dataOf(await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+      taskId: taskPackage.task.id,
+      status: "succeeded",
+      stdout: "generated",
+      stderr: "",
+      outputPaths: [taskPackage.testPath]
+    }));
+
+    expect(result.chainRun.status).toBe("failed");
+    expect(result.testResult.structuredReporter.status).toBe("blocked");
+    expect(context.service.getTestCase(testCase.id).status).toBe("failed");
   });
 
   it("returns a healer task when the Playwright process throws after a host-agent generator submit", async () => {
@@ -1226,7 +1316,14 @@ describe("handleBrainCreatorTool", () => {
         calls.push([command, ...args]);
         return calls.length === 1
           ? { exitCode: 1, stdout: "", stderr: "expected amount missing" }
-          : { exitCode: 0, stdout: "healed test passed", stderr: "" };
+          : {
+              exitCode: 0,
+              stdout: JSON.stringify({
+                stats: { duration: 13, expected: 1, unexpected: 0, skipped: 0 },
+                suites: [{ specs: [{ title: "healed", tests: [{ results: [{ status: "passed" }] }] }] }]
+              }),
+              stderr: ""
+            };
       }
     });
     const system = dataOf(
@@ -1287,11 +1384,31 @@ describe("handleBrainCreatorTool", () => {
     );
 
     expect(calls).toEqual([
-      ["npx", "playwright", "test", `tests/generated/${testCase.id}.spec.ts`],
-      ["npx", "playwright", "test", `tests/generated/${testCase.id}.spec.ts`]
+      [
+        "npx",
+        "playwright",
+        "test",
+        `tests/generated/${testCase.id}.spec.ts`,
+        "--workers=1",
+        "--reporter=json",
+        "--trace=on"
+      ],
+      [
+        "npx",
+        "playwright",
+        "test",
+        `tests/generated/${testCase.id}.spec.ts`,
+        "--workers=1",
+        "--reporter=json",
+        "--trace=on"
+      ]
     ]);
     expect(healed.testResult).toEqual(
-      expect.objectContaining({ exitCode: 0, stdout: "healed test passed" })
+      expect.objectContaining({
+        exitCode: 0,
+        structuredReporter: expect.objectContaining({ status: "passed" }),
+        reporterPath: expect.stringContaining("playwright-report.json")
+      })
     );
     expect(healed.chainRun).toEqual(
       expect.objectContaining({

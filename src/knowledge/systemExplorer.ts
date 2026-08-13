@@ -614,20 +614,36 @@ async function probeSafeInteractions(input: {
       await route.continue();
     };
     await activePage.route("**/*", routeHandler);
+    const routedPages = new Set<import("@playwright/test").Page>([activePage]);
     let after = before;
     let status: SystemInteractionEvidence["status"] = "failed";
     let screenshotPath: string | undefined;
     try {
-      const target = interactionLocator(activePage, candidate).first();
-      if (!(await target.isVisible())) {
-        throw new Error("Safe interaction target is not visible");
-      }
-      if (decision.action === "select") {
-        await target.selectOption(decision.inputValue, {
-          timeout: interactionTimeout(input.deadline)
-        });
-      } else {
-        await target.click({ timeout: interactionTimeout(input.deadline) });
+      let actionCompleted = false;
+      for (let attempt = 0; attempt < 2 && !actionCompleted; attempt += 1) {
+        try {
+          const target = interactionLocator(activePage, candidate).first();
+          if (!(await target.isVisible())) {
+            throw new Error("Safe interaction target is not visible");
+          }
+          if (decision.action === "select") {
+            await target.selectOption(decision.inputValue, {
+              timeout: interactionTimeout(input.deadline)
+            });
+          } else {
+            await target.click({ timeout: interactionTimeout(input.deadline) });
+          }
+          actionCompleted = true;
+        } catch (error) {
+          if (attempt > 0 || Date.now() >= input.deadline) throw error;
+          const replacement = await reacquirePage(input.context, input.pageUrl, input.deadline);
+          if (!replacement) throw error;
+          await activePage.unroute("**/*", routeHandler).catch(() => undefined);
+          activePage = replacement;
+          routedPages.add(activePage);
+          await activePage.route("**/*", routeHandler);
+          reacquiredPage = true;
+        }
       }
       const settleMs = Math.min(300, Math.max(0, input.deadline - Date.now()));
       if (settleMs > 0) await activePage.waitForTimeout(settleMs);
@@ -660,7 +676,9 @@ async function probeSafeInteractions(input: {
     } catch {
       status = blockedRequests.length > 0 ? "blocked" : "failed";
     } finally {
-      await activePage.unroute("**/*", routeHandler).catch(() => undefined);
+      await Promise.all(
+        [...routedPages].map((page) => page.unroute("**/*", routeHandler).catch(() => undefined))
+      );
     }
     transitions.push({
       target: {

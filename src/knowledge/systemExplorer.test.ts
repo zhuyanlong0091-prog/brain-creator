@@ -418,14 +418,16 @@ describe("System exploration coordinator", () => {
           <html>
             <head><title>Recruiting</title></head>
             <body>
-              <label>
-                Employee Type
-                <select id="employee-type" onchange="document.querySelector('#replacement').hidden = this.value !== 'intern'">
-                  <option value="employee">Employee</option>
-                  <option value="intern">Intern</option>
-                </select>
-              </label>
-              <input id="replacement" aria-label="Replacement Employee" hidden>
+              <div id="app-root">
+                <label>
+                  Employee Type
+                  <select id="employee-type" onchange="remountEmployee(this.value)">
+                    <option value="employee">Employee</option>
+                    <option value="intern">Intern</option>
+                  </select>
+                </label>
+                <input id="replacement" aria-label="Replacement Employee" hidden>
+              </div>
               <iframe src="/frame" title="Embedded form"></iframe>
               <div id="shadow-host"></div>
               <label>
@@ -443,6 +445,10 @@ describe("System exploration coordinator", () => {
               </button>
               <script>
                 const root = document.querySelector('#shadow-host').attachShadow({ mode: 'open' });
+                window.remountEmployee = (value) => {
+                  const root = document.querySelector('#app-root');
+                  root.innerHTML = '<label>Employee Type <select id="employee-type"><option value="employee">Employee</option><option value="intern" selected>Intern</option></select></label><input id="replacement" aria-label="Replacement Employee"><span>App remounted</span>';
+                };
                 const shadowButton = document.createElement('button');
                 shadowButton.id = 'shadow-details';
                 shadowButton.setAttribute('aria-expanded', 'false');
@@ -497,7 +503,7 @@ describe("System exploration coordinator", () => {
         expect(employeeType).toEqual(
           expect.objectContaining({
             status: "observed",
-            visibleAdded: ["Replacement Employee"]
+            visibleAdded: expect.arrayContaining(["Replacement Employee", "App remounted"])
           })
         );
         expect(syncType).toEqual(

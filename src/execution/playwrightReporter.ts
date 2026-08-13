@@ -35,6 +35,14 @@ export function parsePlaywrightJsonReport(value: unknown): StructuredReporterRes
   };
 }
 
+export function normalizeReporterExitCode(
+  exitCode: number,
+  reporter: StructuredReporterResult | undefined
+) {
+  if (exitCode !== 0 || !reporter) return exitCode;
+  return reporter.status === "passed" ? 0 : 1;
+}
+
 function collectRuntimeImpact(suites: unknown[], output = {
   attachments: [] as string[],
   consoleErrors: [] as string[],
