@@ -326,6 +326,10 @@ export async function runChain(input: RunChainInput) {
     authProfile: input.authProfile,
     actorJourney: input.actorJourney
   });
+  const protectedSecrets = Object.fromEntries(
+    [input.authProfile, ...(input.actorJourney ?? []).map((actor) => actor.authProfile)]
+      .flatMap((profile) => Object.entries(decryptSecrets(profile.encryptedSecrets)))
+  );
   const generateRun = await runAgent({
     systemId: input.system.id,
     agent: "generator",
@@ -334,10 +338,7 @@ export async function runChain(input: RunChainInput) {
     outputPaths: [testPath],
     cwd: input.workDir,
     agentBridge: input.agentBridge,
-    protectedSecrets: Object.fromEntries(
-      [input.authProfile, ...(input.actorJourney ?? []).map((actor) => actor.authProfile)]
-        .flatMap((profile) => Object.entries(decryptSecrets(profile.encryptedSecrets)))
-    )
+    protectedSecrets
   });
 
   const runner = input.runner ?? spawnCommand;
@@ -378,12 +379,17 @@ export async function runChain(input: RunChainInput) {
         ? join(input.workDir, ".brain-creator", "runs", input.testCase.id, "actor-journey.jsonl")
         : undefined;
     if (actorRoleEvidencePath) await mkdir(dirname(actorRoleEvidencePath), { recursive: true });
-    const result = await runner("npx", args, {
+    const rawResult = await runner("npx", args, {
       cwd: input.workDir,
       ...(actorRoleEvidencePath
         ? { env: { ...process.env, BRAIN_CREATOR_ACTOR_EVIDENCE_PATH: actorRoleEvidencePath } }
         : {})
     });
+    const result = {
+      ...rawResult,
+      stdout: redactSensitiveText(rawResult.stdout, protectedSecrets),
+      stderr: redactSensitiveText(rawResult.stderr, protectedSecrets)
+    };
     if (actorRoleEvidencePath && input.actorJourney) {
       const roleCheck = await verifyActorRoleEvidence(actorRoleEvidencePath, input.actorJourney);
       if (!roleCheck.valid) {
@@ -410,11 +416,12 @@ export async function runChain(input: RunChainInput) {
       "playwright-report.json"
     );
     await mkdir(dirname(reporterPath), { recursive: true });
-    await writeFile(reporterPath, `${JSON.stringify(reporter, null, 2)}\n`, "utf8");
+    const safeReporter = redactStructuredReporter(reporter, protectedSecrets);
+    await writeFile(reporterPath, `${JSON.stringify(safeReporter, null, 2)}\n`, "utf8");
     return {
       ...result,
       exitCode: normalizeReporterExitCode(result.exitCode, reporter),
-      structuredReporter: reporter,
+      structuredReporter: safeReporter,
       reporterPath,
       ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {})
     };
@@ -450,10 +457,7 @@ export async function runChain(input: RunChainInput) {
       outputPaths: [testPath],
       cwd: input.workDir,
       agentBridge: input.agentBridge,
-      protectedSecrets: Object.fromEntries(
-        [input.authProfile, ...(input.actorJourney ?? []).map((actor) => actor.authProfile)]
-          .flatMap((profile) => Object.entries(decryptSecrets(profile.encryptedSecrets)))
-      )
+      protectedSecrets
     });
     healerRuns.push(healerRun);
     if (healerRun.status !== "succeeded") {
@@ -642,6 +646,19 @@ function parseReporterOutput(output: string): StructuredReporterResult | undefin
     return parsePlaywrightJsonReport(JSON.parse(output));
   } catch {
     return undefined;
+  }
+}
+
+function redactStructuredReporter(
+  reporter: StructuredReporterResult,
+  secrets: Record<string, string>
+) {
+  try {
+    return JSON.parse(
+      redactSensitiveText(JSON.stringify(reporter), secrets)
+    ) as StructuredReporterResult;
+  } catch {
+    return reporter;
   }
 }
 

@@ -466,6 +466,35 @@ describe("runChain", () => {
     expect(result.chainRun.gaps[0].reason).toContain("No tests found");
   });
 
+  it("redacts runner output and structured reporter artifacts before persistence", async () => {
+    const workDir = await tempDir();
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      testCase: approvedTestCase(),
+      maxHealAttempts: 0,
+      structuredReporter: true,
+      agentBridge: async ({ outputPaths }) => {
+        await writeFile(outputPaths[0], "import { test } from '@playwright/test'; test('safe', () => {});", "utf8");
+        return { exitCode: 0, stdout: "agent ok", stderr: "" };
+      },
+      runner: async () => ({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          stats: { expected: 1, unexpected: 0, skipped: 0 },
+          suites: [{ specs: [{ title: "token=secret-token", tests: [{ results: [{ status: "passed" }] }] }] }]
+        }),
+        stderr: "runner token=secret-token"
+      })
+    });
+
+    expect(result.testResult.stdout).not.toContain("secret-token");
+    expect(result.testResult.stderr).not.toContain("secret-token");
+    const reporter = await readFile(join(workDir, ".brain-creator", "runs", "case_1", "playwright-report.json"), "utf8");
+    expect(reporter).not.toContain("secret-token");
+  });
+
   it("runs healer and retries the generated test until it succeeds", async () => {
     const workDir = await tempDir();
     const commands: string[][] = [];
