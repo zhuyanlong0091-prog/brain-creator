@@ -15,6 +15,7 @@ import {
   isReadOnlyNavigationUrl,
   interactionLocator,
   PlaywrightSystemExplorer,
+  stableChildFrameEntries,
   SystemExplorationCoordinator,
   type SystemExplorer
 } from "./systemExplorer.js";
@@ -27,6 +28,22 @@ afterEach(async () => {
 });
 
 describe("System exploration coordinator", () => {
+  it("keeps child frame ordinals stable before allowlist filtering", () => {
+    const main = { url: () => "https://orders.example.test/" };
+    const outside = { url: () => "https://outside.example.test/frame" };
+    const inside = { url: () => "https://orders.example.test/frame" };
+    const page = {
+      mainFrame: () => main,
+      frames: () => [main, outside, inside]
+    } as unknown as import("@playwright/test").Page;
+
+    expect(stableChildFrameEntries(page).map((item) => item.frameIndex)).toEqual([0, 1]);
+    expect(stableChildFrameEntries(page).map((item) => item.frame.url())).toEqual([
+      "https://outside.example.test/frame",
+      "https://orders.example.test/frame"
+    ]);
+  });
+
   it("explores allowlisted pages, persists navigation, and refreshes System Brain", async () => {
     const fixture = await createFixture();
     const explorer: SystemExplorer = {

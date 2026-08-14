@@ -479,6 +479,7 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
                   limit: input.budget.maxInteractionsPerPage,
                   deadline,
                   warnings,
+                  blockers,
                   popups,
                   scenario: input.scenario
                 })
@@ -642,6 +643,7 @@ async function probeSafeInteractions(input: {
   limit: number;
   deadline: number;
   warnings: string[];
+  blockers: string[];
   popups: Array<import("@playwright/test").Page>;
   scenario?: ExplorationScenario;
 }): Promise<SystemInteractionEvidence[]> {
@@ -679,7 +681,12 @@ async function probeSafeInteractions(input: {
     let reacquiredPage = false;
     if (activePage.isClosed()) {
       const replacement = await reacquirePage(input.context, recoveryUrl(), input.deadline);
-      if (!replacement) break;
+      if (!replacement) {
+        const reason = `Surface recovery failed before interacting with ${candidateName(candidates[index]?.candidate)} at ${recoveryUrl()}`;
+        input.warnings.push(reason);
+        input.blockers.push(reason);
+        break;
+      }
       activePage = replacement;
       registerPopupListener(activePage);
       reacquiredPage = true;
@@ -689,6 +696,9 @@ async function probeSafeInteractions(input: {
     try {
       before = await captureInteractionState(activePage, input.allowedUrls);
     } catch {
+      const reason = `Surface recovery failed while reading interaction state at ${recoveryUrl()}`;
+      input.warnings.push(reason);
+      input.blockers.push(reason);
       break;
     }
     const blockedRequests: Array<{ method: string; url: string }> = [];
@@ -776,8 +786,13 @@ async function probeSafeInteractions(input: {
             screenshotPath = undefined;
           });
       }
-    } catch {
+    } catch (error) {
       status = blockedRequests.length > 0 ? "blocked" : "failed";
+      if (candidate.surface && status === "failed") {
+        const reason = `Surface interaction failed for ${candidate.surface.kind} at ${candidate.surface.url}: ${error instanceof Error ? error.message : String(error)}`;
+        input.warnings.push(reason);
+        input.blockers.push(reason);
+      }
     } finally {
       await Promise.all(
         [...routedPages].map((page) => page.unroute("**/*", routeHandler).catch(() => undefined))
@@ -811,12 +826,17 @@ async function probeSafeInteractions(input: {
       ...(input.scenario ? { scenarioId: input.scenario.id } : {})
     });
     if (Date.now() < input.deadline) {
-      await activePage
-        .goto(input.pageUrl, {
+      try {
+        await activePage.goto(input.pageUrl, {
           waitUntil: "domcontentloaded",
           timeout: interactionTimeout(input.deadline)
-        })
-        .catch(() => undefined);
+        });
+      } catch (error) {
+        const reason = `Surface recovery failed while resetting the page to ${input.pageUrl}: ${error instanceof Error ? error.message : String(error)}`;
+        input.warnings.push(reason);
+        input.blockers.push(reason);
+        break;
+      }
       activePageUrl = input.pageUrl;
       const settleMs = Math.min(200, Math.max(0, input.deadline - Date.now()));
       if (settleMs > 0) await activePage.waitForTimeout(settleMs);
@@ -834,17 +854,15 @@ async function collectInteractionCandidates(
     url: canonicalUrl(page.url())
   });
   const frames = await Promise.all(
-    page.frames()
-      .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
-      .map(async (frame, frameIndex) => {
-        if (!isAllowedExplorationUrl(frame.url(), allowedUrls)) return [];
-        return collectInteractionCandidatesFromSurface(frame, {
-          kind: "iframe",
-          url: canonicalUrl(frame.url()),
-          parentUrl: canonicalUrl(page.url()),
-          frameIndex
-        });
-      })
+    stableChildFrameEntries(page).map(async ({ frame, frameIndex }) => {
+      if (!isAllowedExplorationUrl(frame.url(), allowedUrls)) return [];
+      return collectInteractionCandidatesFromSurface(frame, {
+        kind: "iframe",
+        url: canonicalUrl(frame.url()),
+        parentUrl: canonicalUrl(page.url()),
+        frameIndex
+      });
+    })
   );
   const shadow = await collectOpenShadowInteractionCandidates(page, {
     kind: "shadow-root",
@@ -852,6 +870,10 @@ async function collectInteractionCandidates(
     parentUrl: canonicalUrl(page.url())
   });
   return [...main, ...frames.flat(), ...shadow];
+}
+
+function candidateName(candidate?: SafeInteractionCandidate) {
+  return candidate?.name?.trim() || "the selected interaction";
 }
 
 async function collectOpenShadowInteractionCandidates(
@@ -1124,9 +1146,7 @@ export function interactionLocator(
     ) {
       throw new Error(`Iframe surface is outside the business system allowlist: ${candidate.surface.url}`);
     }
-    const childFrames = page
-      .frames()
-      .filter((item) => item !== page.mainFrame() && Boolean(item.url()));
+    const childFrames = stableChildFrameEntries(page).map((item) => item.frame);
     const indexedFrame =
       candidate.surface.frameIndex === undefined
         ? undefined
@@ -1248,13 +1268,11 @@ async function captureInteractionState(
       )
       .map((frame) => frame.locator('[role="dialog"]').allTextContents().catch(() => []))
   );
-  const surfaceUrls = page.frames()
-    .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
-    .flatMap((frame, frameIndex) =>
-      isAllowedExplorationUrl(frame.url(), allowedUrls)
-        ? [{ kind: "iframe" as const, url: canonicalUrl(frame.url()), frameIndex }]
-        : []
-    );
+  const surfaceUrls = stableChildFrameEntries(page).flatMap(({ frame, frameIndex }) =>
+    isAllowedExplorationUrl(frame.url(), allowedUrls)
+      ? [{ kind: "iframe" as const, url: canonicalUrl(frame.url()), frameIndex }]
+      : []
+  );
   const state = {
     url: canonicalUrl(page.url()),
     visibleElements: uniqueSorted([...visibleElements, ...frameVisibleElements.flat()]),
@@ -1482,17 +1500,15 @@ async function capturePage(
     })
   );
   const frameInteractiveElements = await Promise.all(
-    page.frames()
-      .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
-      .map(async (frame, frameIndex) => {
-        if (!isAllowedExplorationUrl(frame.url(), allowedUrls)) return [];
-        const surface = {
-          kind: "iframe" as const,
-          url: canonicalUrl(frame.url()),
-          parentUrl: finalUrl,
-          frameIndex
-        };
-        const elements = await frame.locator(
+    stableChildFrameEntries(page).map(async ({ frame, frameIndex }) => {
+      if (!isAllowedExplorationUrl(frame.url(), allowedUrls)) return [];
+      const surface = {
+        kind: "iframe" as const,
+        url: canonicalUrl(frame.url()),
+        parentUrl: finalUrl,
+        frameIndex
+      };
+      const elements = await frame.locator(
           'button, input, select, textarea, a[href], [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="radio"]'
         ).evaluateAll((items) => items.slice(0, 100).map((element, position) => {
           const html = element as unknown as {
@@ -1862,6 +1878,13 @@ function difference(left: string[], right: string[]) {
 
 function uniqueSorted(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+export function stableChildFrameEntries(page: import("@playwright/test").Page) {
+  return page
+    .frames()
+    .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
+    .map((frame, frameIndex) => ({ frame, frameIndex }));
 }
 
 function interactionTimeout(deadline: number) {

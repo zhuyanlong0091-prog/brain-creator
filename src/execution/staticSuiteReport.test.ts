@@ -130,6 +130,20 @@ describe("static suite execution report", () => {
     expect(html).toContain("Locale: zh-CN");
     expect(html).toContain("2026");
   });
+
+  it("localizes the static report chrome for Chinese systems", () => {
+    const html = renderStaticSuiteExecutionReport({
+      title: "Localized suite",
+      run: run(),
+      locale: "zh-CN",
+      evidence: []
+    });
+
+    expect(html).toContain('<html lang="zh-CN">');
+    expect(html).toContain("状态：");
+    expect(html).toContain("搜索报告");
+    expect(html).toContain("用例");
+  });
 });
 
 function run(): RequirementSuiteRun {
