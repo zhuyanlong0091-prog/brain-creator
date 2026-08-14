@@ -110,6 +110,12 @@ describe("TestIntent coverage ledger", () => {
       superseded: 1
     });
     expect(ledger.items.every((item) => item.requirementRefs.length === 1)).toBe(true);
+    repository.executionEvidence[0].status = "failed";
+    const failedLedger = service.testIntentCoverage(project.id);
+    expect(failedLedger.items.find((item) => item.testIntentId === "intent-0")).toEqual(
+      expect.objectContaining({ classification: "failed" })
+    );
+    repository.executionEvidence[0].status = "passed";
     expect(service.requirementSourceLedger(project.id)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

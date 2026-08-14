@@ -913,9 +913,16 @@ export class KnowledgeService {
         ? "superseded"
         : cases.length === 0
           ? "not-selected"
-          : results.some((item) => item.assuranceLevel === "strong" && (item.coverage?.missing.length ?? 0) === 0)
+          : results.some(
+              (item) =>
+                item.status === "passed" &&
+                item.assuranceLevel === "strong" &&
+                (item.coverage?.missing.length ?? 0) === 0
+            )
             ? "strong-verified"
-            : results.some((item) => item.assuranceLevel === "limited")
+            : results.some(
+                (item) => item.status === "passed" && item.assuranceLevel === "limited"
+              )
               ? "limited"
               : results.some((item) => item.status === "failed")
                 ? "failed"
