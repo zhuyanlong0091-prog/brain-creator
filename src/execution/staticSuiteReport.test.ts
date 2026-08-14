@@ -34,6 +34,7 @@ describe("static suite execution report", () => {
     expect(html).toContain("strong");
     expect(html).toContain("Assurance: <strong>strong 1</strong> | limited 0 | none 0");
     expect(html).toContain("trace.zip");
+    expect(html).toContain('href="report.html"');
     expect(html).toContain("bug-1");
     expect(html).toContain("gap-1");
     expect(html).toContain("filterReport");

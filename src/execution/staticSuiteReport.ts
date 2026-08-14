@@ -32,7 +32,7 @@ export function renderStaticSuiteExecutionReport(input: {
     const artifacts = evidence?.artifactPaths ?? [];
     const warnings = evidence?.evidenceWarnings ?? [];
     const reason = evidence?.actualResult ?? caseRun.error ?? (caseRun.status === "queued" ? "Not executed" : "");
-    return `<tr class="searchable-row"><td>${caseRun.order}</td><td>${escapeHtml(caseRun.title)}</td><td class="${caseRun.status}">${escapeHtml(caseRun.status)}</td><td>${escapeHtml(assurance)}</td><td>${escapeHtml(reason)}</td><td>${escapeHtml(warnings.join("; "))}</td><td>${escapeHtml(artifacts.join(", "))}</td></tr>`;
+    return `<tr class="searchable-row"><td>${caseRun.order}</td><td>${escapeHtml(caseRun.title)}</td><td class="${caseRun.status}">${escapeHtml(caseRun.status)}</td><td>${escapeHtml(assurance)}</td><td>${escapeHtml(reason)}</td><td>${escapeHtml(warnings.join("; "))}</td><td>${artifactLinks(artifacts)}</td></tr>`;
   }).join("");
   const bugs = (input.bugs ?? []).map((bug) => `<li class="searchable-row">${escapeHtml(bug.id)} ${escapeHtml(bug.status)}: ${escapeHtml(bug.actualResult)}</li>`).join("") || "<li class=muted>None</li>";
   const gaps = (input.gaps ?? []).map((gap) => `<li class="searchable-row">${escapeHtml(gap.id)} ${escapeHtml(gap.status)}: ${escapeHtml(gap.reason)}</li>`).join("") || "<li class=muted>None</li>";
@@ -41,4 +41,21 @@ export function renderStaticSuiteExecutionReport(input: {
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+}
+
+function artifactLinks(paths: string[]) {
+  return paths.map((path) => artifactLink(path)).filter(Boolean).join("<br>");
+}
+
+function artifactLink(path?: string) {
+  if (!path) return "";
+  return `<a href="${escapeHtml(artifactHref(path))}">${escapeHtml(path)}</a>`;
+}
+
+function artifactHref(path: string) {
+  const normalized = path.replaceAll("\\", "/");
+  if (/^[A-Za-z]:\//.test(normalized)) return `file:///${normalized}`;
+  if (normalized.startsWith("/")) return `file://${normalized}`;
+  if (/^[a-z][a-z\d+.-]*:/i.test(normalized) || normalized.startsWith("//")) return "#";
+  return normalized;
 }

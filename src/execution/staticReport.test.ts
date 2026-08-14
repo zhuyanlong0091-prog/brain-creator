@@ -26,6 +26,8 @@ describe("static execution report", () => {
     expect(html).toContain("Assurance: <strong>strong</strong>");
     expect(html).toContain("Search report");
     expect(html).toContain("step-01.png");
+    expect(html).toContain('href="step-01.png"');
+    expect(html).toContain('href="trace.zip"');
     expect(html).toContain("requirement:amount");
     expect(html).toContain("bug-1");
     expect(html).toContain("gap-1");
@@ -52,6 +54,15 @@ describe("static execution report", () => {
     expect(html).toContain("page-order-form");
     expect(html).toContain("locator-total");
     expect(html).toContain("data-order-total");
+  });
+
+  it("does not turn untrusted artifact protocols into executable links", () => {
+    const html = renderStaticExecutionReport({
+      title: "Orders",
+      evidence: { ...evidence(), artifactPaths: ["javascript:alert(1)"] }
+    });
+
+    expect(html).not.toContain('href="javascript:');
   });
 
   it("writes a standalone HTML file", async () => {
