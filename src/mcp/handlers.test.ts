@@ -3119,6 +3119,67 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.listCaseSuites(system.id)).toEqual([]);
   });
 
+  it("returns suite auth refresh evidence after a host-provided refresh", async () => {
+    const workDir = await tempDir();
+    let verificationCount = 0;
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(
+        async () => ({ exitCode: 0, stdout: "host agent", stderr: "" }),
+        {
+          provider: "host-agent" as const,
+          preflight: async () => ({ ok: true })
+        }
+      ),
+      authStateVerifier: async () => {
+        verificationCount += 1;
+        return verificationCount === 1
+          ? { status: "expired" as const, reason: "Short-lived session expired." }
+          : { status: "valid" as const, finalUrl: "https://hrms.example.test/dashboard" };
+      },
+      authStateRefresher: async () => ({
+        storageStatePath: ".brain-creator/auth/refreshed.json",
+        provider: "host-refresh"
+      })
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Refreshable HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    const auth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "script",
+        secrets: { storageStatePath: ".brain-creator/auth/storage.json" }
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_verify_auth", { id: auth.id });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true
+      })
+    );
+
+    expect(result.authState).toEqual(expect.objectContaining({
+      status: "valid",
+      authRefresh: { attempted: true, provider: "host-refresh" }
+    }));
+  });
+
   it("bounds nested bc_status history while preserving counts", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({

@@ -15,6 +15,7 @@ import { extractCandidateTerms } from "../agent/termExtractor.js";
 import { createConfiguredAgentBridge } from "../agent/bridgeProvider.js";
 import {
   verifyStoredBrowserAuth,
+  type AuthStateVerification,
   type AuthStateVerifier
 } from "../agent/authStateVerifier.js";
 import {
@@ -1483,6 +1484,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       return {
         ...taskPackageFromStoredTask(pendingTask),
         mode: "case-source-suite",
+        authState,
         stage: pendingTask.agent,
         source: caseSource,
         suite: waitingSuite,
@@ -1505,6 +1507,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         mode: "case-source-suite",
         status: "completed",
         source: caseSource,
+        authState,
         suite: completedSuite,
         progress: caseSuiteProgress(context, completedSuite)
       };
@@ -1522,6 +1525,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       return {
         ...result.taskPackage,
         mode: "case-source-suite",
+        authState,
         stage: result.taskPackage.task.agent,
         source: caseSource,
         suite: waitingSuite,
@@ -1609,6 +1613,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     mode: "case-source-suite",
     status: suiteRun.status,
     source: caseSource,
+    authState,
     suite,
     suiteRun,
     artifactManifest,
@@ -6765,7 +6770,9 @@ async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestAr
 async function verifyCaseSourceSuiteAuthState(
   context: BrainCreatorMcpContext,
   systemId: string
-) {
+): Promise<(AuthStateVerification & {
+  authRefresh?: { attempted: boolean; provider?: string };
+}) | undefined> {
   const profile = findAuthProfile(context, systemId);
   const system = context.repository.systemProfiles.find((item) => item.id === systemId);
   if (!system) {
@@ -6780,7 +6787,9 @@ async function verifyCaseSourceSuiteAuthState(
     targetUrl: system.baseUrl,
     allowedUrls: system.urlAllowlist
   });
-  if (verification.status === "valid") return verification;
+  if (verification.status === "valid") {
+    return { ...verification, authRefresh: { attempted: false } };
+  }
   return (
     (await refreshAndVerifyAuthState(context, system, profile, verification.reason)) ?? verification
   );
@@ -6805,11 +6814,18 @@ async function refreshAndVerifyAuthState(
       refreshed.storageStatePath
     );
     context.service.setAuthStorageStatePath(authProfile.id, refreshed.storageStatePath);
-    return context.authStateVerifier({
+    const verification = await context.authStateVerifier({
       storageStatePath: safePath,
       targetUrl: system.baseUrl,
       allowedUrls: system.urlAllowlist
     });
+    return {
+      ...verification,
+      authRefresh: {
+        attempted: true,
+        ...(refreshed.provider ? { provider: refreshed.provider } : {})
+      }
+    };
   } catch {
     return undefined;
   }
