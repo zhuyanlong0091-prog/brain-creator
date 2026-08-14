@@ -702,11 +702,17 @@ describe("System exploration coordinator", () => {
             }),
             expect.objectContaining({
               targetName: "Shadow details",
-              surface: expect.objectContaining({ kind: "shadow-root" })
+              surface: expect.objectContaining({
+                kind: "shadow-root",
+                hostSelectors: expect.arrayContaining([expect.stringContaining("shadow-host")])
+              })
             }),
             expect.objectContaining({
               targetName: "Wujie details",
-              surface: expect.objectContaining({ kind: "wujie" })
+              surface: expect.objectContaining({
+                kind: "wujie",
+                hostSelectors: expect.arrayContaining([expect.stringContaining("wujie-host")])
+              })
             })
           ])
         );

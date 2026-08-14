@@ -588,6 +588,13 @@ export function classifySafeInteractionCandidate(
   if (!candidate.selector || /nth-of-type|nth-child/i.test(candidate.selector)) {
     return { allowed: false, reason: "The control has no stable selector" };
   }
+  if (
+    candidate.surface &&
+    (candidate.surface.kind === "shadow-root" || candidate.surface.kind === "wujie") &&
+    (candidate.surface.hostSelectors?.length ?? 0) === 0
+  ) {
+    return { allowed: false, reason: "The shadow surface has no stable host selector" };
+  }
   if (candidate.tag === "select") {
     const requestedValue = scenario?.selectorValues[candidate.selector] ??
       scenario?.selectorValues[candidate.name];
@@ -855,12 +862,22 @@ async function collectOpenShadowInteractionCandidates(
       options?: ArrayLike<{ value: string; textContent?: string | null; disabled: boolean }>;
       getAttribute(name: string): string | null;
       matches(selector: string): boolean;
+      getRootNode(): { host?: ElementLike };
       shadowRoot?: { querySelectorAll(selector: string): ArrayLike<ElementLike> } | null;
     };
     const selectors = '[role="tab"], button[aria-expanded], button[aria-controls], select';
+    const stableHostSelector = (element: ElementLike) => {
+      const testId = element.getAttribute("data-testid");
+      if (testId) return `[data-testid=${JSON.stringify(testId)}]`;
+      if (element.id) return `[id=${JSON.stringify(element.id)}]`;
+      const name = element.getAttribute("name");
+      if (name) return `${element.tagName.toLowerCase()}[name=${JSON.stringify(name)}]`;
+      return undefined;
+    };
     const collect = (
       root: { querySelectorAll(selector: string): ArrayLike<ElementLike> },
-      inWujie: boolean
+      inWujie: boolean,
+      hostSelectors: string[]
     ) => {
       const results: Array<{
         name: string;
@@ -872,6 +889,7 @@ async function collectOpenShadowInteractionCandidates(
         currentValue?: string;
         options?: Array<{ value: string; label: string; disabled: boolean }>;
         surfaceKind: "shadow-root" | "wujie";
+        hostSelectors: string[];
       }> = [];
       for (const element of Array.from(root.querySelectorAll(selectors))) {
         const tag = element.tagName.toLowerCase();
@@ -911,15 +929,18 @@ async function collectOpenShadowInteractionCandidates(
                 disabled: option.disabled
               }))
             : undefined,
-          surfaceKind: inWujie ? "wujie" : "shadow-root"
+          surfaceKind: inWujie ? "wujie" : "shadow-root",
+          hostSelectors
         });
       }
       for (const host of Array.from(root.querySelectorAll("*"))) {
         if (host.shadowRoot) {
+          const hostSelector = stableHostSelector(host);
           results.push(
             ...collect(
               host.shadowRoot,
-              inWujie || host.matches("[data-wujie], wujie-app, [class*='wujie']")
+              inWujie || host.matches("[data-wujie], wujie-app, [class*='wujie']"),
+              hostSelector ? [...hostSelectors, hostSelector] : []
             )
           );
         }
@@ -929,10 +950,12 @@ async function collectOpenShadowInteractionCandidates(
     const results: ReturnType<typeof collect> = [];
     for (const host of Array.from(documentLike.querySelectorAll("*"))) {
       if (host.shadowRoot) {
+        const hostSelector = stableHostSelector(host);
         results.push(
           ...collect(
             host.shadowRoot,
-            host.matches("[data-wujie], wujie-app, [class*='wujie']")
+            host.matches("[data-wujie], wujie-app, [class*='wujie']"),
+            hostSelector ? [hostSelector] : []
           )
         );
       }
@@ -940,7 +963,13 @@ async function collectOpenShadowInteractionCandidates(
     return results;
   }).then((candidates) => candidates.map((candidate) => ({
     ...candidate,
-    surface: { ...surfaceRef, kind: candidate.surfaceKind }
+    surface: {
+      ...surfaceRef,
+      kind: candidate.surfaceKind,
+      ...(candidate.hostSelectors.length > 0
+        ? { hostSelectors: candidate.hostSelectors }
+        : {})
+    }
   })));
 }
 
@@ -1019,22 +1048,55 @@ async function collectInteractionCandidatesFromSurface(
       const surfaceState = await surface
         .locator(candidate.selector)
         .first()
-        .evaluate((element) => {
+          .evaluate((element) => {
           const root = element.getRootNode() as {
             toString(): string;
-            host?: { matches(selector: string): boolean };
+            host?: {
+              id: string;
+              tagName: string;
+              getAttribute(name: string): string | null;
+              matches(selector: string): boolean;
+              getRootNode(): unknown;
+            };
           };
+          const hostSelectors: string[] = [];
+          let currentRoot = root;
+          while (currentRoot.host) {
+            const host = currentRoot.host;
+            const testId = host.getAttribute("data-testid");
+            const name = host.getAttribute("name");
+            const selector = testId
+              ? `[data-testid=${JSON.stringify(testId)}]`
+              : host.id
+                ? `[id=${JSON.stringify(host.id)}]`
+                : name
+                  ? `${host.tagName.toLowerCase()}[name=${JSON.stringify(name)}]`
+                  : undefined;
+            if (!selector) break;
+            hostSelectors.unshift(selector);
+            currentRoot = host.getRootNode() as typeof currentRoot;
+          }
           return {
             inShadowRoot: root.toString() === "[object ShadowRoot]",
-            inWujie: Boolean(root.host?.matches("[data-wujie], wujie-app, [class*='wujie']"))
+            inWujie: Boolean(root.host?.matches("[data-wujie], wujie-app, [class*='wujie']")),
+            hostSelectors
           };
         })
-        .catch(() => ({ inShadowRoot: false, inWujie: false }));
+        .catch(() => ({ inShadowRoot: false, inWujie: false, hostSelectors: [] }));
       if (!surfaceState.inShadowRoot) return { ...candidate, surface: surfaceRef };
       const kind: InteractionSurfaceRef["kind"] = surfaceState.inWujie
         ? "wujie"
         : "shadow-root";
-      return { ...candidate, surface: { ...surfaceRef, kind } };
+      return {
+        ...candidate,
+        surface: {
+          ...surfaceRef,
+          kind,
+          ...(surfaceState.hostSelectors.length > 0
+            ? { hostSelectors: surfaceState.hostSelectors }
+            : {})
+        }
+      };
     })
   );
 }
@@ -1072,6 +1134,20 @@ export function interactionLocator(
       throw new Error(`Iframe surface is outside the business system allowlist: ${frame.url()}`);
     }
     return frame.locator(candidate.selector);
+  }
+  if (
+    candidate.surface &&
+    (candidate.surface.kind === "shadow-root" || candidate.surface.kind === "wujie")
+  ) {
+    const hosts = candidate.surface.hostSelectors ?? [];
+    if (hosts.length === 0) {
+      throw new Error(
+        `Shadow surface is unavailable without a stable host selector: ${candidate.surface.url}`
+      );
+    }
+    let scoped = page.locator(hosts[0]);
+    for (const host of hosts.slice(1)) scoped = scoped.locator(host);
+    return scoped.locator(candidate.selector);
   }
   return page.locator(candidate.selector);
 }
@@ -1335,20 +1411,54 @@ async function capturePage(
         .evaluate((item) => {
           const root = item.getRootNode() as {
             toString(): string;
-            host?: { matches(selector: string): boolean };
+            host?: {
+              id: string;
+              tagName: string;
+              getAttribute(name: string): string | null;
+              matches(selector: string): boolean;
+              getRootNode(): unknown;
+            };
           };
           const host = root.host;
+          const hostSelectors: string[] = [];
+          let currentRoot = root;
+          while (currentRoot.host) {
+            const currentHost = currentRoot.host;
+            const testId = currentHost.getAttribute("data-testid");
+            const name = currentHost.getAttribute("name");
+            const selector = testId
+              ? `[data-testid=${JSON.stringify(testId)}]`
+              : currentHost.id
+                ? `[id=${JSON.stringify(currentHost.id)}]`
+                : name
+                  ? `${currentHost.tagName.toLowerCase()}[name=${JSON.stringify(name)}]`
+                  : undefined;
+            if (!selector) break;
+            hostSelectors.unshift(selector);
+            currentRoot = currentHost.getRootNode() as typeof currentRoot;
+          }
           return {
             inShadowRoot: root.toString() === "[object ShadowRoot]",
-            inWujie: Boolean(host?.matches("[data-wujie], wujie-app, [class*='wujie']"))
+            inWujie: Boolean(host?.matches("[data-wujie], wujie-app, [class*='wujie']")),
+            hostSelectors
           };
         })
-        .catch(() => ({ inShadowRoot: false, inWujie: false }));
+        .catch(() => ({ inShadowRoot: false, inWujie: false, hostSelectors: [] }));
       if (!inShadowRoot.inShadowRoot) return element;
       const kind: InteractionSurfaceRef["kind"] = inShadowRoot.inWujie
         ? "wujie"
         : "shadow-root";
-      return { ...element, surface: { kind, url: finalUrl, parentUrl: finalUrl } };
+      return {
+        ...element,
+        surface: {
+          kind,
+          url: finalUrl,
+          parentUrl: finalUrl,
+          ...(inShadowRoot.hostSelectors.length > 0
+            ? { hostSelectors: inShadowRoot.hostSelectors }
+            : {})
+        }
+      };
     })
   );
   const frameInteractiveElements = await Promise.all(

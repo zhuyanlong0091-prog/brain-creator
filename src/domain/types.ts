@@ -188,6 +188,8 @@ export type InteractionSurfaceRef = {
   parentUrl?: string;
   /** Stable ordinal among child frames on the captured page. */
   frameIndex?: number;
+  /** Stable host selector chain for an open shadow/Wujie surface. */
+  hostSelectors?: string[];
 };
 
 export type SystemExplorationInteractionTransition = {
