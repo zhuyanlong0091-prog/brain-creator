@@ -14,6 +14,23 @@ import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers
 
 const tempDirs: string[] = [];
 
+function structuredFailureReport() {
+  return JSON.stringify({
+    stats: { expected: 1, unexpected: 1, skipped: 0 },
+    suites: [
+      {
+        specs: [
+          {
+            id: "requirement-mismatch",
+            title: "requirement mismatch",
+            tests: [{ results: [{ status: "failed" }] }]
+          }
+        ]
+      }
+    ]
+  });
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -1305,7 +1322,7 @@ describe("Brain Creator requirement-first facade", () => {
         ++testRunCount === 1
           ? {
               exitCode: 1,
-              stdout: "",
+              stdout: structuredFailureReport(),
               stderr: [
                 "Error: expect(received).toBe(expected)",
                 "Expected: \"approved\"",

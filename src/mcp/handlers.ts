@@ -123,6 +123,7 @@ export type BrainCreatorMcpContext = {
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
+  structuredReporter?: boolean;
   authStateVerifier: AuthStateVerifier;
   authStateMaterializer: AuthStateMaterializer;
   authStateRefresher?: AuthStateRefresher;
@@ -146,6 +147,7 @@ type CreateContextInput = {
   workDir?: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
+  structuredReporter?: boolean;
   authStateVerifier?: AuthStateVerifier;
   authStateMaterializer?: AuthStateMaterializer;
   authStateRefresher?: AuthStateRefresher;
@@ -202,6 +204,7 @@ export function createBrainCreatorMcpContext(
       input.agentBridge ??
       (input.runner ? commandRunnerAgentBridge(input.runner) : createConfiguredAgentBridge()),
     runner: input.runner,
+    structuredReporter: input.structuredReporter,
     authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
     authStateMaterializer: input.authStateMaterializer ?? materializeBrowserAuthState,
     authStateRefresher: input.authStateRefresher,
@@ -1778,6 +1781,7 @@ async function executeDocumentCase(
       sourceType: "case-source-suite",
       healAttempts: result.healerRuns.length,
       maxHealAttempts: input.maxHealAttempts ?? 3,
+      evidenceAssurance: result.testResult?.structuredReporter ? "strong" : "none",
       evidenceRefs: [
         result.chainRun.id,
         input.sourceId,
@@ -3104,6 +3108,7 @@ async function executeRequirementSuiteCase(
               ? result.healerRuns.length
               : 0,
           maxHealAttempts: input.maxHealAttempts ?? 3,
+          evidenceAssurance: executionEvidence.assuranceLevel,
           evidenceRefs: [
             executionEvidence.id,
             result.chainRun.id,
@@ -4224,6 +4229,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     testCase,
     agentBridge: context.agentBridge,
     runner: context.runner,
+    structuredReporter: context.structuredReporter,
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
     knowledgeContext: optionalStringArg(input, "knowledgeContext"),
     actorJourney: actorJourneyProfiles,
@@ -4840,6 +4846,13 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
               : "host-agent-generator",
           healAttempts,
           maxHealAttempts,
+          evidenceAssurance: testResult?.structuredReporter
+            ? "strong"
+            : chainContext.executionEvidenceId
+              ? context.repository.executionEvidence.find(
+                  (item) => item.id === chainContext.executionEvidenceId
+                )?.assuranceLevel
+              : "none",
           evidenceRefs: [
             chainRunId,
             chainContext.executionEvidenceId,

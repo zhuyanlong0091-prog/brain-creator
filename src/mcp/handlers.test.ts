@@ -9,6 +9,23 @@ import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers
 
 const tempDirs: string[] = [];
 
+function structuredFailureReport(title = "document assertion") {
+  return JSON.stringify({
+    stats: { expected: 1, unexpected: 1, skipped: 0 },
+    suites: [
+      {
+        specs: [
+          {
+            id: "document-assertion",
+            title,
+            tests: [{ results: [{ status: "failed" }] }]
+          }
+        ]
+      }
+    ]
+  });
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -3435,7 +3452,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
-      runner: async () => ({ exitCode: 1, stdout: "", stderr: "suite assertion failed" })
+      structuredReporter: true,
+      runner: async () => ({
+        exitCode: 1,
+        stdout: structuredFailureReport(),
+        stderr: "suite assertion failed"
+      })
     });
     const source = join(workDir, "cases.xlsx");
     await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "", "", ""]]));
@@ -3509,7 +3531,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
-      runner: async () => ({ exitCode: 1, stdout: "", stderr: "expected banner missing" })
+      structuredReporter: true,
+      runner: async () => ({
+        exitCode: 1,
+        stdout: structuredFailureReport(),
+        stderr: "expected banner missing"
+      })
     });
     const source = join(workDir, "cases.xlsx");
     await writeFile(source, createXlsxFixture([["TC-009", "Create job request", "Recruiting", "Logged in", "1. Click New", "Created", "", "P0", "", "", ""]]));
@@ -3779,7 +3806,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
-      runner: async () => ({ exitCode: 1, stdout: "", stderr: "expected result was not visible" })
+      structuredReporter: true,
+      runner: async () => ({
+        exitCode: 1,
+        stdout: structuredFailureReport(),
+        stderr: "expected result was not visible"
+      })
     });
     const source = join(workDir, "cases.xlsx");
     await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "未执行", "", ""]]));
@@ -3848,12 +3880,13 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () => {
         runCount += 1;
         return runCount === 2
           ? {
               exitCode: 1,
-              stdout: "",
+              stdout: structuredFailureReport("offer assertion"),
               stderr: "Expected offer to be sent, actual offer remained draft"
             }
           : { exitCode: 0, stdout: "passed", stderr: "" };
@@ -4356,7 +4389,7 @@ describe("handleBrainCreatorTool", () => {
       );
       context.runner = async () => ({
         exitCode: 1,
-        stdout: "",
+        stdout: structuredFailureReport(),
         stderr: "expected result was not visible"
       });
       await writeFile(firstRun.task.outputPaths[0], "import { test } from '@playwright/test';\n", "utf8");
@@ -4563,7 +4596,11 @@ describe("handleBrainCreatorTool", () => {
       let hostFailureReason = "expected result was not visible";
       context.runner = async () => {
         runCount += 1;
-        return { exitCode: 1, stdout: "", stderr: hostFailureReason };
+        return {
+          exitCode: 1,
+          stdout: structuredFailureReport(),
+          stderr: hostFailureReason
+        };
       };
       const source = join(workDir, "cases.xlsx");
       await writeFile(
@@ -4825,10 +4862,11 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () => {
         runCount += 1;
         return runCount === 2
-          ? { exitCode: 1, stdout: "", stderr: "TC-002 failed" }
+          ? { exitCode: 1, stdout: structuredFailureReport("TC-002 failed"), stderr: "TC-002 failed" }
           : { exitCode: 0, stdout: "passed", stderr: "" };
       }
     });
@@ -4908,9 +4946,10 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () =>
         failureReason
-          ? { exitCode: 1, stdout: "", stderr: failureReason }
+          ? { exitCode: 1, stdout: structuredFailureReport(), stderr: failureReason }
           : { exitCode: 0, stdout: "fixed", stderr: "" }
     });
     const source = join(workDir, "cases.xlsx");
@@ -5109,11 +5148,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () => {
         if (!regressionRun) {
           return {
             exitCode: 1,
-            stdout: "",
+            stdout: structuredFailureReport("initial regression failure"),
             stderr: "Expected documented result, actual result differed"
           };
         }
@@ -5121,7 +5161,7 @@ describe("handleBrainCreatorTool", () => {
         return retestCount === 2
           ? {
               exitCode: 1,
-              stdout: "",
+              stdout: structuredFailureReport("offer regression failure"),
               stderr: "Expected offer sent, actual offer remained draft"
             }
           : { exitCode: 0, stdout: "fixed", stderr: "" };
@@ -5208,11 +5248,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () => {
         if (!regressionRun) {
           return {
             exitCode: 1,
-            stdout: "",
+            stdout: structuredFailureReport("filtered regression failure"),
             stderr: "Expected documented result, actual result differed"
           };
         }

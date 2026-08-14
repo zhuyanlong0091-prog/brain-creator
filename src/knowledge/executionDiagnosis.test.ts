@@ -33,7 +33,8 @@ describe("ExecutionDiagnosisService", () => {
       failureReason: "Expected status to be approved, actual status was pending",
       healAttempts: 2,
       maxHealAttempts: 2,
-      evidenceRefs: ["evidence-a", "chain-a"]
+      evidenceRefs: ["evidence-a", "chain-a"],
+      evidenceAssurance: "strong"
     });
 
     expect(diagnosis.verdict).toBe("product_bug");
@@ -47,6 +48,25 @@ describe("ExecutionDiagnosisService", () => {
     expect(diagnosis.reasons).toEqual([
       "Expected and actual behavior still differ after controlled retries"
     ]);
+  });
+
+  it("does not promote an assertion mismatch without strong reporter evidence", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new ExecutionDiagnosisService(repository);
+
+    const diagnosis = service.create({
+      systemId: "system-a",
+      testCaseId: "case-a",
+      status: "failed",
+      failureReason: "Expected status to be approved, actual status was pending",
+      healAttempts: 2,
+      maxHealAttempts: 2,
+      evidenceRefs: ["evidence-a"],
+      evidenceAssurance: "limited"
+    });
+
+    expect(diagnosis.verdict).toBe("unknown_gap");
+    expect(diagnosis.failureType).toBe("assertion_failure");
   });
 
   it.each([
