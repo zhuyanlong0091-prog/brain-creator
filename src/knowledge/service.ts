@@ -1165,21 +1165,43 @@ export class KnowledgeService {
     if ((missingStepEvidence.length || missingTraceEvidence.length) && evidence.assuranceLevel === "strong") {
       evidence.assuranceLevel = "limited";
     }
+    const assertionSteps = evidence.steps.filter((item) => item.action === "assert");
+    const unboundAssertions = (evidence.reporterResult?.assertions ?? []).filter(
+      (assertion) => !assertion.stepId
+    );
     for (const step of evidence.steps) {
       const screenshot = evidence.artifactPaths.find((path) =>
         path.toLowerCase().includes(`step-${String(step.order).padStart(2, "0")}`)
       );
       step.screenshotPath = screenshot;
       const reporterStep = reporterSteps?.find((reported) => reported.id === step.stepId);
+      const assertion = step.action === "assert"
+        ? evidence.reporterResult?.assertions.find((item) => item.stepId === step.stepId) ??
+          (unboundAssertions.length === assertionSteps.length
+            ? unboundAssertions[assertionSteps.indexOf(step)]
+            : undefined)
+        : undefined;
       step.evidenceRefs = [...new Set([...(step.evidenceRefs ?? []), ...(reporterStep?.evidenceRefs ?? [])])];
       step.traceRefs = [...new Set(reporterStep?.traceRefs ?? evidence.tracePaths)];
-      step.assertionStatus =
-        input.status === "passed"
+      if (assertion) {
+        step.assertionStatus = assertion.status === "passed"
           ? "passed"
-          : step.action === "assert"
-            ? input.status
+          : assertion.status === "failed"
+            ? "failed"
             : "blocked";
-      if (step.action === "assert") step.actual = input.actualResult === undefined ? undefined : redact(input.actualResult);
+        if (assertion.expected !== undefined) step.expected ??= redact(assertion.expected);
+        if (assertion.actual !== undefined) step.actual = redact(assertion.actual);
+      } else {
+        step.assertionStatus =
+          input.status === "passed"
+            ? "passed"
+            : step.action === "assert"
+              ? input.status
+              : "blocked";
+        if (step.action === "assert") {
+          step.actual = input.actualResult === undefined ? undefined : redact(input.actualResult);
+        }
+      }
     }
     if (reporterSteps !== undefined) {
       const requiredCoverage = evidence.coverage?.required ?? ["workflow"];

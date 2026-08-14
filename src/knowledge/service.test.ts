@@ -1008,10 +1008,11 @@ describe("KnowledgeService", () => {
         failed: 0,
         skipped: 0,
         durationMs: 1,
-        assertions: (evidence.assertionContracts ?? []).map((contract) => ({
+        assertions: (evidence.assertionContracts ?? []).map((contract, index) => ({
           id: contract.id,
+          stepId: contract.stepId,
           status: "passed" as const,
-          actual: "Customer form saved",
+          actual: `Observed value ${index + 1}`,
           evidenceRefs: ["evidence/assertion.png", "evidence/trace.zip"]
         })),
         steps: evidence.steps.map((step) => ({
@@ -1030,6 +1031,9 @@ describe("KnowledgeService", () => {
     expect(completed.coverage?.verified).toEqual(expect.arrayContaining(["field", "workflow"]));
     expect(completed.coverage?.missing).toEqual([]);
     expect(completed.assuranceLevel).toBe("strong");
+    expect(completed.steps.filter((step) => step.action === "assert").map((step) => step.actual)).toEqual(
+      (evidence.assertionContracts ?? []).map((_, index) => `Observed value ${index + 1}`)
+    );
   });
 
   it("estimates Requirement Eval accuracy from traceable historical execution outcomes", async () => {
