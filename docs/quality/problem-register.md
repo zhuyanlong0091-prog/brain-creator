@@ -44,7 +44,7 @@ Status meanings:
 | E6 | Created test data was not reliably cleaned | resolved | existing | TestData leases and cleanup states are covered by provider and suite tests |
 | E7 | Host-reported success lacked tool verification | partial | existing/PR C | Tool-side Playwright execution and structured Reporter are used when available; compatibility fallback still records non-strong results without reporter evidence |
 | F1 | Generated baselines were fragile across upgrades | resolved | PR A/PR B | Compile keys supersede stale cases; portable artifact manifests record hashes and missing evidence |
-| F2 | Runtime depended on one workstation | partial | PR D | Browser/auth portability and CI smoke coverage remain |
+| F2 | Runtime depended on one workstation | partial | PR D | Installed package smoke now selects the host CLI and CI covers Node 20/22, build, docs, package contents, and install; real browser/auth portability remains |
 | F3 | One JSON file grew without partitioning | resolved | PR B | Schema 17 sharded repository, atomic writes, migration backup, missing-shard detection, and index rebuild are covered |
 | F4 | Local assets had no collaboration model | deferred | post-2.2 | Revisit only when remote multi-writer collaboration is required |
 | F5 | Multiple requirements could contaminate assets | partial | PR A/PR B | System-owned shards now isolate page/evidence/knowledge observations and indexes carry requirement ownership; complete same-system multi-requirement Eval and report reconciliation remain |

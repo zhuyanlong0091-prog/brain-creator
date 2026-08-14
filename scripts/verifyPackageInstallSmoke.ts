@@ -26,12 +26,14 @@ try {
   await run("npm", ["install", tarballName], businessDir);
 
   const binDir = join(businessDir, "node_modules", ".bin");
-  const version = await run(join(binDir, "brain-creator.cmd"), ["--version"], businessDir);
+  const bin = (name: string) =>
+    join(binDir, process.platform === "win32" ? `${name}.cmd` : name);
+  const version = await run(bin("brain-creator"), ["--version"], businessDir);
   assert(
     version.stdout.trim() === packageVersion,
     `installed brain-creator reported ${version.stdout.trim()} instead of ${packageVersion}`
   );
-  const cliHelp = await run(join(binDir, "brain-creator.cmd"), ["--help"], businessDir);
+  const cliHelp = await run(bin("brain-creator"), ["--help"], businessDir);
   assert(
     cliHelp.stdout.includes("brain-creator init") &&
       cliHelp.stdout.includes("brain-creator doctor") &&
@@ -39,12 +41,12 @@ try {
     "installed Brain Creator CLI help is missing expected commands"
   );
   await run(
-    join(binDir, "brain-creator.cmd"),
+    bin("brain-creator"),
     ["init", "--target", businessDir, "--provider", "host-agent"],
     businessDir
   );
   const configInspection = await run(
-    join(binDir, "brain-creator.cmd"),
+    bin("brain-creator"),
     ["config", "--target", businessDir, "--json"],
     businessDir
   );
@@ -54,7 +56,7 @@ try {
     "installed Brain Creator CLI could not inspect its MCP config"
   );
   await run(
-    join(binDir, "brain-creator.cmd"),
+    bin("brain-creator"),
     [
       "config",
       "write",
@@ -69,7 +71,7 @@ try {
   const globalInspection = JSON.parse(
     (
       await run(
-        join(binDir, "brain-creator.cmd"),
+        bin("brain-creator"),
         ["config", "--target", businessDir, "--json"],
         businessDir
       )
@@ -81,12 +83,12 @@ try {
     "installed Brain Creator CLI did not write global Codex configuration"
   );
   await run(
-    join(binDir, "brain-creator.cmd"),
+    bin("brain-creator"),
     ["config", "write", "--target", businessDir, "--provider", "host-agent"],
     businessDir
   );
   const codexPluginHelp = await run(
-    join(binDir, "brain-creator-install-codex-plugin.cmd"),
+    bin("brain-creator-install-codex-plugin"),
     ["--help"],
     businessDir
   );
@@ -122,7 +124,7 @@ try {
     "installed business project MCP config should default to the facade tool profile"
   );
 
-  await run(join(binDir, "brain-creator-doctor.cmd"), [], businessDir, {
+  await run(bin("brain-creator-doctor"), [], businessDir, {
     BRAIN_CREATOR_WORKSPACE: businessDir,
     BRAIN_CREATOR_TOOL_PROFILE: "facade",
     BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
@@ -205,9 +207,14 @@ try {
           target: "knowledge-project",
           name: "Installed Requirement",
           key: "installed-requirement",
-          defaultLocale: "en-US"
+          defaultLocale: "en-US",
+          responseMode: "full"
         }
       })
+    );
+    assert(
+      typeof knowledgeProject.id === "string" && knowledgeProject.id.length > 0,
+      `Installed MCP knowledge-project configuration did not return an id: ${JSON.stringify(knowledgeProject)}`
     );
     const requirementPath = join(businessDir, "requirement.md");
     await writeFile(
@@ -221,7 +228,8 @@ try {
         arguments: {
           action: "ingest-requirement",
           knowledgeProjectId: knowledgeProject.id,
-          source: requirementPath
+          source: requirementPath,
+          responseMode: "full"
         }
       })
     );
@@ -234,7 +242,8 @@ try {
       await client.callTool({
         name: "bc_status",
         arguments: {
-          knowledgeProjectId: knowledgeProject.id
+          knowledgeProjectId: knowledgeProject.id,
+          responseMode: "full"
         }
       })
     );
