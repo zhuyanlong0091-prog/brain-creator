@@ -37,7 +37,7 @@ export type CommandResult = {
 export type CommandRunner = (
   command: string,
   args: string[],
-  options?: { cwd?: string; timeoutMs?: number }
+  options?: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }
 ) => Promise<CommandResult>;
 
 export type AgentBridgeInput = {
@@ -373,10 +373,35 @@ export async function runChain(input: RunChainInput) {
     }
     const args = ["playwright", "test", testRunPath, "--workers=1"];
     if (structuredReporterEnabled) args.push("--reporter=json", "--trace=on");
-    const result = await runner("npx", args, { cwd: input.workDir });
-    if (!structuredReporterEnabled) return result;
+    const actorRoleEvidencePath =
+      input.actorJourney && input.actorJourney.length > 1
+        ? join(input.workDir, ".brain-creator", "runs", input.testCase.id, "actor-journey.jsonl")
+        : undefined;
+    if (actorRoleEvidencePath) await mkdir(dirname(actorRoleEvidencePath), { recursive: true });
+    const result = await runner("npx", args, {
+      cwd: input.workDir,
+      ...(actorRoleEvidencePath
+        ? { env: { ...process.env, BRAIN_CREATOR_ACTOR_EVIDENCE_PATH: actorRoleEvidencePath } }
+        : {})
+    });
+    if (actorRoleEvidencePath && input.actorJourney) {
+      const roleCheck = await verifyActorRoleEvidence(actorRoleEvidencePath, input.actorJourney);
+      if (!roleCheck.valid) {
+        return {
+          ...result,
+          exitCode: 1,
+          stderr: [result.stderr, roleCheck.reason].filter(Boolean).join("\n"),
+          actorRoleEvidencePath
+        };
+      }
+    }
+    if (!structuredReporterEnabled) {
+      return { ...result, ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {}) };
+    }
     const reporter = parseReporterOutput(result.stdout);
-    if (!reporter) return result;
+    if (!reporter) {
+      return { ...result, ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {}) };
+    }
     const reporterPath = join(
       input.workDir,
       ".brain-creator",
@@ -386,10 +411,6 @@ export async function runChain(input: RunChainInput) {
     );
     await mkdir(dirname(reporterPath), { recursive: true });
     await writeFile(reporterPath, `${JSON.stringify(reporter, null, 2)}\n`, "utf8");
-    const actorRoleEvidencePath =
-      input.actorJourney && input.actorJourney.length > 1
-        ? await writeActorRoleEvidence(input.workDir, input.actorJourney)
-        : undefined;
     return {
       ...result,
       exitCode: normalizeReporterExitCode(result.exitCode, reporter),
@@ -580,22 +601,40 @@ function removeSourceComments(source: string) {
     .replace(/(^|\n)\s*\/\/.*$/gm, "$1");
 }
 
-async function writeActorRoleEvidence(
-  workDir: string,
+async function verifyActorRoleEvidence(
+  evidencePath: string,
   actorJourney: Array<{ role: string; authProfile: AuthProfile }>
 ) {
-  const path = join(workDir, ".brain-creator", "runs", "actor-journey.json");
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(
-    path,
-    `${JSON.stringify(
-      actorJourney.map((actor, index) => ({ order: index + 1, role: actor.role })),
-      null,
-      2
-    )}\n`,
-    "utf8"
-  );
-  return path;
+  let content: string;
+  try {
+    content = await readFile(evidencePath, "utf8");
+  } catch {
+    return {
+      valid: false as const,
+      reason: "Multi-role execution did not produce runtime actor evidence."
+    };
+  }
+  const observedRoles = new Set<string>();
+  for (const line of content.split(/\r?\n/).filter(Boolean)) {
+    try {
+      const event = JSON.parse(line) as { role?: unknown };
+      if (typeof event.role === "string") observedRoles.add(event.role);
+    } catch {
+      return {
+        valid: false as const,
+        reason: "Runtime actor evidence is not valid JSONL."
+      };
+    }
+  }
+  const missingRoles = actorJourney
+    .map((actor) => actor.role)
+    .filter((role) => !observedRoles.has(role));
+  return missingRoles.length > 0
+    ? {
+        valid: false as const,
+        reason: `Runtime actor evidence is missing role(s): ${missingRoles.join(", ")}.`
+      }
+    : { valid: true as const };
 }
 
 function parseReporterOutput(output: string): StructuredReporterResult | undefined {
@@ -618,12 +657,13 @@ async function missingAgentBridge(): Promise<CommandResult> {
 export async function spawnCommand(
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number } = {}
+  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {}
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const normalized = normalizeCommand(command, args);
     const child = spawn(normalized.command, normalized.args, {
-      cwd: options.cwd
+      cwd: options.cwd,
+      env: options.env
     });
     let stdout = "";
     let stderr = "";

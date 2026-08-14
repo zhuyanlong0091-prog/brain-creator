@@ -145,12 +145,14 @@ function formatActorRoleHelper(
     `    const roles = {\n${roleConfig}\n    };`,
     `    const config = roles[role as keyof typeof roles];`,
     `    if (!config) throw new Error(\`Unknown Brain Creator actor role: \${role}\`);`,
+    `    const recordRole = async (event: string) => { const evidencePath = process.env.BRAIN_CREATOR_ACTOR_EVIDENCE_PATH; if (evidencePath) await import("node:fs/promises").then(({ appendFile }) => appendFile(evidencePath, JSON.stringify({ role, event, at: new Date().toISOString() }) + "\\n", "utf8")); };`,
     `    const context = await browser.newContext(config.storageStatePath ? { storageState: config.storageStatePath } : {});`,
     `    const page = await context.newPage();`,
     `    await page.goto(${JSON.stringify(baseUrl)});`,
     `    if (config.tokenEnv) { const token = process.env[config.tokenEnv]; if (!token) throw new Error(\`Missing auth env \${config.tokenEnv}\`); await page.evaluate((value: string) => window.localStorage.setItem("brain_creator_token", value), token); }`,
     `    if (config.cookieEnv) { const cookie = process.env[config.cookieEnv]; if (!cookie) throw new Error(\`Missing auth env \${config.cookieEnv}\`); await page.context().addCookies([{ name: "brain_creator_session", value: cookie, url: ${JSON.stringify(baseUrl)} }]); }`,
-    `    try { return await action(page); } finally { await context.close(); }`,
+    `    await recordRole("entered");`,
+    `    try { return await action(page); } finally { await recordRole("exited"); await context.close(); }`,
   ];
 }
 

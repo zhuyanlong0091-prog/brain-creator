@@ -223,6 +223,85 @@ describe("runChain", () => {
     expect(await readFile(result.testResult.reporterPath!, "utf8")).toContain('"status": "passed"');
   });
 
+  it("requires runtime evidence for every declared actor role", async () => {
+    const workDir = await tempDir();
+    const actorJourney = [
+      { role: "recruiter", authProfile: authProfile() },
+      { role: "approver", authProfile: { ...authProfile(), id: "auth_approver", role: "approver" } }
+    ];
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      actorJourney,
+      testCase: approvedTestCase(),
+      structuredReporter: true,
+      agentBridge: async ({ outputPaths }) => {
+        await writeFile(
+          outputPaths[0],
+          'await bc.runAsRole(browser, "recruiter", async () => {});\nawait bc.runAsRole(browser, "approver", async () => {});',
+          "utf8"
+        );
+        return { exitCode: 0, stdout: "agent ok", stderr: "" };
+      },
+      runner: async (_command, args, options) => {
+        const evidencePath = options?.env?.BRAIN_CREATOR_ACTOR_EVIDENCE_PATH;
+        if (evidencePath) {
+          await writeFile(
+            evidencePath,
+            '{"role":"recruiter","event":"entered"}\n{"role":"approver","event":"entered"}\n',
+            "utf8"
+          );
+        }
+        return {
+          exitCode: 0,
+          stdout: args.includes("--reporter=json")
+            ? JSON.stringify({ stats: { duration: 1, expected: 1, unexpected: 0, skipped: 0 }, suites: [] })
+            : "agent ok",
+          stderr: ""
+        };
+      }
+    });
+
+    expect(result.chainRun.status).toBe("succeeded");
+    expect(result.testResult.actorRoleEvidencePath).toContain("actor-journey.jsonl");
+  });
+
+  it("blocks a multi-role run when runtime evidence omits a declared role", async () => {
+    const workDir = await tempDir();
+    const actorJourney = [
+      { role: "recruiter", authProfile: authProfile() },
+      { role: "approver", authProfile: { ...authProfile(), id: "auth_approver", role: "approver" } }
+    ];
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      actorJourney,
+      testCase: approvedTestCase(),
+      structuredReporter: false,
+      agentBridge: async ({ outputPaths }) => {
+        await writeFile(
+          outputPaths[0],
+          'await bc.runAsRole(browser, "recruiter", async () => {});\nawait bc.runAsRole(browser, "approver", async () => {});',
+          "utf8"
+        );
+        return { exitCode: 0, stdout: "agent ok", stderr: "" };
+      },
+      runner: async (_command, _args, options) => {
+        await writeFile(
+          options?.env?.BRAIN_CREATOR_ACTOR_EVIDENCE_PATH ?? "missing.jsonl",
+          '{"role":"recruiter","event":"entered"}\n',
+          "utf8"
+        );
+        return { exitCode: 0, stdout: "passed", stderr: "" };
+      }
+    });
+
+    expect(result.chainRun.status).toBe("failed");
+    expect(result.testResult.stderr).toContain("missing role(s): approver");
+  });
+
   it("redacts protected values from bridge logs", async () => {
     const run = await runAgent({
       systemId: "system_1",
