@@ -101,6 +101,35 @@ describe("static suite execution report", () => {
     expect(html).toContain("Not executed");
     expect(html).toContain("blocked");
   });
+
+  it("shows all requirement revisions attached to a mixed suite", () => {
+    const html = renderStaticSuiteExecutionReport({
+      title: "Mixed requirement suite",
+      run: run(),
+      requirementSetIds: ["requirement-orders-v1", "requirement-orders-v2"],
+      evidence: []
+    });
+
+    expect(html).toContain("Requirement sets:");
+    expect(html).toContain("requirement-orders-v1");
+    expect(html).toContain("requirement-orders-v2");
+  });
+
+  it("formats report timestamps with the requested locale", () => {
+    const html = renderStaticSuiteExecutionReport({
+      title: "Localized suite",
+      run: {
+        ...run(),
+        createdAt: "2026-08-14T12:34:56.000Z",
+        updatedAt: "2026-08-14T13:34:56.000Z"
+      },
+      locale: "zh-CN",
+      evidence: []
+    });
+
+    expect(html).toContain("Locale: zh-CN");
+    expect(html).toContain("2026");
+  });
 });
 
 function run(): RequirementSuiteRun {

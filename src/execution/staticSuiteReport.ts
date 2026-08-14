@@ -6,6 +6,8 @@ export async function writeStaticSuiteExecutionReport(input: {
   outputPath: string;
   title: string;
   run: RequirementSuiteRun;
+  requirementSetIds?: string[];
+  locale?: string;
   evidence: ExecutionEvidence[];
   coverage?: Array<{
     testIntentId: string;
@@ -26,6 +28,8 @@ export async function writeStaticSuiteExecutionReport(input: {
 export function renderStaticSuiteExecutionReport(input: {
   title: string;
   run: RequirementSuiteRun;
+  requirementSetIds?: string[];
+  locale?: string;
   evidence: ExecutionEvidence[];
   coverage?: Array<{
     testIntentId: string;
@@ -57,6 +61,9 @@ export function renderStaticSuiteExecutionReport(input: {
   const coverageRows = (input.coverage ?? []).map((item) =>
     `<tr class="searchable-row"><td>${escapeHtml(item.testIntentId)}</td><td>${escapeHtml(item.title)}</td><td>${escapeHtml(item.module)}</td><td>${escapeHtml(item.classification)}</td><td>${escapeHtml(item.classificationReason)}</td><td>${escapeHtml(item.requirementRefs.join(", "))}</td></tr>`
   ).join("");
+  const requirementSetIds = [...new Set(input.requirementSetIds ?? [])];
+  const formattedCreatedAt = formatTimestamp(input.run.createdAt, input.locale);
+  const formattedUpdatedAt = formatTimestamp(input.run.updatedAt, input.locale);
   const rows = input.run.caseRuns.map((caseRun) => {
     const evidence = evidenceByCase.get(caseRun.executableCaseId);
     const assurance = evidence?.assuranceLevel ?? "none";
@@ -71,7 +78,23 @@ export function renderStaticSuiteExecutionReport(input: {
   }).join("");
   const bugs = (input.bugs ?? []).map((bug) => `<li class="searchable-row">${escapeHtml(bug.id)} ${escapeHtml(bug.status)}: ${escapeHtml(bug.actualResult)}</li>`).join("") || "<li class=muted>None</li>";
   const gaps = (input.gaps ?? []).map((gap) => `<li class="searchable-row">${escapeHtml(gap.id)} ${escapeHtml(gap.status)}: ${escapeHtml(gap.reason)}</li>`).join("") || "<li class=muted>None</li>";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title><style>body{font:14px system-ui,sans-serif;max-width:1400px;margin:2rem auto;padding:0 1rem;color:#17202a}header{border-bottom:1px solid #ddd;margin-bottom:1rem}input{width:100%;padding:.6rem;margin:1rem 0}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:.5rem;text-align:left;vertical-align:top}.passed{color:#087f5b}.failed{color:#c92a2a}.blocked{color:#a15c00}.muted{color:#667085}details{min-width:240px}</style></head><body><header><h1>${escapeHtml(input.title)}</h1><p>Status: <strong class="${input.run.status}">${escapeHtml(input.run.status)}</strong> | Total: ${input.run.total} | Passed: ${input.run.passed} | Failed: ${input.run.failed} | Blocked: ${input.run.blocked}</p><p>Assurance: <strong>strong ${strong}</strong> | limited ${limited} | none ${none}</p><p>Runtime impact: console errors ${consoleErrors} | network failures ${networkFailures}</p><p>TestIntent coverage: ${Object.entries(coverageCounts).map(([key, value]) => `${escapeHtml(key)} ${value}`).join(" | ") || "not attached"}</p><p>Run: ${escapeHtml(input.run.id)} | System: ${escapeHtml(input.run.systemId)} | Requirement project: ${escapeHtml(input.run.knowledgeProjectId)}</p></header><label for="search">Search report</label><input id="search" type="search" placeholder="case, status, evidence" oninput="filterReport(this.value)"><h2>TestIntent coverage</h2><table><thead><tr><th>Intent</th><th>Title</th><th>Module</th><th>Classification</th><th>Reason</th><th>Requirement refs</th></tr></thead><tbody>${coverageRows || "<tr><td colspan=6 class=muted>No coverage ledger attached</td></tr>"}</tbody></table><h2>Cases</h2><table><thead><tr><th>#</th><th>Case</th><th>Status</th><th>Assurance</th><th>Actual result / not executed reason</th><th>Evidence warnings</th><th>Steps</th><th>Console errors</th><th>Network failures</th><th>Artifacts</th></tr></thead><tbody>${rows || "<tr><td colspan=10 class=muted>No cases</td></tr>"}</tbody></table><h2>BugReports</h2><ul>${bugs}</ul><h2>Gaps</h2><ul>${gaps}</ul><script>function filterReport(q){q=q.toLowerCase();document.querySelectorAll('.searchable-row').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q))}</script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title><style>body{font:14px system-ui,sans-serif;max-width:1400px;margin:2rem auto;padding:0 1rem;color:#17202a}header{border-bottom:1px solid #ddd;margin-bottom:1rem}input{width:100%;padding:.6rem;margin:1rem 0}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:.5rem;text-align:left;vertical-align:top}.passed{color:#087f5b}.failed{color:#c92a2a}.blocked{color:#a15c00}.muted{color:#667085}details{min-width:240px}</style></head><body><header><h1>${escapeHtml(input.title)}</h1><p>Status: <strong class="${input.run.status}">${escapeHtml(input.run.status)}</strong> | Total: ${input.run.total} | Passed: ${input.run.passed} | Failed: ${input.run.failed} | Blocked: ${input.run.blocked}</p><p>Assurance: <strong>strong ${strong}</strong> | limited ${limited} | none ${none}</p><p>Runtime impact: console errors ${consoleErrors} | network failures ${networkFailures}</p><p>TestIntent coverage: ${Object.entries(coverageCounts).map(([key, value]) => `${escapeHtml(key)} ${value}`).join(" | ") || "not attached"}</p><p>Run: ${escapeHtml(input.run.id)} | System: ${escapeHtml(input.run.systemId)} | Requirement project: ${escapeHtml(input.run.knowledgeProjectId)}</p><p>Created: ${escapeHtml(formattedCreatedAt)} | Updated: ${escapeHtml(formattedUpdatedAt)}${input.locale ? ` | Locale: ${escapeHtml(input.locale)}` : ""}</p>${requirementSetIds.length > 0 ? `<p>Requirement sets: ${requirementSetIds.map((id) => escapeHtml(id)).join(", ")}</p>` : ""}</header><label for="search">Search report</label><input id="search" type="search" placeholder="case, status, evidence" oninput="filterReport(this.value)"><h2>TestIntent coverage</h2><table><thead><tr><th>Intent</th><th>Title</th><th>Module</th><th>Classification</th><th>Reason</th><th>Requirement refs</th></tr></thead><tbody>${coverageRows || "<tr><td colspan=6 class=muted>No coverage ledger attached</td></tr>"}</tbody></table><h2>Cases</h2><table><thead><tr><th>#</th><th>Case</th><th>Status</th><th>Assurance</th><th>Actual result / not executed reason</th><th>Evidence warnings</th><th>Steps</th><th>Console errors</th><th>Network failures</th><th>Artifacts</th></tr></thead><tbody>${rows || "<tr><td colspan=10 class=muted>No cases</td></tr>"}</tbody></table><h2>BugReports</h2><ul>${bugs}</ul><h2>Gaps</h2><ul>${gaps}</ul><script>function filterReport(q){q=q.toLowerCase();document.querySelectorAll('.searchable-row').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q))}</script></body></html>`;
+}
+
+function formatTimestamp(value: string, locale = "en-US") {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      dateStyle: "medium",
+      timeStyle: "medium"
+    }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "medium"
+    }).format(date);
+  }
 }
 
 function escapeHtml(value: string) {

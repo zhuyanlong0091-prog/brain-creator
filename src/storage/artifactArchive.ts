@@ -18,6 +18,7 @@ export type ArtifactManifest = {
   path: string;
   systemId: string;
   requirementSetId?: string;
+  requirementSetIds?: string[];
   suiteRunId?: string;
   createdAt: string;
   artifacts: ArtifactManifestItem[];
@@ -28,6 +29,7 @@ export type ArtifactManifestInput = {
   workDir: string;
   systemId: string;
   requirementSetId?: string;
+  requirementSetIds?: string[];
   suiteRunId?: string;
   artifactPaths: string[];
   sourceRefs?: string[];
@@ -118,6 +120,9 @@ export async function writeArtifactManifest(input: ArtifactManifestInput): Promi
     path: manifestPath,
     systemId: input.systemId,
     ...(input.requirementSetId ? { requirementSetId: input.requirementSetId } : {}),
+    ...(input.requirementSetIds && input.requirementSetIds.length > 0
+      ? { requirementSetIds: [...new Set(input.requirementSetIds)] }
+      : {}),
     ...(input.suiteRunId ? { suiteRunId: input.suiteRunId } : {}),
     createdAt,
     artifacts,

@@ -2895,6 +2895,65 @@ describe("handleBrainCreatorTool", () => {
     expect(all.executionLedger.counts).toEqual({ blocked: 1 });
   });
 
+  it("returns a bounded summary for requirement suite run review", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Orders Knowledge",
+      key: "project-orders",
+      defaultLocale: "en-US"
+    });
+    context.repository.requirementSuiteRuns.push({
+      id: "suite-run-running",
+      knowledgeProjectId: project.id,
+      systemId: "system-orders",
+      status: "running",
+      continueOnBlocked: false,
+      allowCreateTestData: false,
+      total: 2,
+      passed: 1,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: [],
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:01:00.000Z"
+    });
+    context.repository.requirementSuiteRuns.push({
+      id: "suite-run-completed",
+      knowledgeProjectId: project.id,
+      systemId: "system-orders",
+      status: "completed",
+      continueOnBlocked: false,
+      allowCreateTestData: false,
+      total: 1,
+      passed: 1,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: [],
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:01:00.000Z"
+    });
+
+    const review = dataOf(await handleBrainCreatorTool(context, "bc_review", {
+      target: "requirement-suite-run",
+      knowledgeProjectId: project.id
+    }));
+
+    expect(review.reviewSummary).toEqual(expect.objectContaining({
+      title: "Requirement Suite Run Review",
+      status: "action_required",
+      nextAction: "resume_or_resolve_blockers",
+      metrics: expect.objectContaining({ totalRuns: 2, totalCases: 3, passed: 2 })
+    }));
+  });
+
   it("previews natural-language entrypoints as facade calls without executing", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({

@@ -46,6 +46,25 @@ describe("artifact archive", () => {
     expect(manifest.path).toContain(join(".brain-creator", "artifacts", "system_orders", "requirement_orders", "suite_run_1"));
   });
 
+  it("retains every requirement revision for a mixed suite manifest", async () => {
+    const root = await tempDir();
+    const manifest = await writeArtifactManifest({
+      workDir: root,
+      systemId: "system_orders",
+      requirementSetId: "multi-requirement",
+      requirementSetIds: ["requirement_orders_v1", "requirement_orders_v2", "requirement_orders_v1"],
+      suiteRunId: "suite_run_mixed",
+      artifactPaths: []
+    });
+
+    expect(manifest.requirementSetId).toBe("multi-requirement");
+    expect(manifest.requirementSetIds).toEqual([
+      "requirement_orders_v1",
+      "requirement_orders_v2"
+    ]);
+    expect(manifest.sourceRefs).toEqual([]);
+  });
+
   it("blocks sensitive artifacts before they enter the evidence manifest", async () => {
     const root = await tempDir();
     const artifact = join(root, "playwright-report.json");

@@ -3836,9 +3836,11 @@ function knowledgeReview(
     const items = context.requirementSuiteRuns
       .list(projectId)
       .filter((item) => !idValue || item.id === idValue);
+    const reviewSummary = requirementSuiteRunCollectionSummary(items);
     return {
       project,
-      ...paginateReviewItems(items, input)
+      ...paginateReviewItems(items, input),
+      reviewSummary
     };
   }
   if (target === "run-ledger") {
@@ -6412,6 +6414,32 @@ function statusToolGuidance(nextAction: string) {
   };
 }
 
+function requirementSuiteRunCollectionSummary(runs: RequirementSuiteRun[]) {
+  const statusCounts = countBy(runs, (run) => run.status);
+  const metrics = {
+    totalRuns: runs.length,
+    byStatus: statusCounts,
+    totalCases: runs.reduce((total, run) => total + run.total, 0),
+    passed: runs.reduce((total, run) => total + run.passed, 0),
+    failed: runs.reduce((total, run) => total + run.failed, 0),
+    blocked: runs.reduce((total, run) => total + run.blocked, 0),
+    skipped: runs.reduce((total, run) => total + run.skipped, 0),
+    cancelled: runs.reduce((total, run) => total + run.cancelled, 0)
+  };
+  const active = runs.some((run) =>
+    ["running", "waiting-for-test-data", "waiting-for-agent", "blocked"].includes(run.status)
+  );
+  return {
+    title: "Requirement Suite Run Review",
+    status: active ? "action_required" : runs.length > 0 ? "completed" : "empty",
+    metrics,
+    nextAction: active ? "resume_or_resolve_blockers" : runs.length > 0 ? "review_suite_results" : "prepare_requirement_suite",
+    userMessage: runs.length === 0
+      ? "No requirement suite runs are available."
+      : `${runs.length} requirement suite run(s), ${metrics.totalCases} case(s): ${metrics.passed} passed, ${metrics.failed} failed, ${metrics.blocked} blocked.`
+  };
+}
+
 function executionDiagnosisReviewSummary(input: {
   summary: ReturnType<ExecutionDiagnosisService["summary"]>;
   items: Array<{ evidenceRefs: string[] }>;
@@ -7354,12 +7382,17 @@ async function archiveRequirementSuiteRun(
   const executableCases = run.caseRuns
     .map((item) => context.repository.executableCases.find((candidate) => candidate.id === item.executableCaseId))
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
-  const requirementSetId = executableCases[0]?.requirementSetId ?? "unscoped";
-  const requirementSetIds = new Set(executableCases.map((item) => item.requirementSetId));
+  const requirementSetIds = [...new Set(executableCases.map((item) => item.requirementSetId))];
+  const requirementSetIdSet = new Set(requirementSetIds);
+  const requirementSetId = requirementSetIds.length === 1
+    ? requirementSetIds[0]
+    : requirementSetIds.length > 1
+      ? "multi-requirement"
+      : "unscoped";
   const coverage = context.knowledgeService
     .testIntentCoverage(run.knowledgeProjectId, run.systemId)
     .items
-    .filter((item) => requirementSetIds.has(item.requirementSetId))
+    .filter((item) => requirementSetIdSet.has(item.requirementSetId))
     .map((item) => ({
       testIntentId: item.testIntentId,
       title: item.title,
@@ -7383,10 +7416,13 @@ async function archiveRequirementSuiteRun(
     run.id,
     "suite-report.html"
   );
+  const system = context.repository.systemProfiles.find((item) => item.id === run.systemId);
   await writeStaticSuiteExecutionReport({
     outputPath: reportPath,
     title: `Brain Creator requirement suite ${run.id}`,
     run,
+    requirementSetIds,
+    locale: system?.defaultLocale,
     evidence,
     coverage,
     bugs: context.repository.bugReports
@@ -7402,8 +7438,9 @@ async function archiveRequirementSuiteRun(
     systemId: run.systemId,
     requirementSetId,
     suiteRunId: run.id,
+    requirementSetIds,
     artifactPaths: [reportPath, ...evidence.flatMap((item) => item.artifactPaths)],
-    sourceRefs: requirementSetId === "unscoped" ? [] : [requirementSetId],
+    sourceRefs: requirementSetIds,
     protectedSecrets: protectedSecretsForSystem(context, run.systemId)
   });
   context.repository.persist();
