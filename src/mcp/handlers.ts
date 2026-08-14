@@ -1104,6 +1104,13 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const awaitingAuthCheckpoints = snapshot.auth.checkpoints.filter(
     (checkpoint) => checkpoint.status === "awaiting-user"
   );
+  const activeDocumentLedgerSummary =
+    activeDocumentSuite &&
+    documentRunLedgerEntries.some(
+      (entry) => entry.caseSuiteId === activeDocumentSuite.suiteId
+    )
+      ? context.runLedger.summary(activeDocumentSuite.suiteId)
+      : undefined;
   const nextAction = facadeNextAction({
     bridgeOk: snapshot.bridge.ok,
     awaitingAuthCheckpoints: awaitingAuthCheckpoints.length,
@@ -1126,6 +1133,14 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
         waiting: activeDocumentSuite.waitingCaseNos.length,
         pending: activeDocumentSuite.pendingCaseNos.length,
         nextCaseNo: activeDocumentSuite.nextCaseNo,
+        ...(activeDocumentLedgerSummary
+          ? {
+              currentStage: activeDocumentLedgerSummary.currentStage,
+              currentStep: activeDocumentLedgerSummary.currentStep,
+              latestEvent: activeDocumentLedgerSummary.latestEvent,
+              traceId: activeDocumentLedgerSummary.traceId
+            }
+          : {}),
         activeTask: activeDocumentSuite.activeTask
           ? {
               taskId: activeDocumentSuite.activeTask.taskId,
@@ -1169,12 +1184,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     documentRunLedger: {
       total: documentRunLedgerEntries.length,
       activeSummary:
-        activeDocumentSuite &&
-        documentRunLedgerEntries.some(
-          (entry) => entry.caseSuiteId === activeDocumentSuite.suiteId
-        )
-          ? context.runLedger.summary(activeDocumentSuite.suiteId)
-          : undefined,
+        activeDocumentLedgerSummary,
       recent: documentRunLedgerEntries.slice(-20),
       recentTruncated: documentRunLedgerEntries.length > 20
     },
@@ -6267,6 +6277,10 @@ function statusUserSummary(state: {
     waiting: number;
     pending: number;
     nextCaseNo?: string;
+    currentStage?: string;
+    currentStep?: string;
+    latestEvent?: string;
+    traceId?: string;
     activeTask?: { taskId: string; caseNo: string; title: string };
   };
 }) {
@@ -6310,7 +6324,19 @@ function statusMarkdown(summary: ReturnType<typeof statusUserSummary>) {
     ...(summary.activeSuite
       ? [
           `- Active suite: ${summary.activeSuite.suiteId} (${summary.activeSuite.status})`,
-          `- Active suite progress: ${summary.activeSuite.passed}/${summary.activeSuite.totalCases} passed; next ${summary.activeSuite.nextCaseNo ?? "none"}`
+          `- Active suite progress: ${summary.activeSuite.passed}/${summary.activeSuite.totalCases} passed; next ${summary.activeSuite.nextCaseNo ?? "none"}`,
+          ...(summary.activeSuite.currentStage
+            ? [`- Active suite stage: ${summary.activeSuite.currentStage}`]
+            : []),
+          ...(summary.activeSuite.currentStep
+            ? [`- Active suite step: ${summary.activeSuite.currentStep}`]
+            : []),
+          ...(summary.activeSuite.latestEvent
+            ? [`- Active suite event: ${summary.activeSuite.latestEvent}`]
+            : []),
+          ...(summary.activeSuite.traceId
+            ? [`- Active suite trace: ${summary.activeSuite.traceId}`]
+            : [])
         ]
       : []),
     "",
