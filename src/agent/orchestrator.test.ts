@@ -319,6 +319,41 @@ describe("runChain", () => {
     expect(result.testResult.stderr).toContain("missing role(s): approver");
   });
 
+  it("blocks a multi-role run when runtime evidence uses roles out of order", async () => {
+    const workDir = await tempDir();
+    const actorJourney = [
+      { role: "recruiter", authProfile: authProfile() },
+      { role: "approver", authProfile: { ...authProfile(), id: "auth_approver", role: "approver" } }
+    ];
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      actorJourney,
+      testCase: approvedTestCase(),
+      structuredReporter: false,
+      agentBridge: async ({ outputPaths }) => {
+        await writeFile(
+          outputPaths[0],
+          'await bc.runAsRole(browser, "recruiter", async () => {});\nawait bc.runAsRole(browser, "approver", async () => {});',
+          "utf8"
+        );
+        return { exitCode: 0, stdout: "agent ok", stderr: "" };
+      },
+      runner: async (_command, _args, options) => {
+        await writeFile(
+          options?.env?.BRAIN_CREATOR_ACTOR_EVIDENCE_PATH ?? "missing.jsonl",
+          '{"role":"approver","event":"entered"}\n{"role":"recruiter","event":"entered"}\n',
+          "utf8"
+        );
+        return { exitCode: 0, stdout: "passed", stderr: "" };
+      }
+    });
+
+    expect(result.chainRun.status).toBe("failed");
+    expect(result.testResult.stderr).toContain("does not follow the declared role order");
+  });
+
   it("redacts protected values from bridge logs", async () => {
     const run = await runAgent({
       systemId: "system_1",

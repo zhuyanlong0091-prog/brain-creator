@@ -627,10 +627,14 @@ async function verifyActorRoleEvidence(
     };
   }
   const observedRoles = new Set<string>();
+  const observedEnteredRoles: string[] = [];
   for (const line of content.split(/\r?\n/).filter(Boolean)) {
     try {
-      const event = JSON.parse(line) as { role?: unknown };
-      if (typeof event.role === "string") observedRoles.add(event.role);
+      const event = JSON.parse(line) as { role?: unknown; event?: unknown };
+      if (typeof event.role === "string") {
+        observedRoles.add(event.role);
+        if (event.event === "entered") observedEnteredRoles.push(event.role);
+      }
     } catch {
       return {
         valid: false as const,
@@ -641,12 +645,32 @@ async function verifyActorRoleEvidence(
   const missingRoles = actorJourney
     .map((actor) => actor.role)
     .filter((role) => !observedRoles.has(role));
-  return missingRoles.length > 0
-    ? {
-        valid: false as const,
-        reason: `Runtime actor evidence is missing role(s): ${missingRoles.join(", ")}.`
-      }
-    : { valid: true as const };
+  if (missingRoles.length > 0) {
+    return {
+      valid: false as const,
+      reason: `Runtime actor evidence is missing role(s): ${missingRoles.join(", ")}.`
+    };
+  }
+  const declaredRoles = actorJourney.map((actor) => actor.role);
+  const unknownRoles = [...observedRoles].filter((role) => !declaredRoles.includes(role));
+  if (unknownRoles.length > 0) {
+    return {
+      valid: false as const,
+      reason: `Runtime actor evidence contains undeclared role(s): ${unknownRoles.join(", ")}.`
+    };
+  }
+  let nextDeclaredRole = 0;
+  for (const role of observedEnteredRoles) {
+    if (role === declaredRoles[nextDeclaredRole]) nextDeclaredRole += 1;
+    if (nextDeclaredRole === declaredRoles.length) break;
+  }
+  if (nextDeclaredRole < declaredRoles.length) {
+    return {
+      valid: false as const,
+      reason: `Runtime actor evidence does not follow the declared role order: ${declaredRoles.join(" -> ")}.`
+    };
+  }
+  return { valid: true as const };
 }
 
 function parseReporterOutput(output: string): StructuredReporterResult | undefined {
