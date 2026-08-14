@@ -17,7 +17,10 @@ import type {
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
-import { collectBrowserSurfaceEvidence } from "./browserSurface.js";
+import {
+  capturePopupSurfaceEvidence,
+  collectBrowserSurfaceEvidence
+} from "./browserSurface.js";
 import type { KnowledgeService } from "./service.js";
 
 export type SystemExplorationPage = {
@@ -478,7 +481,7 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
                   scenario: input.scenario
                 })
               : [];
-          for (const popup of popups) {
+          for (const [popupIndex, popup] of popups.entries()) {
             try {
               if (popup.isClosed()) {
                 warnings.push("Popup closed before capture; main page evidence was retained.");
@@ -494,20 +497,17 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
                 warnings.push(`Ignored popup outside allowlist: ${popup.url() || "unknown"}`);
                 continue;
               }
-              capture.surfaces = [
-                ...(capture.surfaces ?? []),
-                {
-                  kind: "popup",
-                  url: popupUrl,
-                  parentUrl: finalUrl,
-                  accessible: true,
-                  interactiveCount: await popup
-                    .locator('button, input, select, textarea, a[href]')
-                    .count()
-                    .catch(() => 0),
-                  evidence: "Popup opened by a safe interaction"
-                }
-              ];
+              const popupSurface = await capturePopupSurfaceEvidence(
+                popup,
+                finalUrl,
+                join(
+                  input.artifactDir,
+                  `popup-${String(pages.length + 1).padStart(2, "0")}-${String(
+                    popupIndex + 1
+                  ).padStart(2, "0")}.png`
+                )
+              );
+              capture.surfaces = [...(capture.surfaces ?? []), popupSurface];
               if (!queued.has(popupUrl) && !visited.has(popupUrl)) {
                 queued.add(popupUrl);
                 queue.push({ url: popupUrl, depth: candidate.depth + 1 });

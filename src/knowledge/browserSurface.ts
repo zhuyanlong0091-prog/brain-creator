@@ -1,5 +1,37 @@
 import type { BrowserSurfaceEvidence } from "../domain/types.js";
 
+type PlaywrightPage = import("@playwright/test").Page;
+
+export async function capturePopupSurfaceEvidence(
+  popup: PlaywrightPage,
+  parentUrl: string,
+  screenshotPath: string
+): Promise<BrowserSurfaceEvidence> {
+  const title = await popup.title().catch(() => "");
+  const domText = (await popup.locator("body").innerText().catch(() => "")).slice(0, 20_000);
+  const interactiveCount = await popup
+    .locator(
+      'button, input, select, textarea, a[href], [role="button"], [role="link"], [role="textbox"], [role="combobox"]'
+    )
+    .count()
+    .catch(() => 0);
+  const screenshot = await popup
+    .screenshot({ path: screenshotPath, fullPage: true })
+    .then(() => screenshotPath)
+    .catch(() => undefined);
+  return {
+    kind: "popup",
+    url: popup.url(),
+    parentUrl,
+    accessible: true,
+    interactiveCount,
+    ...(title ? { title } : {}),
+    ...(domText ? { domText } : {}),
+    ...(screenshot ? { screenshotPath: screenshot } : {}),
+    evidence: "Popup opened by a safe interaction"
+  };
+}
+
 export async function collectBrowserSurfaceEvidence(
   page: import("@playwright/test").Page,
   allowedUrls: string[]

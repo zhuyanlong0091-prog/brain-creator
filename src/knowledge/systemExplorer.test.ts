@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -717,10 +717,20 @@ describe("System exploration coordinator", () => {
           expect.arrayContaining([
             expect.objectContaining({ kind: "iframe" }),
             expect.objectContaining({ kind: "shadow-root" }),
-            expect.objectContaining({ kind: "popup" }),
+            expect.objectContaining({
+              kind: "popup",
+              title: "Popup details",
+              domText: "Popup action",
+              screenshotPath: expect.any(String)
+            }),
             expect.objectContaining({ kind: "wujie" })
           ])
         );
+        const popupSurface = result.brain.pages[0].surfaces?.find(
+          (surface) => surface.kind === "popup"
+        );
+        expect(popupSurface?.screenshotPath).toBeTruthy();
+        await expect(stat(popupSurface!.screenshotPath!)).resolves.toBeTruthy();
         expect(
           result.brain.pages[0].locators.some(
             (locator) => locator.name === "Outside private control"

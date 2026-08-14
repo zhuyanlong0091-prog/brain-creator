@@ -137,6 +137,9 @@ export type BrowserSurfaceEvidence = {
   parentUrl?: string;
   accessible: boolean;
   interactiveCount: number;
+  title?: string;
+  domText?: string;
+  screenshotPath?: string;
   evidence?: string;
 };
 
