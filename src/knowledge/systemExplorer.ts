@@ -12,6 +12,7 @@ import type {
   PageCaptureEvidence,
   SystemExploration,
   SystemExplorationBudget,
+  SystemExplorationNavigationEdge,
   SystemInteractionState
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
@@ -273,6 +274,26 @@ export class SystemExplorationCoordinator {
           scenarioId: transition.scenarioId
         }));
       });
+      exploration.navigationEdges = mergeNavigationEdges([
+        ...exploration.navigationEdges,
+        ...exploration.interactionTransitions.flatMap((transition) => {
+          if (
+            transition.status !== "observed" ||
+            !transition.urlChanged ||
+            !isAllowedExplorationUrl(transition.after.url, allowedUrls)
+          ) {
+            return [];
+          }
+          const toUrl = canonicalUrl(transition.after.url);
+          return [{
+            fromUrl: transition.pageUrl,
+            toUrl,
+            text: transition.targetName,
+            fromPageModelId: transition.pageModelId,
+            toPageModelId: captured.get(toUrl)
+          }];
+        })
+      ]);
       exploration.warnings = [
         ...result.warnings,
         ...(result.budgetExhausted ? ["Exploration stopped at the approved budget."] : [])
@@ -1517,6 +1538,16 @@ function uniquePages(pages: SystemExplorationPage[]) {
   const seen = new Set<string>();
   return pages.filter((page) => {
     const key = canonicalUrl(page.evidence.finalUrl);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function mergeNavigationEdges(edges: SystemExplorationNavigationEdge[]) {
+  const seen = new Set<string>();
+  return edges.filter((edge) => {
+    const key = `${edge.fromUrl}\u0000${edge.toUrl}\u0000${edge.text}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
