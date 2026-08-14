@@ -8,7 +8,11 @@ import AdmZip from "adm-zip";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import { encryptSecrets } from "../shared/crypto.js";
-import { exportCaseSuiteArchive, writeArtifactManifest } from "./artifactArchive.js";
+import {
+  auditArtifactDirectory,
+  exportCaseSuiteArchive,
+  writeArtifactManifest
+} from "./artifactArchive.js";
 
 const tempDirs: string[] = [];
 
@@ -57,6 +61,52 @@ describe("artifact archive", () => {
     ).rejects.toThrow(
       "Artifact manifest blocked because sensitive values were found in: playwright-report.json"
     );
+  });
+
+  it("scans unlisted files in the owned artifact directory", async () => {
+    const root = await tempDir();
+    const owned = join(
+      root,
+      ".brain-creator",
+      "artifacts",
+      "system_orders",
+      "requirement_orders",
+      "suite_run_1"
+    );
+    await mkdir(owned, { recursive: true });
+    await writeFile(join(owned, "orphan.log"), "token=long-lived-token-123", "utf8");
+
+    await expect(
+      writeArtifactManifest({
+        workDir: root,
+        systemId: "system_orders",
+        requirementSetId: "requirement_orders",
+        suiteRunId: "suite_run_1",
+        artifactPaths: [],
+        protectedSecrets: { token: "long-lived-token-123" }
+      })
+    ).rejects.toThrow("unlisted files: .brain-creator/artifacts/system_orders/requirement_orders/suite_run_1/orphan.log");
+  });
+
+  it("flags protected auth state even without a matching secret value", async () => {
+    const root = await tempDir();
+    const authState = join(root, ".brain-creator", "auth", "system_orders", "storage-state.json");
+    await mkdir(dirname(authState), { recursive: true });
+    await writeFile(authState, JSON.stringify({ cookies: [], origins: [] }), "utf8");
+
+    await expect(
+      auditArtifactDirectory({
+        workDir: root,
+        directoryPath: ".brain-creator",
+        protectedSecrets: {}
+      })
+    ).resolves.toEqual({
+      filesScanned: 1,
+      findings: [{
+        path: ".brain-creator/auth/system_orders/storage-state.json",
+        secretKeys: ["protected-auth-artifact"]
+      }]
+    });
   });
 
   it("exports a suite run with manifest and available evidence without secrets", async () => {

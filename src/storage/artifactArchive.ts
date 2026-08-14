@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import AdmZip from "adm-zip";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CaseSuiteRun } from "../domain/types.js";
@@ -34,6 +34,43 @@ export type ArtifactManifestInput = {
   protectedSecrets?: Record<string, string>;
 };
 
+export type ArtifactSecurityFinding = {
+  path: string;
+  secretKeys: string[];
+};
+
+export async function auditArtifactDirectory(input: {
+  workDir: string;
+  directoryPath: string;
+  protectedSecrets?: Record<string, string>;
+}): Promise<{ filesScanned: number; findings: ArtifactSecurityFinding[] }> {
+  const root = resolve(input.workDir, input.directoryPath);
+  const files = await collectFiles(root);
+  const findings: ArtifactSecurityFinding[] = [];
+  for (const file of files) {
+    const relativePath = normalizeArchivePath(relative(input.workDir, file));
+    if (isProtectedAuthArtifact(relativePath)) {
+      findings.push({
+        path: relativePath,
+        secretKeys: ["protected-auth-artifact"]
+      });
+      continue;
+    }
+    const content = await readFile(file);
+    const matches = scanSensitiveText(
+      content.toString("utf8"),
+      Object.entries(input.protectedSecrets ?? {})
+    );
+    if (matches.length > 0) {
+      findings.push({
+        path: relativePath,
+        secretKeys: matches.map((match) => match.secretKey)
+      });
+    }
+  }
+  return { filesScanned: files.length, findings };
+}
+
 export async function writeArtifactManifest(input: ArtifactManifestInput): Promise<ArtifactManifest> {
   const createdAt = new Date().toISOString();
   const ownership = [
@@ -45,6 +82,22 @@ export async function writeArtifactManifest(input: ArtifactManifestInput): Promi
   ];
   const manifestPath = resolve(input.workDir, ...ownership, "manifest.json");
   const artifacts = await describeArtifacts(input.workDir, input.artifactPaths);
+  const directoryAudit = await auditArtifactDirectory({
+    workDir: input.workDir,
+    directoryPath: dirname(manifestPath),
+    protectedSecrets: input.protectedSecrets
+  });
+  const knownArtifactPaths = new Set(artifacts.map((item) => item.path));
+  const unlistedFindings = directoryAudit.findings.filter(
+    (finding) => !knownArtifactPaths.has(finding.path)
+  );
+  if (unlistedFindings.length > 0) {
+    throw new Error(
+      `Artifact manifest blocked because sensitive values were found in unlisted files: ${unlistedFindings
+        .map((finding) => finding.path)
+        .join(", ")}`
+    );
+  }
   const secretFindings = await scanArtifactSecrets(
     input.workDir,
     artifacts.filter((item) => item.status === "present"),
@@ -180,6 +233,24 @@ async function scanArtifactSecrets(
     }
   }
   return findings;
+}
+
+async function collectFiles(root: string): Promise<string[]> {
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const files: string[] = [];
+    for (const entry of entries) {
+      const file = resolve(root, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...(await collectFiles(file)));
+      } else if (entry.isFile()) {
+        files.push(file);
+      }
+    }
+    return files;
+  } catch {
+    return [];
+  }
 }
 
 function scanSensitiveText(content: string, entries: Array<readonly [string, string]>) {
