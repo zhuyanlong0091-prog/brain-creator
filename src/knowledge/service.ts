@@ -326,6 +326,7 @@ export class KnowledgeService {
     actionIds: string[];
     note: string;
     confirm: boolean;
+    confirmedBy?: string;
   }) {
     if (!input.confirm) {
       throw new Error("Explicit confirmation is required for Requirement Eval actions");
@@ -358,6 +359,10 @@ export class KnowledgeService {
     }
 
     const confirmedAt = timestamp();
+    const confirmedBy =
+      input.confirmedBy?.trim() ||
+      process.env.BRAIN_CREATOR_OPERATOR?.trim() ||
+      "local-agent";
     const resolvedGapIds: string[] = [];
     const module =
       this.repository.knowledgeNodes.find(
@@ -367,6 +372,7 @@ export class KnowledgeService {
       if (action.status === "confirmed") continue;
       action.status = "confirmed";
       action.confirmedAt = confirmedAt;
+      action.confirmedBy = confirmedBy;
       action.confirmationNote = note;
       const resolutionSourceRef = `${requirementSet.id}#eval-action-${action.id}`;
       const resolutionNode: KnowledgeNode = {
@@ -1815,6 +1821,7 @@ export class KnowledgeService {
               `- Requirement evidence: ${action.sourceRefs.join(", ") || "None"}`,
               `- Resolution node: ${action.resolutionNodeId ?? "None"}`,
               `- Confirmed at: ${action.confirmedAt ?? "Not confirmed"}`,
+              `- Confirmed by: ${action.confirmedBy ?? "Not recorded"}`,
               `- Confirmation: ${action.confirmationNote ?? "None"}`,
               ""
             ])

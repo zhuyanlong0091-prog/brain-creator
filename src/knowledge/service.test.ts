@@ -408,7 +408,8 @@ describe("KnowledgeService", () => {
       requirementSetId: ingested.requirementSet.id,
       actionIds: [pendingAction.id],
       note: "If approval does not occur, the order remains in draft.",
-      confirm: true
+      confirm: true,
+      confirmedBy: "reviewer@example.test"
     });
     const confirmationReport = await readFile(
       join(
@@ -426,10 +427,12 @@ describe("KnowledgeService", () => {
       expect.objectContaining({
         status: "confirmed",
         confirmationNote: "If approval does not occur, the order remains in draft.",
-        confirmedAt: expect.any(String)
+        confirmedAt: expect.any(String),
+        confirmedBy: "reviewer@example.test"
       })
     );
     expect(confirmationReport).toContain("If approval does not occur");
+    expect(confirmationReport).toContain("reviewer@example.test");
     expect(restored.approveRequirementSet(ingested.requirementSet.id).status).toBe("approved");
     const compiled = restored.compileExecutableCases(design.testIntents[0].id).executableCase;
     expect(compiled.steps.every((step) =>

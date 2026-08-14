@@ -783,7 +783,8 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       requirementSetId,
       actionIds: stringArrayArg(input, "actionIds"),
       note: stringArg(input, "confirmationNote"),
-      confirm: true
+      confirm: true,
+      confirmedBy: optionalStringArg(input, "confirmedBy")
     });
   }
   if (action === "approve-baseline") {

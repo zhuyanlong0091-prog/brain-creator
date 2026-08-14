@@ -186,6 +186,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       interactionMode: z.enum(["off", "safe"]).default("off"),
       maxInteractionsPerPage: z.number().int().min(0).max(10).optional(),
       actionIds: z.array(z.string()).default([]),
+      confirmedBy: z.string().optional(),
       executableCaseId: z.string().optional(),
       taskId: z.string().optional(),
       taskStatus: z.enum(["succeeded", "failed"]).optional(),

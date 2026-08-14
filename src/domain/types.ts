@@ -665,6 +665,7 @@ export type RequirementEvalAction = {
   status: "pending" | "confirmed" | "blocked";
   createdAt: string;
   confirmedAt?: string;
+  confirmedBy?: string;
   confirmationNote?: string;
   resolutionNodeId?: string;
 };
