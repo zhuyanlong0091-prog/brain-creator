@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { InMemoryBrainCreatorRepository } from "../domain/repository.js";
+import { encryptSecrets } from "../shared/crypto.js";
 import { RunLedgerService } from "./runLedger.js";
 
 describe("RunLedgerService", () => {
@@ -145,5 +146,37 @@ describe("RunLedgerService", () => {
         outcomes: { passed: 1 }
       })
     );
+  });
+
+  it("redacts protected values before writing ledger messages and steps", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.authProfiles.push({
+      id: "auth-orders",
+      projectId: "system-orders",
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      encryptedSecrets: encryptSecrets({ token: "ledger-token-123" }),
+      status: "succeeded",
+      createdAt: "2026-08-12T00:00:00.000Z",
+      updatedAt: "2026-08-12T00:00:00.000Z"
+    });
+    const ledger = new RunLedgerService(repository);
+
+    const entry = ledger.append({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      requirementSuiteRunId: "suite-orders",
+      event: "case-completed",
+      scope: "case",
+      stage: "execution",
+      toStatus: "failed",
+      currentStep: "submit token=ledger-token-123",
+      message: "Observed ledger-token-123 in response"
+    });
+
+    expect(entry.currentStep).not.toContain("ledger-token-123");
+    expect(entry.message).not.toContain("ledger-token-123");
+    expect(repository.runLedgerEntries[0]).toEqual(entry);
   });
 });

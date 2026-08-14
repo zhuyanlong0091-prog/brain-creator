@@ -1,5 +1,6 @@
 import { InMemoryBrainCreatorRepository } from "./repository.js";
 import { decryptSecrets, encryptSecrets, migrateEncryptedSecrets, redactSecrets } from "../shared/crypto.js";
+import { redactSensitiveText } from "../shared/secretScan.js";
 import { id } from "../shared/id.js";
 import type {
   ActionStep,
@@ -366,6 +367,7 @@ export class BrainCreatorService {
 
   createBugReport(input: CreateBugReportInput): BugReport {
     const now = timestamp();
+    const redact = (value: string) => this.redactSystemText(input.systemId, value);
     const bug: BugReport = {
       id: id("bug"),
       systemId: input.systemId,
@@ -375,9 +377,9 @@ export class BrainCreatorService {
       caseTitle: input.caseTitle,
       module: input.module,
       priority: input.priority,
-      expectedResult: input.expectedResult,
-      actualResult: input.actualResult,
-      reproductionSteps: input.reproductionSteps,
+      expectedResult: redact(input.expectedResult),
+      actualResult: redact(input.actualResult),
+      reproductionSteps: input.reproductionSteps.map(redact),
       evidencePaths: input.evidencePaths,
       chainRunId: input.chainRunId,
       diagnosisId: input.diagnosisId,
@@ -1603,7 +1605,7 @@ export class BrainCreatorService {
       ...(gap.lifecycle ?? []),
       {
         operation: input.operation,
-        note,
+        note: this.redactSystemText(gap.projectId, note),
         evidenceRefs: [...new Set(input.evidenceRefs)],
         createdAt: now
       }
@@ -1627,13 +1629,28 @@ export class BrainCreatorService {
       projectId,
       sourceType,
       sourceId,
-      reason,
+      reason: this.redactSystemText(projectId, reason),
       severity,
       owner,
       status: "open",
       createdAt: now,
       updatedAt: now
     };
+  }
+
+  private redactSystemText(systemId: string, value: string) {
+    const secrets = Object.fromEntries(
+      this.repository.authProfiles
+        .filter((profile) => profile.projectId === systemId)
+        .flatMap((profile) => {
+          try {
+            return Object.entries(decryptSecrets(profile.encryptedSecrets));
+          } catch {
+            return [];
+          }
+        })
+    );
+    return redactSensitiveText(value, secrets);
   }
 
   private setAuthCheckpointStatus(

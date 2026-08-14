@@ -4,6 +4,8 @@ import type {
 } from "../domain/types.js";
 import { randomUUID } from "node:crypto";
 import { id } from "../shared/id.js";
+import { decryptSecrets } from "../shared/crypto.js";
+import { redactSensitiveText } from "../shared/secretScan.js";
 
 type AppendRunLedgerEntryInput = Omit<RunLedgerEntry, "id" | "createdAt">;
 
@@ -25,6 +27,11 @@ export class RunLedgerService {
 
   append(input: AppendRunLedgerEntryInput): RunLedgerEntry {
     assertRunIdentity(input);
+    const secrets = protectedSecrets(this.repository, input.systemId);
+    const redact = (value?: string) =>
+      value === undefined ? undefined : redactSensitiveText(value, secrets);
+    const message = redact(input.message);
+    const currentStep = redact(input.currentStep);
     const entry: RunLedgerEntry = {
       id: id("runLedger"),
       ...input,
@@ -38,6 +45,8 @@ export class RunLedgerService {
         "unknown",
       sessionId: input.sessionId ?? process.env.BRAIN_CREATOR_SESSION_ID,
       traceId: input.traceId ?? randomUUID(),
+      ...(message === undefined ? {} : { message }),
+      ...(currentStep === undefined ? {} : { currentStep }),
       createdAt: this.now()
     };
     this.repository.runLedgerEntries.push(entry);
@@ -108,6 +117,23 @@ export class RunLedgerService {
       )
     };
   }
+}
+
+function protectedSecrets(
+  repository: InMemoryBrainCreatorRepository,
+  systemId: string
+) {
+  return Object.fromEntries(
+    repository.authProfiles
+      .filter((profile) => profile.projectId === systemId)
+      .flatMap((profile) => {
+        try {
+          return Object.entries(decryptSecrets(profile.encryptedSecrets));
+        } catch {
+          return [];
+        }
+      })
+  );
 }
 
 function assertRunIdentity(input: AppendRunLedgerEntryInput) {

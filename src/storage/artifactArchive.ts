@@ -66,6 +66,17 @@ export async function writeArtifactManifest(input: ArtifactManifestInput): Promi
     artifacts,
     sourceRefs: [...new Set(input.sourceRefs ?? [])]
   };
+  const manifestFindings = scanSensitiveText(
+    JSON.stringify(manifest),
+    Object.entries(input.protectedSecrets ?? {})
+  );
+  if (manifestFindings.length > 0) {
+    throw new Error(
+      `Artifact manifest blocked because sensitive values were found in manifest: ${manifestFindings
+        .map((finding) => finding.secretKey)
+        .join(", ")}`
+    );
+  }
   await mkdir(dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
   return manifest;
@@ -80,6 +91,18 @@ export async function exportCaseSuiteArchive(input: {
   const suiteRun = input.repository.caseSuiteRuns.find((item) => item.id === input.suiteRunId);
   if (!suiteRun) throw new Error("Case suite run not found");
   const described = await describeArtifacts(input.workDir, suiteRun.artifactPaths);
+  const protectedSecrets = input.repository.authProfiles
+    .filter((profile) => profile.projectId === suiteRun.systemId)
+    .flatMap((profile) => {
+      try {
+        return Object.entries(decryptSecrets(profile.encryptedSecrets)).map(([key, value]) => [
+          `${profile.id}.${key}`,
+          value
+        ] as const);
+      } catch {
+        return [];
+      }
+    });
   const protectedArtifacts = described
     .filter((item) => item.status === "present" && isProtectedAuthArtifact(item.path));
   if (protectedArtifacts.length > 0) {
@@ -92,18 +115,7 @@ export async function exportCaseSuiteArchive(input: {
   const secretFindings = await scanArtifactSecrets(
     input.workDir,
     described.filter((item) => item.status === "present"),
-    input.repository.authProfiles
-      .filter((profile) => profile.projectId === suiteRun.systemId)
-      .flatMap((profile) => {
-        try {
-          return Object.entries(decryptSecrets(profile.encryptedSecrets)).map(([key, value]) => [
-            `${profile.id}.${key}`,
-            value
-          ] as const);
-        } catch {
-          return [];
-        }
-      })
+    protectedSecrets
   );
   if (secretFindings.length > 0) {
     throw new Error(
@@ -123,6 +135,17 @@ export async function exportCaseSuiteArchive(input: {
     artifacts: described.filter((item) => item.status === "present"),
     missingArtifacts: described.filter((item) => item.status === "missing").map((item) => item.path)
   };
+  const manifestFindings = scanSensitiveText(
+    JSON.stringify(manifest),
+    protectedSecrets
+  );
+  if (manifestFindings.length > 0) {
+    throw new Error(
+      `Artifact export blocked because sensitive values were found in export manifest: ${manifestFindings
+        .map((finding) => finding.secretKey)
+        .join(", ")}`
+    );
+  }
   const zip = new AdmZip();
   zip.addFile("manifest.json", Buffer.from(JSON.stringify(manifest, null, 2), "utf8"));
   for (const artifact of described.filter((item) => item.status === "present")) {
@@ -145,23 +168,29 @@ async function scanArtifactSecrets(
   artifacts: ArtifactManifestItem[],
   entries: Array<readonly [string, string]>
 ) {
-  const secrets = Object.fromEntries(entries);
   const findings: Array<{ path: string; secretKeys: string[] }> = [];
   for (const artifact of artifacts) {
     const content = await readFile(resolve(workDir, artifact.path));
-    const matches = scanSensitiveValues(content.toString("utf8"), secrets);
-    const patternMatches = scanSensitivePatterns(content.toString("utf8"));
-    if (matches.length > 0 || patternMatches.length > 0) {
+    const matches = scanSensitiveText(content.toString("utf8"), entries);
+    if (matches.length > 0) {
       findings.push({
         path: artifact.path,
-        secretKeys: [
-          ...matches.map((match) => match.secretKey),
-          ...patternMatches.map((match) => `pattern:${match.rule}`)
-        ]
+        secretKeys: matches.map((match) => match.secretKey)
       });
     }
   }
   return findings;
+}
+
+function scanSensitiveText(content: string, entries: Array<readonly [string, string]>) {
+  const secrets = Object.fromEntries(entries);
+  return [
+    ...scanSensitiveValues(content, secrets),
+    ...scanSensitivePatterns(content).map((finding) => ({
+      secretKey: `pattern:${finding.rule}`,
+      matchedLength: finding.matchedLength
+    }))
+  ];
 }
 
 async function describeArtifacts(workDir: string, paths: string[]) {

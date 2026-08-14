@@ -185,6 +185,56 @@ describe("artifact archive", () => {
     ).rejects.toThrow("Artifact export blocked because sensitive values were found in: generated.spec.ts");
   });
 
+  it("blocks exporting suite metadata that contains a saved credential", async () => {
+    const root = await tempDir();
+    const artifact = join(root, "report.html");
+    await writeFile(artifact, "<html>report</html>", "utf8");
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.authProfiles.push({
+      id: "auth_orders",
+      projectId: "system_orders",
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      encryptedSecrets: encryptSecrets({ token: "metadata-token-123" }),
+      status: "succeeded",
+      createdAt: "2026-08-12T00:00:00.000Z",
+      updatedAt: "2026-08-12T00:00:00.000Z"
+    });
+    repository.caseSuiteRuns.push({
+      id: "suite_run_metadata_secret",
+      systemId: "system_orders",
+      suiteId: "suite_1",
+      sourceId: "source_1",
+      status: "failed",
+      total: 1,
+      passed: 0,
+      failed: 1,
+      blocked: 0,
+      caseResults: [{
+        caseNo: "TC-001",
+        title: "Create order",
+        status: "failed",
+        gapIds: [],
+        error: "Observed token metadata-token-123 in response"
+      }],
+      artifactPaths: [artifact],
+      bugReportIds: [],
+      gapIds: [],
+      createdAt: "2026-08-12T00:00:00.000Z",
+      completedAt: "2026-08-12T00:01:00.000Z"
+    });
+
+    await expect(
+      exportCaseSuiteArchive({
+        repository,
+        workDir: root,
+        suiteRunId: "suite_run_metadata_secret",
+        outputPath: join(root, "exports", "suite.zip")
+      })
+    ).rejects.toThrow("Artifact export blocked because sensitive values were found in export manifest");
+  });
+
   it("never exports protected browser authentication state", async () => {
     const root = await tempDir();
     const repository = new InMemoryBrainCreatorRepository();
