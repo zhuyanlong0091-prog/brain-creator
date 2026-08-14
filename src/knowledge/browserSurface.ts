@@ -2,6 +2,19 @@ import type { BrowserSurfaceEvidence } from "../domain/types.js";
 
 type PlaywrightPage = import("@playwright/test").Page;
 
+export type BrowserChildFrameEntry = {
+  frame: import("@playwright/test").Frame;
+  /** Ordinal among all non-main frames, before allowlist filtering. */
+  frameIndex: number;
+};
+
+export function stableChildFrameEntries(page: PlaywrightPage): BrowserChildFrameEntry[] {
+  return page
+    .frames()
+    .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
+    .map((frame, frameIndex) => ({ frame, frameIndex }));
+}
+
 export async function capturePopupSurfaceEvidence(
   popup: PlaywrightPage,
   parentUrl: string,
@@ -44,8 +57,7 @@ export async function collectBrowserSurfaceEvidence(
     interactiveCount: await interactiveCount(page).catch(() => 0)
   }];
 
-  const childFrames = page.frames().filter((frame) => frame !== page.mainFrame());
-  for (const [frameIndex, frame] of childFrames.entries()) {
+  for (const { frame, frameIndex } of stableChildFrameEntries(page)) {
     const url = frame.url() || mainUrl;
     const accessible = isAllowedUrl(url, allowedUrls);
     surfaces.push({

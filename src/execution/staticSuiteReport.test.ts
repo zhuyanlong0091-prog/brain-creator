@@ -144,6 +144,19 @@ describe("static suite execution report", () => {
     expect(html).toContain("搜索报告");
     expect(html).toContain("用例");
   });
+
+  it("does not rewrite business evidence while localizing the report chrome", () => {
+    const html = renderStaticSuiteExecutionReport({
+      title: "Localized suite",
+      run: run(),
+      locale: "zh-CN",
+      evidence: [],
+      bugs: [{ id: "bug-1", status: "open", actualResult: "Status: None in the source result" }]
+    });
+
+    expect(html).toContain("Status: None in the source result");
+    expect(html).toContain("状态：");
+  });
 });
 
 function run(): RequirementSuiteRun {

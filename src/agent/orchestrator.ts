@@ -345,6 +345,13 @@ export async function runChain(input: RunChainInput) {
   const structuredReporterEnabled = input.structuredReporter ?? !input.runner;
   const runPlaywright = async (): Promise<CommandResult> => {
     const generatedSource = await readGeneratedSource(testPath);
+    if (structuredReporterEnabled && !generatedSource?.trim()) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Generated Playwright test file is missing or empty; strict execution is blocked."
+      };
+    }
     if (generatedSource) {
       const secretFindings = scanGeneratedSourceSecrets(
         generatedSource,
@@ -673,12 +680,24 @@ async function verifyActorRoleEvidence(
   }
   const observedRoles = new Set<string>();
   const observedEnteredRoles: string[] = [];
+  const observedEnteredAuthProfiles: Array<{ role: string; authProfileId?: string }> = [];
   for (const line of content.split(/\r?\n/).filter(Boolean)) {
     try {
-      const event = JSON.parse(line) as { role?: unknown; event?: unknown };
+      const event = JSON.parse(line) as {
+        role?: unknown;
+        authProfileId?: unknown;
+        event?: unknown;
+      };
       if (typeof event.role === "string") {
         observedRoles.add(event.role);
-        if (event.event === "entered") observedEnteredRoles.push(event.role);
+        if (event.event === "entered") {
+          observedEnteredRoles.push(event.role);
+          observedEnteredAuthProfiles.push({
+            role: event.role,
+            authProfileId:
+              typeof event.authProfileId === "string" ? event.authProfileId : undefined
+          });
+        }
       }
     } catch {
       return {
@@ -694,6 +713,18 @@ async function verifyActorRoleEvidence(
     return {
       valid: false as const,
       reason: `Runtime actor evidence is missing role(s): ${missingRoles.join(", ")}.`
+    };
+  }
+  const expectedAuthProfiles = new Map(
+    actorJourney.map((actor) => [actor.role, actor.authProfile.id])
+  );
+  const authProfileMismatches = observedEnteredAuthProfiles.filter(
+    (event) => event.authProfileId !== expectedAuthProfiles.get(event.role)
+  );
+  if (authProfileMismatches.length > 0) {
+    return {
+      valid: false as const,
+      reason: `Runtime actor evidence maps role(s) to an unexpected AuthProfile: ${authProfileMismatches.map((event) => event.role).join(", ")}.`
     };
   }
   const declaredRoles = actorJourney.map((actor) => actor.role);

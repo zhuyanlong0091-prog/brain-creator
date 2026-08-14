@@ -140,6 +140,7 @@ describe("generateSeedFile", () => {
     expect(content).toContain("runAsRole");
     expect(content).toContain("BRAIN_CREATOR_ACTOR_EVIDENCE_PATH");
     expect(content).toContain('recordRole("entered")');
+    expect(content).toContain("authProfileId: config.authProfileId");
     expect(content).toContain('"recruiter"');
     expect(content).toContain('"approver"');
     expect(content).not.toContain("secret-token");

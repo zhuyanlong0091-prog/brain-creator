@@ -22,6 +22,7 @@ export async function generateSeedFile(input: GenerateSeedFileInput) {
       const roleSecrets = decryptSecrets(authProfile.encryptedSecrets);
       return {
         role,
+        authProfileId: authProfile.id,
         storageStatePath: await resolveAuthStorageState(
           { ...input, authProfile },
           roleSecrets.storageStatePath
@@ -121,6 +122,7 @@ function formatActorRoleHelper(
   baseUrl: string,
   actorRoles: Array<{
     role: string;
+    authProfileId: string;
     storageStatePath: string | undefined;
     loginMethod: AuthProfile["loginMethod"];
     hasToken: boolean;
@@ -145,7 +147,7 @@ function formatActorRoleHelper(
     `    const roles = {\n${roleConfig}\n    };`,
     `    const config = roles[role as keyof typeof roles];`,
     `    if (!config) throw new Error(\`Unknown Brain Creator actor role: \${role}\`);`,
-    `    const recordRole = async (event: string) => { const evidencePath = process.env.BRAIN_CREATOR_ACTOR_EVIDENCE_PATH; if (evidencePath) await import("node:fs/promises").then(({ appendFile }) => appendFile(evidencePath, JSON.stringify({ role, event, at: new Date().toISOString() }) + "\\n", "utf8")); };`,
+    `    const recordRole = async (event: string) => { const evidencePath = process.env.BRAIN_CREATOR_ACTOR_EVIDENCE_PATH; if (evidencePath) await import("node:fs/promises").then(({ appendFile }) => appendFile(evidencePath, JSON.stringify({ role, authProfileId: config.authProfileId, event, at: new Date().toISOString() }) + "\\n", "utf8")); };`,
     `    const context = await browser.newContext(config.storageStatePath ? { storageState: config.storageStatePath } : {});`,
     `    const page = await context.newPage();`,
     `    await page.goto(${JSON.stringify(baseUrl)});`,

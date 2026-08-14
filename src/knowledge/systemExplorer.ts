@@ -19,7 +19,8 @@ import { id } from "../shared/id.js";
 import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
 import {
   capturePopupSurfaceEvidence,
-  collectBrowserSurfaceEvidence
+  collectBrowserSurfaceEvidence,
+  stableChildFrameEntries as stableBrowserChildFrameEntries
 } from "./browserSurface.js";
 import type { KnowledgeService } from "./service.js";
 
@@ -1881,10 +1882,7 @@ function uniqueSorted(values: string[]) {
 }
 
 export function stableChildFrameEntries(page: import("@playwright/test").Page) {
-  return page
-    .frames()
-    .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
-    .map((frame, frameIndex) => ({ frame, frameIndex }));
+  return stableBrowserChildFrameEntries(page);
 }
 
 function interactionTimeout(deadline: number) {
