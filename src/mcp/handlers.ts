@@ -1803,7 +1803,7 @@ async function executeDocumentCase(
       failureReason,
       sourceType: "case-source-suite",
       healAttempts: result.healerRuns.length,
-      maxHealAttempts: input.maxHealAttempts ?? 3,
+      maxHealAttempts: input.maxHealAttempts ?? 2,
       evidenceAssurance: result.testResult?.structuredReporter ? "strong" : "none",
       evidenceRefs: [
         result.chainRun.id,
@@ -3141,7 +3141,7 @@ async function executeRequirementSuiteCase(
             "healerRuns" in result && Array.isArray(result.healerRuns)
               ? result.healerRuns.length
               : 0,
-          maxHealAttempts: input.maxHealAttempts ?? 3,
+          maxHealAttempts: input.maxHealAttempts ?? 2,
           evidenceAssurance: executionEvidence.assuranceLevel,
           evidenceRefs: [
             executionEvidence.id,

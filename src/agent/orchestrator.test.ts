@@ -9,6 +9,7 @@ import {
   runAgent,
   runChain,
   validateActorJourneyUsage,
+  validateHealerMutation,
   validateStepInstrumentation
 } from "./orchestrator.js";
 import { encryptSecrets } from "../shared/crypto.js";
@@ -57,6 +58,44 @@ describe("step instrumentation guard", () => {
       .toEqual({ valid: true });
     expect(validateStepInstrumentation("// bc.step(\"step-create\", page, action);", ["step-create"]).valid)
       .toBe(false);
+  });
+});
+
+describe("healer mutation guard", () => {
+  it("rejects a healer mutation that removes assertions or step instrumentation", () => {
+    const before = `await bc.step("step-create", page, async () => { await expect(page.getByText("Created")).toBeVisible(); });`;
+    const removedAssertion = `await bc.step("step-create", page, async () => { await page.getByText("Created").click(); });`;
+    const removedStep = `await expect(page.getByText("Created")).toBeVisible();`;
+
+    expect(validateHealerMutation(before, removedAssertion, ["step-create"])).toEqual({
+      valid: false,
+      reason: expect.stringContaining("assertion")
+    });
+    expect(validateHealerMutation(before, removedStep, ["step-create"])).toEqual({
+      valid: false,
+      reason: expect.stringContaining("bc.step")
+    });
+  });
+
+  it("rejects healer attempts that skip or isolate tests", () => {
+    const before = `test("case", async () => { await expect(true).toBeTruthy(); });`;
+
+    expect(validateHealerMutation(before, `test.skip("case", async () => {});`, [])).toEqual({
+      valid: false,
+      reason: expect.stringContaining("skip")
+    });
+    expect(validateHealerMutation(before, `test.only("case", async () => { await expect(true).toBeTruthy(); });`, [])).toEqual({
+      valid: false,
+      reason: expect.stringContaining("only")
+    });
+    expect(validateHealerMutation(
+      "assert.equal(result, true);",
+      "",
+      []
+    )).toEqual({
+      valid: false,
+      reason: expect.stringContaining("assertion")
+    });
   });
 });
 
@@ -194,6 +233,56 @@ describe("generatePlanDraft", () => {
 });
 
 describe("runChain", () => {
+  it("stops before rerunning Playwright when Healer removes an assertion", async () => {
+    const workDir = await tempDir();
+    let testRuns = 0;
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      testCase: approvedTestCase(),
+      structuredReporter: true,
+      requiredStepIds: ["step-1"],
+      agentBridge: async ({ agent, outputPaths }) => {
+        if (agent === "generator") {
+          await writeFile(
+            outputPaths[0],
+            `await bc.step("step-1", page, async () => { await expect(page.getByText("Created")).toBeVisible(); });`,
+            "utf8"
+          );
+        } else {
+          await writeFile(
+            outputPaths[0],
+            `await bc.step("step-1", page, async () => { await page.getByText("Created").click(); });`,
+            "utf8"
+          );
+        }
+        return { exitCode: 0, stdout: "agent ok", stderr: "" };
+      },
+      runner: async (_command, args) => {
+        if (args.includes("--reporter=json")) {
+          testRuns += 1;
+          return {
+            exitCode: 1,
+            stdout: JSON.stringify({
+              stats: { duration: 1, expected: 0, unexpected: 1, skipped: 0 },
+              suites: [{ specs: [{ title: "step-1", tests: [{ results: [{ status: "failed" }] }] }] }]
+            }),
+            stderr: "assertion failed"
+          };
+        }
+        return { exitCode: 0, stdout: "agent ok", stderr: "" };
+      },
+      maxHealAttempts: 1
+    });
+
+    expect(testRuns).toBe(1);
+    expect(result.healerRuns).toEqual([
+      expect.objectContaining({ status: "failed", error: expect.stringContaining("assertion") })
+    ]);
+    expect(result.chainRun.status).toBe("failed");
+  });
+
   it("fails closed when strict Reporter mode receives no structured output", async () => {
     const result = await runChain({
       workDir: await tempDir(),

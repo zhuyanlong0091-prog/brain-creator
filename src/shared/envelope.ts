@@ -101,6 +101,53 @@ function errorDetail(error: unknown, message: string): BrainCreatorErrorDetail {
       "approve-baseline"
     );
   }
+  if (/reporter.*missing|not auditable/i.test(message)) {
+    return knownError(
+      "BC_REPORTER_MISSING",
+      message,
+      "Structured Playwright evidence was not produced, so the result cannot be treated as auditable.",
+      "未生成结构化 Playwright 证据，当前结果不能作为可审计结果。",
+      "inspect-reporter-output"
+    );
+  }
+  if (/bridge.*timed out|bridge.*timeout|agent.*command timed out|BRAIN_CREATOR_AGENT_COMMAND/i.test(message)) {
+    return knownError(
+      "BC_AGENT_BRIDGE_TIMEOUT",
+      message,
+      "The Agent bridge did not respond before the configured timeout.",
+      "Agent Bridge 未在配置的超时时间内响应。",
+      "configure-agent-bridge",
+      true
+    );
+  }
+  if (/store.*locked|locked by another writer/i.test(message)) {
+    return knownError(
+      "BC_STORE_LOCKED",
+      message,
+      "The Brain Creator store is busy. Retry after the active writer finishes.",
+      "Brain Creator 存储正在被其他写入者占用，请稍后重试。",
+      "retry-store-operation",
+      true
+    );
+  }
+  if (/outside.*workspace|must stay inside.*workspace/i.test(message)) {
+    return knownError(
+      "BC_PATH_OUTSIDE_WORKSPACE",
+      message,
+      "The requested path is outside the Brain Creator workspace.",
+      "请求路径位于 Brain Creator 工作区之外。",
+      "choose-workspace-path"
+    );
+  }
+  if (/budget|maximum.*attempt|heal.*exhausted|too many retries/i.test(message)) {
+    return knownError(
+      "BC_EXECUTION_BUDGET_EXCEEDED",
+      message,
+      "The execution safety budget was reached before the task completed.",
+      "任务在完成前已达到执行安全预算。",
+      "review-run-and-gap"
+    );
+  }
   if (/ is required| is invalid|unsupported/i.test(message)) {
     return knownError(
       "BC_INVALID_ARGUMENT",

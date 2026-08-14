@@ -443,13 +443,14 @@ export async function runChain(input: RunChainInput) {
           stderr: generateRun.error ?? "Generator agent failed"
         };
   const healerRuns: AgentRun[] = [];
-  const maxHealAttempts = input.maxHealAttempts ?? 3;
+  const maxHealAttempts = input.maxHealAttempts ?? 2;
 
   for (
     let attempt = 0;
     generateRun.status === "succeeded" && testResult.exitCode !== 0 && attempt < maxHealAttempts;
     attempt += 1
   ) {
+    const beforeHealSource = await readGeneratedSource(testPath);
     const healerRun = await runAgent({
       systemId: input.system.id,
       agent: "healer",
@@ -467,8 +468,22 @@ export async function runChain(input: RunChainInput) {
       agentBridge: input.agentBridge,
       protectedSecrets
     });
-    healerRuns.push(healerRun);
-    if (healerRun.status !== "succeeded") {
+    const afterHealSource = await readGeneratedSource(testPath);
+    const mutationCheck = beforeHealSource && afterHealSource
+      ? validateHealerMutation(beforeHealSource, afterHealSource, input.requiredStepIds ?? [])
+      : beforeHealSource && !afterHealSource
+        ? { valid: false as const, reason: "Healer removed the generated test file." }
+        : { valid: true as const };
+    const guardedHealerRun = !mutationCheck.valid
+      ? {
+          ...healerRun,
+          status: "failed" as const,
+          error: mutationCheck.reason,
+          logs: [...healerRun.logs, mutationCheck.reason]
+        }
+      : healerRun;
+    healerRuns.push(guardedHealerRun);
+    if (guardedHealerRun.status !== "succeeded") {
       break;
     }
     testResult = await runPlaywright();
@@ -605,6 +620,36 @@ export function validateStepInstrumentation(source: string, stepIds: string[]) {
         reason: `Generated test is missing bc.step instrumentation for: ${missingStepIds.join(", ")}.`
       }
     : { valid: true as const };
+}
+
+export function validateHealerMutation(
+  beforeSource: string,
+  afterSource: string,
+  requiredStepIds: string[]
+) {
+  const before = removeSourceComments(beforeSource);
+  const after = removeSourceComments(afterSource);
+  if (/\b(?:test|it|describe)\.skip\s*\(/.test(after)) {
+    return { valid: false as const, reason: "Healer introduced a skipped test." };
+  }
+  if (/\b(?:test|it|describe)\.only\s*\(/.test(after)) {
+    return { valid: false as const, reason: "Healer introduced an isolated test.only/it.only/describe.only." };
+  }
+  const instrumentation = validateStepInstrumentation(after, requiredStepIds);
+  if (!instrumentation.valid) return instrumentation;
+  const beforeAssertions = countAssertions(before);
+  const afterAssertions = countAssertions(after);
+  if (afterAssertions < beforeAssertions) {
+    return {
+      valid: false as const,
+      reason: `Healer removed assertion(s): ${beforeAssertions} before, ${afterAssertions} after.`
+    };
+  }
+  return { valid: true as const };
+}
+
+function countAssertions(source: string) {
+  return (source.match(/\bexpect(?:\.soft)?\s*\(|\bassert(?:\.[A-Za-z]+)?\s*\(/g) ?? []).length;
 }
 
 function removeSourceComments(source: string) {
