@@ -527,6 +527,11 @@ describe("System exploration coordinator", () => {
           `);
           return;
         }
+        if (request.url === "/outside-frame") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end("<button>Outside private control</button>");
+          return;
+        }
         if (request.method === "POST") writeRequests += 1;
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         response.end(`
@@ -546,6 +551,7 @@ describe("System exploration coordinator", () => {
               </div>
               <iframe src="/frame" title="Embedded form"></iframe>
               <iframe src="/frame" title="Embedded form duplicate"></iframe>
+              <iframe src="http://localhost:${address.port}/outside-frame" title="Outside surface"></iframe>
               <div id="shadow-host"></div>
               <wujie-app id="wujie-host"></wujie-app>
               <label>
@@ -669,7 +675,14 @@ describe("System exploration coordinator", () => {
         expect(syncType).toEqual(
           expect.objectContaining({
             status: "blocked",
-            blockedRequests: [expect.objectContaining({ method: "POST" })]
+            blockedRequests: [expect.objectContaining({ method: "POST" })],
+            changedControls: [
+              expect.objectContaining({
+                name: "Sync Type",
+                before: "manual",
+                after: "automatic"
+              })
+            ]
           })
         );
         expect(
@@ -708,6 +721,11 @@ describe("System exploration coordinator", () => {
             expect.objectContaining({ kind: "wujie" })
           ])
         );
+        expect(
+          result.brain.pages[0].locators.some(
+            (locator) => locator.name === "Outside private control"
+          )
+        ).toBe(false);
         const frameModes = result.exploration.interactionTransitions.filter(
           (transition) => transition.targetName === "Frame Mode"
         );

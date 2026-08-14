@@ -42,6 +42,7 @@ export type SystemInteractionEvidence = {
   visibleRemoved: string[];
   dialogAdded: string[];
   dialogRemoved: string[];
+  changedControls?: Array<{ name: string; before: string; after: string }>;
   urlChanged: boolean;
   blockedRequests: Array<{ method: string; url: string }>;
   status: "observed" | "no-change" | "blocked" | "failed";
@@ -266,6 +267,7 @@ export class SystemExplorationCoordinator {
           visibleRemoved: transition.visibleRemoved,
           dialogAdded: transition.dialogAdded,
           dialogRemoved: transition.dialogRemoved,
+          changedControls: transition.changedControls,
           urlChanged: transition.urlChanged,
           blockedRequests: transition.blockedRequests,
           status: transition.status,
@@ -638,7 +640,7 @@ async function probeSafeInteractions(input: {
   const registerPopupListener = (page: import("@playwright/test").Page) => {
     page.on("popup", (popup) => input.popups.push(popup));
   };
-  const candidates = (await collectInteractionCandidates(activePage))
+  const candidates = (await collectInteractionCandidates(activePage, input.allowedUrls))
     .map((candidate) => ({
       candidate,
       decision: classifySafeInteractionCandidate(candidate, input.scenario)
@@ -669,7 +671,7 @@ async function probeSafeInteractions(input: {
     const { candidate, decision } = candidates[index];
     let before: SystemInteractionState;
     try {
-      before = await captureInteractionState(activePage);
+      before = await captureInteractionState(activePage, input.allowedUrls);
     } catch {
       break;
     }
@@ -703,7 +705,7 @@ async function probeSafeInteractions(input: {
       let actionCompleted = false;
       for (let attempt = 0; attempt < 2 && !actionCompleted; attempt += 1) {
         try {
-          const target = interactionLocator(activePage, candidate).first();
+          const target = interactionLocator(activePage, candidate, input.allowedUrls).first();
           if (!(await target.isVisible())) {
             throw new Error("Safe interaction target is not visible");
           }
@@ -736,7 +738,7 @@ async function probeSafeInteractions(input: {
         registerPopupListener(activePage);
         reacquiredPage = true;
       }
-      after = await captureInteractionState(activePage);
+      after = await captureInteractionState(activePage, input.allowedUrls);
       status =
         blockedRequests.length > 0
           ? "blocked"
@@ -778,6 +780,7 @@ async function probeSafeInteractions(input: {
       visibleRemoved: difference(before.visibleElements, after.visibleElements),
       dialogAdded: difference(after.dialogs, before.dialogs),
       dialogRemoved: difference(before.dialogs, after.dialogs),
+      changedControls: changedControls(before.controlValues, after.controlValues),
       urlChanged: before.url !== after.url,
       blockedRequests,
       status,
@@ -801,7 +804,8 @@ async function probeSafeInteractions(input: {
 }
 
 async function collectInteractionCandidates(
-  page: import("@playwright/test").Page
+  page: import("@playwright/test").Page,
+  allowedUrls: string[]
 ): Promise<SafeInteractionCandidate[]> {
   const main = await collectInteractionCandidatesFromSurface(page, {
     kind: "document",
@@ -809,7 +813,12 @@ async function collectInteractionCandidates(
   });
   const frames = await Promise.all(
     page.frames()
-      .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
+      .filter(
+        (frame) =>
+          frame !== page.mainFrame() &&
+          Boolean(frame.url()) &&
+          isAllowedExplorationUrl(frame.url(), allowedUrls)
+      )
       .map((frame, frameIndex) =>
         collectInteractionCandidatesFromSurface(frame, {
           kind: "iframe",
@@ -1032,9 +1041,16 @@ async function collectInteractionCandidatesFromSurface(
 
 export function interactionLocator(
   page: import("@playwright/test").Page,
-  candidate: SafeInteractionCandidate
+  candidate: SafeInteractionCandidate,
+  allowedUrls?: string[]
 ) {
   if (candidate.surface?.kind === "iframe") {
+    if (
+      allowedUrls &&
+      !isAllowedExplorationUrl(candidate.surface.url, allowedUrls)
+    ) {
+      throw new Error(`Iframe surface is outside the business system allowlist: ${candidate.surface.url}`);
+    }
     const childFrames = page
       .frames()
       .filter((item) => item !== page.mainFrame() && Boolean(item.url()));
@@ -1052,13 +1068,17 @@ export function interactionLocator(
         `Iframe surface is unavailable after page recovery: ${candidate.surface.url}`
       );
     }
+    if (allowedUrls && !isAllowedExplorationUrl(frame.url(), allowedUrls)) {
+      throw new Error(`Iframe surface is outside the business system allowlist: ${frame.url()}`);
+    }
     return frame.locator(candidate.selector);
   }
   return page.locator(candidate.selector);
 }
 
 async function captureInteractionState(
-  page: import("@playwright/test").Page
+  page: import("@playwright/test").Page,
+  allowedUrls: string[]
 ): Promise<SystemInteractionState> {
   const visibleElements = await page
     .locator(
@@ -1096,7 +1116,10 @@ async function captureInteractionState(
     );
   const frameVisibleElements = await Promise.all(
     page.frames()
-      .filter((frame) => frame !== page.mainFrame())
+      .filter(
+        (frame) =>
+          frame !== page.mainFrame() && isAllowedExplorationUrl(frame.url(), allowedUrls)
+      )
       .map((frame) =>
         frame.locator('button, input, select, textarea, a[href], span, [role="tab"], [role="dialog"], [aria-label]')
           .evaluateAll((elements) => elements.flatMap((element) => {
@@ -1132,7 +1155,10 @@ async function captureInteractionState(
   );
   const frameDialogs = await Promise.all(
     page.frames()
-      .filter((frame) => frame !== page.mainFrame())
+      .filter(
+        (frame) =>
+          frame !== page.mainFrame() && isAllowedExplorationUrl(frame.url(), allowedUrls)
+      )
       .map((frame) => frame.locator('[role="dialog"]').allTextContents().catch(() => []))
   );
   const state = {
@@ -1141,12 +1167,84 @@ async function captureInteractionState(
     dialogs: uniqueSorted([
       ...dialogs,
       ...frameDialogs.flat().map((value) => value.trim()).filter(Boolean)
-    ])
+    ]),
+    controlValues: await captureControlValues(page, allowedUrls)
   };
   return {
     id: `state-${createHash("sha256").update(JSON.stringify(state)).digest("hex").slice(0, 16)}`,
     ...state
   };
+}
+
+async function captureControlValues(
+  page: import("@playwright/test").Page,
+  allowedUrls: string[]
+) {
+  type Surface = import("@playwright/test").Page | import("@playwright/test").Frame;
+  const collect = async (surface: Surface, prefix = "") =>
+    surface
+      .locator(
+        'select, input[type="checkbox"], input[type="radio"], [aria-selected="true"], [aria-expanded]'
+      )
+      .evaluateAll((elements) =>
+        elements.flatMap((element) => {
+          const html = element as unknown as {
+            tagName: string;
+            id: string;
+            value?: string;
+            checked?: boolean;
+            labels?: ArrayLike<{ textContent?: string | null }>;
+            textContent?: string | null;
+            getAttribute(name: string): string | null;
+          };
+          const label = html.labels
+            ? Array.from(html.labels)
+                .map((item) =>
+                  (item.textContent ?? "")
+                    .replace(html.textContent ?? "", "")
+                    .trim()
+                )
+                .filter(Boolean)
+                .join(" ")
+            : "";
+          const name =
+            html.getAttribute("aria-label") ||
+            label ||
+            html.getAttribute("name") ||
+            html.id ||
+            (html.textContent ?? "").trim();
+          if (!name) return [];
+          const type = html.getAttribute("type")?.toLowerCase();
+          const value =
+            type === "checkbox" || type === "radio"
+              ? html.checked
+                ? "checked"
+                : "unchecked"
+              : html.getAttribute("aria-selected") === "true"
+                ? "selected"
+                : html.getAttribute("aria-expanded") ?? html.value ?? "";
+          return [{ name, value }];
+        })
+      )
+      .then((values) =>
+        values.map((item) => ({
+          name: prefix ? `${item.name} @${prefix}` : item.name,
+          value: item.value
+        }))
+      )
+      .catch(() => [] as Array<{ name: string; value: string }>);
+  const childFrames = page.frames().filter(
+    (frame) =>
+      frame !== page.mainFrame() && isAllowedExplorationUrl(frame.url(), allowedUrls)
+  );
+  const frameValues = await Promise.all(
+    childFrames.map((frame, index) =>
+      collect(frame, `iframe:${canonicalUrl(frame.url())}#${index}`)
+    )
+  );
+  return [...(await collect(page)), ...frameValues.flat()].sort((left, right) =>
+    `${left.name}\u0000${left.value}`.localeCompare(`${right.name}\u0000${right.value}`)
+  );
 }
 
 async function capturePage(
@@ -1257,6 +1355,7 @@ async function capturePage(
     page.frames()
       .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
       .map(async (frame, frameIndex) => {
+        if (!isAllowedExplorationUrl(frame.url(), allowedUrls)) return [];
         const surface = {
           kind: "iframe" as const,
           url: canonicalUrl(frame.url()),
@@ -1603,8 +1702,24 @@ function statesDiffer(left: SystemInteractionState, right: SystemInteractionStat
   return (
     left.url !== right.url ||
     left.visibleElements.join("\u0000") !== right.visibleElements.join("\u0000") ||
-    left.dialogs.join("\u0000") !== right.dialogs.join("\u0000")
+    left.dialogs.join("\u0000") !== right.dialogs.join("\u0000") ||
+    JSON.stringify(left.controlValues ?? []) !== JSON.stringify(right.controlValues ?? [])
   );
+}
+
+function changedControls(
+  before: SystemInteractionState["controlValues"],
+  after: SystemInteractionState["controlValues"]
+) {
+  const beforeByName = new Map((before ?? []).map((item) => [item.name, item.value]));
+  const afterByName = new Map((after ?? []).map((item) => [item.name, item.value]));
+  return [...new Set([...beforeByName.keys(), ...afterByName.keys()])]
+    .filter((name) => beforeByName.get(name) !== afterByName.get(name))
+    .map((name) => ({
+      name,
+      before: beforeByName.get(name) ?? "",
+      after: afterByName.get(name) ?? ""
+    }));
 }
 
 function difference(left: string[], right: string[]) {

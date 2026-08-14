@@ -72,6 +72,7 @@ export type SystemBrainState = {
   url: string;
   visibleElements: string[];
   dialogs: string[];
+  controlValues?: Array<{ name: string; value: string }>;
   sourceRefs: string[];
 };
 
@@ -93,6 +94,7 @@ export type SystemBrainStateTransition = {
   visibleRemoved: string[];
   dialogAdded: string[];
   dialogRemoved: string[];
+  changedControls?: Array<{ name: string; before: string; after: string }>;
   urlChanged: boolean;
   reacquiredPage?: boolean;
   screenshotPath?: string;
@@ -293,6 +295,7 @@ export function buildSystemBrain(
             visibleRemoved: transition.visibleRemoved,
             dialogAdded: transition.dialogAdded,
             dialogRemoved: transition.dialogRemoved,
+            changedControls: transition.changedControls,
           urlChanged: transition.urlChanged,
           reacquiredPage: transition.reacquiredPage,
           screenshotPath: transition.screenshotPath,
@@ -447,6 +450,9 @@ export function systemObservationDrafts(brain: SystemBrain): SystemObservationDr
       transition.dialogRemoved.length > 0
         ? `dialogs -${transition.dialogRemoved.join(", ")}`
         : "",
+      ...(transition.changedControls ?? []).map(
+        (control) => `control ${control.name}: ${control.before} -> ${control.after}`
+      ),
       transition.urlChanged ? "URL changed" : ""
     ].filter(Boolean);
     drafts.push({

@@ -175,6 +175,8 @@ export type SystemInteractionState = {
   url: string;
   visibleElements: string[];
   dialogs: string[];
+  /** Non-secret control state used to detect SPA changes without a DOM text change. */
+  controlValues?: Array<{ name: string; value: string }>;
 };
 
 export type InteractionSurfaceRef = {
@@ -202,6 +204,7 @@ export type SystemExplorationInteractionTransition = {
   visibleRemoved: string[];
   dialogAdded: string[];
   dialogRemoved: string[];
+  changedControls?: Array<{ name: string; before: string; after: string }>;
   urlChanged: boolean;
   blockedRequests: Array<{ method: string; url: string }>;
   status: "observed" | "no-change" | "blocked" | "failed";
