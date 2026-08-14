@@ -7188,6 +7188,19 @@ async function archiveRequirementSuiteRun(
     .map((item) => context.repository.executableCases.find((candidate) => candidate.id === item.executableCaseId))
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
   const requirementSetId = executableCases[0]?.requirementSetId ?? "unscoped";
+  const requirementSetIds = new Set(executableCases.map((item) => item.requirementSetId));
+  const coverage = context.knowledgeService
+    .testIntentCoverage(run.knowledgeProjectId, run.systemId)
+    .items
+    .filter((item) => requirementSetIds.has(item.requirementSetId))
+    .map((item) => ({
+      testIntentId: item.testIntentId,
+      title: item.title,
+      module: item.module,
+      classification: item.classification,
+      classificationReason: item.classificationReason,
+      requirementRefs: item.requirementRefs
+    }));
   const evidence = run.caseRuns.flatMap((caseRun) => {
     const item = caseRun.executionEvidenceId
       ? context.repository.executionEvidence.find((candidate) => candidate.id === caseRun.executionEvidenceId)
@@ -7208,6 +7221,7 @@ async function archiveRequirementSuiteRun(
     title: `Brain Creator requirement suite ${run.id}`,
     run,
     evidence,
+    coverage,
     bugs: context.repository.bugReports
       .filter((bug) => bug.systemId === run.systemId && executableCaseIds.has(bug.sourceId))
       .map((bug) => ({ id: bug.id, status: bug.status, caseNo: bug.caseNo, actualResult: bug.actualResult })),

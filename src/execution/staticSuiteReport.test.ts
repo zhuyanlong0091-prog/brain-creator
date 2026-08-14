@@ -26,6 +26,21 @@ describe("static suite execution report", () => {
         networkFailures: [],
         createdAt: new Date().toISOString()
       }],
+      coverage: [{
+        testIntentId: "intent-1",
+        title: "Order approval",
+        module: "Orders",
+        classification: "strong-verified",
+        classificationReason: "Strong reporter evidence passed.",
+        requirementRefs: ["requirement:approval"]
+      }, {
+        testIntentId: "intent-2",
+        title: "Approval timeout",
+        module: "Orders",
+        classification: "blocked",
+        classificationReason: "Auth checkpoint required.",
+        requirementRefs: ["requirement:timeout"]
+      }],
       bugs: [{ id: "bug-1", status: "open", actualResult: "Unexpected value" }],
       gaps: [{ id: "gap-1", status: "open", reason: "Missing role evidence" }]
     });
@@ -38,6 +53,9 @@ describe("static suite execution report", () => {
     expect(html).toContain("bug-1");
     expect(html).toContain("gap-1");
     expect(html).toContain("filterReport");
+    expect(html).toContain("TestIntent coverage");
+    expect(html).toContain("strong-verified");
+    expect(html).toContain("Auth checkpoint required.");
   });
 
   it("keeps blocked and queued cases visible in the same report", () => {
