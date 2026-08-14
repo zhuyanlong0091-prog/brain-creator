@@ -92,6 +92,7 @@ import type {
   CompileRun,
   DocumentCase,
   ExecutableCase,
+  ExecutionEvidence,
   ExecutionDiagnosisVerdict,
   ExecutionPlan,
   ExecutionFailureType,
@@ -2111,8 +2112,9 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
             (item.failureType !== undefined &&
               failureTypes.has(item.failureType)))
       );
+    const diagnosisSummary = context.executionDiagnosis.summary({ systemId });
     return {
-      summary: context.executionDiagnosis.summary({ systemId }),
+      summary: diagnosisSummary,
       items,
       legacyAudit: context.executionDiagnosis.auditLegacy({
         systemId,
@@ -2120,6 +2122,16 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
       }),
       legacyReviews: context.executionDiagnosis.listLegacyReviews(systemId),
       humanAdjudicationEval: diagnosisEval,
+      reviewSummary: executionDiagnosisReviewSummary({
+        summary: diagnosisSummary,
+        items,
+        nextAction:
+          diagnosisSummary.routing.bugEligible > 0
+            ? "review_product_bugs"
+            : diagnosisSummary.routing.gapRouted > 0
+              ? "review_evidence_gaps"
+              : "no_diagnosis_action"
+      }),
       evalMarkdown: legacyDiagnosisEvalMarkdown(diagnosisEval),
       systemResolution: resolution
     };
@@ -3518,7 +3530,10 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     (item) => item.knowledgeProjectId === projectId
   );
   const requirementSuiteRuns = context.requirementSuiteRuns.list(projectId);
-  const stability = summarizeStabilityRuns(requirementSuiteRuns);
+  const stability = summarizeStabilityRuns(
+    requirementSuiteRuns,
+    context.repository.executionEvidence
+  );
   const runLedgerEntries = context.runLedger.list({
     knowledgeProjectId: projectId
   });
@@ -3860,11 +3875,12 @@ function knowledgeReview(
     const items = context.executionDiagnosis
       .list({ knowledgeProjectId: projectId })
       .filter((item) => !idValue || item.id === idValue);
+    const diagnosisSummary = context.executionDiagnosis.summary({
+      knowledgeProjectId: projectId
+    });
     return {
       project,
-      summary: context.executionDiagnosis.summary({
-        knowledgeProjectId: projectId
-      }),
+      summary: diagnosisSummary,
       items,
       legacyAudit: aggregateLegacyDiagnosisAudit(
         context,
@@ -3875,6 +3891,16 @@ function knowledgeReview(
         context.executionDiagnosis.listLegacyReviews(systemId)
       ),
       humanAdjudicationEval: diagnosisEval,
+      reviewSummary: executionDiagnosisReviewSummary({
+        summary: diagnosisSummary,
+        items,
+        nextAction:
+          diagnosisSummary.routing.bugEligible > 0
+            ? "review_product_bugs"
+            : diagnosisSummary.routing.gapRouted > 0
+              ? "review_evidence_gaps"
+              : "no_diagnosis_action"
+      }),
       evalMarkdown: legacyDiagnosisEvalMarkdown(diagnosisEval)
     };
   }
@@ -5745,11 +5771,14 @@ function suiteRunNextAction(bugReports: BugReport[], gaps: Gap[]) {
 }
 
 function suiteRunReviewSummary(review: ReturnType<typeof suiteRunReview>) {
+  const evidencePaths = uniqueStrings(review.runs.flatMap((run) => run.artifactPaths));
   return {
     title: "Suite Run Review",
     status: review.summary.latestStatus ?? "empty",
     metrics: review.summary,
-    evidencePaths: uniqueStrings(review.runs.flatMap((run) => run.artifactPaths)),
+    evidencePaths: evidencePaths.slice(0, 20),
+    evidencePathCount: evidencePaths.length,
+    evidenceTruncated: evidencePaths.length > 20,
     nextAction: review.nextAction,
     userMessage:
       `Suite review: ${review.summary.totalCases} cases, ` +
@@ -5765,11 +5794,14 @@ function bugReviewResultSummary(
   bugs: BugReport[],
   nextAction: string
 ) {
+  const evidencePaths = uniqueStrings(bugs.flatMap((bug) => bug.evidencePaths));
   return {
     title: "Bug Review",
     status: summary.open > 0 || summary.retestFailed > 0 ? "action_required" : "completed",
     metrics: summary,
-    evidencePaths: uniqueStrings(bugs.flatMap((bug) => bug.evidencePaths)),
+    evidencePaths: evidencePaths.slice(0, 20),
+    evidencePathCount: evidencePaths.length,
+    evidenceTruncated: evidencePaths.length > 20,
     nextAction,
     userMessage:
       `Bug review: ${summary.open} open, ${summary.retestFailed} retest failed, ` +
@@ -6380,7 +6412,34 @@ function statusToolGuidance(nextAction: string) {
   };
 }
 
-function summarizeStabilityRuns(runs: RequirementSuiteRun[]) {
+function executionDiagnosisReviewSummary(input: {
+  summary: ReturnType<ExecutionDiagnosisService["summary"]>;
+  items: Array<{ evidenceRefs: string[] }>;
+  nextAction: string;
+}) {
+  const evidencePaths = uniqueStrings(input.items.flatMap((item) => item.evidenceRefs));
+  return {
+    title: "Execution Diagnosis Review",
+    status:
+      input.summary.routing.bugEligible > 0 || input.summary.routing.gapRouted > 0
+        ? "action_required"
+        : "completed",
+    metrics: input.summary,
+    evidencePaths: evidencePaths.slice(0, 20),
+    evidencePathCount: evidencePaths.length,
+    evidenceTruncated: evidencePaths.length > 20,
+    nextAction: input.nextAction,
+    userMessage:
+      `Diagnosis review: ${input.summary.total} records, ` +
+      `${input.summary.routing.bugEligible} product-bug candidates, ` +
+      `${input.summary.routing.gapRouted} evidence-gap candidates.`
+  };
+}
+
+function summarizeStabilityRuns(
+  runs: RequirementSuiteRun[],
+  executionEvidence: ExecutionEvidence[]
+) {
   const grouped = new Map<string, RequirementSuiteRun[]>();
   for (const run of runs) {
     if (!run.stabilityGroupId) continue;
@@ -6399,19 +6458,40 @@ function summarizeStabilityRuns(runs: RequirementSuiteRun[]) {
       const passed = group.filter(
         (run) => run.status === "completed" && run.failed === 0 && run.blocked === 0
       ).length;
+      const strongVerified = group.filter((run) =>
+        run.status === "completed" &&
+        run.failed === 0 &&
+        run.blocked === 0 &&
+        run.caseRuns.length === run.total &&
+        run.caseRuns.every((caseRun) => {
+          const evidence = caseRun.executionEvidenceId
+            ? executionEvidence.find((item) => item.id === caseRun.executionEvidenceId)
+            : undefined;
+          return Boolean(
+            evidence &&
+              evidence.status === "passed" &&
+              evidence.assuranceLevel === "strong" &&
+              (evidence.coverage?.missing.length ?? 0) === 0 &&
+              actorJourneyEvidenceMatches(run, evidence)
+          );
+        })
+      ).length;
       const verdict = blocked > 0
         ? "blocked"
         : completed < target
           ? "running"
           : failed > 0
             ? "unstable"
-            : "stable";
+            : strongVerified === completed
+              ? "stable"
+              : "unstable";
       return {
         stabilityGroupId: groupId,
         target,
         iterations: group.length,
         completed,
         passed,
+        strongVerified,
         failed,
         blocked,
         verdict,
@@ -6419,6 +6499,19 @@ function summarizeStabilityRuns(runs: RequirementSuiteRun[]) {
         nextRunId: group.find((run) => run.stabilityNextRunId)?.stabilityNextRunId
       };
     });
+}
+
+function actorJourneyEvidenceMatches(
+  run: RequirementSuiteRun,
+  evidence: ExecutionEvidence
+) {
+  const declaredRoles = (run.actorJourney ?? []).map((item) => item.role ?? "");
+  if (declaredRoles.length === 0) return true;
+  const observedRoles = (evidence.actorJourney ?? []).map((item) => item.role);
+  return (
+    observedRoles.length === declaredRoles.length &&
+    observedRoles.every((role, index) => role === declaredRoles[index])
+  );
 }
 
 function nextFacadeToolForAction(action: string) {

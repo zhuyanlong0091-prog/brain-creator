@@ -45,6 +45,10 @@ export async function auditArtifactDirectory(input: {
   protectedSecrets?: Record<string, string>;
 }): Promise<{ filesScanned: number; findings: ArtifactSecurityFinding[] }> {
   const root = resolve(input.workDir, input.directoryPath);
+  const rootOffset = relative(resolve(input.workDir), root);
+  if (rootOffset.startsWith("..") || isAbsolute(rootOffset)) {
+    throw new Error("Artifact audit path must stay inside workspace");
+  }
   const files = await collectFiles(root);
   const findings: ArtifactSecurityFinding[] = [];
   for (const file of files) {
@@ -162,6 +166,36 @@ export async function exportCaseSuiteArchive(input: {
     throw new Error(
       `Artifact export blocked because protected authentication state cannot be exported: ${protectedArtifacts
         .map((item) => item.path)
+        .join(", ")}`
+    );
+  }
+  const ownedArtifactDirectories = new Set(
+    described
+      .filter((item) => item.status === "present")
+      .map((item) => {
+        const normalized = normalizeArchivePath(item.path);
+        return normalized.includes("/.brain-creator/artifacts/") ||
+          normalized.startsWith(".brain-creator/artifacts/")
+          ? normalizeArchivePath(dirname(normalized))
+          : undefined;
+      })
+      .filter((directory): directory is string => Boolean(directory))
+  );
+  const unlistedFindings = (
+    await Promise.all(
+      [...ownedArtifactDirectories].map((directoryPath) =>
+        auditArtifactDirectory({
+          workDir: input.workDir,
+          directoryPath,
+          protectedSecrets: Object.fromEntries(protectedSecrets)
+        })
+      )
+    )
+  ).flatMap((audit) => audit.findings);
+  if (unlistedFindings.length > 0) {
+    throw new Error(
+      `Artifact export blocked because sensitive values were found in unlisted files: ${unlistedFindings
+        .map((finding) => finding.path)
         .join(", ")}`
     );
   }

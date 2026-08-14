@@ -2341,6 +2341,54 @@ describe("Brain Creator requirement-first facade", () => {
       })
     ]);
   });
+
+  it("does not call completed iterations stable without strong execution evidence", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Evidence Stability",
+      key: "evidence-stability",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Evidence Console",
+      environment: "test",
+      baseUrl: "https://evidence.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://evidence.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    for (const iteration of [1, 2]) {
+      const run = context.requirementSuiteRuns.create({
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        cases: [{ executableCaseId: `case-evidence-${iteration}`, title: "Evidence case" }],
+        continueOnBlocked: false,
+        stabilityGroupId: "evidence-stability-group",
+        stabilityIteration: iteration,
+        stabilityTarget: 2
+      });
+      run.status = "completed";
+      run.passed = 1;
+      run.caseRuns[0].status = "passed";
+    }
+
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: project.id
+    }));
+
+    expect(status.knowledge.requirementSuiteRuns.stability).toEqual([
+      expect.objectContaining({
+        completed: 2,
+        passed: 2,
+        strongVerified: 0,
+        verdict: "unstable"
+      })
+    ]);
+  });
 });
 
 function dataOf(result: { content: Array<{ type: string; text?: string }> }) {

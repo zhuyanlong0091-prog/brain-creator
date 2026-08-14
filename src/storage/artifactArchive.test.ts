@@ -109,6 +109,69 @@ describe("artifact archive", () => {
     });
   });
 
+  it("rejects artifact audit paths outside the workspace", async () => {
+    const root = await tempDir();
+
+    await expect(
+      auditArtifactDirectory({
+        workDir: root,
+        directoryPath: join(root, "..", "outside")
+      })
+    ).rejects.toThrow("Artifact audit path must stay inside workspace");
+  });
+
+  it("blocks export when an owned artifact directory contains an unlisted secret", async () => {
+    const root = await tempDir();
+    const owned = join(
+      root,
+      ".brain-creator",
+      "artifacts",
+      "system_orders",
+      "requirement_orders",
+      "suite_run_1"
+    );
+    await mkdir(owned, { recursive: true });
+    const listed = join(owned, "report.html");
+    await writeFile(listed, "<html>report</html>", "utf8");
+    await writeFile(join(owned, "orphan.json"), '{"token":"secret-value"}', "utf8");
+    await expect(
+      auditArtifactDirectory({
+        workDir: root,
+        directoryPath: ".brain-creator/artifacts/system_orders/requirement_orders/suite_run_1"
+      })
+    ).resolves.toEqual(expect.objectContaining({
+      filesScanned: 2,
+      findings: expect.arrayContaining([expect.objectContaining({ path: expect.stringContaining("orphan.json") })])
+    }));
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.caseSuiteRuns.push({
+      id: "suite_run_1",
+      systemId: "system_orders",
+      suiteId: "suite_1",
+      sourceId: "source_1",
+      status: "completed",
+      total: 1,
+      passed: 1,
+      failed: 0,
+      blocked: 0,
+      caseResults: [],
+      artifactPaths: [listed],
+      bugReportIds: [],
+      gapIds: [],
+      createdAt: "2026-08-12T00:00:00.000Z",
+      completedAt: "2026-08-12T00:01:00.000Z"
+    });
+
+    await expect(
+      exportCaseSuiteArchive({
+        repository,
+        workDir: root,
+        suiteRunId: "suite_run_1",
+        outputPath: join(root, "exports", "suite.zip")
+      })
+    ).rejects.toThrow("unlisted files");
+  });
+
   it("exports a suite run with manifest and available evidence without secrets", async () => {
     const root = await tempDir();
     const artifact = join(root, "report.html");

@@ -30,6 +30,9 @@ describe("secret scan", () => {
     expect(scanSensitivePatterns('password: "do-not-export-this"')).toEqual([
       { rule: "sensitive-field-literal", matchedLength: expect.any(Number) }
     ]);
+    expect(scanSensitivePatterns('{"token":"do-not-export-this"}')).toEqual([
+      { rule: "sensitive-field-literal", matchedLength: expect.any(Number) }
+    ]);
     expect(scanSensitivePatterns('token: "REDACTED"')).toEqual([]);
     expect(scanSensitivePatterns('const token = process.env.BRAIN_CREATOR_AUTH_TOKEN;')).toEqual([]);
   });

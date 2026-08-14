@@ -275,6 +275,8 @@ export class ExecutionPreflightService {
     const dataBindings = this.dataBindings(executableCase, systemId);
     const retrievedContextPack = buildContextPack(this.repository, {
       knowledgeProjectId: executableCase.knowledgeProjectId,
+      systemId,
+      requirementSetId: executableCase.requirementSetId,
       query: [
         executableCase.title,
         ...executableCase.steps.map(

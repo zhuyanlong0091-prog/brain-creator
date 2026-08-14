@@ -41,7 +41,7 @@ export function scanSensitivePatterns(content: string): SecretPatternFinding[] {
     ["bearer-token", /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}/i],
     [
       "sensitive-field-literal",
-      /\b(?:password|passwd|token|cookie|secret|api[_-]?key)\s*[:=]\s*["'](?!redacted|masked|your[_-]|<)[^"'\r\n]{8,}["']/i
+      /(?:\b(?:password|passwd|token|cookie|secret|api[_-]?key)\b|["'](?:password|passwd|token|cookie|secret|api[_-]?key)["'])\s*[:=]\s*["'](?!redacted|masked|your[_-]|<)[^"'\r\n]{8,}["']/i
     ]
   ];
   return patterns.flatMap(([rule, pattern]) => {

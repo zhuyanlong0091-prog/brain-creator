@@ -5127,6 +5127,12 @@ describe("handleBrainCreatorTool", () => {
             gapRouted: 1
           })
         }),
+        reviewSummary: expect.objectContaining({
+          title: "Execution Diagnosis Review",
+          status: "action_required",
+          nextAction: "review_product_bugs",
+          metrics: expect.objectContaining({ total: 2 })
+        }),
         items: [
           expect.objectContaining({
             verdict: "automation_gap",
