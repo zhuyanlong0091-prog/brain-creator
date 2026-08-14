@@ -2256,6 +2256,67 @@ describe("Brain Creator requirement-first facade", () => {
       expect.objectContaining({ systemId: bound.id, assetId: `gap-${bound.id}` })
     ]);
   });
+
+  it("summarizes stability iterations without treating one run as stable", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Stability Summary",
+      key: "stability-summary",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Stability Console",
+      environment: "test",
+      baseUrl: "https://stability.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://stability.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const first = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      cases: [{ executableCaseId: "case-stability", title: "Stable case" }],
+      continueOnBlocked: false,
+      stabilityGroupId: "stability-group",
+      stabilityIteration: 1,
+      stabilityTarget: 2
+    });
+    first.status = "completed";
+    first.passed = 1;
+    first.caseRuns[0].status = "passed";
+    const second = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      cases: [{ executableCaseId: "case-stability", title: "Stable case" }],
+      continueOnBlocked: false,
+      stabilityGroupId: "stability-group",
+      stabilityIteration: 2,
+      stabilityTarget: 2
+    });
+    second.status = "failed";
+    second.failed = 1;
+    second.caseRuns[0].status = "failed";
+
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: project.id
+    }));
+
+    expect(status.knowledge.requirementSuiteRuns.stability).toEqual([
+      expect.objectContaining({
+        stabilityGroupId: "stability-group",
+        target: 2,
+        iterations: 2,
+        completed: 2,
+        passed: 1,
+        failed: 1,
+        verdict: "unstable"
+      })
+    ]);
+  });
 });
 
 function dataOf(result: { content: Array<{ type: string; text?: string }> }) {

@@ -3486,6 +3486,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     (item) => item.knowledgeProjectId === projectId
   );
   const requirementSuiteRuns = context.requirementSuiteRuns.list(projectId);
+  const stability = summarizeStabilityRuns(requirementSuiteRuns);
   const runLedgerEntries = context.runLedger.list({
     knowledgeProjectId: projectId
   });
@@ -3641,6 +3642,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       requirementSuiteRuns: {
         total: requirementSuiteRuns.length,
         byStatus: countBy(requirementSuiteRuns, (item) => item.status),
+        stability,
         active: activeRequirementSuiteRun,
         recent: requirementSuiteRuns.slice(-5)
       },
@@ -6297,6 +6299,47 @@ function statusToolGuidance(nextAction: string) {
     internalToolsPolicy:
       "Use fine-grained bc_* tools only for debugging, audit, or unsupported facade details."
   };
+}
+
+function summarizeStabilityRuns(runs: RequirementSuiteRun[]) {
+  const grouped = new Map<string, RequirementSuiteRun[]>();
+  for (const run of runs) {
+    if (!run.stabilityGroupId) continue;
+    const group = grouped.get(run.stabilityGroupId) ?? [];
+    group.push(run);
+    grouped.set(run.stabilityGroupId, group);
+  }
+  return [...grouped.entries()]
+    .sort(([, left], [, right]) => (right.at(-1)?.updatedAt ?? "").localeCompare(left.at(-1)?.updatedAt ?? ""))
+    .slice(0, 20)
+    .map(([groupId, group]) => {
+      const target = Math.max(...group.map((run) => run.stabilityTarget ?? 1));
+      const completed = group.filter((run) => run.status === "completed" || run.status === "failed").length;
+      const blocked = group.filter((run) => run.status === "blocked").length;
+      const failed = group.filter((run) => run.status === "failed").length;
+      const passed = group.filter(
+        (run) => run.status === "completed" && run.failed === 0 && run.blocked === 0
+      ).length;
+      const verdict = blocked > 0
+        ? "blocked"
+        : completed < target
+          ? "running"
+          : failed > 0
+            ? "unstable"
+            : "stable";
+      return {
+        stabilityGroupId: groupId,
+        target,
+        iterations: group.length,
+        completed,
+        passed,
+        failed,
+        blocked,
+        verdict,
+        latestRunId: group.at(-1)?.id,
+        nextRunId: group.find((run) => run.stabilityNextRunId)?.stabilityNextRunId
+      };
+    });
 }
 
 function nextFacadeToolForAction(action: string) {
