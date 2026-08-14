@@ -96,6 +96,7 @@ export type SystemBrainStateTransition = {
   dialogRemoved: string[];
   changedControls?: Array<{ name: string; before: string; after: string }>;
   urlChanged: boolean;
+  transitionKind?: "navigation" | "state";
   reacquiredPage?: boolean;
   screenshotPath?: string;
   scenarioId?: string;
@@ -296,10 +297,11 @@ export function buildSystemBrain(
             dialogAdded: transition.dialogAdded,
             dialogRemoved: transition.dialogRemoved,
             changedControls: transition.changedControls,
-          urlChanged: transition.urlChanged,
-          reacquiredPage: transition.reacquiredPage,
-          screenshotPath: transition.screenshotPath,
-          scenarioId: transition.scenarioId,
+            urlChanged: transition.urlChanged,
+            transitionKind: transition.transitionKind,
+            reacquiredPage: transition.reacquiredPage,
+            screenshotPath: transition.screenshotPath,
+            scenarioId: transition.scenarioId,
             sourceRefs: [
               `system-exploration:${exploration.id}`,
               `system-interaction:${transition.id}`,

@@ -47,6 +47,7 @@ export type SystemInteractionEvidence = {
   dialogRemoved: string[];
   changedControls?: Array<{ name: string; before: string; after: string }>;
   urlChanged: boolean;
+  transitionKind?: "navigation" | "state";
   blockedRequests: Array<{ method: string; url: string }>;
   status: "observed" | "no-change" | "blocked" | "failed";
   surface?: InteractionSurfaceRef;
@@ -272,6 +273,7 @@ export class SystemExplorationCoordinator {
           dialogRemoved: transition.dialogRemoved,
           changedControls: transition.changedControls,
           urlChanged: transition.urlChanged,
+          transitionKind: transition.transitionKind,
           blockedRequests: transition.blockedRequests,
           status: transition.status,
           reacquiredPage: transition.reacquiredPage,
@@ -644,9 +646,16 @@ async function probeSafeInteractions(input: {
   scenario?: ExplorationScenario;
 }): Promise<SystemInteractionEvidence[]> {
   let activePage = input.page;
+  let activePageUrl = input.pageUrl;
   const registerPopupListener = (page: import("@playwright/test").Page) => {
     page.on("popup", (popup) => input.popups.push(popup));
   };
+  const rememberActivePageUrl = (page: import("@playwright/test").Page) => {
+    const url = safeCanonicalUrl(page.url());
+    if (url && isAllowedExplorationUrl(url, input.allowedUrls)) activePageUrl = url;
+  };
+  const recoveryUrl = () =>
+    isAllowedExplorationUrl(activePageUrl, input.allowedUrls) ? activePageUrl : input.pageUrl;
   const candidates = (await collectInteractionCandidates(activePage, input.allowedUrls))
     .map((candidate) => ({
       candidate,
@@ -669,7 +678,7 @@ async function probeSafeInteractions(input: {
     if (Date.now() >= input.deadline) break;
     let reacquiredPage = false;
     if (activePage.isClosed()) {
-      const replacement = await reacquirePage(input.context, input.pageUrl, input.deadline);
+      const replacement = await reacquirePage(input.context, recoveryUrl(), input.deadline);
       if (!replacement) break;
       activePage = replacement;
       registerPopupListener(activePage);
@@ -726,7 +735,8 @@ async function probeSafeInteractions(input: {
           actionCompleted = true;
         } catch (error) {
           if (attempt > 0 || Date.now() >= input.deadline) throw error;
-          const replacement = await reacquirePage(input.context, input.pageUrl, input.deadline);
+          rememberActivePageUrl(activePage);
+          const replacement = await reacquirePage(input.context, recoveryUrl(), input.deadline);
           if (!replacement) throw error;
           await activePage.unroute("**/*", routeHandler).catch(() => undefined);
           activePage = replacement;
@@ -739,12 +749,13 @@ async function probeSafeInteractions(input: {
       const settleMs = Math.min(300, Math.max(0, input.deadline - Date.now()));
       if (settleMs > 0) await activePage.waitForTimeout(settleMs);
       if (activePage.isClosed()) {
-        const replacement = await reacquirePage(input.context, input.pageUrl, input.deadline);
+        const replacement = await reacquirePage(input.context, recoveryUrl(), input.deadline);
         if (!replacement) throw new Error("Active page closed and could not be reacquired");
         activePage = replacement;
         registerPopupListener(activePage);
         reacquiredPage = true;
       }
+      rememberActivePageUrl(activePage);
       after = await captureInteractionState(activePage, input.allowedUrls);
       status =
         blockedRequests.length > 0
@@ -789,6 +800,9 @@ async function probeSafeInteractions(input: {
       dialogRemoved: difference(before.dialogs, after.dialogs),
       changedControls: changedControls(before.controlValues, after.controlValues),
       urlChanged: before.url !== after.url,
+      ...(status === "observed"
+        ? { transitionKind: before.url !== after.url ? "navigation" as const : "state" as const }
+        : {}),
       blockedRequests,
       status,
       surface: candidate.surface,
@@ -803,6 +817,7 @@ async function probeSafeInteractions(input: {
           timeout: interactionTimeout(input.deadline)
         })
         .catch(() => undefined);
+      activePageUrl = input.pageUrl;
       const settleMs = Math.min(200, Math.max(0, input.deadline - Date.now()));
       if (settleMs > 0) await activePage.waitForTimeout(settleMs);
     }
@@ -820,20 +835,16 @@ async function collectInteractionCandidates(
   });
   const frames = await Promise.all(
     page.frames()
-      .filter(
-        (frame) =>
-          frame !== page.mainFrame() &&
-          Boolean(frame.url()) &&
-          isAllowedExplorationUrl(frame.url(), allowedUrls)
-      )
-      .map((frame, frameIndex) =>
-        collectInteractionCandidatesFromSurface(frame, {
+      .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
+      .map(async (frame, frameIndex) => {
+        if (!isAllowedExplorationUrl(frame.url(), allowedUrls)) return [];
+        return collectInteractionCandidatesFromSurface(frame, {
           kind: "iframe",
           url: canonicalUrl(frame.url()),
           parentUrl: canonicalUrl(page.url()),
           frameIndex
-        })
-      )
+        });
+      })
   );
   const shadow = await collectOpenShadowInteractionCandidates(page, {
     kind: "shadow-root",
@@ -1310,12 +1321,13 @@ async function captureControlValues(
       )
       .catch(() => [] as Array<{ name: string; value: string }>);
   const childFrames = page.frames().filter(
-    (frame) =>
-      frame !== page.mainFrame() && isAllowedExplorationUrl(frame.url(), allowedUrls)
+    (frame) => frame !== page.mainFrame() && Boolean(frame.url())
   );
   const frameValues = await Promise.all(
     childFrames.map((frame, index) =>
-      collect(frame, `iframe:${canonicalUrl(frame.url())}#${index}`)
+      isAllowedExplorationUrl(frame.url(), allowedUrls)
+        ? collect(frame, `iframe:${canonicalUrl(frame.url())}#${index}`)
+        : []
     )
   );
   return [...(await collect(page)), ...frameValues.flat()].sort((left, right) =>

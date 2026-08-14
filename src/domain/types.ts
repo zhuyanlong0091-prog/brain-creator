@@ -213,6 +213,7 @@ export type SystemExplorationInteractionTransition = {
   dialogRemoved: string[];
   changedControls?: Array<{ name: string; before: string; after: string }>;
   urlChanged: boolean;
+  transitionKind?: "navigation" | "state";
   blockedRequests: Array<{ method: string; url: string }>;
   status: "observed" | "no-change" | "blocked" | "failed";
   reacquiredPage?: boolean;

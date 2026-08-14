@@ -232,6 +232,38 @@ describe("System exploration coordinator", () => {
     ).toThrow("Iframe surface is unavailable after page recovery");
   });
 
+  it("preserves iframe ordinals when an earlier frame is outside the allowlist", () => {
+    const mainFrame = { url: () => "https://orders.example.test/" };
+    const outsideFrame = { url: () => "https://other.example.test/frame" };
+    const targetFrame = {
+      url: () => "https://orders.example.test/frame",
+      locator: vi.fn(() => "target-locator")
+    };
+    const page = {
+      mainFrame: () => mainFrame,
+      frames: () => [mainFrame, outsideFrame, targetFrame]
+    } as unknown as import("@playwright/test").Page;
+
+    const locator = interactionLocator(
+      page,
+      {
+        name: "Frame Mode",
+        role: "combobox",
+        selector: '[id="frame-mode"]',
+        tag: "select",
+        surface: {
+          kind: "iframe",
+          url: "https://orders.example.test/frame",
+          frameIndex: 2
+        }
+      },
+      ["https://orders.example.test/"]
+    );
+
+    expect(locator).toBe("target-locator");
+    expect(targetFrame.locator).toHaveBeenCalledWith('[id="frame-mode"]');
+  });
+
   it("rejects unavailable or cross-system scenario data leases before opening a browser", async () => {
     const fixture = await createFixture();
     const explorer: SystemExplorer = { explore: vi.fn() };
@@ -663,6 +695,7 @@ describe("System exploration coordinator", () => {
         expect(employeeType).toEqual(
           expect.objectContaining({
             status: "observed",
+            transitionKind: "state",
             scenarioId: "intern-replacement",
             visibleAdded: expect.arrayContaining(["Replacement Employee", "App remounted"])
           })
