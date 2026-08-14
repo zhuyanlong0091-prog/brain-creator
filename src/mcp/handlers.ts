@@ -1107,6 +1107,27 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     caseSources: caseSources.length,
     unfinishedSuites: unfinishedSuites.length
   });
+  const activeSuiteSummary = activeDocumentSuite
+    ? {
+        suiteId: activeDocumentSuite.suiteId,
+        status: activeDocumentSuite.status,
+        totalCases: activeDocumentSuite.totalCases,
+        attempted: activeDocumentSuite.attemptedCaseNos.length,
+        passed: activeDocumentSuite.passedCaseNos.length,
+        failed: activeDocumentSuite.failedCaseNos.length,
+        blocked: activeDocumentSuite.blockedCaseNos.length,
+        waiting: activeDocumentSuite.waitingCaseNos.length,
+        pending: activeDocumentSuite.pendingCaseNos.length,
+        nextCaseNo: activeDocumentSuite.nextCaseNo,
+        activeTask: activeDocumentSuite.activeTask
+          ? {
+              taskId: activeDocumentSuite.activeTask.taskId,
+              caseNo: activeDocumentSuite.activeTask.caseNo,
+              title: activeDocumentSuite.activeTask.title
+            }
+          : undefined
+      }
+    : undefined;
   const userSummary = statusUserSummary({
     systemName: snapshot.system.name,
     bridgeOk: snapshot.bridge.ok,
@@ -1116,7 +1137,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     openBugs: openBugs.length,
     openGaps: snapshot.openGaps.length,
     unfinishedSuites: unfinishedSuites.length,
-    nextAction
+    nextAction,
+    activeSuite: activeSuiteSummary
   });
   return {
     ...snapshot,
@@ -6180,6 +6202,19 @@ function statusUserSummary(state: {
   openGaps: number;
   unfinishedSuites: number;
   nextAction: string;
+  activeSuite?: {
+    suiteId: string;
+    status: string;
+    totalCases: number;
+    attempted: number;
+    passed: number;
+    failed: number;
+    blocked: number;
+    waiting: number;
+    pending: number;
+    nextCaseNo?: string;
+    activeTask?: { taskId: string; caseNo: string; title: string };
+  };
 }) {
   return {
     systemName: state.systemName,
@@ -6195,6 +6230,7 @@ function statusUserSummary(state: {
     nextAction: state.nextAction,
     nextCommand: nextCommandForAction(state.nextAction),
     nextStep: nextStepForAction(state.nextAction),
+    ...(state.activeSuite ? { activeSuite: state.activeSuite } : {}),
     counts: {
       authProfiles: state.authProfiles,
       awaitingAuthCheckpoints: state.awaitingAuthCheckpoints,
@@ -6217,6 +6253,12 @@ function statusMarkdown(summary: ReturnType<typeof statusUserSummary>) {
     `- Open bugs: ${summary.counts.openBugs}`,
     `- Open gaps: ${summary.counts.openGaps}`,
     `- Unfinished suites: ${summary.counts.unfinishedSuites}`,
+    ...(summary.activeSuite
+      ? [
+          `- Active suite: ${summary.activeSuite.suiteId} (${summary.activeSuite.status})`,
+          `- Active suite progress: ${summary.activeSuite.passed}/${summary.activeSuite.totalCases} passed; next ${summary.activeSuite.nextCaseNo ?? "none"}`
+        ]
+      : []),
     "",
     `Next: ${summary.nextStep}`,
     `Command: \`${summary.nextCommand}\``
