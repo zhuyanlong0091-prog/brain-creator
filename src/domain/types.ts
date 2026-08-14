@@ -180,6 +180,11 @@ export type SystemInteractionState = {
   url: string;
   visibleElements: string[];
   dialogs: string[];
+  surfaceUrls?: Array<{
+    kind: "iframe";
+    url: string;
+    frameIndex: number;
+  }>;
   /** Non-secret control state used to detect SPA changes without a DOM text change. */
   controlValues?: Array<{ name: string; value: string }>;
 };

@@ -551,11 +551,23 @@ describe("System exploration coordinator", () => {
           response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
           response.end(`
             <label>Frame Mode
-              <select id="frame-mode" onchange="document.body.dataset.mode=this.value; document.body.insertAdjacentHTML('beforeend', '<span>Advanced Mode</span>')">
+              <select id="frame-mode" onchange="location.href='/frame-next'">
                 <option value="basic">Basic</option>
                 <option value="advanced">Advanced</option>
               </select>
             </label>
+          `);
+          return;
+        }
+        if (request.url === "/frame-next") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end(`
+            <label>Frame Mode
+              <select id="frame-mode">
+                <option value="advanced" selected>Advanced</option>
+              </select>
+            </label>
+            <span>Advanced Mode</span>
           `);
           return;
         }
@@ -747,6 +759,18 @@ describe("System exploration coordinator", () => {
                 hostSelectors: expect.arrayContaining([expect.stringContaining("wujie-host")])
               })
             })
+          ])
+        );
+        expect(
+          result.exploration.interactionTransitions.find(
+            (transition) =>
+              transition.targetName === "Frame Mode" &&
+              transition.surface?.kind === "iframe" &&
+              transition.surface.frameIndex === 0
+          )?.after.surfaceUrls
+        ).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ url: expect.stringContaining("/frame-next") })
           ])
         );
         expect(result.brain.stateTransitions).not.toEqual(

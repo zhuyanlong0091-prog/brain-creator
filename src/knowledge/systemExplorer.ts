@@ -1248,6 +1248,13 @@ async function captureInteractionState(
       )
       .map((frame) => frame.locator('[role="dialog"]').allTextContents().catch(() => []))
   );
+  const surfaceUrls = page.frames()
+    .filter((frame) => frame !== page.mainFrame() && Boolean(frame.url()))
+    .flatMap((frame, frameIndex) =>
+      isAllowedExplorationUrl(frame.url(), allowedUrls)
+        ? [{ kind: "iframe" as const, url: canonicalUrl(frame.url()), frameIndex }]
+        : []
+    );
   const state = {
     url: canonicalUrl(page.url()),
     visibleElements: uniqueSorted([...visibleElements, ...frameVisibleElements.flat()]),
@@ -1255,6 +1262,7 @@ async function captureInteractionState(
       ...dialogs,
       ...frameDialogs.flat().map((value) => value.trim()).filter(Boolean)
     ]),
+    surfaceUrls,
     controlValues: await captureControlValues(page, allowedUrls)
   };
   return {
@@ -1827,6 +1835,7 @@ function statesDiffer(left: SystemInteractionState, right: SystemInteractionStat
     left.url !== right.url ||
     left.visibleElements.join("\u0000") !== right.visibleElements.join("\u0000") ||
     left.dialogs.join("\u0000") !== right.dialogs.join("\u0000") ||
+    JSON.stringify(left.surfaceUrls ?? []) !== JSON.stringify(right.surfaceUrls ?? []) ||
     JSON.stringify(left.controlValues ?? []) !== JSON.stringify(right.controlValues ?? [])
   );
 }

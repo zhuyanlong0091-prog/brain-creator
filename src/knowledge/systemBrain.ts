@@ -72,6 +72,11 @@ export type SystemBrainState = {
   url: string;
   visibleElements: string[];
   dialogs: string[];
+  surfaceUrls?: Array<{
+    kind: "iframe";
+    url: string;
+    frameIndex: number;
+  }>;
   controlValues?: Array<{ name: string; value: string }>;
   sourceRefs: string[];
 };
