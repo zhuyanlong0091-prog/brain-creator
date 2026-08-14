@@ -1707,14 +1707,16 @@ function assertResultWithinBudget(
       }
       if (
         !page.evidence.interactiveElements.some(
-          (element) =>
+              (element) =>
             element.selector === interaction.target.selector &&
             element.name === interaction.target.name &&
             (!interaction.surface ||
               (interaction.surface.kind === "document"
                 ? !element.surface || element.surface.kind === "document"
                 : element.surface?.kind === interaction.surface.kind &&
-                  element.surface.url === interaction.surface.url))
+                  element.surface.url === interaction.surface.url &&
+                  (interaction.surface.kind !== "iframe" ||
+                    element.surface.frameIndex === interaction.surface.frameIndex)))
         )
       ) {
         throw new Error("Explorer interaction target is not present in the captured page evidence");
