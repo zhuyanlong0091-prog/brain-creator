@@ -26,6 +26,23 @@ function structuredFailureReport(title = "document assertion") {
   });
 }
 
+function structuredPassReport(title = "document assertion") {
+  return JSON.stringify({
+    stats: { expected: 1, unexpected: 0, skipped: 0 },
+    suites: [
+      {
+        specs: [
+          {
+            id: "document-assertion",
+            title,
+            tests: [{ results: [{ status: "passed" }] }]
+          }
+        ]
+      }
+    ]
+  });
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -757,7 +774,7 @@ describe("handleBrainCreatorTool", () => {
         dataFilePath: join(workDir, "assets.json"),
         workDir
       });
-      context.runner = async () => ({ exitCode: 0, stdout: "playwright passed", stderr: "" });
+      context.runner = async () => ({ exitCode: 0, stdout: structuredPassReport(), stderr: "" });
       const system = dataOf(
         await handleBrainCreatorTool(context, "bc_create_system", {
           name: "Orders Console",
@@ -822,7 +839,11 @@ describe("handleBrainCreatorTool", () => {
         dataFilePath: join(workDir, "assets.json"),
         workDir
       });
-      context.runner = async () => ({ exitCode: 0, stdout: "playwright passed", stderr: "" });
+      context.runner = async () => ({
+        exitCode: 0,
+        stdout: structuredPassReport("secret-token"),
+        stderr: "runner token=secret-token"
+      });
       const system = dataOf(
         await handleBrainCreatorTool(context, "bc_create_system", {
           name: "Orders Console",
@@ -881,6 +902,8 @@ describe("handleBrainCreatorTool", () => {
           testPath: taskPackage.testPath
         })
       );
+      expect(submitted.testResult.stdout).not.toContain("secret-token");
+      expect(JSON.stringify(submitted.testResult.structuredReporter)).not.toContain("secret-token");
       expect(submitted.agentRun.logs.join("\n")).not.toContain("secret-token");
       expect(submitted.agentRun.logs.join("\n")).toContain("[REDACTED]");
       expect(context.service.getTestCase(testCase.id).status).toBe("passed");
@@ -2153,6 +2176,12 @@ describe("handleBrainCreatorTool", () => {
     expect(status.system.name).toBe("HRMS");
     expect(status.auth.profiles).toHaveLength(1);
     expect(status.bridge.ok).toBe(true);
+    expect(status.executionEvidence).toEqual({
+      total: 0,
+      byStatus: {},
+      byAssurance: {},
+      unassured: 0
+    });
     expect(status.facadeNextAction).toBe("configure_or_generate_plan");
     expect(status.userSummary).toEqual(
       expect.objectContaining({
@@ -3889,7 +3918,7 @@ describe("handleBrainCreatorTool", () => {
               stdout: structuredFailureReport("offer assertion"),
               stderr: "Expected offer to be sent, actual offer remained draft"
             }
-          : { exitCode: 0, stdout: "passed", stderr: "" };
+          : { exitCode: 0, stdout: structuredPassReport(), stderr: "" };
       }
     });
     const source = join(workDir, "cases.xlsx");
@@ -3951,7 +3980,7 @@ describe("handleBrainCreatorTool", () => {
         dataFilePath: join(workDir, "assets.json"),
         workDir
       });
-      context.runner = async () => ({ exitCode: 0, stdout: "playwright passed", stderr: "" });
+      context.runner = async () => ({ exitCode: 0, stdout: structuredPassReport(), stderr: "" });
       const source = join(workDir, "cases.xlsx");
       await writeFile(source, createXlsxFixture());
       const system = dataOf(
@@ -4137,10 +4166,10 @@ describe("handleBrainCreatorTool", () => {
         runCount += 1;
         return {
           exitCode: 1,
-          stdout:
+          stdout: structuredFailureReport("environment configuration"),
+          stderr:
             `process definition key is not configured (attempt ${runCount})\n` +
-            "Expected: 200\nReceived: 500",
-          stderr: ""
+            "Expected: 200\nReceived: 500"
         };
       };
       const source = join(workDir, "cases.xlsx");
@@ -4242,10 +4271,10 @@ describe("handleBrainCreatorTool", () => {
         return runCount <= 2
           ? {
               exitCode: 1,
-              stdout: "missing environment configuration: required fixture data is unavailable",
-              stderr: ""
+              stdout: structuredFailureReport("missing environment configuration"),
+              stderr: "missing environment configuration: required fixture data is unavailable"
             }
-          : { exitCode: 0, stdout: "playwright passed", stderr: "" };
+          : { exitCode: 0, stdout: structuredPassReport(), stderr: "" };
       };
       const source = join(workDir, "cases.xlsx");
       await writeFile(source, createXlsxFixture());
@@ -4867,7 +4896,7 @@ describe("handleBrainCreatorTool", () => {
         runCount += 1;
         return runCount === 2
           ? { exitCode: 1, stdout: structuredFailureReport("TC-002 failed"), stderr: "TC-002 failed" }
-          : { exitCode: 0, stdout: "passed", stderr: "" };
+          : { exitCode: 0, stdout: structuredPassReport(), stderr: "" };
       }
     });
     const source = join(workDir, "cases.xlsx");
@@ -4950,7 +4979,7 @@ describe("handleBrainCreatorTool", () => {
       runner: async () =>
         failureReason
           ? { exitCode: 1, stdout: structuredFailureReport(), stderr: failureReason }
-          : { exitCode: 0, stdout: "fixed", stderr: "" }
+          : { exitCode: 0, stdout: structuredPassReport("fixed"), stderr: "" }
     });
     const source = join(workDir, "cases.xlsx");
     await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "", "", ""]]));
@@ -5164,7 +5193,7 @@ describe("handleBrainCreatorTool", () => {
               stdout: structuredFailureReport("offer regression failure"),
               stderr: "Expected offer sent, actual offer remained draft"
             }
-          : { exitCode: 0, stdout: "fixed", stderr: "" };
+          : { exitCode: 0, stdout: structuredPassReport("fixed"), stderr: "" };
       }
     });
     const source = join(workDir, "cases.xlsx");
@@ -5258,7 +5287,7 @@ describe("handleBrainCreatorTool", () => {
           };
         }
         retestCount += 1;
-        return { exitCode: 0, stdout: "fixed", stderr: "" };
+        return { exitCode: 0, stdout: structuredPassReport("fixed"), stderr: "" };
       }
     });
     const source = join(workDir, "cases.xlsx");

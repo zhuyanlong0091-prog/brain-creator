@@ -721,7 +721,8 @@ describe("System exploration coordinator", () => {
         );
         expect(result.brain.pages[0].surfaces).toEqual(
           expect.arrayContaining([
-            expect.objectContaining({ kind: "iframe" }),
+            expect.objectContaining({ kind: "iframe", frameIndex: 0 }),
+            expect.objectContaining({ kind: "iframe", frameIndex: 1 }),
             expect.objectContaining({ kind: "shadow-root" }),
             expect.objectContaining({
               kind: "popup",

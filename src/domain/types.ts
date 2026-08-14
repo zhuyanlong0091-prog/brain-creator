@@ -135,6 +135,8 @@ export type BrowserSurfaceEvidence = {
   kind: "document" | "iframe" | "shadow-root" | "wujie" | "popup";
   url: string;
   parentUrl?: string;
+  /** Stable ordinal among child frames on the captured page. */
+  frameIndex?: number;
   accessible: boolean;
   interactiveCount: number;
   title?: string;

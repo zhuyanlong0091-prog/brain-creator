@@ -406,7 +406,15 @@ export async function runChain(input: RunChainInput) {
     }
     const reporter = parseReporterOutput(result.stdout);
     if (!reporter) {
-      return { ...result, ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {}) };
+      return {
+        ...result,
+        exitCode: result.exitCode === 0 ? 1 : result.exitCode,
+        stderr: [
+          result.stderr,
+          "Structured Playwright Reporter output was missing; execution is not auditable."
+        ].filter(Boolean).join("\n"),
+        ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {})
+      };
     }
     const reporterPath = join(
       input.workDir,

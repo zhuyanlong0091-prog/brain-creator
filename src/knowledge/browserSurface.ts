@@ -44,14 +44,15 @@ export async function collectBrowserSurfaceEvidence(
     interactiveCount: await interactiveCount(page).catch(() => 0)
   }];
 
-  for (const frame of page.frames()) {
-    if (frame === page.mainFrame()) continue;
+  const childFrames = page.frames().filter((frame) => frame !== page.mainFrame());
+  for (const [frameIndex, frame] of childFrames.entries()) {
     const url = frame.url() || mainUrl;
     const accessible = isAllowedUrl(url, allowedUrls);
     surfaces.push({
       kind: "iframe",
       url,
       parentUrl: mainUrl,
+      frameIndex,
       accessible,
       interactiveCount: accessible ? await interactiveCount(frame).catch(() => 0) : 0,
       evidence: accessible ? undefined : "Frame URL is outside the system allowlist"

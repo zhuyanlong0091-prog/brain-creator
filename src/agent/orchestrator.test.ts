@@ -194,6 +194,23 @@ describe("generatePlanDraft", () => {
 });
 
 describe("runChain", () => {
+  it("fails closed when strict Reporter mode receives no structured output", async () => {
+    const result = await runChain({
+      workDir: await tempDir(),
+      system: systemProfile(),
+      authProfile: authProfile(),
+      testCase: approvedTestCase(),
+      structuredReporter: true,
+      agentBridge: async () => ({ exitCode: 0, stdout: "agent ok", stderr: "" }),
+      runner: async () => ({ exitCode: 0, stdout: "1 passed", stderr: "" })
+    });
+
+    expect(result.testResult.structuredReporter).toBeUndefined();
+    expect(result.testResult.exitCode).toBe(1);
+    expect(result.testResult.stderr).toContain("Structured Playwright Reporter output was missing");
+    expect(result.chainRun.status).toBe("failed");
+  });
+
   it("uses the structured Playwright reporter when requested", async () => {
     const workDir = await tempDir();
     const testCase = approvedTestCase();

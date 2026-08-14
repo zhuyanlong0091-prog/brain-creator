@@ -1084,6 +1084,9 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const suiteRuns = context.service.listCaseSuiteRuns(systemId);
   const bugs = context.service.listBugReports({ systemId });
   const executionDiagnoses = context.executionDiagnosis.list({ systemId });
+  const executionEvidence = context.repository.executionEvidence.filter(
+    (item) => item.systemId === systemId
+  );
   const legacyDiagnosisAudit = context.executionDiagnosis.auditLegacy({
     systemId,
     limit: 1
@@ -1192,6 +1195,14 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       legacyReviews: context.executionDiagnosis.legacyReviewSummary(systemId),
       humanAdjudicationEval:
         context.executionDiagnosis.legacyReviewEval(systemId)
+    },
+    executionEvidence: {
+      total: executionEvidence.length,
+      byStatus: countBy(executionEvidence, (item) => item.status),
+      byAssurance: countBy(executionEvidence, (item) => item.assuranceLevel ?? "none"),
+      unassured: executionEvidence.filter(
+        (item) => !item.assuranceLevel || item.assuranceLevel === "none"
+      ).length
     },
     facadeNextAction: nextAction,
     userSummary,
@@ -4714,7 +4725,7 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
   const testResult =
     result.agentRun.status === "succeeded" &&
     (result.task.agent === "generator" || result.task.agent === "healer")
-      ? await runSubmittedTest(context, chainContext.testPath, result.task.id)
+      ? await runSubmittedTest(context, chainContext.testPath, result.task.systemId, result.task.id)
       : undefined;
   const healAttempts = chainContext.healAttempts ?? 0;
   const maxHealAttempts = chainContext.maxHealAttempts ?? 1;
@@ -5355,20 +5366,43 @@ function hostAgentFailureReason(
 async function runSubmittedTest(
   context: BrainCreatorMcpContext,
   testPath: string,
+  systemId: string,
   runId = "host-agent"
 ) {
   const runner = context.runner ?? spawnCommand;
   const testRunPath = relative(context.workDir, testPath).replace(/\\/g, "/");
   try {
-    const result = await runner(
+    const rawResult = await runner(
       "npx",
       ["playwright", "test", testRunPath, "--workers=1", "--reporter=json", "--trace=on"],
       {
       cwd: context.workDir
       }
     );
+    const protectedSecrets = protectedSecretsForSystem(context, systemId);
+    const result: CommandResult = {
+      ...rawResult,
+      stdout: redactSensitiveText(rawResult.stdout, protectedSecrets),
+      stderr: redactSensitiveText(rawResult.stderr, protectedSecrets),
+      ...(rawResult.structuredReporter
+        ? {
+            structuredReporter: JSON.parse(
+              redactSensitiveText(JSON.stringify(rawResult.structuredReporter), protectedSecrets)
+            )
+          }
+        : {})
+    };
     const reporter = result.structuredReporter ?? parseHostReporter(result.stdout);
-    if (!reporter) return result;
+    if (!reporter) {
+      return {
+        ...result,
+        exitCode: result.exitCode === 0 ? 1 : result.exitCode,
+        stderr: [
+          result.stderr,
+          "Structured Playwright Reporter output was missing; execution is not auditable."
+        ].filter(Boolean).join("\n")
+      };
+    }
     const reporterPath = result.reporterPath ?? join(
       context.workDir,
       ".brain-creator",

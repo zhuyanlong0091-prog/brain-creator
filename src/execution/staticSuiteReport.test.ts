@@ -19,11 +19,21 @@ describe("static suite execution report", () => {
         status: "passed",
         assuranceLevel: "strong",
         evidenceWarnings: [],
-        steps: [],
+        steps: [{
+          stepId: "step-1",
+          order: 1,
+          action: "assert",
+          instruction: "Order approval is visible",
+          expected: "visible",
+          actual: "visible",
+          assertionStatus: "passed",
+          sourceRefs: ["requirement:approval"],
+          origin: "source"
+        }],
         tracePaths: ["trace.zip"],
         artifactPaths: ["report.html", "trace.zip"],
-        consoleErrors: [],
-        networkFailures: [],
+        consoleErrors: ["console warning"],
+        networkFailures: ["GET /health failed"],
         createdAt: new Date().toISOString()
       }],
       coverage: [{
@@ -48,6 +58,10 @@ describe("static suite execution report", () => {
     expect(html).toContain("Orders &lt;suite&gt;");
     expect(html).toContain("strong");
     expect(html).toContain("Assurance: <strong>strong 1</strong> | limited 0 | none 0");
+    expect(html).toContain("Runtime impact: console errors 1 | network failures 1");
+    expect(html).toContain("1 step(s)");
+    expect(html).toContain("Console errors");
+    expect(html).toContain("Network failures");
     expect(html).toContain("trace.zip");
     expect(html).toContain('href="report.html"');
     expect(html).toContain("bug-1");

@@ -31,6 +31,13 @@ function structuredFailureReport() {
   });
 }
 
+function structuredPassReport() {
+  return JSON.stringify({
+    stats: { expected: 1, unexpected: 0, skipped: 0 },
+    suites: [{ specs: [{ id: "requirement-pass", title: "requirement pass", tests: [{ results: [{ status: "passed" }] }] }] }]
+  });
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -1329,7 +1336,7 @@ describe("Brain Creator requirement-first facade", () => {
                 "Received: \"draft\""
               ].join("\n")
             }
-          : { exitCode: 0, stdout: "1 passed", stderr: "" }
+          : { exitCode: 0, stdout: structuredPassReport(), stderr: "" }
     });
     const project = dataOf(
       await handleBrainCreatorTool(context, "bc_configure", {
@@ -1681,7 +1688,7 @@ describe("Brain Creator requirement-first facade", () => {
       agentBridge: bridge,
       runner: async () => ({
         exitCode: 0,
-        stdout: "1 passed",
+        stdout: structuredPassReport(),
         stderr: ""
       })
     });
