@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium } from "@playwright/test";
 import type { AuthProfile, SystemProfile } from "../domain/types.js";
@@ -33,7 +33,9 @@ export const materializeBrowserAuthState: AuthStateMaterializer = async (input) 
     input.workDir,
     join(".brain-creator", "auth", safePart(input.system.id), safePart(input.authProfile.id), "storage-state.json")
   );
-  await mkdir(join(outputPath, ".."), { recursive: true });
+  const authDir = join(outputPath, "..");
+  await mkdir(authDir, { recursive: true, mode: 0o700 });
+  await chmod(authDir, 0o700).catch(() => undefined);
   const executablePath = browserExecutablePath();
   const browser = await chromium.launch({
     headless: true,
@@ -55,6 +57,7 @@ export const materializeBrowserAuthState: AuthStateMaterializer = async (input) 
       timeout: 15_000
     });
     await context.storageState({ path: outputPath });
+    await chmod(outputPath, 0o600).catch(() => undefined);
     await context.close();
   } finally {
     await browser.close();
