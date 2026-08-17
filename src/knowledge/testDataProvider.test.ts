@@ -46,6 +46,99 @@ describe("TestDataProviderService", () => {
     expect(fixture.repository.testDataTasks).toHaveLength(0);
   });
 
+  it("automatically resolves deterministic generated data without touching the target system", async () => {
+    const fixture = await providerFixture();
+    fixture.executableCase.dataPlan = {
+      verdict: "ready",
+      reasons: [],
+      operations: [{
+        profileId: "profile-name",
+        field: "Name",
+        strategy: "generated",
+        decision: "generate",
+        status: "proposed",
+        value: "bc-name-1234",
+        dependsOnProfileIds: [],
+        cleanup: "none",
+        constraints: [],
+        sourceRefs: ["test-data-profile:profile-name"]
+      }],
+      dependencyOrder: ["profile-name"],
+      requiresConfirmation: true,
+      confirmedAt: new Date(0).toISOString(),
+      requiresCleanup: false,
+      sourceRefs: ["test-data-profile:profile-name"]
+    };
+    fixture.executableCase.steps = [{
+      id: "step-name",
+      order: 1,
+      action: "fill",
+      instruction: "Fill Name",
+      targetSemantic: "Name",
+      dataProfileId: "profile-name",
+      value: undefined,
+      origin: "source",
+      sourceRefs: ["requirement:customer"]
+    }];
+
+    const result = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true,
+      automatic: true
+    });
+
+    expect(result).toEqual({
+      status: "ready",
+      operations: [],
+      autoResolvedProfileIds: ["profile-name"]
+    });
+    expect(fixture.repository.testDataTasks).toHaveLength(0);
+    expect(fixture.executableCase.dataPlan?.operations[0]).toEqual(
+      expect.objectContaining({
+        decision: "use-fixed",
+        status: "ready",
+        value: "bc-name-1234"
+      })
+    );
+    expect(fixture.executableCase.steps[0].value).toBe("bc-name-1234");
+  });
+
+  it("does not let automatic resolution bypass the data-plan confirmation gate", async () => {
+    const fixture = await providerFixture();
+    fixture.executableCase.dataPlan = {
+      verdict: "ready",
+      reasons: [],
+      operations: [{
+        profileId: "profile-name",
+        field: "Name",
+        strategy: "generated",
+        decision: "generate",
+        status: "proposed",
+        value: "bc-name-1234",
+        dependsOnProfileIds: [],
+        cleanup: "none",
+        constraints: [],
+        sourceRefs: ["test-data-profile:profile-name"]
+      }],
+      dependencyOrder: ["profile-name"],
+      requiresConfirmation: true,
+      requiresCleanup: false,
+      sourceRefs: ["test-data-profile:profile-name"]
+    };
+
+    await expect(
+      fixture.provider.prepare({
+        knowledgeProjectId: fixture.project.id,
+        systemId: fixture.system.id,
+        executableCaseId: fixture.executableCase.id,
+        confirm: true,
+        automatic: true
+      })
+    ).rejects.toThrow("must be confirmed");
+  });
+
   it("creates one idempotent host-agent task with auditable input artifacts", async () => {
     const fixture = await providerFixture();
     const input = {

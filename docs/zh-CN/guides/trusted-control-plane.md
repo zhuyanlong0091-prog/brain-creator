@@ -1,6 +1,6 @@
 # 可信控制面
 
-所有运行状态变更都应通过 Brain Creator Facade 完成。不要通过修改 `.brain-creator/local-assets.json`、生成测试或已安装 npm 包来绕过工作流。
+所有运行状态变更都应通过 Brain Creator Facade 完成。不要通过修改 `.brain-creator/store/`、`.brain-creator/local-assets.json`、生成测试或已安装 npm 包来绕过工作流。
 
 ## 控制 Agent 返回体大小
 
@@ -86,6 +86,26 @@ Brain Creator Skill 默认使用 `summary`。只有查看特定资产或诊断�
 - `reopen-gap`：新证据使已解决或已忽略的 Gap 再次需要处理。
 
 每次转换都会追加到 Gap 生命周期，不会覆盖历史记录。
+
+## 准备确定性测试数据
+
+如果编译后的用例包含带确定性值的 `generated` 或 `unique` 数据配置，Facade
+可以在不打开目标系统的情况下解析该值：
+
+```json
+{
+  "action": "prepare-test-data",
+  "knowledgeProjectId": "knowledge-project-id",
+  "systemId": "system-id",
+  "executableCaseId": "executable-case-id",
+  "confirm": true,
+  "automatic": true
+}
+```
+
+该模式只会写入已经由已确认数据计划推导出的值，不会创建业务记录、伪造查询
+证据，也不会绕过清理规则。已有记录查询、记录创建、审批和清理仍然先预览，
+再通过可审计的 Host Agent 任务完成。
 
 ## 不重启 MCP 刷新存储
 

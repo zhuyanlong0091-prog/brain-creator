@@ -31,6 +31,47 @@ describe("RequirementSuiteRunService", () => {
     ]);
   });
 
+  it("records declared actor role transitions in the run ledger", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      operator: "qa-user",
+      provider: "codex",
+      sessionId: "session-orders",
+      actorJourney: [
+        { role: "recruiter", authProfileId: "auth-recruiter", afterStepId: "step-submit" },
+        { role: "approver", authProfileId: "auth-approver", afterStepId: "step-submit" }
+      ],
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false
+    });
+    const current = fixture.service.beginNext(run.id).caseRun!;
+
+    fixture.service.recordActorJourneyEvidence(
+      run.id,
+      current.executableCaseId,
+      ".brain-creator/runs/actor-journey.json"
+    );
+
+    expect(fixture.repository.runLedgerEntries.filter((entry) => entry.event === "role-switched"))
+      .toEqual([
+        expect.objectContaining({
+          executableCaseId: current.executableCaseId,
+          operator: "qa-user",
+          provider: "codex",
+          sessionId: "session-orders",
+          currentStep: "step-submit",
+          message: expect.stringContaining("actor role recruiter")
+        }),
+        expect.objectContaining({
+          executableCaseId: current.executableCaseId,
+          currentStep: "step-submit",
+          message: expect.stringContaining("actor role approver")
+        })
+      ]);
+  });
+
   it("runs one case at a time and continues after a business failure", () => {
     const fixture = suiteFixture();
     const run = fixture.service.create({
@@ -152,6 +193,60 @@ describe("RequirementSuiteRunService", () => {
     );
   });
 
+  it("creates the next isolated suite run for a requested stability repeat", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false,
+      stabilityGroupId: "stability-orders",
+      stabilityIteration: 1,
+      stabilityTarget: 2
+    });
+    const current = fixture.service.beginNext(run.id).caseRun!;
+    const completed = fixture.service.completeCase(run.id, current.executableCaseId, {
+      status: "passed",
+      chainRunId: "chain-stability-1",
+      gapIds: []
+    });
+
+    expect(completed.status).toBe("completed");
+    expect(completed.stabilityNextRunId).toEqual(expect.any(String));
+    const next = fixture.service.get(completed.stabilityNextRunId!);
+    expect(next).toEqual(expect.objectContaining({
+      stabilityGroupId: "stability-orders",
+      stabilityIteration: 2,
+      stabilityTarget: 2,
+      status: "running"
+    }));
+    expect(next.id).not.toBe(run.id);
+    expect(next.caseRuns[0].status).toBe("queued");
+  });
+
+  it("does not start another stability iteration after a blocked run", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false,
+      stabilityGroupId: "stability-orders",
+      stabilityIteration: 1,
+      stabilityTarget: 2
+    });
+    const current = fixture.service.beginNext(run.id).caseRun!;
+    const blocked = fixture.service.completeCase(run.id, current.executableCaseId, {
+      status: "blocked",
+      gapIds: ["gap-auth"],
+      error: "Authentication checkpoint required"
+    });
+
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.stabilityNextRunId).toBeUndefined();
+    expect(fixture.repository.requirementSuiteRuns).toHaveLength(1);
+  });
+
   it("waits for test data preparation before binding the execution plan", () => {
     const fixture = suiteFixture();
     const run = fixture.service.create({
@@ -162,7 +257,8 @@ describe("RequirementSuiteRunService", () => {
         title: plan.title
       })),
       continueOnBlocked: false,
-      allowCreateTestData: true
+      allowCreateTestData: true,
+      automaticTestData: true
     });
     const started = fixture.service.beginNext(run.id);
 
@@ -197,6 +293,7 @@ describe("RequirementSuiteRunService", () => {
       })
     );
     expect(bound.allowCreateTestData).toBe(true);
+    expect(bound.automaticTestData).toBe(true);
   });
 
   it("holds a completed case until cleanup succeeds, then advances", () => {
@@ -334,6 +431,21 @@ describe("RequirementSuiteRunService", () => {
     expect(authorized.allowCreateTestData).toBe(true);
     expect(repeated.id).toBe(run.id);
     expect(fixture.repository.requirementSuiteRuns).toHaveLength(1);
+  });
+
+  it("enables deterministic automatic test data on an active run", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false
+    });
+
+    const enabled = fixture.service.enableAutomaticTestData(run.id);
+
+    expect(enabled.automaticTestData).toBe(true);
+    expect(fixture.repository.requirementSuiteRuns[0].automaticTestData).toBe(true);
   });
 
   it("cancels unfinished cases and pending work without changing completed results", () => {

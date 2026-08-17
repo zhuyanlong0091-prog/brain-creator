@@ -1,6 +1,7 @@
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ExecutionFailureType,
+  ActorJourneyConfig,
   ExecutionPlan,
   RequirementSuiteCaseOutcome,
   RequirementSuiteCaseRun,
@@ -13,6 +14,10 @@ type CreateRequirementSuiteRunInput = {
   knowledgeProjectId: string;
   systemId: string;
   authProfileId?: string;
+  operator?: string;
+  provider?: string;
+  sessionId?: string;
+  actorJourney?: ActorJourneyConfig[];
   executionPlans?: ExecutionPlan[];
   cases?: Array<{
     executableCaseId: string;
@@ -21,7 +26,11 @@ type CreateRequirementSuiteRunInput = {
   }>;
   continueOnBlocked: boolean;
   allowCreateTestData?: boolean;
+  automaticTestData?: boolean;
   maxHealAttempts?: number;
+  stabilityGroupId?: string;
+  stabilityIteration?: number;
+  stabilityTarget?: number;
 };
 
 type CompleteRequirementSuiteCaseInput = RequirementSuiteCaseOutcome;
@@ -76,10 +85,18 @@ export class RequirementSuiteRunService {
       knowledgeProjectId: input.knowledgeProjectId,
       systemId: input.systemId,
       authProfileId: input.authProfileId,
+      operator: input.operator,
+      provider: input.provider,
+      sessionId: input.sessionId,
+      actorJourney: input.actorJourney,
       status: "running",
       continueOnBlocked: input.continueOnBlocked,
       allowCreateTestData: Boolean(input.allowCreateTestData),
+      automaticTestData: Boolean(input.automaticTestData),
       maxHealAttempts: input.maxHealAttempts,
+      stabilityGroupId: input.stabilityGroupId,
+      stabilityIteration: input.stabilityIteration,
+      stabilityTarget: input.stabilityTarget,
       total: cases.length,
       passed: 0,
       failed: 0,
@@ -344,6 +361,37 @@ export class RequirementSuiteRunService {
       toStatus: caseRun.status,
       references: { executionPlanId }
     });
+    return run;
+  }
+
+  enableAutomaticTestData(runId: string): RequirementSuiteRun {
+    const run = this.get(runId);
+    if (!run.automaticTestData) {
+      run.automaticTestData = true;
+      run.updatedAt = timestamp();
+      this.repository.persist();
+    }
+    return run;
+  }
+
+  recordActorJourneyEvidence(
+    runId: string,
+    executableCaseId: string,
+    evidencePath: string
+  ) {
+    const run = this.get(runId);
+    const caseRun = this.caseById(run, executableCaseId);
+    for (const actor of run.actorJourney ?? []) {
+      this.record(run, {
+        executableCaseId,
+        event: "role-switched",
+        scope: "case",
+        stage: "execution",
+        toStatus: caseRun.status,
+        currentStep: actor.afterStepId,
+        message: `Observed actor role ${actor.role}; evidence=${evidencePath}`
+      });
+    }
     return run;
   }
 
@@ -736,6 +784,9 @@ export class RequirementSuiteRunService {
       knowledgeProjectId: run.knowledgeProjectId,
       systemId: run.systemId,
       requirementSuiteRunId: run.id,
+      operator: run.operator,
+      provider: run.provider,
+      sessionId: run.sessionId,
       ...input
     });
   }
@@ -779,6 +830,65 @@ export class RequirementSuiteRunService {
             ? "failed"
             : "blocked"
     });
+    if (
+      (run.status === "completed" || run.status === "failed") &&
+      run.stabilityTarget &&
+      (run.stabilityIteration ?? 1) < run.stabilityTarget
+    ) {
+      const next = this.createStabilityRun(run);
+      run.stabilityNextRunId = next.id;
+      run.updatedAt = timestamp();
+      this.repository.persist();
+    }
+  }
+
+  private createStabilityRun(previous: RequirementSuiteRun): RequirementSuiteRun {
+    const nextIteration = (previous.stabilityIteration ?? 1) + 1;
+    const next: RequirementSuiteRun = {
+      id: id("requirementSuiteRun"),
+      knowledgeProjectId: previous.knowledgeProjectId,
+      systemId: previous.systemId,
+      authProfileId: previous.authProfileId,
+      operator: previous.operator,
+      provider: previous.provider,
+      sessionId: previous.sessionId,
+      actorJourney: previous.actorJourney,
+      status: "running",
+      continueOnBlocked: previous.continueOnBlocked,
+      allowCreateTestData: previous.allowCreateTestData,
+      automaticTestData: previous.automaticTestData,
+      maxHealAttempts: previous.maxHealAttempts,
+      stabilityGroupId: previous.stabilityGroupId,
+      stabilityIteration: nextIteration,
+      stabilityTarget: previous.stabilityTarget,
+      total: previous.caseRuns.length,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: previous.caseRuns.map((caseRun) => ({
+        executableCaseId: caseRun.executableCaseId,
+        executionPlanId: caseRun.executionPlanId,
+        title: caseRun.title,
+        order: caseRun.order,
+        status: "queued",
+        gapIds: [],
+        attempts: []
+      })),
+      createdAt: timestamp(),
+      updatedAt: timestamp()
+    };
+    this.repository.requirementSuiteRuns.push(next);
+    this.repository.persist();
+    this.record(next, {
+      event: "suite-created",
+      scope: "suite",
+      stage: "suite",
+      toStatus: next.status,
+      message: `Stability iteration ${nextIteration}/${next.stabilityTarget}`
+    });
+    return next;
   }
 }
 

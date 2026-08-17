@@ -3,6 +3,7 @@ import type {
   ExecutionDiagnosis,
   ExecutionDiagnosisReview,
   ExecutionDiagnosisVerdict,
+  ExecutionEvidence,
   ExecutionFailureType,
   LegacyDiagnosisDecision,
   LegacyDiagnosisSuggestion
@@ -29,6 +30,7 @@ type CreateExecutionDiagnosisInput = {
   healAttempts: number;
   maxHealAttempts: number;
   evidenceRefs: string[];
+  evidenceAssurance?: ExecutionEvidence["assuranceLevel"];
   gapIds?: string[];
 };
 
@@ -78,7 +80,11 @@ export class ExecutionDiagnosisService {
         ? undefined
         : classifyExecutionFailure(failureText, input.sourceType);
     const exhausted = attempted >= max;
-    const verdict = resolveVerdict(input.status, failureType, exhausted);
+    const evidenceAssurance = input.evidenceAssurance ??
+      (input.executionEvidenceId
+        ? this.repository.executionEvidence.find((item) => item.id === input.executionEvidenceId)?.assuranceLevel
+        : undefined);
+    const verdict = resolveVerdict(input.status, failureType, exhausted, evidenceAssurance);
     const diagnosis: ExecutionDiagnosis = {
       id: id("executionDiagnosis"),
       knowledgeProjectId: input.knowledgeProjectId,
@@ -801,10 +807,15 @@ function uniqueStrings(values: string[]) {
 function resolveVerdict(
   status: CreateExecutionDiagnosisInput["status"],
   failureType: ExecutionFailureType | undefined,
-  retriesExhausted: boolean
+  retriesExhausted: boolean,
+  evidenceAssurance?: ExecutionEvidence["assuranceLevel"]
 ): ExecutionDiagnosisVerdict {
   if (status === "passed") return "passed";
-  if (failureType === "assertion_failure" && retriesExhausted) {
+  if (
+    failureType === "assertion_failure" &&
+    retriesExhausted &&
+    evidenceAssurance === "strong"
+  ) {
     return "product_bug";
   }
   if (

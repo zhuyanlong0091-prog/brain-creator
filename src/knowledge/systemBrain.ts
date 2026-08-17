@@ -15,7 +15,17 @@ export type SystemBrainPage = {
   probeIssueCount: number;
   locators: LocatorPoint[];
   probeResultIds: string[];
+  surfaces?: NonNullable<import("../domain/types.js").ProbeResult["surfaceEvidence"]>;
   sourceRefs: string[];
+};
+
+export type PageCandidateScore = {
+  pageModelId: string;
+  pageName: string;
+  route: string;
+  score: number;
+  matchedEvidence: string[];
+  scoreBreakdown: Array<{ evidence: string; contribution: number }>;
 };
 
 export type SystemBrainWorkflow = {
@@ -62,6 +72,12 @@ export type SystemBrainState = {
   url: string;
   visibleElements: string[];
   dialogs: string[];
+  surfaceUrls?: Array<{
+    kind: "iframe";
+    url: string;
+    frameIndex: number;
+  }>;
+  controlValues?: Array<{ name: string; value: string }>;
   sourceRefs: string[];
 };
 
@@ -74,6 +90,7 @@ export type SystemBrainStateTransition = {
   targetRole: string;
   targetSelector: string;
   targetKind: "tab" | "disclosure" | "select";
+  surface?: import("../domain/types.js").InteractionSurfaceRef;
   action: "click" | "select";
   inputValue?: string;
   beforeStateId: string;
@@ -82,8 +99,12 @@ export type SystemBrainStateTransition = {
   visibleRemoved: string[];
   dialogAdded: string[];
   dialogRemoved: string[];
+  changedControls?: Array<{ name: string; before: string; after: string }>;
   urlChanged: boolean;
+  transitionKind?: "navigation" | "state";
+  reacquiredPage?: boolean;
   screenshotPath?: string;
+  scenarioId?: string;
   sourceRefs: string[];
 };
 
@@ -163,6 +184,7 @@ export function buildSystemBrain(
       probeIssueCount: probes.reduce((total, probe) => total + probe.issues.length, 0),
       locators,
       probeResultIds: probes.map((probe) => probe.id),
+      surfaces: probes.flatMap((probe) => probe.surfaceEvidence ?? []),
       sourceRefs: [
         `page-model:${page.id}`,
         ...locators.map((locator) => `locator-point:${locator.id}`),
@@ -270,6 +292,7 @@ export function buildSystemBrain(
             targetRole: transition.targetRole,
             targetSelector: transition.targetSelector,
             targetKind: transition.targetKind,
+            surface: transition.surface,
             action: transition.action,
             inputValue: transition.inputValue,
             beforeStateId: transition.before.id,
@@ -278,8 +301,12 @@ export function buildSystemBrain(
             visibleRemoved: transition.visibleRemoved,
             dialogAdded: transition.dialogAdded,
             dialogRemoved: transition.dialogRemoved,
+            changedControls: transition.changedControls,
             urlChanged: transition.urlChanged,
+            transitionKind: transition.transitionKind,
+            reacquiredPage: transition.reacquiredPage,
             screenshotPath: transition.screenshotPath,
+            scenarioId: transition.scenarioId,
             sourceRefs: [
               `system-exploration:${exploration.id}`,
               `system-interaction:${transition.id}`,
@@ -430,6 +457,9 @@ export function systemObservationDrafts(brain: SystemBrain): SystemObservationDr
       transition.dialogRemoved.length > 0
         ? `dialogs -${transition.dialogRemoved.join(", ")}`
         : "",
+      ...(transition.changedControls ?? []).map(
+        (control) => `control ${control.name}: ${control.before} -> ${control.after}`
+      ),
       transition.urlChanged ? "URL changed" : ""
     ].filter(Boolean);
     drafts.push({
@@ -510,6 +540,10 @@ export function bindStepsToSystemBrain(
     reason: string;
   }> = [];
   if (!page && hasUnpinnedSteps) {
+    const candidates = scorePageCandidates(
+      brain.pages,
+      `${contextQuery} ${steps.map((step) => step.instruction).join(" ")}`
+    );
     return {
       steps,
       missingEvidence: steps.map((step) => ({
@@ -518,7 +552,10 @@ export function bindStepsToSystemBrain(
         reason:
           brain.pages.length === 0
             ? "System Brain has no page evidence"
-            : "System Brain has no unambiguous page evidence"
+            : `System Brain has no unambiguous page evidence; candidates: ${candidates
+                .slice(0, 3)
+                .map((candidate) => `${candidate.pageName} (${candidate.score}; evidence: ${candidate.matchedEvidence.join(", ") || "none"})`)
+                .join(", ")}`
       }))
     };
   }
@@ -677,14 +714,41 @@ function matchingStateTransitions(
 
 function selectPage(pages: SystemBrainPage[], query: string) {
   if (pages.length <= 1) return pages[0];
-  const scored = pages
-    .map((page) => ({
-      page,
-      score: tokenOverlap(query.toLowerCase(), `${page.name} ${page.route}`.toLowerCase())
-    }))
-    .sort((left, right) => right.score - left.score);
+  const scored = scorePageCandidates(pages, query).map((candidate) => ({
+    page: pages.find((page) => page.pageModelId === candidate.pageModelId)!,
+    score: candidate.score
+  }));
   if (scored[0].score === 0 || scored[0].score === scored[1].score) return undefined;
   return scored[0].page;
+}
+
+export function scorePageCandidates(
+  pages: SystemBrainPage[],
+  query: string
+): PageCandidateScore[] {
+  const normalizedQuery = query.toLowerCase();
+  return pages
+    .map((page) => {
+      const evidence = [
+        page.name,
+        page.route,
+        ...page.locators.flatMap((locator) => [locator.name, locator.text])
+      ].filter(Boolean);
+      const matchedEvidence = evidence.filter(
+        (value) => tokenOverlap(normalizedQuery, value.toLowerCase()) > 0
+      );
+      return {
+        pageModelId: page.pageModelId,
+        pageName: page.name,
+        route: page.route,
+        score: tokenOverlap(normalizedQuery, evidence.join(" ").toLowerCase()),
+        matchedEvidence,
+        scoreBreakdown: evidence
+          .map((value) => ({ evidence: value, contribution: tokenOverlap(normalizedQuery, value.toLowerCase()) }))
+          .filter((item) => item.contribution > 0)
+      };
+    })
+    .sort((left, right) => right.score - left.score || left.pageName.localeCompare(right.pageName));
 }
 
 function tokenOverlap(left: string, right: string) {

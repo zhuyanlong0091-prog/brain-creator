@@ -1,11 +1,12 @@
 // @vitest-environment node
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryBrainCreatorRepository, JsonFileBrainCreatorRepository } from "../domain/repository.js";
 import type { RequirementContentPackage } from "../domain/types.js";
+import { encryptSecrets } from "../shared/crypto.js";
 import { KnowledgeService } from "./service.js";
 
 const tempDirs: string[] = [];
@@ -407,7 +408,8 @@ describe("KnowledgeService", () => {
       requirementSetId: ingested.requirementSet.id,
       actionIds: [pendingAction.id],
       note: "If approval does not occur, the order remains in draft.",
-      confirm: true
+      confirm: true,
+      confirmedBy: "reviewer@example.test"
     });
     const confirmationReport = await readFile(
       join(
@@ -425,10 +427,12 @@ describe("KnowledgeService", () => {
       expect.objectContaining({
         status: "confirmed",
         confirmationNote: "If approval does not occur, the order remains in draft.",
-        confirmedAt: expect.any(String)
+        confirmedAt: expect.any(String),
+        confirmedBy: "reviewer@example.test"
       })
     );
     expect(confirmationReport).toContain("If approval does not occur");
+    expect(confirmationReport).toContain("reviewer@example.test");
     expect(restored.approveRequirementSet(ingested.requirementSet.id).status).toBe("approved");
     const compiled = restored.compileExecutableCases(design.testIntents[0].id).executableCase;
     expect(compiled.steps.every((step) =>
@@ -730,6 +734,311 @@ describe("KnowledgeService", () => {
     ).toContain("Expected approved status but received draft");
   });
 
+  it("downgrades assurance and records a warning when a declared trace is missing", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    const project = await service.createProject({ name: "Trace evidence", key: "trace-evidence", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-trace",
+      name: "Trace",
+      environment: "test",
+      baseUrl: "https://trace.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://trace.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-trace");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("trace", "Users submit an order.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const executableCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-trace",
+      executableCaseId: executableCase.id,
+      testCaseId: "test-trace",
+      contextPackPath: "context/trace.json"
+    });
+    evidence.assertionContracts = [{
+      id: "assert-workflow",
+      type: "workflow",
+      strength: "strong",
+      requirementRefs: ["requirement:trace"],
+      evidenceRequirements: ["trace"]
+    }];
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "passed",
+      artifactPaths: [],
+      tracePaths: ["missing/trace.zip"],
+      reporterResult: {
+        status: "passed",
+        total: 1,
+        passed: 1,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        assertions: [],
+        steps: [],
+        attachments: [],
+        consoleErrors: [],
+        networkFailures: []
+      },
+      evidenceRootDir: knowledgeDir
+    });
+
+    expect(completed.assuranceLevel).toBe("none");
+    expect(completed.evidenceWarnings).toEqual(
+      expect.arrayContaining([expect.stringContaining("Missing trace artifact")])
+    );
+  });
+
+  it("redacts auth values before execution evidence and reports are persisted", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    const project = await service.createProject({ name: "Redacted evidence", key: "redacted-evidence", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-redacted",
+      name: "Redacted",
+      environment: "test",
+      baseUrl: "https://redacted.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://redacted.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    repository.authProfiles.push({
+      id: "auth-redacted",
+      projectId: "system-redacted",
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      encryptedSecrets: encryptSecrets({ token: "runtime-secret-value" }),
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-redacted");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("redacted", "Users create a record.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const executableCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const persistedCase = repository.executableCases.find((item) => item.id === executableCase.id);
+    if (!persistedCase) throw new Error("Expected compiled case to be persisted");
+    persistedCase.steps[0] = {
+      ...persistedCase.steps[0],
+      targetSemantic: "Protected token field",
+      value: "runtime-secret-value",
+      pageModelId: "page-redacted",
+      locatorPointId: "locator-token",
+      dataProfileId: "data-token"
+    };
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-redacted",
+      executableCaseId: executableCase.id,
+      testCaseId: "test-redacted",
+      contextPackPath: "context/redacted.json"
+    });
+    expect(evidence.steps[0]).toEqual(expect.objectContaining({
+      targetSemantic: "Protected token field",
+      value: "[REDACTED]",
+      pageModelId: "page-redacted",
+      locatorPointId: "locator-token",
+      dataProfileId: "data-token"
+    }));
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "failed",
+      actualResult: "token=runtime-secret-value",
+      artifactPaths: [],
+      consoleErrors: ["Authorization runtime-secret-value"],
+      networkFailures: ["GET /records?token=runtime-secret-value"],
+      reporterResult: {
+        status: "failed",
+        total: 1,
+        passed: 0,
+        failed: 1,
+        skipped: 0,
+        durationMs: 1,
+        assertions: [{
+          id: "assert-secret",
+          status: "failed",
+          actual: "runtime-secret-value",
+          expected: "runtime-secret-value",
+          evidenceRefs: []
+        }],
+        steps: [{
+          id: "step-secret",
+          title: "bc:secret",
+          status: "failed",
+          evidenceRefs: [],
+          error: "token=runtime-secret-value",
+          consoleErrors: ["runtime-secret-value"],
+          networkFailures: ["runtime-secret-value"]
+        }],
+        attachments: [],
+        consoleErrors: ["runtime-secret-value"],
+        networkFailures: ["runtime-secret-value"]
+      }
+    });
+
+    expect(completed.actualResult).toBe("token=[REDACTED]");
+    expect(completed.consoleErrors).toEqual(["Authorization [REDACTED]"]);
+    expect(completed.networkFailures).toEqual(["GET /records?token=[REDACTED]"]);
+    expect(completed.reporterResult?.assertions[0].actual).toBe("[REDACTED]");
+    expect(completed.reporterResult?.steps?.[0].error).toBe("token=[REDACTED]");
+    const report = await readFile(join(knowledgeDir, "redacted-evidence", "reports", evidence.id, "summary.md"), "utf8");
+    expect(report).not.toContain("runtime-secret-value");
+  });
+
+  it("downgrades assurance when structured reporter omits a declared step", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    await writeFile(join(knowledgeDir, "trace.zip"), "trace", "utf8");
+    const project = await service.createProject({ name: "Reporter coverage", key: "reporter-coverage", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-reporter-coverage",
+      name: "Reporter coverage",
+      environment: "test",
+      baseUrl: "https://reporter-coverage.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://reporter-coverage.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-reporter-coverage");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("reporter-coverage", "Users create an order record.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const executableCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-reporter-coverage",
+      executableCaseId: executableCase.id,
+      testCaseId: "test-reporter-coverage",
+      contextPackPath: "context/reporter-coverage.json"
+    });
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "passed",
+      artifactPaths: [],
+      tracePaths: ["trace.zip"],
+      evidenceRootDir: knowledgeDir,
+      reporterResult: {
+        status: "passed",
+        total: evidence.assertionContracts?.length ?? 0,
+        passed: evidence.assertionContracts?.length ?? 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        assertions: (evidence.assertionContracts ?? []).map((contract) => ({
+          id: contract.id,
+          status: "passed" as const,
+          evidenceRefs: []
+        })),
+        steps: [],
+        attachments: [],
+        consoleErrors: [],
+        networkFailures: []
+      }
+    });
+
+    expect(completed.assuranceLevel).toBe("limited");
+    expect(completed.evidenceWarnings).toEqual([
+      expect.stringContaining("Assurance evidence incomplete: actual-value, screenshot, trace"),
+      expect.stringContaining("Missing structured Reporter evidence for step(s):")
+    ]);
+    expect(completed.evidenceWarnings?.some((warning) => warning.includes("Missing trace artifact"))).toBe(false);
+  });
+
+  it("records field and workflow coverage only from step evidence", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    await mkdir(join(knowledgeDir, "evidence"), { recursive: true });
+    await writeFile(join(knowledgeDir, "evidence", "trace.zip"), "trace", "utf8");
+    const service = new KnowledgeService(repository, knowledgeDir);
+    const project = await service.createProject({ name: "Coverage dimensions", key: "coverage-dimensions", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-coverage-dimensions",
+      name: "Coverage dimensions",
+      environment: "test",
+      baseUrl: "https://coverage-dimensions.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://coverage-dimensions.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-coverage-dimensions");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("coverage-dimensions", "Users fill the customer form and save the customer record.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const executableCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-coverage-dimensions",
+      executableCaseId: executableCase.id,
+      testCaseId: "test-coverage-dimensions",
+      contextPackPath: "context/coverage-dimensions.json"
+    });
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "passed",
+      actualResult: "Customer form saved",
+      artifactPaths: ["evidence/step.png", "evidence/trace.zip"],
+      tracePaths: ["evidence/trace.zip"],
+      evidenceRootDir: knowledgeDir,
+      reporterResult: {
+        status: "passed",
+        total: evidence.assertionContracts?.length ?? 0,
+        passed: evidence.assertionContracts?.length ?? 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        assertions: (evidence.assertionContracts ?? []).map((contract, index) => ({
+          id: contract.id,
+          stepId: contract.stepId,
+          status: "passed" as const,
+          actual: `Observed value ${index + 1}`,
+          evidenceRefs: ["evidence/assertion.png", "evidence/trace.zip"]
+        })),
+        steps: evidence.steps.map((step) => ({
+          id: step.stepId,
+          title: `bc:${step.stepId}`,
+          status: "passed" as const,
+          evidenceRefs: ["evidence/step.png"]
+        })),
+        attachments: ["evidence/step.png", "evidence/trace.zip"],
+        consoleErrors: [],
+        networkFailures: []
+      }
+    });
+
+    expect(completed.coverage?.required).toEqual(expect.arrayContaining(["field", "workflow"]));
+    expect(completed.coverage?.verified).toEqual(expect.arrayContaining(["field", "workflow"]));
+    expect(completed.coverage?.missing).toEqual([]);
+    expect(completed.assuranceLevel).toBe("strong");
+    expect(completed.steps.filter((step) => step.action === "assert").map((step) => step.actual)).toEqual(
+      (evidence.assertionContracts ?? []).map((_, index) => `Observed value ${index + 1}`)
+    );
+  });
+
   it("estimates Requirement Eval accuracy from traceable historical execution outcomes", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const service = new KnowledgeService(repository, await tempDir());
@@ -765,12 +1074,48 @@ describe("KnowledgeService", () => {
       testCaseId: "test-pass",
       contextPackPath: "context/pass.json"
     });
+    passEvidence.assertionContracts = [{
+      id: "assertion-pass",
+      type: "workflow",
+      strength: "strong",
+      expected: "Customer record created",
+      requirementRefs: [ingested.requirementSet.id],
+      evidenceRequirements: ["actual-value", "screenshot", "trace"]
+    }];
     await service.completeExecutionEvidence(passEvidence.id, {
       status: "passed",
       chainRunId: "chain-pass",
       actualResult: "Customer record created",
-      artifactPaths: []
+      artifactPaths: ["evidence/pass.png", "evidence/pass-trace.zip"],
+      tracePaths: ["evidence/pass-trace.zip"],
+      reporterResult: {
+        status: "passed",
+        total: passEvidence.assertionContracts?.length ?? 0,
+        passed: passEvidence.assertionContracts?.length ?? 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 10,
+        assertions: [{
+          id: "assertion-pass",
+          status: "passed" as const,
+          actual: "Customer record created",
+          evidenceRefs: ["evidence/pass.png", "evidence/pass-trace.zip"]
+        }],
+        steps: passEvidence.steps.map((step) => ({
+          id: step.stepId,
+          title: `bc:${step.stepId}`,
+          status: "passed" as const,
+          evidenceRefs: ["evidence/pass.png"],
+          traceRefs: ["evidence/pass-trace.zip"]
+        })),
+        attachments: ["evidence/pass.png", "evidence/pass-trace.zip"],
+        consoleErrors: [],
+        networkFailures: []
+      }
     });
+    expect(repository.executionEvidence.find((item) => item.id === passEvidence.id)?.assuranceLevel).toBe(
+      passEvidence.assertionContracts?.length ? "strong" : "none"
+    );
 
     const bugCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
     const bugEvidence = service.createExecutionEvidence({
@@ -835,14 +1180,32 @@ describe("KnowledgeService", () => {
       networkFailures: ["GET /customers 503"]
     });
 
+    const unassuredCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const unassuredEvidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-history",
+      executableCaseId: unassuredCase.id,
+      testCaseId: "test-unassured",
+      contextPackPath: "context/unassured.json"
+    });
+    await service.completeExecutionEvidence(unassuredEvidence.id, {
+      status: "passed",
+      actualResult: "The runner completed without structured assertion evidence",
+      artifactPaths: []
+    });
+
     expect(service.requirementEvalAccuracy(project.id)).toEqual(
       expect.objectContaining({
-        totalEvidence: 4,
+        totalEvidence: 5,
+        executionPassed: 2,
+        strongVerified: 1,
+        limitedOrUnassuredPassed: 1,
         validated: 2,
         contradicted: 1,
-        inconclusive: 1,
+        inconclusive: 2,
         accuracyRate: 2 / 3,
-        systemConformanceRate: 1 / 2,
+        systemConformanceRate: 2 / 3,
+        strongVerificationRate: 1 / 5,
         traceabilityRate: 1
       })
     );
@@ -851,7 +1214,8 @@ describe("KnowledgeService", () => {
         requirementSetId: ingested.requirementSet.id,
         validated: 2,
         contradicted: 1,
-        inconclusive: 1
+        inconclusive: 2,
+        strongVerified: 1
       })
     ]);
   });

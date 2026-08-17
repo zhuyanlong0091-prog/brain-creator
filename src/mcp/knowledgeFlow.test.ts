@@ -14,6 +14,30 @@ import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers
 
 const tempDirs: string[] = [];
 
+function structuredFailureReport() {
+  return JSON.stringify({
+    stats: { expected: 1, unexpected: 1, skipped: 0 },
+    suites: [
+      {
+        specs: [
+          {
+            id: "requirement-mismatch",
+            title: "requirement mismatch",
+            tests: [{ results: [{ status: "failed" }] }]
+          }
+        ]
+      }
+    ]
+  });
+}
+
+function structuredPassReport() {
+  return JSON.stringify({
+    stats: { expected: 1, unexpected: 0, skipped: 0 },
+    suites: [{ specs: [{ id: "requirement-pass", title: "requirement pass", tests: [{ results: [{ status: "passed" }] }] }] }]
+  });
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -534,6 +558,14 @@ describe("Brain Creator requirement-first facade", () => {
         testIntentId: designed.testIntents[0].id
       })
     );
+    const coveragePage = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "coverage",
+        knowledgeProjectId: project.id,
+        limit: 1,
+        offset: 0
+      })
+    );
 
     expect(ingested.requirementSet.status).toBe("draft");
     expect(designed.evaluation.verdict).toBe("pass");
@@ -546,6 +578,14 @@ describe("Brain Creator requirement-first facade", () => {
     expect(compiled.workflowPath).toBeUndefined();
     expect(compiled.stateActions).toBeUndefined();
     expect(compiled.nextAction).toBe("preview-requirement-suite");
+    expect(coveragePage.executionLedger.items).toHaveLength(1);
+    expect(coveragePage.executionLedger.totalItems).toBe(2);
+    expect(coveragePage.itemPage).toEqual({
+      limit: 1,
+      offset: 0,
+      total: 2,
+      nextOffset: 1
+    });
   });
 
   it("surfaces and resolves a test data plan through the prepare facade", async () => {
@@ -1289,14 +1329,14 @@ describe("Brain Creator requirement-first facade", () => {
         ++testRunCount === 1
           ? {
               exitCode: 1,
-              stdout: "",
+              stdout: structuredFailureReport(),
               stderr: [
                 "Error: expect(received).toBe(expected)",
                 "Expected: \"approved\"",
                 "Received: \"draft\""
               ].join("\n")
             }
-          : { exitCode: 0, stdout: "1 passed", stderr: "" }
+          : { exitCode: 0, stdout: structuredPassReport(), stderr: "" }
     });
     const project = dataOf(
       await handleBrainCreatorTool(context, "bc_configure", {
@@ -1463,6 +1503,12 @@ describe("Brain Creator requirement-first facade", () => {
       result.testPath,
       [
         `import { test, expect } from "../${basename(result.seedPath)}";`,
+        ...result.executionPlan.steps
+          .filter((step: { action: string }) => step.action !== "api")
+          .map(
+            (step: { id: string }) =>
+              `await bc.step(${JSON.stringify(step.id)}, page, action);`
+          ),
         'test("requirement mismatch", async () => { expect("draft").toBe("approved"); });'
       ].join("\n"),
       "utf8"
@@ -1586,6 +1632,9 @@ describe("Brain Creator requirement-first facade", () => {
       completed.testPath,
       [
         `import { test, expect } from "../${basename(completed.seedPath)}";`,
+        ...(completed.task.chainContext?.requiredStepIds ?? []).map(
+          (stepId: string) => `await bc.step(${JSON.stringify(stepId)}, page, action);`
+        ),
         'test("sibling scenario", async () => { expect("approved").toBe("approved"); });'
       ].join("\n"),
       "utf8"
@@ -1639,7 +1688,7 @@ describe("Brain Creator requirement-first facade", () => {
       agentBridge: bridge,
       runner: async () => ({
         exitCode: 0,
-        stdout: "1 passed",
+        stdout: structuredPassReport(),
         stderr: ""
       })
     });
@@ -1849,6 +1898,12 @@ describe("Brain Creator requirement-first facade", () => {
       generated.testPath,
       [
         `import { test, expect } from "../${basename(generated.seedPath)}";`,
+        ...generated.executionPlan.steps
+          .filter((step: { action: string }) => step.action !== "api")
+          .map(
+            (step: { id: string }) =>
+              `await bc.step(${JSON.stringify(step.id)}, page, action);`
+          ),
         'test("created data", async () => { expect(true).toBe(true); });'
       ].join("\n"),
       "utf8"
@@ -2043,7 +2098,8 @@ describe("Brain Creator requirement-first facade", () => {
         action: "cancel",
         requirementSuiteRun: expect.objectContaining({
           status: "cancelled",
-          cancelled: 1
+          cancelled: 1,
+          reportPath: expect.stringContaining("suite-report.html")
         })
       })
     );
@@ -2222,6 +2278,115 @@ describe("Brain Creator requirement-first facade", () => {
     );
     expect(confirmedReview.legacyReviews).toEqual([
       expect.objectContaining({ systemId: bound.id, assetId: `gap-${bound.id}` })
+    ]);
+  });
+
+  it("summarizes stability iterations without treating one run as stable", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Stability Summary",
+      key: "stability-summary",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Stability Console",
+      environment: "test",
+      baseUrl: "https://stability.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://stability.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const first = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      cases: [{ executableCaseId: "case-stability", title: "Stable case" }],
+      continueOnBlocked: false,
+      stabilityGroupId: "stability-group",
+      stabilityIteration: 1,
+      stabilityTarget: 2
+    });
+    first.status = "completed";
+    first.passed = 1;
+    first.caseRuns[0].status = "passed";
+    const second = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      cases: [{ executableCaseId: "case-stability", title: "Stable case" }],
+      continueOnBlocked: false,
+      stabilityGroupId: "stability-group",
+      stabilityIteration: 2,
+      stabilityTarget: 2
+    });
+    second.status = "failed";
+    second.failed = 1;
+    second.caseRuns[0].status = "failed";
+
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: project.id
+    }));
+
+    expect(status.knowledge.requirementSuiteRuns.stability).toEqual([
+      expect.objectContaining({
+        stabilityGroupId: "stability-group",
+        target: 2,
+        iterations: 2,
+        completed: 2,
+        passed: 1,
+        failed: 1,
+        verdict: "unstable"
+      })
+    ]);
+  });
+
+  it("does not call completed iterations stable without strong execution evidence", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Evidence Stability",
+      key: "evidence-stability",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Evidence Console",
+      environment: "test",
+      baseUrl: "https://evidence.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://evidence.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    for (const iteration of [1, 2]) {
+      const run = context.requirementSuiteRuns.create({
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        cases: [{ executableCaseId: `case-evidence-${iteration}`, title: "Evidence case" }],
+        continueOnBlocked: false,
+        stabilityGroupId: "evidence-stability-group",
+        stabilityIteration: iteration,
+        stabilityTarget: 2
+      });
+      run.status = "completed";
+      run.passed = 1;
+      run.caseRuns[0].status = "passed";
+    }
+
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: project.id
+    }));
+
+    expect(status.knowledge.requirementSuiteRuns.stability).toEqual([
+      expect.objectContaining({
+        completed: 2,
+        passed: 2,
+        strongVerified: 0,
+        verdict: "unstable"
+      })
     ]);
   });
 });

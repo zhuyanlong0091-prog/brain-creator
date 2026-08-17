@@ -40,6 +40,58 @@ describe("BrainCreatorService", () => {
     expect(crmSystem.id).not.toBe(ordersSystem.id);
   });
 
+  it("redacts protected values from bug reports and gap lifecycle notes", () => {
+    const service = createService();
+    const system = service.createSystemProfile({
+      name: "Orders Console",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://orders.example.test"]
+    });
+    service.createAuthProfile({
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "bug-token-123" }
+    });
+
+    const bug = service.createBugReport({
+      systemId: system.id,
+      sourceId: "case-1",
+      caseNo: "TC-001",
+      caseTitle: "Create order",
+      module: "Orders",
+      priority: "P1",
+      expectedResult: "No secret should be shown",
+      actualResult: "token=bug-token-123",
+      reproductionSteps: ["Submit token=bug-token-123"],
+      evidencePaths: [],
+      gapIds: []
+    });
+    expect(bug.actualResult).toBe("token=[REDACTED]");
+    expect(bug.reproductionSteps).toEqual(["Submit token=[REDACTED]"]);
+
+    const gap = service.reportGap({
+      projectId: system.id,
+      sourceType: "execution",
+      sourceId: "case-1",
+      reason: "token=bug-token-123",
+      severity: "high",
+      owner: "qa"
+    });
+    const transitioned = service.transitionGap({
+      gapId: gap.id,
+      projectId: system.id,
+      operation: "resolve",
+      note: "Resolved after token=bug-token-123 was removed",
+      evidenceRefs: []
+    });
+    expect(transitioned.reason).toBe("token=[REDACTED]");
+    expect(transitioned.lifecycle?.at(-1)?.note).toContain("token=[REDACTED]");
+  });
+
   it("prevents page modeling and case generation from crossing business systems", () => {
     const service = createService();
     const ordersSystem = service.createSystemProfile({

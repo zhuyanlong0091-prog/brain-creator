@@ -156,8 +156,29 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       role: z.string().optional(),
       gapId: z.string().optional(),
       evidenceRefs: z.array(z.string()).default([]),
-      responseMode: z.enum(["summary", "full"]).default("full"),
+      responseMode: z.enum(["summary", "full"]).default("summary"),
       authProfileId: z.string().optional(),
+      actorJourney: z
+        .array(
+          z.object({
+            role: z.string().optional(),
+            authProfileId: z.string(),
+            afterStepId: z.string().optional(),
+            sourceRefs: z.array(z.string()).default([])
+          })
+        )
+        .optional(),
+      explorationScenario: z
+        .object({
+          id: z.string().optional(),
+          name: z.string().min(1),
+          role: z.string().optional(),
+          prerequisiteState: z.string().optional(),
+          dataRefs: z.array(z.string()).default([]),
+          testDataLeaseIds: z.array(z.string()).default([]),
+          selectorValues: z.record(z.string(), z.string()).default({})
+        })
+        .optional(),
       startUrl: z.string().url().optional(),
       maxPages: z.number().int().min(1).max(25).optional(),
       maxDepth: z.number().int().min(0).max(4).optional(),
@@ -165,6 +186,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       interactionMode: z.enum(["off", "safe"]).default("off"),
       maxInteractionsPerPage: z.number().int().min(0).max(10).optional(),
       actionIds: z.array(z.string()).default([]),
+      confirmedBy: z.string().optional(),
       executableCaseId: z.string().optional(),
       taskId: z.string().optional(),
       taskStatus: z.enum(["succeeded", "failed"]).optional(),
@@ -173,6 +195,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       dataValue: z.string().optional(),
       error: z.string().optional(),
       allowCreate: z.boolean().default(false),
+      automatic: z.boolean().default(false),
       testDataResolutions: z
         .array(
           z.object({
@@ -343,7 +366,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       systemName: z.string().optional(),
       environment: z.string().optional(),
       include: z.array(z.string()).default([]),
-      responseMode: z.enum(["summary", "full"]).default("full")
+      responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
   {
@@ -365,6 +388,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       resume: z.boolean().default(false),
       continueOnBlocked: z.boolean().default(false),
       allowCreateTestData: z.boolean().default(false),
+      automaticTestData: z.boolean().default(false),
       caseNos: z.array(z.string()).default([]),
       modules: z.array(z.string()).default([]),
       priorities: z.array(z.string()).default([]),
@@ -372,11 +396,16 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       confirmWriteBack: z.boolean().default(false),
       confirm: z.boolean().default(false),
       maxHealAttempts: z.number().int().min(0).max(10).optional(),
+      repeatCount: z.number().int().min(1).max(5).optional(),
       bugIds: z.array(z.string()).default([]),
       knowledgeProjectId: z.string().optional(),
       executableCaseId: z.string().optional(),
       authProfileId: z.string().optional(),
-      responseMode: z.enum(["summary", "full"]).default("full")
+      operator: z.string().optional(),
+      provider: z.string().optional(),
+      sessionId: z.string().optional(),
+      evidenceMode: z.enum(["strict", "compatibility"]).optional(),
+      responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
   {
@@ -430,7 +459,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
           ])
         )
         .default([]),
-      responseMode: z.enum(["summary", "full"]).default("full")
+      responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
   {
@@ -439,7 +468,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     description: "Facade configuration entry for system, auth, term, rule, runtime, and auth checkpoint setup.",
     inputSchema: z.object({
       target: z.enum(["system", "auth", "term", "rule", "checkpoint", "knowledge-project", "system-binding", "connector", "runtime"]),
-      operation: z.enum(["create", "verify", "archive", "reload-store"]).default("create"),
+      operation: z.enum(["create", "verify", "archive", "reload-store", "rebuild-index"]).default("create"),
       knowledgeProjectId: z.string().optional(),
       connector: z.enum(["feishu"]).optional(),
       systemId: z.string().optional(),
@@ -463,7 +492,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       testCaseId: z.string().optional(),
       reason: z.string().optional(),
       resumeInstruction: z.string().optional(),
-      responseMode: z.enum(["summary", "full"]).default("full")
+      responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
   {
@@ -763,7 +792,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     description: "Run generator/test/healer chain for an approved test case.",
     inputSchema: z.object({
       caseId: z.string(),
-      maxHealAttempts: z.number().int().min(0).max(10).optional()
+      maxHealAttempts: z.number().int().min(0).max(10).optional(),
+      evidenceMode: z.enum(["strict", "compatibility"]).optional()
     })
   },
   {
@@ -773,7 +803,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       "一键审批并执行：对草稿用例先调用 bc_approve_plan，审批通过后自动执行 bc_run_chain。用于用户已审核计划、确认可执行的场景，减少两次独立工具调用。",
     inputSchema: z.object({
       caseId: z.string(),
-      maxHealAttempts: z.number().int().min(0).max(10).optional()
+      maxHealAttempts: z.number().int().min(0).max(10).optional(),
+      evidenceMode: z.enum(["strict", "compatibility"]).optional()
     })
   },
   {

@@ -36,6 +36,8 @@ Fine-grained tools remain available with `BRAIN_CREATOR_TOOL_PROFILE=full` for c
 
 Use `responseMode=summary` for normal Facade calls. Request `full` only for a specific audit or diagnosis, and page large CompileRun details through `bc_review target=compile-run`. Resolve, dismiss, or reopen a Gap only through `bc_prepare` preview and confirmation with a human note and evidence references.
 
+Real Playwright execution uses strict structured evidence by default. `evidenceMode=compatibility` is only valid for injected test runners; it cannot downgrade a real process, and reporter-less results are not strong auditable passes.
+
 ## User Entrypoint Map
 
 | User intent | Default Agent path | Approval boundary |
@@ -50,11 +52,11 @@ Use `responseMode=summary` for normal Facade calls. Request `full` only for a sp
 | Submit page/training evidence | `bc_prepare action=record-page-evidence` / `record-training-evidence` | Use real host-browser evidence inside the selected system allowlist |
 | Refresh System Brain | `bc_prepare action=refresh-system-brain` | Preserve system isolation and evidence references |
 | Compile against a system | `bc_prepare action=compile-cases` with `requirementSetId` or `testIntentIds`, `systemId`, and `responseMode=summary` | Review details through `bc_review target=compile-run`; ambiguous evidence requires explicit page binding |
-| Prepare test data | `bc_prepare action=prepare-test-data` | Preview first; reuse is default and create requires explicit `allowCreate=true` |
+| Prepare test data | `bc_prepare action=prepare-test-data` | Preview first; deterministic generated/unique values may use `automatic=true` only after the data plan is confirmed; reuse is default and create requires explicit `allowCreate=true` |
 | Submit data or cleanup evidence | `bc_prepare action=submit-test-data` | Require stable references and non-empty `sourceRefs`; never expose secrets |
 | Prepare execution | `bc_prepare action=prepare-execution` | Persist only a ready immutable plan; blocked and needs-confirmation drafts cannot start Generator |
 | Configure auth | `bc_configure target=auth operation=create|verify|archive` or `bc_configure target=checkpoint` | Verify only through a fresh browser context; never expose secrets |
-| Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true` |
+| Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true`; `automaticTestData=true` may resolve only confirmed deterministic generated/unique values |
 | Execute an existing test document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` | Explicit confirmation required |
 | Regress bugs | `bc_run mode=bug-regression` | Show filters and candidates |
 | Review status | `bc_status`, then `bc_review target="bug"`, `bc_review target="gap"`, `bc_review target=run-ledger`, `bc_review target=execution-diagnosis`, `bc_review target=requirement-eval-accuracy`, or System Brain reviews | Read-only |

@@ -1,12 +1,18 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { buildAgentPrompt } from "./promptBuilder.js";
 import { generateSeedFile } from "./seedGenerator.js";
 import { formatScenariosAsMarkdown, parseSpecMarkdown } from "./caseFormatter.js";
 import { checkBusinessRules } from "./qualityGate.js";
 import { extractCandidateTerms } from "./termExtractor.js";
 import { id } from "../shared/id.js";
+import {
+  normalizeReporterExitCode,
+  parsePlaywrightJsonReport
+} from "../execution/playwrightReporter.js";
+import { decryptSecrets } from "../shared/crypto.js";
+import { redactSensitiveText, scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
 import type {
   AgentRun,
   AuthProfile,
@@ -15,19 +21,23 @@ import type {
   Gap,
   GlossaryTerm,
   SystemProfile,
-  TestCase
+  TestCase,
+  StructuredReporterResult
 } from "../domain/types.js";
 
 export type CommandResult = {
   exitCode: number;
   stdout: string;
   stderr: string;
+  structuredReporter?: StructuredReporterResult;
+  reporterPath?: string;
+  actorRoleEvidencePath?: string;
 };
 
 export type CommandRunner = (
   command: string,
   args: string[],
-  options?: { cwd?: string; timeoutMs?: number }
+  options?: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }
 ) => Promise<CommandResult>;
 
 export type AgentBridgeInput = {
@@ -124,6 +134,7 @@ type RunAgentInput = {
   agentBridge?: AgentBridge;
   cwd?: string;
   timeoutMs?: number;
+  protectedSecrets?: Record<string, string>;
 };
 
 type GeneratePlanDraftInput = {
@@ -146,10 +157,33 @@ type RunChainInput = {
   runner?: CommandRunner;
   maxHealAttempts?: number;
   knowledgeContext?: string;
+  structuredReporter?: boolean;
+  actorJourney?: Array<{ role: string; authProfile: AuthProfile }>;
+  requiredStepIds?: string[];
 };
 
 export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
   const start = Date.now();
+  const invalidOutputPaths = input.outputPaths.filter((outputPath) => {
+    const root = resolve(input.cwd ?? process.cwd());
+    const offset = relative(root, resolve(root, outputPath));
+    return offset.startsWith("..") || /^[A-Za-z]:/.test(offset);
+  });
+  if (invalidOutputPaths.length > 0) {
+    const message = `Agent output path must stay inside the workdir: ${invalidOutputPaths.join(", ")}`;
+    return {
+      id: id("agent"),
+      systemId: input.systemId,
+      agent: input.agent,
+      status: "failed",
+      inputSummary: input.inputSummary,
+      outputPaths: input.outputPaths,
+      duration: Date.now() - start,
+      logs: [message],
+      error: message,
+      createdAt: new Date().toISOString()
+    };
+  }
   const agentBridge = input.agentBridge ?? missingAgentBridge;
   let result: CommandResult;
   try {
@@ -169,8 +203,17 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
       createdAt: new Date().toISOString()
     };
   }
-  const logs = [result.stdout, result.stderr].map((entry) => entry.trim()).filter(Boolean);
-  const status = result.exitCode === 0 ? "succeeded" : "failed";
+  const redact = (value: string) => redactSensitiveText(value, input.protectedSecrets ?? {});
+  const stdout = redact(result.stdout);
+  const stderr = redact(result.stderr);
+  const logs = [stdout, stderr].map((entry) => entry.trim()).filter(Boolean);
+  const outputFindings = await scanAgentOutputFiles(input);
+  if (outputFindings.length > 0) {
+    logs.push(
+      `Sensitive values were redacted from Agent output(s): ${outputFindings.join(", ")}`
+    );
+  }
+  const status = result.exitCode === 0 && outputFindings.length === 0 ? "succeeded" : "failed";
 
   return {
     id: id("agent"),
@@ -181,7 +224,12 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
     outputPaths: input.outputPaths,
     duration: Date.now() - start,
     logs,
-    error: status === "failed" ? result.stderr || result.stdout || "Agent command failed" : undefined,
+    error:
+      status === "failed"
+        ? outputFindings.length > 0
+          ? `Agent output contained sensitive material: ${outputFindings.join(", ")}`
+          : stderr || stdout || "Agent command failed"
+        : undefined,
     createdAt: new Date().toISOString()
   };
 }
@@ -220,7 +268,8 @@ export async function generatePlanDraft(input: GeneratePlanDraftInput) {
     args: ["--prompt", prompt.promptPath, "--seed", seed.seedPath, "--output", input.specPath],
     outputPaths: [input.specPath],
     cwd: input.workDir,
-    agentBridge: input.agentBridge
+    agentBridge: input.agentBridge,
+    protectedSecrets: decryptSecrets(input.authProfile.encryptedSecrets)
   });
   if (agentRun.status !== "succeeded") {
     throw new Error(agentRun.error ?? "Planner agent failed");
@@ -274,8 +323,13 @@ export async function runChain(input: RunChainInput) {
     workDir: input.workDir,
     outputDir: join(input.workDir, "tests"),
     system: input.system,
-    authProfile: input.authProfile
+    authProfile: input.authProfile,
+    actorJourney: input.actorJourney
   });
+  const protectedSecrets = Object.fromEntries(
+    [input.authProfile, ...(input.actorJourney ?? []).map((actor) => actor.authProfile)]
+      .flatMap((profile) => Object.entries(decryptSecrets(profile.encryptedSecrets)))
+  );
   const generateRun = await runAgent({
     systemId: input.system.id,
     agent: "generator",
@@ -283,28 +337,127 @@ export async function runChain(input: RunChainInput) {
     args: ["--spec", specPath, "--seed", seed.seedPath, "--output", testPath],
     outputPaths: [testPath],
     cwd: input.workDir,
-    agentBridge: input.agentBridge
+    agentBridge: input.agentBridge,
+    protectedSecrets
   });
 
   const runner = input.runner ?? spawnCommand;
+  const structuredReporterEnabled = input.structuredReporter ?? !input.runner;
+  const runPlaywright = async (): Promise<CommandResult> => {
+    const generatedSource = await readGeneratedSource(testPath);
+    if (structuredReporterEnabled && !generatedSource?.trim()) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Generated Playwright test file is missing or empty; strict execution is blocked."
+      };
+    }
+    if (generatedSource) {
+      const secretFindings = scanGeneratedSourceSecrets(
+        generatedSource,
+        [input.authProfile, ...(input.actorJourney ?? []).map((actor) => actor.authProfile)]
+      );
+      if (secretFindings.length > 0) {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Generated test contains sensitive material: ${secretFindings.join(", ")}`
+        };
+      }
+    }
+    if (input.actorJourney && input.actorJourney.length > 1) {
+      const source = await readFile(testPath, "utf8");
+      const journeyCheck = validateActorJourneyUsage(source, input.actorJourney);
+      if (!journeyCheck.valid) {
+        return { exitCode: 1, stdout: "", stderr: journeyCheck.reason };
+      }
+    }
+    if (input.requiredStepIds?.length) {
+      const source = await readFile(testPath, "utf8");
+      const instrumentationCheck = validateStepInstrumentation(source, input.requiredStepIds);
+      if (!instrumentationCheck.valid) {
+        return { exitCode: 1, stdout: "", stderr: instrumentationCheck.reason };
+      }
+    }
+    const args = ["playwright", "test", testRunPath, "--workers=1"];
+    if (structuredReporterEnabled) args.push("--reporter=json", "--trace=on");
+    const actorRoleEvidencePath =
+      input.actorJourney && input.actorJourney.length > 1
+        ? join(input.workDir, ".brain-creator", "runs", input.testCase.id, "actor-journey.jsonl")
+        : undefined;
+    if (actorRoleEvidencePath) await mkdir(dirname(actorRoleEvidencePath), { recursive: true });
+    const rawResult = await runner("npx", args, {
+      cwd: input.workDir,
+      ...(actorRoleEvidencePath
+        ? { env: { ...process.env, BRAIN_CREATOR_ACTOR_EVIDENCE_PATH: actorRoleEvidencePath } }
+        : {})
+    });
+    const result = {
+      ...rawResult,
+      stdout: redactSensitiveText(rawResult.stdout, protectedSecrets),
+      stderr: redactSensitiveText(rawResult.stderr, protectedSecrets)
+    };
+    if (actorRoleEvidencePath && input.actorJourney) {
+      const roleCheck = await verifyActorRoleEvidence(actorRoleEvidencePath, input.actorJourney);
+      if (!roleCheck.valid) {
+        return {
+          ...result,
+          exitCode: 1,
+          stderr: [result.stderr, roleCheck.reason].filter(Boolean).join("\n"),
+          actorRoleEvidencePath
+        };
+      }
+    }
+    if (!structuredReporterEnabled) {
+      return { ...result, ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {}) };
+    }
+    const reporter = parseReporterOutput(result.stdout);
+    if (!reporter) {
+      return {
+        ...result,
+        exitCode: result.exitCode === 0 ? 1 : result.exitCode,
+        stderr: [
+          result.stderr,
+          "Structured Playwright Reporter output was missing; execution is not auditable."
+        ].filter(Boolean).join("\n"),
+        ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {})
+      };
+    }
+    const reporterPath = join(
+      input.workDir,
+      ".brain-creator",
+      "runs",
+      input.testCase.id,
+      "playwright-report.json"
+    );
+    await mkdir(dirname(reporterPath), { recursive: true });
+    const safeReporter = redactStructuredReporter(reporter, protectedSecrets);
+    await writeFile(reporterPath, `${JSON.stringify(safeReporter, null, 2)}\n`, "utf8");
+    return {
+      ...result,
+      exitCode: normalizeReporterExitCode(result.exitCode, reporter),
+      structuredReporter: safeReporter,
+      reporterPath,
+      ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {})
+    };
+  };
   let testResult: CommandResult =
     generateRun.status === "succeeded"
-      ? await runner("npx", ["playwright", "test", testRunPath], {
-          cwd: input.workDir
-        })
+      ? await runPlaywright()
       : {
           exitCode: 1,
           stdout: "",
           stderr: generateRun.error ?? "Generator agent failed"
         };
   const healerRuns: AgentRun[] = [];
-  const maxHealAttempts = input.maxHealAttempts ?? 3;
+  const maxHealAttempts = input.maxHealAttempts ?? 2;
 
   for (
     let attempt = 0;
     generateRun.status === "succeeded" && testResult.exitCode !== 0 && attempt < maxHealAttempts;
     attempt += 1
   ) {
+    const beforeHealSource = await readGeneratedSource(testPath);
     const healerRun = await runAgent({
       systemId: input.system.id,
       agent: "healer",
@@ -319,15 +472,28 @@ export async function runChain(input: RunChainInput) {
       ],
       outputPaths: [testPath],
       cwd: input.workDir,
-      agentBridge: input.agentBridge
+      agentBridge: input.agentBridge,
+      protectedSecrets
     });
-    healerRuns.push(healerRun);
-    if (healerRun.status !== "succeeded") {
+    const afterHealSource = await readGeneratedSource(testPath);
+    const mutationCheck = beforeHealSource && afterHealSource
+      ? validateHealerMutation(beforeHealSource, afterHealSource, input.requiredStepIds ?? [])
+      : beforeHealSource && !afterHealSource
+        ? { valid: false as const, reason: "Healer removed the generated test file." }
+        : { valid: true as const };
+    const guardedHealerRun = !mutationCheck.valid
+      ? {
+          ...healerRun,
+          status: "failed" as const,
+          error: mutationCheck.reason,
+          logs: [...healerRun.logs, mutationCheck.reason]
+        }
+      : healerRun;
+    healerRuns.push(guardedHealerRun);
+    if (guardedHealerRun.status !== "succeeded") {
       break;
     }
-    testResult = await runner("npx", ["playwright", "test", testRunPath], {
-      cwd: input.workDir
-    });
+    testResult = await runPlaywright();
   }
 
   const status = generateRun.status === "succeeded" && testResult.exitCode === 0 ? "succeeded" : "failed";
@@ -366,6 +532,244 @@ export async function runChain(input: RunChainInput) {
   };
 }
 
+async function scanAgentOutputFiles(input: RunAgentInput) {
+  const findings: string[] = [];
+  const root = resolve(input.cwd ?? process.cwd());
+  for (const outputPath of [...new Set(input.outputPaths)]) {
+    const path = resolve(root, outputPath);
+    const offset = relative(root, path);
+    if (offset.startsWith("..") || /^[A-Za-z]:/.test(offset)) {
+      findings.push(`${outputPath} (outside-workdir)`);
+      continue;
+    }
+    let source: string;
+    try {
+      source = await readFile(path, "utf8");
+    } catch {
+      continue;
+    }
+    const matches = [
+      ...scanSensitiveValues(source, input.protectedSecrets ?? {}).map(
+        (finding) => `credential:${finding.secretKey}`
+      ),
+      ...scanSensitivePatterns(source).map((finding) => `pattern:${finding.rule}`)
+    ];
+    if (matches.length === 0) continue;
+    await writeFile(path, redactSensitiveText(source, input.protectedSecrets ?? {}), "utf8");
+    findings.push(`${outputPath} (${[...new Set(matches)].join(", ")})`);
+  }
+  return findings;
+}
+
+async function readGeneratedSource(path: string) {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function scanGeneratedSourceSecrets(source: string, profiles: AuthProfile[]) {
+  const protectedValues = profiles.flatMap((profile) => {
+    try {
+      return Object.entries(decryptSecrets(profile.encryptedSecrets));
+    } catch {
+      return [];
+    }
+  });
+  return [
+    ...scanSensitiveValues(source, Object.fromEntries(protectedValues)).map(
+      (finding) => `credential:${finding.secretKey}`
+    ),
+    ...scanSensitivePatterns(source).map((finding) => `pattern:${finding.rule}`)
+  ];
+}
+
+export function validateActorJourneyUsage(
+  source: string,
+  actorJourney: Array<{ role: string }>
+) {
+  if (actorJourney.length <= 1) return { valid: true as const };
+  if (!/\bbc\.runAsRole\s*\(/.test(source)) {
+    return {
+      valid: false as const,
+      reason: "Generated test must call bc.runAsRole for a multi-role actor journey."
+    };
+  }
+  const missingRoles = actorJourney
+    .map((actor) => actor.role)
+    .filter(
+      (role) =>
+        !source.includes(JSON.stringify(role)) &&
+        !source.includes(`'${role}'`) &&
+        !source.includes(`\"${role}\"`)
+    );
+  if (missingRoles.length > 0) {
+    return {
+      valid: false as const,
+      reason: `Generated test does not reference actor role(s): ${missingRoles.join(", ")}.`
+    };
+  }
+  return { valid: true as const };
+}
+
+export function validateStepInstrumentation(source: string, stepIds: string[]) {
+  const executableSource = removeSourceComments(source);
+  const missingStepIds = stepIds.filter(
+    (stepId) =>
+      !executableSource.includes(`bc.step(${JSON.stringify(stepId)}`) &&
+      !executableSource.includes(`bc.step('${stepId}'`) &&
+      !executableSource.includes(`bc.step("${stepId}"`)
+  );
+  return missingStepIds.length
+    ? {
+        valid: false as const,
+        reason: `Generated test is missing bc.step instrumentation for: ${missingStepIds.join(", ")}.`
+      }
+    : { valid: true as const };
+}
+
+export function validateHealerMutation(
+  beforeSource: string,
+  afterSource: string,
+  requiredStepIds: string[]
+) {
+  const before = removeSourceComments(beforeSource);
+  const after = removeSourceComments(afterSource);
+  if (/\b(?:test|it|describe)\.skip\s*\(/.test(after)) {
+    return { valid: false as const, reason: "Healer introduced a skipped test." };
+  }
+  if (/\b(?:test|it|describe)\.only\s*\(/.test(after)) {
+    return { valid: false as const, reason: "Healer introduced an isolated test.only/it.only/describe.only." };
+  }
+  const instrumentation = validateStepInstrumentation(after, requiredStepIds);
+  if (!instrumentation.valid) return instrumentation;
+  const beforeAssertions = countAssertions(before);
+  const afterAssertions = countAssertions(after);
+  if (afterAssertions < beforeAssertions) {
+    return {
+      valid: false as const,
+      reason: `Healer removed assertion(s): ${beforeAssertions} before, ${afterAssertions} after.`
+    };
+  }
+  return { valid: true as const };
+}
+
+function countAssertions(source: string) {
+  return (source.match(/\bexpect(?:\.soft)?\s*\(|\bassert(?:\.[A-Za-z]+)?\s*\(/g) ?? []).length;
+}
+
+function removeSourceComments(source: string) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\n)\s*\/\/.*$/gm, "$1");
+}
+
+async function verifyActorRoleEvidence(
+  evidencePath: string,
+  actorJourney: Array<{ role: string; authProfile: AuthProfile }>
+) {
+  let content: string;
+  try {
+    content = await readFile(evidencePath, "utf8");
+  } catch {
+    return {
+      valid: false as const,
+      reason: "Multi-role execution did not produce runtime actor evidence."
+    };
+  }
+  const observedRoles = new Set<string>();
+  const observedEnteredRoles: string[] = [];
+  const observedEnteredAuthProfiles: Array<{ role: string; authProfileId?: string }> = [];
+  for (const line of content.split(/\r?\n/).filter(Boolean)) {
+    try {
+      const event = JSON.parse(line) as {
+        role?: unknown;
+        authProfileId?: unknown;
+        event?: unknown;
+      };
+      if (typeof event.role === "string") {
+        observedRoles.add(event.role);
+        if (event.event === "entered") {
+          observedEnteredRoles.push(event.role);
+          observedEnteredAuthProfiles.push({
+            role: event.role,
+            authProfileId:
+              typeof event.authProfileId === "string" ? event.authProfileId : undefined
+          });
+        }
+      }
+    } catch {
+      return {
+        valid: false as const,
+        reason: "Runtime actor evidence is not valid JSONL."
+      };
+    }
+  }
+  const missingRoles = actorJourney
+    .map((actor) => actor.role)
+    .filter((role) => !observedRoles.has(role));
+  if (missingRoles.length > 0) {
+    return {
+      valid: false as const,
+      reason: `Runtime actor evidence is missing role(s): ${missingRoles.join(", ")}.`
+    };
+  }
+  const expectedAuthProfiles = new Map(
+    actorJourney.map((actor) => [actor.role, actor.authProfile.id])
+  );
+  const authProfileMismatches = observedEnteredAuthProfiles.filter(
+    (event) => event.authProfileId !== expectedAuthProfiles.get(event.role)
+  );
+  if (authProfileMismatches.length > 0) {
+    return {
+      valid: false as const,
+      reason: `Runtime actor evidence maps role(s) to an unexpected AuthProfile: ${authProfileMismatches.map((event) => event.role).join(", ")}.`
+    };
+  }
+  const declaredRoles = actorJourney.map((actor) => actor.role);
+  const unknownRoles = [...observedRoles].filter((role) => !declaredRoles.includes(role));
+  if (unknownRoles.length > 0) {
+    return {
+      valid: false as const,
+      reason: `Runtime actor evidence contains undeclared role(s): ${unknownRoles.join(", ")}.`
+    };
+  }
+  let nextDeclaredRole = 0;
+  for (const role of observedEnteredRoles) {
+    if (role === declaredRoles[nextDeclaredRole]) nextDeclaredRole += 1;
+    if (nextDeclaredRole === declaredRoles.length) break;
+  }
+  if (nextDeclaredRole < declaredRoles.length) {
+    return {
+      valid: false as const,
+      reason: `Runtime actor evidence does not follow the declared role order: ${declaredRoles.join(" -> ")}.`
+    };
+  }
+  return { valid: true as const };
+}
+
+function parseReporterOutput(output: string): StructuredReporterResult | undefined {
+  try {
+    return parsePlaywrightJsonReport(JSON.parse(output));
+  } catch {
+    return undefined;
+  }
+}
+
+function redactStructuredReporter(
+  reporter: StructuredReporterResult,
+  secrets: Record<string, string>
+) {
+  try {
+    return JSON.parse(
+      redactSensitiveText(JSON.stringify(reporter), secrets)
+    ) as StructuredReporterResult;
+  } catch {
+    return reporter;
+  }
+}
+
 async function missingAgentBridge(): Promise<CommandResult> {
   return {
     exitCode: 1,
@@ -378,12 +782,13 @@ async function missingAgentBridge(): Promise<CommandResult> {
 export async function spawnCommand(
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number } = {}
+  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {}
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const normalized = normalizeCommand(command, args);
     const child = spawn(normalized.command, normalized.args, {
-      cwd: options.cwd
+      cwd: options.cwd,
+      env: options.env
     });
     let stdout = "";
     let stderr = "";

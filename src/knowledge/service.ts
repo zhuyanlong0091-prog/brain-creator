@@ -1,6 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ExecutableCase,
@@ -18,7 +18,9 @@ import type {
   RequirementContentPackage,
   RequirementSet,
   RequirementSource,
-  TestIntent
+  TestIntent,
+  CoverageDimension,
+  AssertionContractType
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import {
@@ -42,6 +44,9 @@ import {
   type TestDataResolution
 } from "./testDataPlanner.js";
 import { planWorkflowPath } from "./workflowPathPlanner.js";
+import { buildAssertionContracts, determineAssuranceLevel, missingAssuranceEvidence } from "../execution/assurance.js";
+import { writeStaticExecutionReport } from "../execution/staticReport.js";
+import { decryptSecrets } from "../shared/crypto.js";
 
 export class KnowledgeService {
   constructor(
@@ -321,6 +326,7 @@ export class KnowledgeService {
     actionIds: string[];
     note: string;
     confirm: boolean;
+    confirmedBy?: string;
   }) {
     if (!input.confirm) {
       throw new Error("Explicit confirmation is required for Requirement Eval actions");
@@ -353,6 +359,10 @@ export class KnowledgeService {
     }
 
     const confirmedAt = timestamp();
+    const confirmedBy =
+      input.confirmedBy?.trim() ||
+      process.env.BRAIN_CREATOR_OPERATOR?.trim() ||
+      "local-agent";
     const resolvedGapIds: string[] = [];
     const module =
       this.repository.knowledgeNodes.find(
@@ -362,6 +372,7 @@ export class KnowledgeService {
       if (action.status === "confirmed") continue;
       action.status = "confirmed";
       action.confirmedAt = confirmedAt;
+      action.confirmedBy = confirmedBy;
       action.confirmationNote = note;
       const resolutionSourceRef = `${requirementSet.id}#eval-action-${action.id}`;
       const resolutionNode: KnowledgeNode = {
@@ -655,6 +666,7 @@ export class KnowledgeService {
       pathPlan,
       statePlan,
       dataPlan: dataPlanned.plan,
+      coverageDimensions: intent.coverageDimensions,
       dataProfileIds: dataProfiles.map((profile) => profile.id),
       gapIds: gaps.map((gap) => gap.id),
       createdAt: now,
@@ -881,6 +893,134 @@ export class KnowledgeService {
     return this.repository.testIntents.filter((item) => item.knowledgeProjectId === projectId);
   }
 
+  testIntentCoverage(projectId: string, systemId?: string) {
+    this.getProject(projectId);
+    const intents = this.listTestIntents(projectId);
+    const executableCases = this.repository.executableCases.filter(
+      (item) =>
+        item.knowledgeProjectId === projectId &&
+        (systemId === undefined || item.systemId === systemId)
+    );
+    const evidence = this.repository.executionEvidence.filter(
+      (item) =>
+        item.knowledgeProjectId === projectId &&
+        (systemId === undefined || item.systemId === systemId)
+    );
+    const items = intents.map((intent) => {
+      const requirementSet = this.repository.requirementSets.find(
+        (item) => item.id === intent.requirementSetId
+      );
+      const cases = executableCases.filter(
+        (item) => item.testIntentId === intent.id && item.status !== "superseded"
+      );
+      const caseIds = cases.map((item) => item.id);
+      const results = evidence.filter((item) => caseIds.includes(item.executableCaseId));
+      const classification = requirementSet?.status === "superseded"
+        ? "superseded"
+        : cases.length === 0
+          ? "not-selected"
+          : results.some(
+              (item) =>
+                item.status === "passed" &&
+                item.assuranceLevel === "strong" &&
+                (item.coverage?.missing.length ?? 0) === 0
+            )
+            ? "strong-verified"
+            : results.some(
+                (item) => item.status === "passed" && item.assuranceLevel === "limited"
+              )
+              ? "limited"
+              : results.some((item) => item.status === "failed")
+                ? "failed"
+                : results.some((item) => item.status === "blocked") || cases.some((item) => item.status === "blocked")
+                  ? "blocked"
+                  : "not-selected";
+      const classificationReason = coverageClassificationReason({
+        classification,
+        requirementSetStatus: requirementSet?.status,
+        cases,
+        results
+      });
+      return {
+        testIntentId: intent.id,
+        requirementSetId: intent.requirementSetId,
+        title: intent.title,
+        module: intent.module,
+        priority: intent.priority,
+        classification,
+        classificationReason,
+        executableCaseIds: caseIds,
+        evidenceIds: results.map((item) => item.id),
+        requirementRefs: intent.requirementRefs,
+        coverage: {
+          required: intent.coverageDimensions ?? [],
+          verified: [...new Set(results.flatMap((item) => item.coverage?.verified ?? []))],
+          missing: [...new Set(results.flatMap((item) => item.coverage?.missing ?? intent.coverageDimensions ?? []))]
+        },
+        stability: {
+          runs: results.length,
+          passed: results.filter((item) => item.status === "passed" && item.assuranceLevel === "strong" && (item.coverage?.missing.length ?? 0) === 0).length,
+          failed: results.filter((item) => item.status === "failed").length,
+          blocked: results.filter((item) => item.status === "blocked").length,
+          rate: results.length > 0
+            ? results.filter((item) => item.status === "passed" && item.assuranceLevel === "strong" && (item.coverage?.missing.length ?? 0) === 0).length / results.length
+            : undefined,
+          repeated: results.length >= 2,
+          verdict: stabilityVerdict(results)
+        }
+      } as const;
+    });
+    const counts = items.reduce<Record<string, number>>((result, item) => {
+      result[item.classification] = (result[item.classification] ?? 0) + 1;
+      return result;
+    }, {});
+    return {
+      total: items.length,
+      counts,
+      items
+    };
+  }
+
+  requirementSourceLedger(projectId: string) {
+    this.getProject(projectId);
+    const sources = this.repository.requirementSources.filter(
+      (source) => source.knowledgeProjectId === projectId
+    );
+    return sources.map((source) => {
+      const sets = this.repository.requirementSets.filter((item) => item.sourceId === source.id);
+      const setIds = new Set(sets.map((item) => item.id));
+      const nodes = this.repository.knowledgeNodes.filter(
+        (item) => item.requirementSetId && setIds.has(item.requirementSetId)
+      );
+      const intents = this.repository.testIntents.filter((item) => setIds.has(item.requirementSetId));
+      const intentIds = new Set(intents.map((item) => item.id));
+      const cases = this.repository.executableCases.filter((item) => intentIds.has(item.testIntentId));
+      const caseIds = new Set(cases.map((item) => item.id));
+      const evidence = this.repository.executionEvidence.filter((item) => caseIds.has(item.executableCaseId));
+      return {
+        sourceId: source.id,
+        title: source.title,
+        source: source.source,
+        revision: source.revision,
+        contentHash: source.contentHash,
+        blockCount: source.blocks.length,
+        attachmentCount: source.attachments.length,
+        unreadAttachments: source.attachments.map((attachment) => ({
+          name: attachment.name,
+          url: attachment.url,
+          type: attachment.type,
+          status: "unread" as const,
+          reason: "No OCR or visual adapter has analyzed this attachment yet."
+        })),
+        requirementSetCount: sets.length,
+        nodeCount: nodes.length,
+        intentCount: intents.length,
+        executableCaseCount: cases.length,
+        evidenceCount: evidence.length
+      };
+    });
+  }
+
   listExecutableCases(projectId: string) {
     return this.repository.executableCases.filter((item) => item.knowledgeProjectId === projectId);
   }
@@ -914,6 +1054,7 @@ export class KnowledgeService {
       throw new Error("Execution plan does not match the evidence context");
     }
     const executionSteps = executionPlan?.steps ?? executableCase.steps;
+    const redact = executionSecretRedactor(this.repository, input.systemId);
     const evidence: ExecutionEvidence = {
       id: id("executionEvidence"),
       knowledgeProjectId: project.id,
@@ -928,11 +1069,26 @@ export class KnowledgeService {
         order: step.order,
         action: step.action,
         instruction: step.instruction,
+        targetSemantic: step.targetSemantic,
+        ...(step.value === undefined ? {} : { value: redact(step.value) }),
+        ...(step.pageModelId === undefined ? {} : { pageModelId: step.pageModelId }),
+        ...(step.locatorPointId === undefined ? {} : { locatorPointId: step.locatorPointId }),
+        ...(step.dataProfileId === undefined ? {} : { dataProfileId: step.dataProfileId }),
         expected: step.expected,
         assertionStatus: "pending",
+        evidenceRefs: [],
         sourceRefs: step.sourceRefs,
         origin: step.origin
       })),
+      assertionContracts:
+        executionPlan?.assertionContracts ?? buildAssertionContracts(executionSteps),
+      assuranceLevel: "none",
+      actorJourney: executionPlan?.actorJourney,
+      coverage: {
+        required: executableCase.coverageDimensions ?? ["workflow"],
+        verified: [],
+        missing: executableCase.coverageDimensions ?? ["workflow"]
+      },
       tracePaths: [],
       artifactPaths: [input.contextPackPath],
       consoleErrors: [],
@@ -954,29 +1110,123 @@ export class KnowledgeService {
       tracePaths?: string[];
       consoleErrors?: string[];
       networkFailures?: string[];
+      reporterPath?: string;
+      reporterResult?: ExecutionEvidence["reporterResult"];
+      actorRoleEvidencePath?: string;
+      evidenceRootDir?: string;
     }
   ) {
     const evidence = this.repository.executionEvidence.find((item) => item.id === evidenceId);
     if (!evidence) throw new Error("Execution evidence not found");
+    const redact = executionSecretRedactor(this.repository, evidence.systemId);
     evidence.status = input.status;
     evidence.chainRunId = input.chainRunId;
-    evidence.actualResult = input.actualResult;
+    evidence.actualResult = input.actualResult === undefined ? undefined : redact(input.actualResult);
     evidence.artifactPaths = [...new Set([...evidence.artifactPaths, ...input.artifactPaths])];
     evidence.tracePaths = [...new Set(input.tracePaths ?? [])];
-    evidence.consoleErrors = input.consoleErrors ?? [];
-    evidence.networkFailures = input.networkFailures ?? [];
+    evidence.consoleErrors = (input.consoleErrors ?? []).map(redact);
+    evidence.networkFailures = (input.networkFailures ?? []).map(redact);
+    evidence.reporterPath = input.reporterPath;
+    evidence.reporterResult = input.reporterResult
+      ? redactReporterResult(input.reporterResult, redact)
+      : undefined;
+    if (input.actorRoleEvidencePath) {
+      evidence.artifactPaths = [...new Set([...evidence.artifactPaths, input.actorRoleEvidencePath])];
+    }
+    evidence.assuranceLevel = determineAssuranceLevel(
+      evidence.assertionContracts ?? [],
+      input.reporterResult
+    );
+    const missingAssurance = missingAssuranceEvidence(
+      evidence.assertionContracts ?? [],
+      input.reporterResult
+    );
+    const reporterSteps = evidence.reporterResult?.steps;
+    const missingStepEvidence = reporterSteps
+      ? evidence.steps
+          .filter((step) => !reporterSteps.some((reported) => reported.id === step.stepId))
+          .map((step) => step.stepId)
+      : [];
+    const tracePathsToCheck = input.evidenceRootDir || (input.tracePaths ?? []).some((tracePath) => isAbsolute(tracePath))
+      ? input.tracePaths ?? []
+      : [];
+    const missingTraceEvidence = await Promise.all(
+      tracePathsToCheck.map(async (tracePath) => {
+        try {
+          await access(
+            input.evidenceRootDir && !isAbsolute(tracePath)
+              ? join(input.evidenceRootDir, tracePath)
+              : tracePath
+          );
+          return undefined;
+        } catch {
+          return tracePath;
+        }
+      })
+    ).then((paths) => paths.filter((path): path is string => Boolean(path)));
+    evidence.evidenceWarnings = [
+      ...(missingAssurance.length
+        ? [`Assurance evidence incomplete: ${missingAssurance.join(", ")}`]
+        : []),
+      ...(missingStepEvidence.length
+        ? [`Missing structured Reporter evidence for step(s): ${missingStepEvidence.join(", ")}`]
+        : []),
+      ...(missingTraceEvidence.length
+        ? [`Missing trace artifact(s): ${missingTraceEvidence.join(", ")}`]
+        : [])
+    ];
+    if ((missingStepEvidence.length || missingTraceEvidence.length) && evidence.assuranceLevel === "strong") {
+      evidence.assuranceLevel = "limited";
+    }
+    const assertionSteps = evidence.steps.filter((item) => item.action === "assert");
+    const unboundAssertions = (evidence.reporterResult?.assertions ?? []).filter(
+      (assertion) => !assertion.stepId
+    );
     for (const step of evidence.steps) {
       const screenshot = evidence.artifactPaths.find((path) =>
         path.toLowerCase().includes(`step-${String(step.order).padStart(2, "0")}`)
       );
       step.screenshotPath = screenshot;
-      step.assertionStatus =
-        input.status === "passed"
+      const reporterStep = reporterSteps?.find((reported) => reported.id === step.stepId);
+      const assertion = step.action === "assert"
+        ? evidence.reporterResult?.assertions.find((item) => item.stepId === step.stepId) ??
+          (unboundAssertions.length === assertionSteps.length
+            ? unboundAssertions[assertionSteps.indexOf(step)]
+            : undefined)
+        : undefined;
+      step.evidenceRefs = [...new Set([...(step.evidenceRefs ?? []), ...(reporterStep?.evidenceRefs ?? [])])];
+      step.traceRefs = [...new Set(reporterStep?.traceRefs ?? evidence.tracePaths)];
+      if (assertion) {
+        step.assertionStatus = assertion.status === "passed"
           ? "passed"
-          : step.action === "assert"
-            ? input.status
+          : assertion.status === "failed"
+            ? "failed"
             : "blocked";
-      if (step.action === "assert") step.actual = input.actualResult;
+        if (assertion.expected !== undefined) step.expected ??= redact(assertion.expected);
+        if (assertion.actual !== undefined) step.actual = redact(assertion.actual);
+      } else {
+        step.assertionStatus =
+          input.status === "passed"
+            ? "passed"
+            : step.action === "assert"
+              ? input.status
+              : "blocked";
+        if (step.action === "assert") {
+          step.actual = input.actualResult === undefined ? undefined : redact(input.actualResult);
+        }
+      }
+    }
+    if (reporterSteps !== undefined) {
+      const requiredCoverage = evidence.coverage?.required ?? ["workflow"];
+      const verifiedCoverage = verifiedCoverageDimensions(evidence, input.status);
+      evidence.coverage = {
+        required: requiredCoverage,
+        verified: verifiedCoverage,
+        missing: requiredCoverage.filter((dimension) => !verifiedCoverage.includes(dimension))
+      };
+      if (evidence.coverage.missing.length > 0 && evidence.assuranceLevel === "strong") {
+        evidence.assuranceLevel = "limited";
+      }
     }
     if (input.status !== "blocked") {
       const executableCase = this.repository.executableCases.find(
@@ -990,6 +1240,24 @@ export class KnowledgeService {
     evidence.completedAt = timestamp();
     const reportPath = await this.writeExecutionReport(evidence);
     evidence.artifactPaths = [...new Set([...evidence.artifactPaths, reportPath])];
+    const htmlReportPath = await writeStaticExecutionReport({
+      outputPath: join(
+        this.knowledgeDir,
+        "execution-evidence",
+        "reports",
+        evidence.chainRunId ?? evidence.id,
+        "report.html"
+      ),
+      title: `Execution Evidence ${evidence.id}`,
+      evidence,
+      bugReports: this.repository.bugReports
+        .filter((bug) => bug.chainRunId === evidence.chainRunId)
+        .map((bug) => ({ id: bug.id, status: bug.status, actualResult: bug.actualResult })),
+      gaps: this.repository.gaps
+        .filter((gap) => gap.sourceId === evidence.chainRunId || gap.sourceId === evidence.id)
+        .map((gap) => ({ id: gap.id, status: gap.status, reason: gap.reason }))
+    });
+    evidence.artifactPaths = [...new Set([...evidence.artifactPaths, htmlReportPath])];
     this.repository.persist();
     return evidence;
   }
@@ -1032,10 +1300,15 @@ export class KnowledgeService {
       );
       const technicalFailure =
         item.consoleErrors.length > 0 || item.networkFailures.length > 0 || linkedGap;
+      const stronglyVerified =
+        executableCase !== undefined &&
+        item.status === "passed" &&
+        item.assuranceLevel === "strong" &&
+        (item.coverage?.missing.length ?? 0) === 0;
       let outcome: "validated" | "contradicted" | "inconclusive" = "inconclusive";
       if (
         executableCase &&
-        (item.status === "passed" || (item.status === "failed" && linkedBug))
+        (stronglyVerified || (item.status === "failed" && linkedBug))
       ) {
         outcome = "validated";
       } else if (executableCase && item.status === "failed" && !technicalFailure) {
@@ -1045,6 +1318,8 @@ export class KnowledgeService {
         evidence: item,
         requirementSetId: executableCase?.requirementSetId,
         outcome,
+        executionPassed: item.status === "passed",
+        stronglyVerified,
         linkedBug,
         traceable:
           executableCase !== undefined &&
@@ -1056,6 +1331,11 @@ export class KnowledgeService {
       };
     });
     const summarize = (items: typeof classified) => {
+      const executionPassed = items.filter((item) => item.executionPassed).length;
+      const strongVerified = items.filter((item) => item.stronglyVerified).length;
+      const limitedOrUnassuredPassed = items.filter(
+        (item) => item.executionPassed && !item.stronglyVerified
+      ).length;
       const validated = items.filter((item) => item.outcome === "validated").length;
       const contradicted = items.filter((item) => item.outcome === "contradicted").length;
       const inconclusive = items.filter((item) => item.outcome === "inconclusive").length;
@@ -1067,6 +1347,9 @@ export class KnowledgeService {
       );
       return {
         totalEvidence: items.length,
+        executionPassed,
+        strongVerified,
+        limitedOrUnassuredPassed,
         validated,
         contradicted,
         inconclusive,
@@ -1078,6 +1361,7 @@ export class KnowledgeService {
             ? null
             : conformanceOutcomes.filter((item) => item.evidence.status === "passed").length /
               conformanceOutcomes.length,
+        strongVerificationRate: items.length === 0 ? null : strongVerified / items.length,
         traceabilityRate:
           items.length === 0
             ? null
@@ -1095,7 +1379,7 @@ export class KnowledgeService {
     return {
       ...summarize(classified),
       methodology:
-        "Passed evidence and failed evidence linked to a BugReport validate the requirement expectation. Unclassified semantic failures contradict it. Blocked, Gap-linked, or technical failures are inconclusive.",
+        "A passed run counts as strongly verified only when its assuranceLevel is strong and no required coverage is missing. Passed runs with limited or no assurance are execution successes but remain inconclusive for requirement validation. Failed evidence linked to a BugReport validates the recorded product-defect classification; unclassified semantic failures contradict the expectation. Blocked, Gap-linked, or technical failures are inconclusive.",
       byRequirementSet: requirementSetIds.map((setId) => ({
         requirementSetId: setId,
         title:
@@ -1537,6 +1821,7 @@ export class KnowledgeService {
               `- Requirement evidence: ${action.sourceRefs.join(", ") || "None"}`,
               `- Resolution node: ${action.resolutionNodeId ?? "None"}`,
               `- Confirmed at: ${action.confirmedAt ?? "Not confirmed"}`,
+              `- Confirmed by: ${action.confirmedBy ?? "Not recorded"}`,
               `- Confirmation: ${action.confirmationNote ?? "None"}`,
               ""
             ])
@@ -1950,6 +2235,18 @@ function observationIdentityRef(sourceRefs: string[]) {
   return [...sourceRefs].sort()[0] ?? "";
 }
 
+function stabilityVerdict(
+  results: Array<{ status: string; assuranceLevel?: string; coverage?: { missing: string[] } }>
+) {
+  if (results.length < 2) return "insufficient-sample" as const;
+  const strongPasses = results.filter(
+    (item) => item.status === "passed" && item.assuranceLevel === "strong" && (item.coverage?.missing.length ?? 0) === 0
+  ).length;
+  if (strongPasses === results.length) return "stable" as const;
+  if (results.some((item) => item.status === "blocked")) return "blocked" as const;
+  return "unstable" as const;
+}
+
 function executableCaseCompileKey(
   repository: InMemoryBrainCreatorRepository,
   intent: TestIntent,
@@ -1978,4 +2275,100 @@ function executableCaseCompileKey(
 
 function timestamp() {
   return new Date().toISOString();
+}
+
+function executionSecretRedactor(
+  repository: InMemoryBrainCreatorRepository,
+  systemId: string
+) {
+  const values = repository.authProfiles
+    .filter((profile) => profile.projectId === systemId)
+    .flatMap((profile) => {
+      try {
+        return Object.values(decryptSecrets(profile.encryptedSecrets));
+      } catch {
+        return [];
+      }
+    })
+    .filter((value) => value.length >= 4)
+    .sort((left, right) => right.length - left.length);
+  return (value: string) => values.reduce(
+    (result, secret) => result.split(secret).join("[REDACTED]"),
+    value
+  );
+}
+
+function redactReporterResult(
+  reporter: NonNullable<ExecutionEvidence["reporterResult"]>,
+  redact: (value: string) => string
+): NonNullable<ExecutionEvidence["reporterResult"]> {
+  return {
+    ...reporter,
+    assertions: reporter.assertions.map((assertion) => ({
+      ...assertion,
+      ...(assertion.actual === undefined ? {} : { actual: redact(assertion.actual) }),
+      ...(assertion.expected === undefined ? {} : { expected: redact(assertion.expected) })
+    })),
+    steps: reporter.steps?.map((step) => ({
+      ...step,
+      ...(step.error === undefined ? {} : { error: redact(step.error) }),
+      ...(step.consoleErrors === undefined ? {} : { consoleErrors: step.consoleErrors.map(redact) }),
+      ...(step.networkFailures === undefined ? {} : { networkFailures: step.networkFailures.map(redact) })
+    })),
+    consoleErrors: reporter.consoleErrors.map(redact),
+    networkFailures: reporter.networkFailures.map(redact)
+  };
+}
+
+function coverageClassificationReason(input: {
+  classification: string;
+  requirementSetStatus?: RequirementSet["status"];
+  cases: ExecutableCase[];
+  results: ExecutionEvidence[];
+}) {
+  switch (input.classification) {
+    case "superseded":
+      return "The requirement baseline is superseded, so its historical execution is excluded from active coverage.";
+    case "not-selected":
+      return "No active ExecutableCase is linked to this TestIntent.";
+    case "strong-verified":
+      return "At least one linked execution has strong assurance and no missing coverage dimension.";
+    case "limited":
+      return "Linked execution produced only limited assurance; strong assertion evidence is incomplete.";
+    case "failed":
+      return "A linked execution failed before strong coverage was established.";
+    case "blocked":
+      return "A linked execution or case is blocked and has not established the required evidence.";
+    default:
+      return `Coverage classification '${input.classification}' was derived from ${input.cases.length} case(s) and ${input.results.length} evidence record(s).`;
+  }
+}
+
+function verifiedCoverageDimensions(
+  evidence: ExecutionEvidence,
+  status: ExecutionEvidence["status"]
+): CoverageDimension[] {
+  if (status !== "passed") return [];
+  const hasStepEvidence = (action: ExecutableCaseStep["action"]) =>
+    evidence.steps.some(
+      (step) => step.action === action && (step.evidenceRefs?.length ?? 0) > 0
+    );
+  const hasAssertion = (type: AssertionContractType) =>
+    evidence.assertionContracts?.some((contract) => contract.type === type) &&
+    evidence.reporterResult?.assertions.some((assertion) => assertion.status === "passed");
+  const verified: CoverageDimension[] = [];
+  if (hasStepEvidence("fill") || hasStepEvidence("select") || hasAssertion("value")) {
+    verified.push("field");
+  }
+  if (hasStepEvidence("navigate") || hasStepEvidence("click") || hasAssertion("workflow")) {
+    verified.push("workflow");
+  }
+  if (hasStepEvidence("select") || hasAssertion("state")) {
+    verified.push("state");
+  }
+  if (evidence.actorJourney?.length || hasAssertion("side-effect")) {
+    verified.push("permission");
+  }
+  if (hasAssertion("network")) verified.push("integration");
+  return [...new Set(verified)];
 }

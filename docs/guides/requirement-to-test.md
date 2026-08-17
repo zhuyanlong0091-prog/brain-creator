@@ -155,6 +155,12 @@ A useful review separates:
 
 Use the RunLedger for the timeline and ExecutionEvidence for step-level proof. A Bug must include an approved expectation, actual mismatch, reproduction path, and evidence references.
 
+System exploration also records browser surfaces discovered during capture. The System Brain can distinguish the main document, allowlisted iframe, open Shadow DOM, and Wujie-like container summaries. A URL-changing safe interaction is added to the exploration queue. Surface evidence is observational; it does not authorize writes or silently infer a cross-frame action.
+
+Use `bc_review` with `target=coverage` to inspect the TestIntent execution ledger. Every intent is classified as strong-verified, limited, failed, blocked, not-selected, or superseded. The same response includes a source ledger with blocks, requirement revisions, knowledge nodes, intents, executable cases, evidence, and unread attachments. It also reports required, verified, and missing dimensions for `field`, `workflow`, `state`, `permission`, and `integration`. Use `repeatCount` on `bc_run mode=requirement-suite` for isolated stability iterations.
+
+Suite exports are security-gated. Before a ZIP archive is written, Brain Creator scans available artifacts against the current system's protected credential values. If a report, trace metadata file, or generated test contains a saved Token/Cookie value, export stops and reports only the affected artifact path and credential field name.
+
 ## 10. Resume Or Regress
 
 In a new Agent session, say:

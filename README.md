@@ -24,6 +24,8 @@ Brain Creator 无 Web UI；Claude Code 或 Codex 中的对话就是用户入口�
 npm install --save-dev brain-creator
 npx brain-creator init --provider host-agent
 npx brain-creator doctor
+# Export a completed Suite as a portable evidence archive
+npx brain-creator export --suite <suite-run-id> --output exports/suite.zip
 ```
 
 `doctor` 应显示 MCP 资产、Agent provider、浏览器和知识目录的检查结果。Codex 用户还可以安装项目级插件入口：
@@ -84,7 +86,9 @@ Agent 默认使用高阶 Facade 工具。只有调试、审计或兼容旧流程
 - **源码开发**：克隆本仓库，运行 `npm install`、`npm test` 和 `npm run build`。
 - **全局 CLI**：可运行 `npm install -g brain-creator`，但项目本地安装更容易固定版本。
 
-CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin` 和 `mcp`。使用 `brain-creator config` 查看脱敏配置；旧版独立命令仍兼容，可用 `brain-creator help legacy` 查看。
+CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin`、`export` 和 `mcp`。使用 `brain-creator config` 查看脱敏配置；旧版独立命令仍兼容，可用 `brain-creator help legacy` 查看。
+
+默认运行数据使用 `.brain-creator/store/` 下的 schema 17 分片仓库。首次启动会检测旧的 `.brain-creator/local-assets.json`，创建时间戳备份后迁移；`BRAIN_CREATOR_STORE_DIR` 可指定分片仓库位置。
 
 ### 文档
 
@@ -114,6 +118,7 @@ Install and initialize Brain Creator in the project you want to test:
 npm install --save-dev brain-creator
 npx brain-creator init --provider host-agent
 npx brain-creator doctor
+npx brain-creator export --suite <suite-run-id> --output exports/suite.zip
 ```
 
 `doctor` should report the installed MCP assets, Agent provider, browser, and knowledge directory. Codex users can also install the project plugin entrypoint:
@@ -174,7 +179,9 @@ The trusted control plane removes manual runtime-store edits: auth can be create
 - **Source checkout:** clone this repository, then run `npm install`, `npm test`, and `npm run build`.
 - **Global CLI:** `npm install -g brain-creator` is supported, but a project-local install pins the version.
 
-The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, and `mcp`. Compatibility executables remain available under `brain-creator help legacy`.
+The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, `export`, and `mcp`. Compatibility executables remain available under `brain-creator help legacy`.
+
+Runtime state is stored by default in the schema 17 sharded repository under `.brain-creator/store/`. On first startup Brain Creator detects `.brain-creator/local-assets.json`, creates a timestamped backup, and migrates it. Set `BRAIN_CREATOR_STORE_DIR` to choose another shard directory.
 
 ### Documentation
 

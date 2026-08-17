@@ -69,7 +69,49 @@ describe("knowledge retrieval", () => {
     );
     expect(result.map((item) => item.node.id)).not.toContain("rule_b");
   });
+
+  it("keeps execution retrieval inside the selected system and requirement revision", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.knowledgeNodes.push(
+      scopedNode("node-shared", "Shared rule", "system-a", "requirement-a"),
+      scopedNode("node-system-b", "Other system rule", "system-b", "requirement-a"),
+      scopedNode("node-requirement-b", "Other requirement rule", "system-a", "requirement-b")
+    );
+
+    const result = retrieveKnowledge(repository, {
+      knowledgeProjectId: "project_a",
+      systemId: "system-a",
+      requirementSetId: "requirement-a",
+      query: "rule"
+    });
+
+    expect(result.map((item) => item.node.id)).toEqual(["node-shared"]);
+  });
 });
+
+function scopedNode(
+  id: string,
+  title: string,
+  systemId: string,
+  requirementSetId: string
+) {
+  return {
+    id,
+    knowledgeProjectId: "project_a",
+    systemId,
+    requirementSetId,
+    type: "rule" as const,
+    title,
+    content: title,
+    module: "Orders",
+    sourceRefs: [`source:${id}`],
+    origin: "source" as const,
+    confidence: 1,
+    status: "confirmed" as const,
+    createdAt: "2026-08-14T00:00:00.000Z",
+    updatedAt: "2026-08-14T00:00:00.000Z"
+  };
+}
 
 function node(
   id: string,

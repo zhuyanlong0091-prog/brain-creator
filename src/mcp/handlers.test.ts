@@ -5,15 +5,81 @@ import AdmZip from "adm-zip";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { parseCaseSource } from "../caseSource/parser.js";
-import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
+import {
+  createBrainCreatorMcpContext,
+  handleBrainCreatorTool,
+  summarizeStabilityRuns
+} from "./handlers.js";
 
 const tempDirs: string[] = [];
+
+function structuredFailureReport(title = "document assertion") {
+  return JSON.stringify({
+    stats: { expected: 1, unexpected: 1, skipped: 0 },
+    suites: [
+      {
+        specs: [
+          {
+            id: "document-assertion",
+            title,
+            tests: [{ results: [{ status: "failed" }] }]
+          }
+        ]
+      }
+    ]
+  });
+}
+
+function structuredPassReport(title = "document assertion") {
+  return JSON.stringify({
+    stats: { expected: 1, unexpected: 0, skipped: 0 },
+    suites: [
+      {
+        specs: [
+          {
+            id: "document-assertion",
+            title,
+            tests: [{ results: [{ status: "passed" }] }]
+          }
+        ]
+      }
+    ]
+  });
+}
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 describe("handleBrainCreatorTool", () => {
+  it("does not call a single completed stability run stable", () => {
+    const result = summarizeStabilityRuns([
+      {
+        id: "suite-single-run",
+        knowledgeProjectId: "project-1",
+        systemId: "system-1",
+        status: "completed",
+        stabilityGroupId: "stability-single",
+        stabilityTarget: 1,
+        total: 1,
+        passed: 1,
+        failed: 0,
+        blocked: 0,
+        caseRuns: [],
+        updatedAt: "2026-08-17T00:00:00.000Z"
+      } as never
+    ], []);
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        stabilityGroupId: "stability-single",
+        completed: 1,
+        passed: 1,
+        verdict: "insufficient-sample"
+      })
+    ]);
+  });
+
   it("uses the configured Brain Creator workspace when creating MCP context", async () => {
     const previousWorkspace = process.env.BRAIN_CREATOR_WORKSPACE;
     const workDir = await tempDir();
@@ -44,9 +110,12 @@ describe("handleBrainCreatorTool", () => {
       });
 
       const persisted = JSON.parse(
-        await readFile(join(workDir, ".brain-creator", "local-assets.json"), "utf8")
+        await readFile(
+          join(workDir, ".brain-creator", "store", "collections", "systemProfiles.json"),
+          "utf8"
+        )
       );
-      expect(persisted.systemProfiles).toEqual([
+      expect(persisted).toEqual([
         expect.objectContaining({ name: "Orders Console" })
       ]);
     } finally {
@@ -185,7 +254,8 @@ describe("handleBrainCreatorTool", () => {
       })
     );
     expect(JSON.stringify(seed)).not.toContain("secret-token");
-    expect(seedContent).toContain("secret-token");
+    expect(seedContent).not.toContain("secret-token");
+    expect(seedContent).toContain("BRAIN_CREATOR_AUTH_TOKEN");
   });
 
   it("prefers the latest verified auth profile when generating a seed", async () => {
@@ -727,6 +797,82 @@ describe("handleBrainCreatorTool", () => {
     ]);
   });
 
+  it("allows a Facade caller to require strict Reporter evidence with an injected runner", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      runner: async (_command, args) => {
+        const outputIndex = args.indexOf("--output");
+        if (outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return args.includes("--reporter=json")
+          ? { exitCode: 0, stdout: structuredPassReport(), stderr: "" }
+          : { exitCode: 0, stdout: args.join(" "), stderr: "" };
+      }
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Strict evidence system",
+        environment: "test",
+        baseUrl: "https://strict.example.test",
+        defaultLocale: "en-US",
+        urlAllowlist: ["https://strict.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Strict evidence case",
+      scenarios: [{
+        id: "strict-scenario",
+        title: "Strict evidence",
+        priority: "critical",
+        steps: [{ action: "assert", target: "Result", expected: "visible" }]
+      }],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_chain", {
+        caseId: testCase.id,
+        evidenceMode: "strict"
+      })
+    );
+
+    expect(result.testResult.structuredReporter).toEqual(
+      expect.objectContaining({ status: "passed", total: 1 })
+    );
+    expect(result.chainRun.status).toBe("succeeded");
+  });
+
+  it("does not allow a real process to opt down to compatibility evidence", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+
+    const response = await handleBrainCreatorTool(context, "bc_run_chain", {
+      caseId: "case-not-needed",
+      evidenceMode: "compatibility"
+    });
+
+    expect(response.isError).toBe(true);
+    expect(response.content[0]).toEqual(
+      expect.objectContaining({
+        text: expect.stringContaining("requires an injected runner")
+      })
+    );
+  });
+
   it("returns a host-agent task package instead of running the chain subprocess", async () => {
     const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
     process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";
@@ -736,7 +882,7 @@ describe("handleBrainCreatorTool", () => {
         dataFilePath: join(workDir, "assets.json"),
         workDir
       });
-      context.runner = async () => ({ exitCode: 0, stdout: "playwright passed", stderr: "" });
+      context.runner = async () => ({ exitCode: 0, stdout: structuredPassReport(), stderr: "" });
       const system = dataOf(
         await handleBrainCreatorTool(context, "bc_create_system", {
           name: "Orders Console",
@@ -801,7 +947,11 @@ describe("handleBrainCreatorTool", () => {
         dataFilePath: join(workDir, "assets.json"),
         workDir
       });
-      context.runner = async () => ({ exitCode: 0, stdout: "playwright passed", stderr: "" });
+      context.runner = async () => ({
+        exitCode: 0,
+        stdout: structuredPassReport("secret-token"),
+        stderr: "runner token=secret-token"
+      });
       const system = dataOf(
         await handleBrainCreatorTool(context, "bc_create_system", {
           name: "Orders Console",
@@ -844,7 +994,7 @@ describe("handleBrainCreatorTool", () => {
         await handleBrainCreatorTool(context, "bc_submit_agent_output", {
           taskId: taskPackage.task.id,
           status: "succeeded",
-          stdout: "generated test",
+          stdout: "generated test secret-token",
           stderr: "",
           outputPaths: [taskPackage.testPath]
         })
@@ -860,6 +1010,10 @@ describe("handleBrainCreatorTool", () => {
           testPath: taskPackage.testPath
         })
       );
+      expect(submitted.testResult.stdout).not.toContain("secret-token");
+      expect(JSON.stringify(submitted.testResult.structuredReporter)).not.toContain("secret-token");
+      expect(submitted.agentRun.logs.join("\n")).not.toContain("secret-token");
+      expect(submitted.agentRun.logs.join("\n")).toContain("[REDACTED]");
       expect(context.service.getTestCase(testCase.id).status).toBe("passed");
       expect(context.service.listChainRuns(system.id)).toEqual([
         expect.objectContaining({ id: submitted.chainRun.id })
@@ -895,7 +1049,20 @@ describe("handleBrainCreatorTool", () => {
       agentBridge: hostBridge,
       runner: async (command, args) => {
         calls.push([command, ...args]);
-        return { exitCode: 0, stdout: "playwright passed", stderr: "" };
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            stats: { duration: 12, expected: 1, unexpected: 0, skipped: 0 },
+            suites: [{
+              specs: [{
+                id: "host-assertion",
+                title: "Host assertion",
+                tests: [{ results: [{ status: "passed" }] }]
+              }]
+            }]
+          }),
+          stderr: ""
+        };
       }
     });
     const system = dataOf(
@@ -947,14 +1114,89 @@ describe("handleBrainCreatorTool", () => {
     );
 
     expect(calls).toEqual([
-      ["npx", "playwright", "test", `tests/generated/${testCase.id}.spec.ts`]
+      [
+        "npx",
+        "playwright",
+        "test",
+        `tests/generated/${testCase.id}.spec.ts`,
+        "--workers=1",
+        "--reporter=json",
+        "--trace=on"
+      ]
     ]);
     expect(submitted.testResult).toEqual(
-      expect.objectContaining({ exitCode: 0, stdout: "playwright passed" })
+      expect.objectContaining({
+        exitCode: 0,
+        structuredReporter: expect.objectContaining({ status: "passed", total: 1 }),
+        reporterPath: expect.stringContaining("playwright-report.json")
+      })
     );
+    expect(
+      await readFile(submitted.testResult.reporterPath, "utf8")
+    ).toContain('"status": "passed"');
     expect(submitted.chainRun).toEqual(
       expect.objectContaining({ status: "succeeded", testCaseId: testCase.id })
     );
+  });
+
+  it("does not complete a host-agent chain when Reporter says blocked", async () => {
+    const workDir = await tempDir();
+    const hostBridge = Object.assign(
+      async () => ({ exitCode: 1, stdout: "", stderr: "host-agent handoff" }),
+      { provider: "host-agent", preflight: async () => ({ ok: true }) }
+    );
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: hostBridge,
+      runner: async () => ({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          stats: { duration: 5, expected: 0, unexpected: 0, skipped: 1 },
+          suites: [{ specs: [{ title: "blocked", tests: [{ results: [{ status: "skipped" }] }] }] }]
+        }),
+        stderr: ""
+      })
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "Blocked host system",
+      environment: "test",
+      baseUrl: "https://blocked.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: []
+    }));
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Blocked host case",
+      scenarios: [{ id: "blocked-scenario", title: "Blocked", priority: "critical", steps: [] }],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+    const taskPackage = dataOf(await handleBrainCreatorTool(context, "bc_run_chain", {
+      caseId: testCase.id,
+      maxHealAttempts: 0
+    }));
+    await writeFile(taskPackage.testPath, "import { test } from '../seed';\n", "utf8");
+
+    const result = dataOf(await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+      taskId: taskPackage.task.id,
+      status: "succeeded",
+      stdout: "generated",
+      stderr: "",
+      outputPaths: [taskPackage.testPath]
+    }));
+
+    expect(result.chainRun.status).toBe("failed");
+    expect(result.testResult.structuredReporter.status).toBe("blocked");
+    expect(context.service.getTestCase(testCase.id).status).toBe("failed");
   });
 
   it("returns a healer task when the Playwright process throws after a host-agent generator submit", async () => {
@@ -1120,6 +1362,86 @@ describe("handleBrainCreatorTool", () => {
     ]);
   });
 
+  it("keeps a host-agent task pending when generated step evidence is missing", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(async () => ({ exitCode: 1, stdout: "", stderr: "handoff" }), {
+        provider: "host-agent",
+        preflight: async () => ({ ok: true })
+      })
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Evidence System",
+        environment: "local",
+        baseUrl: "https://evidence.example.test",
+        defaultLocale: "en-US",
+        urlAllowlist: ["https://evidence.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "local",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Validate evidence instrumentation",
+      scenarios: [
+        {
+          id: "scenario_evidence",
+          title: "Evidence",
+          priority: "high",
+          steps: [{ action: "assert", target: "Ready", expected: "visible" }]
+        }
+      ],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+    const taskPackage = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_chain", { caseId: testCase.id })
+    );
+    context.repository.agentTasks.find((task) => task.id === taskPackage.task.id)!.chainContext = {
+      ...taskPackage.task.chainContext,
+      requiredStepIds: ["step-ready"]
+    };
+    await writeFile(taskPackage.testPath, "import { test, expect } from '../seed';\n", "utf8");
+
+    const rejected = await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+      taskId: taskPackage.task.id,
+      status: "succeeded",
+      stdout: "generated test",
+      outputPaths: [taskPackage.testPath]
+    });
+
+    expect(errorOf(rejected)).toContain("missing bc.step instrumentation");
+    expect(context.repository.agentTasks).toEqual([
+      expect.objectContaining({ id: taskPackage.task.id, status: "pending" })
+    ]);
+    expect(context.repository.agentRuns).toHaveLength(0);
+
+    await writeFile(
+      taskPackage.testPath,
+      "import { test, expect } from '../seed';\nawait bc.step(\"step-ready\", page, action);\nconst config = { password: \"do-not-export-this\" };\n",
+      "utf8"
+    );
+    const secretRejected = await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+      taskId: taskPackage.task.id,
+      status: "succeeded",
+      stdout: "generated test",
+      outputPaths: [taskPackage.testPath]
+    });
+    expect(errorOf(secretRejected)).toContain("pattern:sensitive-field-literal");
+    expect(context.repository.agentTasks).toEqual([
+      expect.objectContaining({ id: taskPackage.task.id, status: "pending" })
+    ]);
+  });
+
   it("reruns Playwright and records a healed chain when a host-agent healer task is submitted", async () => {
     const workDir = await tempDir();
     const hostBridge = Object.assign(
@@ -1142,7 +1464,14 @@ describe("handleBrainCreatorTool", () => {
         calls.push([command, ...args]);
         return calls.length === 1
           ? { exitCode: 1, stdout: "", stderr: "expected amount missing" }
-          : { exitCode: 0, stdout: "healed test passed", stderr: "" };
+          : {
+              exitCode: 0,
+              stdout: JSON.stringify({
+                stats: { duration: 13, expected: 1, unexpected: 0, skipped: 0 },
+                suites: [{ specs: [{ title: "healed", tests: [{ results: [{ status: "passed" }] }] }] }]
+              }),
+              stderr: ""
+            };
       }
     });
     const system = dataOf(
@@ -1203,11 +1532,31 @@ describe("handleBrainCreatorTool", () => {
     );
 
     expect(calls).toEqual([
-      ["npx", "playwright", "test", `tests/generated/${testCase.id}.spec.ts`],
-      ["npx", "playwright", "test", `tests/generated/${testCase.id}.spec.ts`]
+      [
+        "npx",
+        "playwright",
+        "test",
+        `tests/generated/${testCase.id}.spec.ts`,
+        "--workers=1",
+        "--reporter=json",
+        "--trace=on"
+      ],
+      [
+        "npx",
+        "playwright",
+        "test",
+        `tests/generated/${testCase.id}.spec.ts`,
+        "--workers=1",
+        "--reporter=json",
+        "--trace=on"
+      ]
     ]);
     expect(healed.testResult).toEqual(
-      expect.objectContaining({ exitCode: 0, stdout: "healed test passed" })
+      expect.objectContaining({
+        exitCode: 0,
+        structuredReporter: expect.objectContaining({ status: "passed" }),
+        reporterPath: expect.stringContaining("playwright-report.json")
+      })
     );
     expect(healed.chainRun).toEqual(
       expect.objectContaining({
@@ -1350,6 +1699,47 @@ describe("handleBrainCreatorTool", () => {
 
     expect(result.isError).toBe(true);
     expect(errorOf(result)).toContain("Artifact path must stay inside workspace");
+  });
+
+  it("rejects host agent output paths outside the workspace", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const task = context.service.createAgentTask({
+      id: "task-output-boundary",
+      systemId: system.id,
+      agent: "planner",
+      inputSummary: "Boundary check",
+      args: [],
+      outputPaths: ["specs/plan.md"],
+      promptPath: join(workDir, "prompt.md"),
+      contextPath: join(workDir, "context.json")
+    });
+
+    const result = await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+      taskId: task.id,
+      status: "failed",
+      stdout: "",
+      stderr: "outside output",
+      outputPaths: [join(workDir, "..", "outside.md")]
+    });
+
+    expect(result.isError).toBe(true);
+    expect(errorOf(result)).toContain("Agent output path must stay inside");
+    expect(context.repository.agentTasks).toEqual([
+      expect.objectContaining({ id: task.id, status: "pending" })
+    ]);
   });
 
   it("runs a single agent and records the agent run through MCP", async () => {
@@ -1935,6 +2325,12 @@ describe("handleBrainCreatorTool", () => {
     expect(status.system.name).toBe("HRMS");
     expect(status.auth.profiles).toHaveLength(1);
     expect(status.bridge.ok).toBe(true);
+    expect(status.executionEvidence).toEqual({
+      total: 0,
+      byStatus: {},
+      byAssurance: {},
+      unassured: 0
+    });
     expect(status.facadeNextAction).toBe("configure_or_generate_plan");
     expect(status.userSummary).toEqual(
       expect.objectContaining({
@@ -2567,6 +2963,146 @@ describe("handleBrainCreatorTool", () => {
     );
   });
 
+  it("scopes coverage review to the requested system", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "System-scoped coverage",
+      key: "system-scoped-coverage",
+      defaultLocale: "en-US"
+    });
+    const first = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "System A",
+        environment: "test",
+        baseUrl: "https://a.example.test",
+        defaultLocale: "en-US",
+        urlAllowlist: []
+      })
+    );
+    const second = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "System B",
+        environment: "test",
+        baseUrl: "https://b.example.test",
+        defaultLocale: "en-US",
+        urlAllowlist: []
+      })
+    );
+    context.knowledgeService.bindSystem(project.id, first.id);
+    context.knowledgeService.bindSystem(project.id, second.id);
+    const ingested = await context.knowledgeService.ingestRequirement({
+      projectId: project.id,
+      contentPackage: {
+        title: "System scoped requirement",
+        content: "Users submit a request.",
+        blocks: [{ type: "paragraph", text: "Users submit a request." }],
+        attachments: [],
+        source: "system-scoped.md",
+        sourceType: "local-file",
+        contentHash: "system-scoped-hash",
+        warnings: []
+      }
+    });
+    const design = await context.knowledgeService.generateTestDesign(ingested.requirementSet.id);
+    context.knowledgeService.approveRequirementSet(ingested.requirementSet.id);
+    const executable = context.knowledgeService.compileExecutableCases(
+      design.testIntents[0].id,
+      first.id
+    ).executableCase;
+    const evidence = context.knowledgeService.createExecutionEvidence({
+      projectId: project.id,
+      systemId: first.id,
+      executableCaseId: executable.id,
+      testCaseId: "test-system-scoped",
+      contextPackPath: "context.json"
+    });
+    await context.knowledgeService.completeExecutionEvidence(evidence.id, {
+      status: "blocked",
+      artifactPaths: [],
+      tracePaths: []
+    });
+
+    const scoped = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "coverage",
+        knowledgeProjectId: project.id,
+        systemId: second.id
+      })
+    );
+    expect(scoped.systemId).toBe(second.id);
+    expect(scoped.executionLedger.counts).toEqual({ "not-selected": 1 });
+    const all = dataOf(
+      await handleBrainCreatorTool(context, "bc_review", {
+        target: "coverage",
+        knowledgeProjectId: project.id
+      })
+    );
+    expect(all.executionLedger.counts).toEqual({ blocked: 1 });
+  });
+
+  it("returns a bounded summary for requirement suite run review", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Orders Knowledge",
+      key: "project-orders",
+      defaultLocale: "en-US"
+    });
+    context.repository.requirementSuiteRuns.push({
+      id: "suite-run-running",
+      knowledgeProjectId: project.id,
+      systemId: "system-orders",
+      status: "running",
+      continueOnBlocked: false,
+      allowCreateTestData: false,
+      total: 2,
+      passed: 1,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: [],
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:01:00.000Z"
+    });
+    context.repository.requirementSuiteRuns.push({
+      id: "suite-run-completed",
+      knowledgeProjectId: project.id,
+      systemId: "system-orders",
+      status: "completed",
+      continueOnBlocked: false,
+      allowCreateTestData: false,
+      total: 1,
+      passed: 1,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: [],
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:01:00.000Z"
+    });
+
+    const review = dataOf(await handleBrainCreatorTool(context, "bc_review", {
+      target: "requirement-suite-run",
+      knowledgeProjectId: project.id
+    }));
+
+    expect(review.reviewSummary).toEqual(expect.objectContaining({
+      title: "Requirement Suite Run Review",
+      status: "action_required",
+      nextAction: "resume_or_resolve_blockers",
+      metrics: expect.objectContaining({ totalRuns: 2, totalCases: 3, passed: 2 })
+    }));
+  });
+
   it("previews natural-language entrypoints as facade calls without executing", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
@@ -2837,6 +3373,139 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.listCaseSuites(system.id)).toEqual([]);
   });
 
+  it("returns suite auth refresh evidence after a host-provided refresh", async () => {
+    const workDir = await tempDir();
+    let verificationCount = 0;
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(
+        async () => ({ exitCode: 0, stdout: "host agent", stderr: "" }),
+        {
+          provider: "host-agent" as const,
+          preflight: async () => ({ ok: true })
+        }
+      ),
+      authStateVerifier: async () => {
+        verificationCount += 1;
+        return verificationCount === 1
+          ? { status: "expired" as const, reason: "Short-lived session expired." }
+          : { status: "valid" as const, finalUrl: "https://hrms.example.test/dashboard" };
+      },
+      authStateRefresher: async () => ({
+        storageStatePath: ".brain-creator/auth/refreshed.json",
+        provider: "host-refresh"
+      })
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Refreshable HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    const auth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "script",
+        secrets: { storageStatePath: ".brain-creator/auth/storage.json" }
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_verify_auth", { id: auth.id });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true
+      })
+    );
+
+    expect(result.authState).toEqual(expect.objectContaining({
+      status: "valid",
+      authRefresh: { attempted: true, provider: "host-refresh" }
+    }));
+  });
+
+  it("bounds nested bc_status history while preserving counts", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "system",
+      name: "Bounded status",
+      environment: "test",
+      baseUrl: "https://bounded.example.test",
+      urlAllowlist: ["https://bounded.example.test"]
+    }));
+    for (let index = 0; index < 15; index += 1) {
+      context.repository.agentTasks.push({
+        id: `task-${index}`,
+        systemId: system.id,
+        agent: "generator",
+        status: "pending",
+        inputSummary: `task-${index}`,
+        args: [],
+        outputPaths: [],
+        promptPath: "prompt.md",
+        contextPath: "context.json",
+        submitTool: "bc_submit_agent_output",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      systemId: system.id,
+      responseMode: "full"
+    }));
+
+    expect(status.agentTasks.pending).toHaveLength(10);
+    expect(status.agentTasks.pendingTruncated).toBe(true);
+    expect(status.userSummary.counts.pendingAgentTasks).toBe(15);
+  });
+
+  it("rejects document-suite auth storage outside the Brain Creator workspace", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      authStateVerifier: async () => ({ status: "valid", finalUrl: "https://hrms.example.test" })
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_create_system", {
+      name: "Protected HRMS",
+      environment: "test",
+      baseUrl: "https://hrms.example.test",
+      defaultLocale: "zh-CN",
+      urlAllowlist: ["https://hrms.example.test"]
+    }));
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "script",
+      secrets: { storageStatePath: "..\\outside-storage-state.json" }
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    await expect(
+      handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        source,
+        confirm: true
+      })
+    ).resolves.toEqual(expect.objectContaining({ isError: true }));
+  });
+
   it("filters document case suites by case number, module, and priority", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
@@ -3020,7 +3689,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
-      runner: async () => ({ exitCode: 1, stdout: "", stderr: "suite assertion failed" })
+      structuredReporter: true,
+      runner: async () => ({
+        exitCode: 1,
+        stdout: structuredFailureReport(),
+        stderr: "suite assertion failed"
+      })
     });
     const source = join(workDir, "cases.xlsx");
     await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "", "", ""]]));
@@ -3094,7 +3768,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
-      runner: async () => ({ exitCode: 1, stdout: "", stderr: "expected banner missing" })
+      structuredReporter: true,
+      runner: async () => ({
+        exitCode: 1,
+        stdout: structuredFailureReport(),
+        stderr: "expected banner missing"
+      })
     });
     const source = join(workDir, "cases.xlsx");
     await writeFile(source, createXlsxFixture([["TC-009", "Create job request", "Recruiting", "Logged in", "1. Click New", "Created", "", "P0", "", "", ""]]));
@@ -3364,7 +4043,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
-      runner: async () => ({ exitCode: 1, stdout: "", stderr: "expected result was not visible" })
+      structuredReporter: true,
+      runner: async () => ({
+        exitCode: 1,
+        stdout: structuredFailureReport(),
+        stderr: "expected result was not visible"
+      })
     });
     const source = join(workDir, "cases.xlsx");
     await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "未执行", "", ""]]));
@@ -3433,15 +4117,16 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () => {
         runCount += 1;
         return runCount === 2
           ? {
               exitCode: 1,
-              stdout: "",
+              stdout: structuredFailureReport("offer assertion"),
               stderr: "Expected offer to be sent, actual offer remained draft"
             }
-          : { exitCode: 0, stdout: "passed", stderr: "" };
+          : { exitCode: 0, stdout: structuredPassReport(), stderr: "" };
       }
     });
     const source = join(workDir, "cases.xlsx");
@@ -3503,7 +4188,7 @@ describe("handleBrainCreatorTool", () => {
         dataFilePath: join(workDir, "assets.json"),
         workDir
       });
-      context.runner = async () => ({ exitCode: 0, stdout: "playwright passed", stderr: "" });
+      context.runner = async () => ({ exitCode: 0, stdout: structuredPassReport(), stderr: "" });
       const source = join(workDir, "cases.xlsx");
       await writeFile(source, createXlsxFixture());
       const system = dataOf(
@@ -3689,10 +4374,10 @@ describe("handleBrainCreatorTool", () => {
         runCount += 1;
         return {
           exitCode: 1,
-          stdout:
+          stdout: structuredFailureReport("environment configuration"),
+          stderr:
             `process definition key is not configured (attempt ${runCount})\n` +
-            "Expected: 200\nReceived: 500",
-          stderr: ""
+            "Expected: 200\nReceived: 500"
         };
       };
       const source = join(workDir, "cases.xlsx");
@@ -3794,10 +4479,10 @@ describe("handleBrainCreatorTool", () => {
         return runCount <= 2
           ? {
               exitCode: 1,
-              stdout: "missing environment configuration: required fixture data is unavailable",
-              stderr: ""
+              stdout: structuredFailureReport("missing environment configuration"),
+              stderr: "missing environment configuration: required fixture data is unavailable"
             }
-          : { exitCode: 0, stdout: "playwright passed", stderr: "" };
+          : { exitCode: 0, stdout: structuredPassReport(), stderr: "" };
       };
       const source = join(workDir, "cases.xlsx");
       await writeFile(source, createXlsxFixture());
@@ -3941,7 +4626,7 @@ describe("handleBrainCreatorTool", () => {
       );
       context.runner = async () => ({
         exitCode: 1,
-        stdout: "",
+        stdout: structuredFailureReport(),
         stderr: "expected result was not visible"
       });
       await writeFile(firstRun.task.outputPaths[0], "import { test } from '@playwright/test';\n", "utf8");
@@ -3978,6 +4663,27 @@ describe("handleBrainCreatorTool", () => {
       expect(status.userSummary.readiness).toBe("action-required");
       expect(status.facadeNextAction).toBe("continue_case_source_suite");
       expect(status.userSummary.nextCommand).toBe("/bc continue");
+      expect(status.userSummary.activeSuite).toEqual({
+        suiteId: firstRun.suite.id,
+        status: "waiting-for-agent",
+        totalCases: 2,
+        attempted: 1,
+        passed: 0,
+        failed: 1,
+        blocked: 0,
+        waiting: 1,
+        pending: 0,
+        nextCaseNo: "TC-002",
+        currentStage: "generator",
+        latestEvent: "agent-task-requested",
+        traceId: expect.any(String),
+        activeTask: {
+          taskId: nextCase.task.id,
+          caseNo: "TC-002",
+          title: nextCase.task.suiteContext.title
+        }
+      });
+      expect(status.statusMarkdown).toContain(`Active suite progress: 0/2 passed; next TC-002`);
       expect(status.suites.unfinished).toEqual([
         expect.objectContaining({
           suiteId: firstRun.suite.id,
@@ -4130,7 +4836,11 @@ describe("handleBrainCreatorTool", () => {
       let hostFailureReason = "expected result was not visible";
       context.runner = async () => {
         runCount += 1;
-        return { exitCode: 1, stdout: "", stderr: hostFailureReason };
+        return {
+          exitCode: 1,
+          stdout: structuredFailureReport(),
+          stderr: hostFailureReason
+        };
       };
       const source = join(workDir, "cases.xlsx");
       await writeFile(
@@ -4392,11 +5102,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () => {
         runCount += 1;
         return runCount === 2
-          ? { exitCode: 1, stdout: "", stderr: "TC-002 failed" }
-          : { exitCode: 0, stdout: "passed", stderr: "" };
+          ? { exitCode: 1, stdout: structuredFailureReport("TC-002 failed"), stderr: "TC-002 failed" }
+          : { exitCode: 0, stdout: structuredPassReport(), stderr: "" };
       }
     });
     const source = join(workDir, "cases.xlsx");
@@ -4475,10 +5186,11 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () =>
         failureReason
-          ? { exitCode: 1, stdout: "", stderr: failureReason }
-          : { exitCode: 0, stdout: "fixed", stderr: "" }
+          ? { exitCode: 1, stdout: structuredFailureReport(), stderr: failureReason }
+          : { exitCode: 0, stdout: structuredPassReport("fixed"), stderr: "" }
     });
     const source = join(workDir, "cases.xlsx");
     await writeFile(source, createXlsxFixture([["TC-001", "创建招聘需求", "招聘需求", "用户已登录", "1. 点击新增", "创建成功", "", "P0", "", "", ""]]));
@@ -4623,6 +5335,12 @@ describe("handleBrainCreatorTool", () => {
             gapRouted: 1
           })
         }),
+        reviewSummary: expect.objectContaining({
+          title: "Execution Diagnosis Review",
+          status: "action_required",
+          nextAction: "review_product_bugs",
+          metrics: expect.objectContaining({ total: 2 })
+        }),
         items: [
           expect.objectContaining({
             verdict: "automation_gap",
@@ -4676,11 +5394,12 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () => {
         if (!regressionRun) {
           return {
             exitCode: 1,
-            stdout: "",
+            stdout: structuredFailureReport("initial regression failure"),
             stderr: "Expected documented result, actual result differed"
           };
         }
@@ -4688,10 +5407,10 @@ describe("handleBrainCreatorTool", () => {
         return retestCount === 2
           ? {
               exitCode: 1,
-              stdout: "",
+              stdout: structuredFailureReport("offer regression failure"),
               stderr: "Expected offer sent, actual offer remained draft"
             }
-          : { exitCode: 0, stdout: "fixed", stderr: "" };
+          : { exitCode: 0, stdout: structuredPassReport("fixed"), stderr: "" };
       }
     });
     const source = join(workDir, "cases.xlsx");
@@ -4775,16 +5494,17 @@ describe("handleBrainCreatorTool", () => {
         }
         return { exitCode: 0, stdout: `${agent} ok`, stderr: "" };
       },
+      structuredReporter: true,
       runner: async () => {
         if (!regressionRun) {
           return {
             exitCode: 1,
-            stdout: "",
+            stdout: structuredFailureReport("filtered regression failure"),
             stderr: "Expected documented result, actual result differed"
           };
         }
         retestCount += 1;
-        return { exitCode: 0, stdout: "fixed", stderr: "" };
+        return { exitCode: 0, stdout: structuredPassReport("fixed"), stderr: "" };
       }
     });
     const source = join(workDir, "cases.xlsx");

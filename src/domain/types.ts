@@ -109,6 +109,7 @@ export type ProbeResult = {
   type: string;
   result: string;
   issues: string[];
+  surfaceEvidence?: BrowserSurfaceEvidence[];
   createdAt: string;
 };
 
@@ -122,10 +123,26 @@ export type PageCaptureEvidence = {
     role: string;
     text: string;
     selector: string;
+    surface?: InteractionSurfaceRef;
   }>;
   consoleErrors: string[];
   networkFailures: string[];
   issues: string[];
+  surfaces?: BrowserSurfaceEvidence[];
+};
+
+export type BrowserSurfaceEvidence = {
+  kind: "document" | "iframe" | "shadow-root" | "wujie" | "popup";
+  url: string;
+  parentUrl?: string;
+  /** Stable ordinal among child frames on the captured page. */
+  frameIndex?: number;
+  accessible: boolean;
+  interactiveCount: number;
+  title?: string;
+  domText?: string;
+  screenshotPath?: string;
+  evidence?: string;
 };
 
 export type SystemExplorationBudget = {
@@ -133,6 +150,21 @@ export type SystemExplorationBudget = {
   maxDepth: number;
   maxDurationMs: number;
   maxInteractionsPerPage: number;
+};
+
+/**
+ * A user-approved exploration context. Selector values are non-secret values
+ * used to reveal conditional UI states; reusable test data stays referenced by
+ * id instead of being copied into browser or report output.
+ */
+export type ExplorationScenario = {
+  id: string;
+  name: string;
+  role?: string;
+  prerequisiteState?: string;
+  dataRefs: string[];
+  testDataLeaseIds: string[];
+  selectorValues: Record<string, string>;
 };
 
 export type SystemExplorationNavigationEdge = {
@@ -148,6 +180,23 @@ export type SystemInteractionState = {
   url: string;
   visibleElements: string[];
   dialogs: string[];
+  surfaceUrls?: Array<{
+    kind: "iframe";
+    url: string;
+    frameIndex: number;
+  }>;
+  /** Non-secret control state used to detect SPA changes without a DOM text change. */
+  controlValues?: Array<{ name: string; value: string }>;
+};
+
+export type InteractionSurfaceRef = {
+  kind: "document" | "iframe" | "shadow-root" | "wujie" | "popup";
+  url: string;
+  parentUrl?: string;
+  /** Stable ordinal among child frames on the captured page. */
+  frameIndex?: number;
+  /** Stable host selector chain for an open shadow/Wujie surface. */
+  hostSelectors?: string[];
 };
 
 export type SystemExplorationInteractionTransition = {
@@ -158,6 +207,7 @@ export type SystemExplorationInteractionTransition = {
   targetRole: string;
   targetSelector: string;
   targetKind: "tab" | "disclosure" | "select";
+  surface?: InteractionSurfaceRef;
   action: "click" | "select";
   inputValue?: string;
   before: SystemInteractionState;
@@ -166,10 +216,24 @@ export type SystemExplorationInteractionTransition = {
   visibleRemoved: string[];
   dialogAdded: string[];
   dialogRemoved: string[];
+  changedControls?: Array<{ name: string; before: string; after: string }>;
   urlChanged: boolean;
+  transitionKind?: "navigation" | "state";
   blockedRequests: Array<{ method: string; url: string }>;
   status: "observed" | "no-change" | "blocked" | "failed";
+  reacquiredPage?: boolean;
+  recovery?: InteractionRecoveryEvidence;
   screenshotPath?: string;
+  scenarioId?: string;
+};
+
+export type InteractionRecoveryEvidence = {
+  trigger: "page-closed" | "interaction-failure" | "page-closed-after-action";
+  method: "new-page-and-reload";
+  fromUrl: string;
+  toUrl: string;
+  attempts: number;
+  status: "recovered" | "failed";
 };
 
 export type SystemExploration = {
@@ -180,6 +244,7 @@ export type SystemExploration = {
   startUrl: string;
   status: "running" | "completed" | "partial" | "blocked" | "cancelled";
   interactionMode: "off" | "safe";
+  scenario?: ExplorationScenario;
   budget: SystemExplorationBudget;
   pageModelIds: string[];
   navigationEdges: SystemExplorationNavigationEdge[];
@@ -380,6 +445,8 @@ export type AgentTask = {
     executionEvidenceId?: string;
     contextPackPath?: string;
     requirementSuiteRunId?: string;
+    requiredStepIds?: string[];
+    actorJourneyRoles?: string[];
   };
   suiteContext?: {
     suiteId: string;
@@ -608,6 +675,7 @@ export type RequirementEvalAction = {
   status: "pending" | "confirmed" | "blocked";
   createdAt: string;
   confirmedAt?: string;
+  confirmedBy?: string;
   confirmationNote?: string;
   resolutionNodeId?: string;
 };
@@ -697,6 +765,13 @@ export type TestDesignTechnique =
   | "scenario"
   | "error-guessing";
 
+export type CoverageDimension =
+  | "field"
+  | "workflow"
+  | "state"
+  | "permission"
+  | "integration";
+
 export type TestIntent = {
   id: string;
   knowledgeProjectId: string;
@@ -710,6 +785,7 @@ export type TestIntent = {
   requirementRefs: string[];
   knowledgeNodeRefs: string[];
   techniques: TestDesignTechnique[];
+  coverageDimensions?: CoverageDimension[];
   status: "draft" | "approved" | "compiled" | "blocked";
   createdAt: string;
   updatedAt: string;
@@ -906,7 +982,8 @@ export type ExecutionPreflightCheck = {
     | "test-data-tasks"
     | "test-data"
     | "test-data-cleanup"
-    | "auth";
+    | "auth"
+    | "actor-journey";
   status: "pass" | "action-required" | "blocked";
   message: string;
   sourceRefs: string[];
@@ -937,6 +1014,22 @@ export type ExecutionContextPack = {
   truncated: boolean;
 };
 
+export type ActorJourneyConfig = {
+  role?: string;
+  authProfileId: string;
+  afterStepId?: string;
+  sourceRefs?: string[];
+};
+
+export type ActorJourneyStep = {
+  id: string;
+  order: number;
+  role: string;
+  authProfileId: string;
+  afterStepId?: string;
+  sourceRefs: string[];
+};
+
 export type ExecutionPlanDraft = {
   knowledgeProjectId: string;
   requirementSetId: string;
@@ -950,7 +1043,9 @@ export type ExecutionPlanDraft = {
     method: AuthProfile["loginMethod"];
     verifiedAt?: string;
   };
+  actorJourney?: ActorJourneyStep[];
   steps: ExecutableCaseStep[];
+  assertionContracts?: AssertionContract[];
   pathPlan?: ExecutableCasePathPlan;
   statePlan?: ExecutableCaseStatePlan;
   dataBindings: ExecutionDataBinding[];
@@ -1031,6 +1126,10 @@ export type RequirementSuiteRun = {
   knowledgeProjectId: string;
   systemId: string;
   authProfileId?: string;
+  operator?: string;
+  provider?: string;
+  sessionId?: string;
+  actorJourney?: ActorJourneyConfig[];
   status:
     | "running"
     | "waiting-for-test-data"
@@ -1041,7 +1140,12 @@ export type RequirementSuiteRun = {
     | "cancelled";
   continueOnBlocked: boolean;
   allowCreateTestData: boolean;
+  automaticTestData?: boolean;
   maxHealAttempts?: number;
+  stabilityGroupId?: string;
+  stabilityIteration?: number;
+  stabilityTarget?: number;
+  stabilityNextRunId?: string;
   total: number;
   passed: number;
   failed: number;
@@ -1049,6 +1153,7 @@ export type RequirementSuiteRun = {
   skipped: number;
   cancelled: number;
   currentExecutableCaseId?: string;
+  reportPath?: string;
   caseRuns: RequirementSuiteCaseRun[];
   createdAt: string;
   updatedAt: string;
@@ -1070,6 +1175,7 @@ export type ExecutableCase = {
   pathPlan?: ExecutableCasePathPlan;
   statePlan?: ExecutableCaseStatePlan;
   dataPlan?: ExecutableCaseDataPlan;
+  coverageDimensions?: CoverageDimension[];
   dataProfileIds: string[];
   gapIds: string[];
   createdAt: string;
@@ -1081,10 +1187,17 @@ export type ExecutionStepEvidence = {
   order: number;
   action: ExecutableCaseStep["action"];
   instruction: string;
+  targetSemantic?: string;
+  value?: string;
+  pageModelId?: string;
+  locatorPointId?: string;
+  dataProfileId?: string;
   expected?: string;
   actual?: string;
   assertionStatus: "pending" | "passed" | "failed" | "blocked";
   screenshotPath?: string;
+  evidenceRefs?: string[];
+  traceRefs?: string[];
   sourceRefs: string[];
   origin: ExecutableCaseStep["origin"];
 };
@@ -1099,6 +1212,17 @@ export type ExecutionEvidence = {
   chainRunId?: string;
   contextPackPath: string;
   status: "running" | "passed" | "failed" | "blocked";
+  assuranceLevel?: AssuranceLevel;
+  assertionContracts?: AssertionContract[];
+  reporterPath?: string;
+  reporterResult?: StructuredReporterResult;
+  evidenceWarnings?: string[];
+  coverage?: {
+    required: CoverageDimension[];
+    verified: CoverageDimension[];
+    missing: CoverageDimension[];
+  };
+  actorJourney?: ActorJourneyStep[];
   steps: ExecutionStepEvidence[];
   tracePaths: string[];
   artifactPaths: string[];
@@ -1107,6 +1231,63 @@ export type ExecutionEvidence = {
   actualResult?: string;
   createdAt: string;
   completedAt?: string;
+};
+
+export type AssertionContractType =
+  | "visibility"
+  | "value"
+  | "state"
+  | "workflow"
+  | "network"
+  | "side-effect";
+
+export type AssertionStrength = "strong" | "limited";
+
+export type AssuranceLevel = "strong" | "limited" | "none";
+
+export type AssertionContract = {
+  id: string;
+  stepId?: string;
+  type: AssertionContractType;
+  strength: AssertionStrength;
+  expected?: string;
+  requirementRefs: string[];
+  evidenceRequirements: Array<"actual-value" | "screenshot" | "trace" | "network" | "console">;
+};
+
+export type StructuredReporterAssertion = {
+  id: string;
+  stepId?: string;
+  status: "passed" | "failed" | "skipped" | "unknown";
+  actual?: string;
+  expected?: string;
+  evidenceRefs: string[];
+};
+
+export type StructuredReporterStep = {
+  id: string;
+  title: string;
+  status: "passed" | "failed" | "skipped" | "unknown";
+  durationMs?: number;
+  evidenceRefs: string[];
+  traceRefs?: string[];
+  consoleErrors?: string[];
+  networkFailures?: string[];
+  error?: string;
+};
+
+export type StructuredReporterResult = {
+  status: "passed" | "failed" | "blocked";
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  durationMs: number;
+  assertions: StructuredReporterAssertion[];
+  steps?: StructuredReporterStep[];
+  attachments: string[];
+  consoleErrors: string[];
+  networkFailures: string[];
 };
 
 export type ExecutionFailureType =
@@ -1220,6 +1401,7 @@ export type RunLedgerEntry = {
     | "case-completed"
     | "suite-resumed"
     | "case-retried"
+    | "role-switched"
     | "case-skipped"
     | "suite-cancelled"
     | "suite-completed";
@@ -1235,6 +1417,11 @@ export type RunLedgerEntry = {
   toStatus: string;
   outcome?: "passed" | "failed" | "blocked" | "skipped" | "cancelled";
   failureType?: ExecutionFailureType;
+  operator?: string;
+  provider?: string;
+  sessionId?: string;
+  traceId?: string;
+  currentStep?: string;
   message?: string;
   references?: {
     testCaseId?: string;

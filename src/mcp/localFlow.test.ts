@@ -218,7 +218,9 @@ describe("Brain Creator local MCP flow", () => {
       })
     ]);
     expect(JSON.stringify(seed)).not.toContain("secret-token");
-    expect(await readFile(seed.seedPath, "utf8")).toContain("secret-token");
+    const seedContent = await readFile(seed.seedPath, "utf8");
+    expect(seedContent).not.toContain("secret-token");
+    expect(seedContent).toContain("BRAIN_CREATOR_AUTH_TOKEN");
     expect(deletedRule.id).toBe(temporaryRule.id);
     expect(terms.length).toBe(confirmedTerms.confirmedTerms.length);
     expect(updatedTerm.key).toBe("checkout.robot");

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { isCliEntryPoint } from "./entrypoint.js";
 
 type McpConfig = {
   mcpServers?: Record<string, unknown>;
@@ -176,7 +177,7 @@ export async function runWriteMcpConfigCli(args: string[], io: WriteMcpConfigCli
   }
 }
 
-if (process.argv[1]?.endsWith("writeMcpConfig.js")) {
+if (isCliEntryPoint(import.meta.url)) {
   runWriteMcpConfigCli(process.argv.slice(2)).then((exitCode) => {
     process.exit(exitCode);
   });

@@ -40,7 +40,8 @@ describe("generateSeedFile", () => {
       secretKeys: ["token"]
     });
     expect(JSON.stringify(result)).not.toContain("secret-token");
-    expect(content).toContain("secret-token");
+    expect(content).not.toContain("secret-token");
+    expect(content).toContain("BRAIN_CREATOR_AUTH_TOKEN");
     expect(content).toContain("https://shop.example.test");
   });
 
@@ -106,6 +107,43 @@ describe("generateSeedFile", () => {
         )
       })
     ).rejects.toThrow("Auth storage state must stay inside the Brain Creator workspace");
+  });
+
+  it("generates an explicit role-switch helper for verified actor journeys", async () => {
+    const workDir = await tempDir();
+    const outputDir = join(workDir, "tests");
+    const recruiterState = join(workDir, ".brain-creator", "auth", "recruiter", "state.json");
+    const approverState = join(workDir, ".brain-creator", "auth", "approver", "state.json");
+    await mkdir(join(recruiterState, ".."), { recursive: true });
+    await mkdir(join(approverState, ".."), { recursive: true });
+    await writeFile(recruiterState, JSON.stringify({ cookies: [], origins: [] }), "utf8");
+    await writeFile(approverState, JSON.stringify({ cookies: [], origins: [] }), "utf8");
+
+    const result = await generateSeedFile({
+      workDir,
+      outputDir,
+      system: systemProfile(),
+      authProfile: authProfileWithStorageState(".brain-creator/auth/recruiter/state.json"),
+      actorJourney: [
+        {
+          role: "recruiter",
+          authProfile: authProfileWithStorageState(".brain-creator/auth/recruiter/state.json")
+        },
+        {
+          role: "approver",
+          authProfile: authProfileWithStorageState(".brain-creator/auth/approver/state.json")
+        }
+      ]
+    });
+
+    const content = await readFile(result.seedPath, "utf8");
+    expect(content).toContain("runAsRole");
+    expect(content).toContain("BRAIN_CREATOR_ACTOR_EVIDENCE_PATH");
+    expect(content).toContain('recordRole("entered")');
+    expect(content).toContain("authProfileId: config.authProfileId");
+    expect(content).toContain('"recruiter"');
+    expect(content).toContain('"approver"');
+    expect(content).not.toContain("secret-token");
   });
 });
 

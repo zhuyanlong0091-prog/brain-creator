@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -13,7 +13,9 @@ import {
   classifySafeInteractionCandidate,
   isAllowedExplorationUrl,
   isReadOnlyNavigationUrl,
+  interactionLocator,
   PlaywrightSystemExplorer,
+  stableChildFrameEntries,
   SystemExplorationCoordinator,
   type SystemExplorer
 } from "./systemExplorer.js";
@@ -26,6 +28,114 @@ afterEach(async () => {
 });
 
 describe("System exploration coordinator", () => {
+  it("keeps popup interaction selectors scoped to the captured popup", () => {
+    const locator = { first: () => "popup-locator" };
+    const page = {
+      url: () => "https://orders.example.test/details",
+      locator: vi.fn(() => locator)
+    } as unknown as import("@playwright/test").Page;
+    const candidate = {
+      name: "Popup details",
+      role: "button",
+      selector: '[id="popup-details"]',
+      tag: "button",
+      surface: {
+        kind: "popup" as const,
+        url: "https://orders.example.test/details"
+      }
+    };
+
+    expect(interactionLocator(page, candidate, ["https://orders.example.test/"]).first()).toBe(
+      "popup-locator"
+    );
+    expect(() =>
+      interactionLocator(
+        { ...page, url: () => "https://orders.example.test/other" } as unknown as import("@playwright/test").Page,
+        candidate,
+        ["https://orders.example.test/"]
+      )
+    ).toThrow("Popup surface is unavailable");
+  });
+
+  it("keeps child frame ordinals stable before allowlist filtering", () => {
+    const main = { url: () => "https://orders.example.test/" };
+    const outside = { url: () => "https://outside.example.test/frame" };
+    const inside = { url: () => "https://orders.example.test/frame" };
+    const page = {
+      mainFrame: () => main,
+      frames: () => [main, outside, inside]
+    } as unknown as import("@playwright/test").Page;
+
+    expect(stableChildFrameEntries(page).map((item) => item.frameIndex)).toEqual([0, 1]);
+    expect(stableChildFrameEntries(page).map((item) => item.frame.url())).toEqual([
+      "https://outside.example.test/frame",
+      "https://orders.example.test/frame"
+    ]);
+  });
+
+  it("explores a popup state transition without falling back to the main document", async () => {
+    const server = createServer((request, response) => {
+      if (request.url === "/popup") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`
+          <button id="popup-details" aria-expanded="false" aria-controls="popup-panel">Popup details</button>
+          <span id="popup-panel" hidden>Popup panel</span>
+          <script>
+            document.querySelector('#popup-details').onclick = () => {
+              document.querySelector('#popup-details').setAttribute('aria-expanded', 'true');
+              document.querySelector('#popup-panel').hidden = false;
+            };
+          </script>
+        `);
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end('<button id="open-popup" aria-expanded="false" aria-controls="popup">Open popup</button><script>document.querySelector("#open-popup").onclick = () => window.open("/popup", "_blank")</script>');
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}/`;
+    try {
+      const fixture = await createLocalFixture(baseUrl);
+      const result = await new SystemExplorationCoordinator({
+        repository: fixture.repository,
+        service: fixture.domainService,
+        knowledgeService: fixture.knowledgeService,
+        workDir: fixture.workDir,
+        explorer: new PlaywrightSystemExplorer()
+      }).explore({
+        knowledgeProjectId: fixture.projectId,
+        systemId: fixture.systemId,
+        interactionMode: "safe",
+        budget: {
+          maxPages: 1,
+          maxDepth: 0,
+          maxDurationMs: 10_000,
+          maxInteractionsPerPage: 2
+        }
+      });
+
+      expect(result.exploration.status).toBe("completed");
+      expect(result.exploration.interactionTransitions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            targetName: "Popup details",
+            status: "observed",
+            surface: expect.objectContaining({ kind: "popup" }),
+            visibleAdded: expect.arrayContaining(["Popup panel"])
+          })
+        ])
+      );
+      expect(result.brain.pages[0].surfaces).toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind: "popup", url: `${baseUrl}popup` })])
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  }, 30_000);
+
   it("explores allowlisted pages, persists navigation, and refreshes System Brain", async () => {
     const fixture = await createFixture();
     const explorer: SystemExplorer = {
@@ -169,6 +279,35 @@ describe("System exploration coordinator", () => {
     ).toEqual(
       expect.objectContaining({ allowed: true, action: "select", inputValue: "intern" })
     );
+    expect(
+      classifySafeInteractionCandidate(
+        {
+          name: "Employee Type",
+          role: "combobox",
+          selector: '[name="employeeType"]',
+          tag: "select",
+          currentValue: "employee",
+          options: [
+            { value: "employee", label: "Employee", disabled: false },
+            { value: "intern", label: "Intern", disabled: false }
+          ]
+        },
+        { selectorValues: { '[name="employeeType"]': "Intern" } }
+      )
+    ).toEqual(expect.objectContaining({ allowed: true, inputValue: "intern" }));
+    expect(
+      classifySafeInteractionCandidate(
+        {
+          name: "Employee Type",
+          role: "combobox",
+          selector: '[name="employeeType"]',
+          tag: "select",
+          currentValue: "employee",
+          options: [{ value: "employee", label: "Employee", disabled: false }]
+        },
+        { selectorValues: { '[name="employeeType"]': "Intern" } }
+      )
+    ).toEqual(expect.objectContaining({ allowed: false, reason: expect.stringContaining("Intern") }));
     for (const name of ["Save", "Delete", "Approve", "Submit", "创建", "删除", "审批"]) {
       expect(
         classifySafeInteractionCandidate({
@@ -182,11 +321,126 @@ describe("System exploration coordinator", () => {
     }
   });
 
+  it("does not fall back to the main document when an iframe surface is missing", () => {
+    const page = {
+      frames: () => []
+    } as unknown as import("@playwright/test").Page;
+
+    expect(() =>
+      interactionLocator(page, {
+        name: "Frame Mode",
+        role: "combobox",
+        selector: '[id="frame-mode"]',
+        tag: "select",
+        surface: {
+          kind: "iframe",
+          url: "https://orders.example.test/frame",
+          frameIndex: 1
+        }
+      })
+    ).toThrow("Iframe surface is unavailable after page recovery");
+  });
+
+  it("preserves iframe ordinals when an earlier frame is outside the allowlist", () => {
+    const mainFrame = { url: () => "https://orders.example.test/" };
+    const outsideFrame = { url: () => "https://other.example.test/frame" };
+    const targetFrame = {
+      url: () => "https://orders.example.test/frame",
+      locator: vi.fn(() => "target-locator")
+    };
+    const page = {
+      mainFrame: () => mainFrame,
+      frames: () => [mainFrame, outsideFrame, targetFrame]
+    } as unknown as import("@playwright/test").Page;
+
+    const locator = interactionLocator(
+      page,
+      {
+        name: "Frame Mode",
+        role: "combobox",
+        selector: '[id="frame-mode"]',
+        tag: "select",
+        surface: {
+          kind: "iframe",
+          url: "https://orders.example.test/frame",
+          frameIndex: 2
+        }
+      },
+      ["https://orders.example.test/"]
+    );
+
+    expect(locator).toBe("target-locator");
+    expect(targetFrame.locator).toHaveBeenCalledWith('[id="frame-mode"]');
+  });
+
+  it("rejects unavailable or cross-system scenario data leases before opening a browser", async () => {
+    const fixture = await createFixture();
+    const explorer: SystemExplorer = { explore: vi.fn() };
+    const coordinator = new SystemExplorationCoordinator({
+      repository: fixture.repository,
+      service: fixture.domainService,
+      knowledgeService: fixture.knowledgeService,
+      workDir: fixture.workDir,
+      explorer
+    });
+
+    await expect(
+      coordinator.explore({
+        knowledgeProjectId: fixture.projectId,
+        systemId: fixture.systemId,
+        interactionMode: "safe",
+        scenario: {
+          name: "Requires prepared data",
+          dataRefs: ["fixture:order"],
+          testDataLeaseIds: ["lease-missing"],
+          selectorValues: {}
+        }
+      })
+    ).rejects.toThrow("unavailable or cross-system test data lease");
+    expect(explorer.explore).not.toHaveBeenCalled();
+  });
+
+  it("rejects secret-like scenario selector keys", async () => {
+    const fixture = await createFixture();
+    const coordinator = new SystemExplorationCoordinator({
+      repository: fixture.repository,
+      service: fixture.domainService,
+      knowledgeService: fixture.knowledgeService,
+      workDir: fixture.workDir,
+      explorer: { explore: vi.fn() }
+    });
+
+    await expect(
+      coordinator.explore({
+        knowledgeProjectId: fixture.projectId,
+        systemId: fixture.systemId,
+        scenario: {
+          name: "Invalid secret scenario",
+          dataRefs: [],
+          testDataLeaseIds: [],
+          selectorValues: { password: "should-not-be-here" }
+        }
+      })
+    ).rejects.toThrow("cannot carry secret selector values");
+  });
+
   it("persists safe field transitions and exposes them to case binding", async () => {
     const fixture = await createFixture();
+    const cascade = cascadePageResult();
+    cascade.interactions[0].after.url = "https://orders.example.test/recruiting/details";
+    cascade.interactions[0].urlChanged = true;
+    (cascade.interactions[0] as { reacquiredPage?: boolean }).reacquiredPage = true;
+    (cascade.interactions[0] as { recovery?: unknown }).recovery = {
+      trigger: "interaction-failure",
+      method: "new-page-and-reload",
+      fromUrl: "https://orders.example.test/recruiting",
+      toUrl: "https://orders.example.test/recruiting",
+      attempts: 2,
+      status: "recovered"
+    };
     const explorer: SystemExplorer = {
       explore: vi.fn().mockResolvedValue({
-        pages: [cascadePageResult()],
+        pages: [cascade],
         blockers: [],
         warnings: [],
         budgetExhausted: false
@@ -245,7 +499,22 @@ describe("System exploration coordinator", () => {
         action: "select",
         inputValue: "intern",
         visibleAdded: ["Replacement Employee"],
-        status: "observed"
+        status: "observed",
+        reacquiredPage: true,
+        recovery: expect.objectContaining({
+          trigger: "interaction-failure",
+          method: "new-page-and-reload",
+          attempts: 2,
+          status: "recovered"
+        })
+      })
+    ]);
+    expect(result.exploration.navigationEdges).toEqual([
+      expect.objectContaining({
+        fromUrl: "https://orders.example.test/recruiting",
+        toUrl: "https://orders.example.test/recruiting/details",
+        text: "Employee Type",
+        fromPageModelId: expect.any(String)
       })
     ]);
     expect(result.brain.stateTransitions).toEqual([
@@ -391,6 +660,45 @@ describe("System exploration coordinator", () => {
     async () => {
       let writeRequests = 0;
       const server = createServer((request, response) => {
+        if (request.url === "/popup?close=1") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end("<title>Closing popup</title><script>window.close()</script>");
+          return;
+        }
+        if (request.url === "/popup") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end("<title>Popup details</title><button>Popup action</button>");
+          return;
+        }
+        if (request.url === "/frame") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end(`
+            <label>Frame Mode
+              <select id="frame-mode" onchange="location.href='/frame-next'">
+                <option value="basic">Basic</option>
+                <option value="advanced">Advanced</option>
+              </select>
+            </label>
+          `);
+          return;
+        }
+        if (request.url === "/frame-next") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end(`
+            <label>Frame Mode
+              <select id="frame-mode">
+                <option value="advanced" selected>Advanced</option>
+              </select>
+            </label>
+            <span>Advanced Mode</span>
+          `);
+          return;
+        }
+        if (request.url === "/outside-frame") {
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          response.end("<button>Outside private control</button>");
+          return;
+        }
         if (request.method === "POST") writeRequests += 1;
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         response.end(`
@@ -398,14 +706,21 @@ describe("System exploration coordinator", () => {
           <html>
             <head><title>Recruiting</title></head>
             <body>
-              <label>
-                Employee Type
-                <select id="employee-type" onchange="document.querySelector('#replacement').hidden = this.value !== 'intern'">
-                  <option value="employee">Employee</option>
-                  <option value="intern">Intern</option>
-                </select>
-              </label>
-              <input id="replacement" aria-label="Replacement Employee" hidden>
+              <div id="app-root">
+                <label>
+                  Employee Type
+                  <select id="employee-type" onchange="remountEmployee(this.value)">
+                    <option value="employee">Employee</option>
+                    <option value="intern">Intern</option>
+                  </select>
+                </label>
+                <input id="replacement" aria-label="Replacement Employee" hidden>
+              </div>
+              <iframe src="/frame" title="Embedded form"></iframe>
+              <iframe src="/frame" title="Embedded form duplicate"></iframe>
+              <iframe src="http://localhost:${address.port}/outside-frame" title="Outside surface"></iframe>
+              <div id="shadow-host"></div>
+              <wujie-app id="wujie-host"></wujie-app>
               <label>
                 Sync Type
                 <select id="sync-type" onchange="fetch('/api/sync', { method: 'POST' }).catch(() => {})">
@@ -416,6 +731,46 @@ describe("System exploration coordinator", () => {
               <button id="save" aria-expanded="false" onclick="fetch('/api/save', { method: 'POST' })">
                 Save
               </button>
+              <button id="details" aria-controls="popup" aria-expanded="false" onclick="window.open('/popup', '_blank')">
+                Open details
+              </button>
+              <button id="closing-details" aria-controls="closing-popup" aria-expanded="false" onclick="window.open('/popup?close=1', '_blank')">
+                Open closing details
+              </button>
+              <script>
+                const root = document.querySelector('#shadow-host').attachShadow({ mode: 'open' });
+                window.remountEmployee = (value) => {
+                  const root = document.querySelector('#app-root');
+                  root.innerHTML = '<label>Employee Type <select id="employee-type"><option value="employee">Employee</option><option value="intern" selected>Intern</option></select></label><input id="replacement" aria-label="Replacement Employee"><span>App remounted</span>';
+                };
+                const shadowButton = document.createElement('button');
+                shadowButton.id = 'shadow-details';
+                shadowButton.setAttribute('aria-expanded', 'false');
+                shadowButton.setAttribute('aria-controls', 'shadow-panel');
+                shadowButton.textContent = 'Shadow details';
+                const shadowPanel = document.createElement('span');
+                shadowPanel.id = 'shadow-panel';
+                shadowPanel.hidden = true;
+                shadowPanel.textContent = 'Shadow panel';
+                shadowButton.onclick = () => {
+                  shadowButton.setAttribute('aria-expanded', 'true');
+                  shadowPanel.hidden = false;
+                };
+                root.append(shadowButton, shadowPanel);
+                const wujieRoot = document.querySelector('#wujie-host').attachShadow({ mode: 'open' });
+                const wujieButton = document.createElement('button');
+                wujieButton.id = 'wujie-details';
+                wujieButton.setAttribute('aria-expanded', 'false');
+                wujieButton.textContent = 'Wujie details';
+                const wujiePanel = document.createElement('span');
+                wujiePanel.hidden = true;
+                wujiePanel.textContent = 'Wujie panel';
+                wujieButton.onclick = () => {
+                  wujieButton.setAttribute('aria-expanded', 'true');
+                  wujiePanel.hidden = false;
+                };
+                wujieRoot.append(wujieButton, wujiePanel);
+              </script>
             </body>
           </html>
         `);
@@ -438,11 +793,20 @@ describe("System exploration coordinator", () => {
           knowledgeProjectId: fixture.projectId,
           systemId: fixture.systemId,
           interactionMode: "safe",
+          scenario: {
+            id: "intern-replacement",
+            name: "Intern replacement field discovery",
+            role: "recruiter",
+            prerequisiteState: "empty recruiting form",
+            dataRefs: ["fixture:intern-recruiting"],
+            testDataLeaseIds: [],
+            selectorValues: { '[id="employee-type"]': "intern" }
+          },
           budget: {
             maxPages: 1,
             maxDepth: 0,
             maxDurationMs: 30_000,
-            maxInteractionsPerPage: 4
+            maxInteractionsPerPage: 10
           }
         });
 
@@ -452,16 +816,41 @@ describe("System exploration coordinator", () => {
         const syncType = result.exploration.interactionTransitions.find(
           (transition) => transition.targetName === "Sync Type"
         );
+        expect(result.brain.pages).toHaveLength(1);
+        expect(result.exploration.scenario).toEqual(
+          expect.objectContaining({
+            id: "intern-replacement",
+            role: "recruiter",
+            dataRefs: ["fixture:intern-recruiting"]
+          })
+        );
+        expect(result.exploration.warnings).toEqual(
+          expect.arrayContaining([expect.stringContaining("Popup closed before capture")])
+        );
         expect(employeeType).toEqual(
           expect.objectContaining({
             status: "observed",
-            visibleAdded: ["Replacement Employee"]
+            transitionKind: "state",
+            scenarioId: "intern-replacement",
+            visibleAdded: expect.arrayContaining(["Replacement Employee", "App remounted"])
           })
         );
+        expect(
+          result.brain.stateTransitions.find(
+            (transition) => transition.targetName === "Employee Type"
+          )
+        ).toEqual(expect.objectContaining({ scenarioId: "intern-replacement" }));
         expect(syncType).toEqual(
           expect.objectContaining({
             status: "blocked",
-            blockedRequests: [expect.objectContaining({ method: "POST" })]
+            blockedRequests: [expect.objectContaining({ method: "POST" })],
+            changedControls: [
+              expect.objectContaining({
+                name: "Sync Type",
+                before: "manual",
+                after: "automatic"
+              })
+            ]
           })
         );
         expect(
@@ -469,8 +858,101 @@ describe("System exploration coordinator", () => {
             (transition) => transition.targetName === "Save"
           )
         ).toBe(false);
-        expect(result.brain.stateTransitions).toHaveLength(1);
+        expect(result.brain.stateTransitions.map((transition) => transition.targetName)).toEqual(
+          expect.arrayContaining(["Employee Type", "Frame Mode", "Shadow details", "Wujie details"])
+        );
+        expect(result.brain.stateTransitions).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              targetName: "Frame Mode",
+              scenarioId: "intern-replacement",
+              surface: expect.objectContaining({ kind: "iframe" })
+            }),
+            expect.objectContaining({
+              targetName: "Shadow details",
+              surface: expect.objectContaining({
+                kind: "shadow-root",
+                hostSelectors: expect.arrayContaining([expect.stringContaining("shadow-host")])
+              })
+            }),
+            expect.objectContaining({
+              targetName: "Wujie details",
+              surface: expect.objectContaining({
+                kind: "wujie",
+                hostSelectors: expect.arrayContaining([expect.stringContaining("wujie-host")])
+              })
+            })
+          ])
+        );
+        expect(
+          result.exploration.interactionTransitions.find(
+            (transition) =>
+              transition.targetName === "Frame Mode" &&
+              transition.surface?.kind === "iframe" &&
+              transition.surface.frameIndex === 0
+          )?.after.surfaceUrls
+        ).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ url: expect.stringContaining("/frame-next") })
+          ])
+        );
+        expect(result.brain.stateTransitions).not.toEqual(
+          expect.arrayContaining([expect.objectContaining({ targetName: "Sync Type" })])
+        );
+        expect(result.brain.pages[0].surfaces).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ kind: "iframe", frameIndex: 0 }),
+            expect.objectContaining({ kind: "iframe", frameIndex: 1 }),
+            expect.objectContaining({ kind: "shadow-root" }),
+            expect.objectContaining({
+              kind: "popup",
+              title: "Popup details",
+              domText: "Popup action",
+              screenshotPath: expect.any(String)
+            }),
+            expect.objectContaining({ kind: "wujie" })
+          ])
+        );
+        const popupSurface = result.brain.pages[0].surfaces?.find(
+          (surface) => surface.kind === "popup"
+        );
+        expect(popupSurface?.screenshotPath).toBeTruthy();
+        await expect(stat(popupSurface!.screenshotPath!)).resolves.toBeTruthy();
+        expect(
+          result.brain.pages[0].locators.some(
+            (locator) => locator.name === "Outside private control"
+          )
+        ).toBe(false);
+        const frameModes = result.exploration.interactionTransitions.filter(
+          (transition) => transition.targetName === "Frame Mode"
+        );
+        expect(frameModes).toHaveLength(2);
+        expect(frameModes).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              status: "observed",
+              surface: expect.objectContaining({ kind: "iframe", frameIndex: 0 }),
+              visibleAdded: expect.arrayContaining(["Advanced Mode"])
+            }),
+            expect.objectContaining({
+              status: "observed",
+              surface: expect.objectContaining({ kind: "iframe", frameIndex: 1 }),
+              visibleAdded: expect.arrayContaining(["Advanced Mode"])
+            })
+          ])
+        );
+        const shadowDetails = result.exploration.interactionTransitions.find(
+          (transition) => transition.targetName === "Shadow details"
+        );
+        expect(shadowDetails).toEqual(
+          expect.objectContaining({
+            status: "observed",
+            surface: expect.objectContaining({ kind: "shadow-root" }),
+            visibleAdded: expect.arrayContaining(["Shadow panel"])
+          })
+        );
         expect(writeRequests).toBe(0);
+
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve()))

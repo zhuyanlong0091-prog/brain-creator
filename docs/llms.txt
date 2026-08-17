@@ -15,6 +15,7 @@
 - [中文核心概念](zh-CN/core-concepts.md): 理解 Requirement Brain、System Brain、执行计划、Bug 与 Gap。
 - [中文需求到测试](zh-CN/guides/requirement-to-test.md): 从需求来源完成审批、系统绑定、数据准备、执行和复盘。
 - [中文可信控制面](zh-CN/guides/trusted-control-plane.md): 使用 Facade 完成鉴权验证、批量编译、页面绑定和 Gap 生命周期。
+- [中文存储与证据](zh-CN/guides/storage-and-evidence.md): 理解 schema 17 分片仓库、迁移、manifest、doctor 检查和 Suite 导出。
 - [中文 CLI 参考](zh-CN/cli-reference.md): 查询统一命令、参数和环境变量。
 - [中文 MCP 安装](zh-CN/mcp-installation.md): 配置 Claude、Codex 与 host-agent。
 - [中文故障排查](zh-CN/troubleshooting.md): 按症状解决安装和执行问题。
@@ -24,6 +25,7 @@
 
 - [Requirement to test](guides/requirement-to-test.md): Take an approved requirement through system binding, evidence collection, data preparation, execution, and review.
 - [Trusted control plane](guides/trusted-control-plane.md): Use bounded Facade responses, verified auth, batch compilation, confirmed page bindings, and auditable Gap transitions.
+- [Storage and evidence](guides/storage-and-evidence.md): Understand schema 17 migration, sharded storage, manifests, doctor checks, and Suite export.
 - [Agent usage](agent-usage.md): Use natural-language entrypoints and understand Facade approval behavior.
 - [Session resume workflow](e2e-session-resume-workflow.md): Restore a persisted Brain Creator workflow in a new Agent session.
 - [v2 low-level quickstart](v2-quickstart.md): Inspect internal and compatibility `bc_*` workflows.

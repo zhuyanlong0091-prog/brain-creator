@@ -6,6 +6,8 @@ type RetrieveInput = {
   query: string;
   types?: KnowledgeNodeType[];
   limit?: number;
+  systemId?: string;
+  requirementSetId?: string;
 };
 
 export function retrieveKnowledge(
@@ -15,6 +17,18 @@ export function retrieveKnowledge(
   const terms = tokenize(input.query);
   const candidates = repository.knowledgeNodes
     .filter((node) => node.knowledgeProjectId === input.knowledgeProjectId)
+    .filter(
+      (node) =>
+        !input.systemId ||
+        node.systemId === undefined ||
+        node.systemId === input.systemId
+    )
+    .filter(
+      (node) =>
+        !input.requirementSetId ||
+        node.requirementSetId === undefined ||
+        node.requirementSetId === input.requirementSetId
+    )
     .filter((node) => node.status !== "deprecated")
     .filter((node) => !input.types || input.types.includes(node.type));
   const directScores = new Map(

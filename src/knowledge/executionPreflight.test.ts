@@ -425,6 +425,70 @@ describe("ExecutionPreflightService", () => {
     ]);
     expect(result.executionPlan?.dataBindings[0]).not.toHaveProperty("value");
   });
+
+  it("requires verified, system-scoped auth profiles for a multi-role journey", () => {
+    const fixture = preflightFixture();
+    const recruiter: AuthProfile = {
+      id: "auth-recruiter",
+      projectId: fixture.system.id,
+      env: "test",
+      role: "recruiter",
+      loginMethod: "script",
+      encryptedSecrets: {},
+      status: "succeeded",
+      lastVerifiedAt: now(),
+      createdAt: now(),
+      updatedAt: now()
+    };
+    const approver: AuthProfile = {
+      id: "auth-approver",
+      projectId: fixture.system.id,
+      env: "test",
+      role: "approver",
+      loginMethod: "script",
+      encryptedSecrets: {},
+      status: "succeeded",
+      lastVerifiedAt: now(),
+      createdAt: now(),
+      updatedAt: now()
+    };
+    fixture.repository.authProfiles.push(recruiter, approver);
+
+    const ready = fixture.service.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      actorJourney: [
+        { authProfileId: recruiter.id, afterStepId: "step-open" },
+        { authProfileId: approver.id, afterStepId: "step-open" }
+      ],
+      confirm: true
+    });
+
+    expect(ready.status).toBe("ready");
+    expect(ready.executionPlan?.actorJourney).toEqual([
+      expect.objectContaining({ role: "recruiter", authProfileId: recruiter.id }),
+      expect.objectContaining({ role: "approver", authProfileId: approver.id })
+    ]);
+
+    approver.status = "pending";
+    const blocked = fixture.service.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      actorJourney: [
+        { authProfileId: recruiter.id },
+        { authProfileId: approver.id }
+      ],
+      confirm: true
+    });
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.draft.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "actor-journey", status: "blocked" })
+      ])
+    );
+  });
 });
 
 function preflightFixture() {

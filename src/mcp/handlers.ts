@@ -3,7 +3,11 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
 import { formatScenariosAsMarkdown, parseSpecMarkdown } from "../agent/caseFormatter.js";
-import { JsonFileBrainCreatorRepository } from "../domain/repository.js";
+import {
+  InMemoryBrainCreatorRepository,
+  JsonFileBrainCreatorRepository,
+  ShardedFileBrainCreatorRepository
+} from "../domain/repository.js";
 import { generateSeedFile } from "../agent/seedGenerator.js";
 import { buildAgentPrompt } from "../agent/promptBuilder.js";
 import { checkBusinessRules } from "../agent/qualityGate.js";
@@ -11,11 +15,18 @@ import { extractCandidateTerms } from "../agent/termExtractor.js";
 import { createConfiguredAgentBridge } from "../agent/bridgeProvider.js";
 import {
   verifyStoredBrowserAuth,
+  type AuthStateVerification,
   type AuthStateVerifier
 } from "../agent/authStateVerifier.js";
+import {
+  materializeBrowserAuthState,
+  type AuthStateMaterializer
+} from "../agent/authStateMaterializer.js";
+import type { AuthStateRefresher } from "../agent/authStateRefresh.js";
 import { BrainCreatorError, errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
+  resolveBrainCreatorStoreDir,
   resolveBrainCreatorKnowledgeDir,
   resolveBrainCreatorWorkspace
 } from "../shared/workspace.js";
@@ -25,6 +36,8 @@ import {
   type RequirementSourceReader
 } from "../knowledge/sourceAdapters.js";
 import { FeishuOpenApiAdapter } from "../knowledge/feishuAdapter.js";
+import { writeArtifactManifest } from "../storage/artifactArchive.js";
+import { writeStaticSuiteExecutionReport } from "../execution/staticSuiteReport.js";
 import { normalizeHostSkillAnalysis } from "../knowledge/policies.js";
 import { buildContextPack } from "../knowledge/retriever.js";
 import {
@@ -49,14 +62,23 @@ import {
   runAgent,
   runChain,
   spawnCommand,
+  validateActorJourneyUsage,
+  validateStepInstrumentation,
   type AgentBridge,
   type AgentBridgeWithMetadata,
   type CommandResult,
   type CommandRunner
 } from "../agent/orchestrator.js";
+import {
+  normalizeReporterExitCode,
+  parsePlaywrightJsonReport
+} from "../execution/playwrightReporter.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
 import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import { id } from "../shared/id.js";
+import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
+import { decryptSecrets } from "../shared/crypto.js";
+import { redactSensitiveText, scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
 import type {
   AgentRun,
   AgentTask,
@@ -70,6 +92,7 @@ import type {
   CompileRun,
   DocumentCase,
   ExecutableCase,
+  ExecutionEvidence,
   ExecutionDiagnosisVerdict,
   ExecutionPlan,
   ExecutionFailureType,
@@ -83,12 +106,13 @@ import type {
   TestCaseStep,
   TestDataTask,
   KnowledgeNodeType,
-  LegacyDiagnosisDecision
+  LegacyDiagnosisDecision,
+  SystemProfile
 } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
 export type BrainCreatorMcpContext = {
-  repository: JsonFileBrainCreatorRepository;
+  repository: InMemoryBrainCreatorRepository;
   service: BrainCreatorService;
   knowledgeService: KnowledgeService;
   testDataProvider: TestDataProviderService;
@@ -100,7 +124,11 @@ export type BrainCreatorMcpContext = {
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
+  structuredReporter?: boolean;
   authStateVerifier: AuthStateVerifier;
+  authStateMaterializer: AuthStateMaterializer;
+  authStateRefresher?: AuthStateRefresher;
+  authVerificationCache: Map<string, number>;
   feishuReader?: RequirementSourceReader;
 };
 
@@ -116,10 +144,14 @@ type HostAgentTaskPackage = {
 
 type CreateContextInput = {
   dataFilePath?: string;
+  storeDirPath?: string;
   workDir?: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
+  structuredReporter?: boolean;
   authStateVerifier?: AuthStateVerifier;
+  authStateMaterializer?: AuthStateMaterializer;
+  authStateRefresher?: AuthStateRefresher;
   knowledgeDir?: string;
   feishuReader?: RequirementSourceReader;
   systemExplorer?: SystemExplorer;
@@ -129,9 +161,12 @@ export function createBrainCreatorMcpContext(
   input: CreateContextInput = {}
 ): BrainCreatorMcpContext {
   const workDir = input.workDir ?? resolveBrainCreatorWorkspace();
-  const repository = new JsonFileBrainCreatorRepository(
-    input.dataFilePath ?? resolveBrainCreatorDataFile(workDir)
-  );
+  const repository = input.dataFilePath
+    ? new JsonFileBrainCreatorRepository(input.dataFilePath)
+    : new ShardedFileBrainCreatorRepository(
+        input.storeDirPath ?? resolveBrainCreatorStoreDir(workDir),
+        resolveBrainCreatorDataFile(workDir)
+      );
   const service = new BrainCreatorService(repository);
   const knowledgeService = new KnowledgeService(
     repository,
@@ -170,7 +205,11 @@ export function createBrainCreatorMcpContext(
       input.agentBridge ??
       (input.runner ? commandRunnerAgentBridge(input.runner) : createConfiguredAgentBridge()),
     runner: input.runner,
+    structuredReporter: input.structuredReporter,
     authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
+    authStateMaterializer: input.authStateMaterializer ?? materializeBrowserAuthState,
+    authStateRefresher: input.authStateRefresher,
+    authVerificationCache: new Map(),
     feishuReader: input.feishuReader ?? configuredFeishuReader()
   };
 }
@@ -745,7 +784,8 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       requirementSetId,
       actionIds: stringArrayArg(input, "actionIds"),
       note: stringArg(input, "confirmationNote"),
-      confirm: true
+      confirm: true,
+      confirmedBy: optionalStringArg(input, "confirmedBy")
     });
   }
   if (action === "approve-baseline") {
@@ -839,7 +879,8 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemId: stringArg(input, "systemId"),
       executableCaseId: stringArg(input, "executableCaseId"),
       confirm: optionalBooleanArg(input, "confirm"),
-      allowCreate: optionalBooleanArg(input, "allowCreate")
+      allowCreate: optionalBooleanArg(input, "allowCreate"),
+      automatic: optionalBooleanArg(input, "automatic")
     });
   }
   if (action === "submit-test-data") {
@@ -874,6 +915,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemId: stringArg(input, "systemId"),
       executableCaseId,
       authProfileId: optionalStringArg(input, "authProfileId"),
+      actorJourney: actorJourneyArg(input),
       confirm
     });
   }
@@ -883,6 +925,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemId: stringArg(input, "systemId"),
       authProfileId: optionalStringArg(input, "authProfileId"),
       startUrl: optionalStringArg(input, "startUrl"),
+      scenario: explorationScenarioArg(input),
       interactionMode: explorationInteractionModeArg(input, "interactionMode"),
       budget: {
         maxPages: optionalNumberArg(input, "maxPages"),
@@ -1044,6 +1087,9 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const suiteRuns = context.service.listCaseSuiteRuns(systemId);
   const bugs = context.service.listBugReports({ systemId });
   const executionDiagnoses = context.executionDiagnosis.list({ systemId });
+  const executionEvidence = context.repository.executionEvidence.filter(
+    (item) => item.systemId === systemId
+  );
   const legacyDiagnosisAudit = context.executionDiagnosis.auditLegacy({
     systemId,
     limit: 1
@@ -1061,6 +1107,13 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const awaitingAuthCheckpoints = snapshot.auth.checkpoints.filter(
     (checkpoint) => checkpoint.status === "awaiting-user"
   );
+  const activeDocumentLedgerSummary =
+    activeDocumentSuite &&
+    documentRunLedgerEntries.some(
+      (entry) => entry.caseSuiteId === activeDocumentSuite.suiteId
+    )
+      ? context.runLedger.summary(activeDocumentSuite.suiteId)
+      : undefined;
   const nextAction = facadeNextAction({
     bridgeOk: snapshot.bridge.ok,
     awaitingAuthCheckpoints: awaitingAuthCheckpoints.length,
@@ -1071,6 +1124,35 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     caseSources: caseSources.length,
     unfinishedSuites: unfinishedSuites.length
   });
+  const activeSuiteSummary = activeDocumentSuite
+    ? {
+        suiteId: activeDocumentSuite.suiteId,
+        status: activeDocumentSuite.status,
+        totalCases: activeDocumentSuite.totalCases,
+        attempted: activeDocumentSuite.attemptedCaseNos.length,
+        passed: activeDocumentSuite.passedCaseNos.length,
+        failed: activeDocumentSuite.failedCaseNos.length,
+        blocked: activeDocumentSuite.blockedCaseNos.length,
+        waiting: activeDocumentSuite.waitingCaseNos.length,
+        pending: activeDocumentSuite.pendingCaseNos.length,
+        nextCaseNo: activeDocumentSuite.nextCaseNo,
+        ...(activeDocumentLedgerSummary
+          ? {
+              currentStage: activeDocumentLedgerSummary.currentStage,
+              currentStep: activeDocumentLedgerSummary.currentStep,
+              latestEvent: activeDocumentLedgerSummary.latestEvent,
+              traceId: activeDocumentLedgerSummary.traceId
+            }
+          : {}),
+        activeTask: activeDocumentSuite.activeTask
+          ? {
+              taskId: activeDocumentSuite.activeTask.taskId,
+              caseNo: activeDocumentSuite.activeTask.caseNo,
+              title: activeDocumentSuite.activeTask.title
+            }
+          : undefined
+      }
+    : undefined;
   const userSummary = statusUserSummary({
     systemName: snapshot.system.name,
     bridgeOk: snapshot.bridge.ok,
@@ -1080,7 +1162,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     openBugs: openBugs.length,
     openGaps: snapshot.openGaps.length,
     unfinishedSuites: unfinishedSuites.length,
-    nextAction
+    nextAction,
+    activeSuite: activeSuiteSummary
   });
   return {
     ...snapshot,
@@ -1092,7 +1175,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     suites: {
       total: suites.length,
       byStatus: countBy(suites, (suite) => suite.status),
-      unfinished: unfinishedSuites,
+      unfinished: unfinishedSuites.slice(-10),
+      unfinishedTruncated: unfinishedSuites.length > 10,
       recent: suites.slice(-5)
     },
     suiteRuns: {
@@ -1103,16 +1187,13 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     documentRunLedger: {
       total: documentRunLedgerEntries.length,
       activeSummary:
-        activeDocumentSuite &&
-        documentRunLedgerEntries.some(
-          (entry) => entry.caseSuiteId === activeDocumentSuite.suiteId
-        )
-          ? context.runLedger.summary(activeDocumentSuite.suiteId)
-          : undefined,
-      recent: documentRunLedgerEntries.slice(-20)
+        activeDocumentLedgerSummary,
+      recent: documentRunLedgerEntries.slice(-20),
+      recentTruncated: documentRunLedgerEntries.length > 20
     },
     agentTasks: {
-      pending: pendingAgentTasks
+      pending: pendingAgentTasks.slice(-10),
+      pendingTruncated: pendingAgentTasks.length > 10
     },
     bugs: {
       total: bugs.length,
@@ -1122,10 +1203,19 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     executionDiagnoses: {
       ...context.executionDiagnosis.summary({ systemId }),
       recent: executionDiagnoses.slice(-10),
+      recentTruncated: executionDiagnoses.length > 10,
       legacyAudit: legacyDiagnosisAudit.summary,
       legacyReviews: context.executionDiagnosis.legacyReviewSummary(systemId),
       humanAdjudicationEval:
         context.executionDiagnosis.legacyReviewEval(systemId)
+    },
+    executionEvidence: {
+      total: executionEvidence.length,
+      byStatus: countBy(executionEvidence, (item) => item.status),
+      byAssurance: countBy(executionEvidence, (item) => item.assuranceLevel ?? "none"),
+      unassured: executionEvidence.filter(
+        (item) => !item.assuranceLevel || item.assuranceLevel === "none"
+      ).length
     },
     facadeNextAction: nextAction,
     userSummary,
@@ -1421,6 +1511,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       return {
         ...taskPackageFromStoredTask(pendingTask),
         mode: "case-source-suite",
+        authState,
         stage: pendingTask.agent,
         source: caseSource,
         suite: waitingSuite,
@@ -1443,6 +1534,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         mode: "case-source-suite",
         status: "completed",
         source: caseSource,
+        authState,
         suite: completedSuite,
         progress: caseSuiteProgress(context, completedSuite)
       };
@@ -1460,6 +1552,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       return {
         ...result.taskPackage,
         mode: "case-source-suite",
+        authState,
         stage: result.taskPackage.task.agent,
         source: caseSource,
         suite: waitingSuite,
@@ -1514,6 +1607,14 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     gapIds,
     completedAt: new Date().toISOString()
   });
+  const artifactManifest = await writeArtifactManifest({
+    workDir: context.workDir,
+    systemId,
+    suiteRunId: suiteRun.id,
+    artifactPaths: suiteRun.artifactPaths,
+    sourceRefs: [caseSource.id, suite.id],
+    protectedSecrets: protectedSecretsForSystem(context, systemId)
+  });
   context.service.updateCaseSuiteStatus(
     suite.id,
     allSuiteCasesPassed ? "completed" : "failed"
@@ -1539,8 +1640,10 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     mode: "case-source-suite",
     status: suiteRun.status,
     source: caseSource,
+    authState,
     suite,
     suiteRun,
+    artifactManifest,
     progress: caseSuiteProgress(context, suite),
     bugs,
     writeBack
@@ -1701,7 +1804,8 @@ async function executeDocumentCase(
       failureReason,
       sourceType: "case-source-suite",
       healAttempts: result.healerRuns.length,
-      maxHealAttempts: input.maxHealAttempts ?? 3,
+      maxHealAttempts: input.maxHealAttempts ?? 2,
+      evidenceAssurance: result.testResult?.structuredReporter ? "strong" : "none",
       evidenceRefs: [
         result.chainRun.id,
         input.sourceId,
@@ -1962,7 +2066,8 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
         : optionalStringArg(input, "id"),
       optionalNumberArg(input, "limit") ?? 50,
       optionalNumberArg(input, "minSampleSize") ?? 20,
-      optionalNumberArg(input, "offset") ?? 0
+      optionalNumberArg(input, "offset") ?? 0,
+      input
     );
   }
   if (!knowledgeProjectId && requestedTarget === "run-ledger") {
@@ -2008,8 +2113,9 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
             (item.failureType !== undefined &&
               failureTypes.has(item.failureType)))
       );
+    const diagnosisSummary = context.executionDiagnosis.summary({ systemId });
     return {
-      summary: context.executionDiagnosis.summary({ systemId }),
+      summary: diagnosisSummary,
       items,
       legacyAudit: context.executionDiagnosis.auditLegacy({
         systemId,
@@ -2017,6 +2123,16 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
       }),
       legacyReviews: context.executionDiagnosis.listLegacyReviews(systemId),
       humanAdjudicationEval: diagnosisEval,
+      reviewSummary: executionDiagnosisReviewSummary({
+        summary: diagnosisSummary,
+        items,
+        nextAction:
+          diagnosisSummary.routing.bugEligible > 0
+            ? "review_product_bugs"
+            : diagnosisSummary.routing.gapRouted > 0
+              ? "review_evidence_gaps"
+              : "no_diagnosis_action"
+      }),
       evalMarkdown: legacyDiagnosisEvalMarkdown(diagnosisEval),
       systemResolution: resolution
     };
@@ -2089,7 +2205,8 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
 async function configureFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const target = configureTargetArg(input, "target");
   if (target === "runtime") {
-    if ((optionalStringArg(input, "operation") ?? "reload-store") !== "reload-store") {
+    const operation = optionalStringArg(input, "operation") ?? "reload-store";
+    if (operation !== "reload-store" && operation !== "rebuild-index") {
       throw new Error("runtime operation is invalid");
     }
     const active = [
@@ -2112,6 +2229,16 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
         nextAction: "review-active-runs",
         retryable: true
       });
+    }
+    if (operation === "rebuild-index") {
+      if (!(context.repository instanceof ShardedFileBrainCreatorRepository)) {
+        throw new Error("Index rebuild requires the schema 17 sharded repository");
+      }
+      return {
+        status: "index-rebuilt",
+        index: context.repository.rebuildIndexes(),
+        nextAction: "review-status"
+      };
     }
     return {
       status: "reloaded",
@@ -2155,7 +2282,23 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
       const profile = findAuthProfileById(context, systemId, authProfileId);
       const system = context.repository.systemProfiles.find((item) => item.id === systemId);
       if (!system) throw new Error("Business system not found");
-      const storageStatePath = context.service.getCaptureAuth(profile.id)?.secrets.storageStatePath;
+      let storageStatePath: string | undefined;
+      try {
+        storageStatePath = await materializeAuthStorageState(context, system, profile, true);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        context.service.failAuthProfileVerification(profile.id, reason);
+        throw new BrainCreatorError({
+          code: "BC_AUTH_MATERIALIZATION_FAILED",
+          message: reason,
+          userMessage: {
+            enUS: "Brain Creator could not materialize this token or cookie into a browser login state.",
+            zhCN: "Token/Cookie cannot be materialized into a browser login state."
+          },
+          nextAction: "capture-auth-checkpoint",
+          retryable: true
+        });
+      }
       if (!storageStatePath) {
         throw new BrainCreatorError({
           code: "BC_AUTH_EVIDENCE_REQUIRED",
@@ -2169,9 +2312,7 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
         });
       }
       const verification = await context.authStateVerifier({
-        storageStatePath: isAbsolute(storageStatePath)
-          ? resolve(storageStatePath)
-          : resolve(context.workDir, storageStatePath),
+        storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
         targetUrl: system.baseUrl,
         allowedUrls: system.urlAllowlist
       });
@@ -2311,6 +2452,9 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   const selectedSystemId =
     optionalStringArg(input, "systemId") ?? project.systemIds[0];
   const authProfileId = optionalStringArg(input, "authProfileId");
+  const actorJourney = actorJourneyArg(input);
+  const requestedRepeatCount = optionalNumberArg(input, "repeatCount");
+  const repeatCount = Math.max(1, requestedRepeatCount ?? 1);
   if (!optionalBooleanArg(input, "confirm")) {
     const executionPreflights = selectedSystemId
       ? candidates.map((executableCase) => ({
@@ -2320,6 +2464,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
             systemId: selectedSystemId,
             executableCaseId: executableCase.id,
             authProfileId,
+            actorJourney,
             confirm: false
           })
         }))
@@ -2331,6 +2476,12 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       executableCases: candidates,
       executionPreflights,
       boundSystemIds: project.systemIds,
+      stability: {
+        repeatCount,
+        policy: repeatCount > 1
+          ? "Each iteration uses an isolated RequirementSuiteRun and is aggregated in coverage review."
+          : "Single execution; do not infer stability from one green run."
+      },
       requiresConfirmation: true,
       nextAction:
         project.systemIds.length === 0
@@ -2377,10 +2528,31 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       );
     }
     if (
+      actorJourney &&
+      JSON.stringify(activeRequirementSuiteRun.actorJourney ?? []) !==
+        JSON.stringify(actorJourney)
+    ) {
+      throw new Error("Requirement suite run cannot change its actor journey");
+    }
+    if (
+      requestedRepeatCount !== undefined &&
+      requestedRepeatCount !== (activeRequirementSuiteRun.stabilityTarget ?? 1)
+    ) {
+      throw new Error("Requirement suite run cannot change its stability repeat count");
+    }
+    if (
       optionalBooleanArg(input, "allowCreateTestData") &&
       !activeRequirementSuiteRun.allowCreateTestData
     ) {
       context.requirementSuiteRuns.authorizeTestDataCreation(
+        activeRequirementSuiteRun.id
+      );
+    }
+    if (
+      optionalBooleanArg(input, "automaticTestData") &&
+      !activeRequirementSuiteRun.automaticTestData
+    ) {
+      context.requirementSuiteRuns.enableAutomaticTestData(
         activeRequirementSuiteRun.id
       );
     }
@@ -2444,6 +2616,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       systemId,
       executableCaseId: candidate.id,
       authProfileId,
+      actorJourney,
       confirm: false
     });
     return {
@@ -2489,13 +2662,21 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     knowledgeProjectId: projectId,
     systemId,
     authProfileId,
+    operator: optionalStringArg(input, "operator"),
+    provider: optionalStringArg(input, "provider"),
+    sessionId: optionalStringArg(input, "sessionId"),
+    actorJourney,
     cases: candidates.map((candidate) => ({
       executableCaseId: candidate.id,
       title: candidate.title
     })),
     continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked"),
     allowCreateTestData: optionalBooleanArg(input, "allowCreateTestData"),
+    automaticTestData: optionalBooleanArg(input, "automaticTestData"),
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
+    ,stabilityGroupId: repeatCount > 1 ? id("stabilityGroup") : undefined
+    ,stabilityIteration: 1
+    ,stabilityTarget: repeatCount
   });
   if (optionalBooleanArg(input, "resume")) {
     requirementSuiteRun = context.requirementSuiteRuns.resume(
@@ -2580,11 +2761,13 @@ async function controlRequirementSuite(
         updated.maxHealAttempts
     });
   }
+  const archive = await archiveRequirementSuiteRun(context, updated);
   return {
     mode: "requirement-suite",
     status: updated.status,
     action,
-    requirementSuiteRun: updated
+    requirementSuiteRun: updated,
+    ...(archive ? { artifactManifest: archive.artifactManifest } : {})
   };
 }
 
@@ -2695,6 +2878,7 @@ async function executeNextRequirementSuiteCase(
     executableCaseId: executableCase.id,
     confirm: true,
     allowCreate: requirementSuiteRun.allowCreateTestData,
+    automatic: requirementSuiteRun.automaticTestData,
     phase: testDataPhase
   });
   if (testDataPreparation.task) {
@@ -2746,6 +2930,7 @@ async function executeNextRequirementSuiteCase(
     systemId: requirementSuiteRun.systemId,
     executableCaseId: executableCase.id,
     authProfileId: requirementSuiteRun.authProfileId,
+    actorJourney: requirementSuiteRun.actorJourney,
     confirm: true
   });
   if (
@@ -2967,7 +3152,8 @@ async function executeRequirementSuiteCase(
             "healerRuns" in result && Array.isArray(result.healerRuns)
               ? result.healerRuns.length
               : 0,
-          maxHealAttempts: input.maxHealAttempts ?? 3,
+          maxHealAttempts: input.maxHealAttempts ?? 2,
+          evidenceAssurance: executionEvidence.assuranceLevel,
           evidenceRefs: [
             executionEvidence.id,
             result.chainRun.id,
@@ -3015,6 +3201,17 @@ async function executeRequirementSuiteCase(
           )
         )
       : executionEvidence;
+  if (
+    "chainRun" in result &&
+    result.testResult?.actorRoleEvidencePath &&
+    requirementSuiteRun.actorJourney?.length
+  ) {
+    context.requirementSuiteRuns.recordActorJourneyEvidence(
+      requirementSuiteRun.id,
+      executableCase.id,
+      result.testResult.actorRoleEvidencePath
+    );
+  }
   const caseStatus =
     "chainRun" in result && result.chainRun?.status === "succeeded"
       ? "passed"
@@ -3104,12 +3301,14 @@ async function finalizeRequirementSuiteCase(
         error: reason
       }
     );
+    const archive = await archiveRequirementSuiteRun(context, blockedRun);
     return {
       ...input.completedCase,
       mode: "requirement-suite",
       status: "blocked",
       gap,
-      requirementSuiteRun: blockedRun
+      requirementSuiteRun: blockedRun,
+      ...(archive ? { artifactManifest: archive.artifactManifest } : {})
     };
   }
   if (cleanup.task) {
@@ -3139,6 +3338,8 @@ async function finalizeRequirementSuiteCase(
     input.executableCase.id,
     input.outcome
   );
+  const archive = await archiveRequirementSuiteRun(context, updatedRun);
+  const artifactManifest = archive?.artifactManifest;
   if (updatedRun.status === "running") {
     const next = await executeNextRequirementSuiteCase(
       context,
@@ -3151,15 +3352,35 @@ async function finalizeRequirementSuiteCase(
       requirementSuiteRun: context.requirementSuiteRuns.get(updatedRun.id)
     };
   }
+  if (updatedRun.stabilityNextRunId) {
+    const next = await executeNextRequirementSuiteCase(
+      context,
+      updatedRun.stabilityNextRunId,
+      { maxHealAttempts: input.maxHealAttempts }
+    );
+    return {
+      ...next,
+      [input.completionField]: input.completedCase,
+      previousStabilityRun: updatedRun,
+      requirementSuiteRun: context.requirementSuiteRuns.get(updatedRun.stabilityNextRunId)
+    };
+  }
   return {
     ...input.completedCase,
     mode: "requirement-suite",
     status: updatedRun.status,
     requirementSuiteRun: updatedRun,
+    ...(artifactManifest ? { artifactManifest } : {}),
     remainingExecutableCaseIds: updatedRun.caseRuns
       .filter((item) => item.status === "queued")
       .map((item) => item.executableCaseId)
   };
+}
+
+function isTerminalRequirementSuiteStatus(
+  status: RequirementSuiteRun["status"]
+) {
+  return status === "completed" || status === "failed" || status === "cancelled";
 }
 
 function formatRequirementGeneratorContext(
@@ -3200,6 +3421,18 @@ function formatRequirementGeneratorContext(
     `- Snapshot hash: ${executionPlan.snapshotHash}`,
     `- System: ${executionPlan.systemId}`,
     `- Auth profile: ${executionPlan.auth?.profileId ?? "public-or-host-managed"}`,
+    ...(executionPlan.actorJourney?.length
+      ? [
+          "",
+          "## Actor Journey",
+          ...executionPlan.actorJourney.map(
+            (actor) =>
+              `- Role ${actor.order}: ${actor.role}; authProfile=${actor.authProfileId}; afterStep=${actor.afterStepId ?? "start"}; sources=${actor.sourceRefs.join(",")}`
+          ),
+          "- Switch role only at the declared step boundary; do not infer an account or role from page text.",
+          "- The generated test must call bc.runAsRole(browser, role, action) for every role transition."
+        ]
+      : []),
     ...executionPlan.checks.map(
       (check) => `- ${check.id}: ${check.status}; ${check.message}`
     ),
@@ -3243,20 +3476,32 @@ async function completeRequirementEvidence(
   baseArtifactPaths: string[]
 ) {
   const output = [testResult?.stdout, testResult?.stderr].filter(Boolean).join("\n").trim();
-  const outputLines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const discoveredArtifacts = output.match(
-    /(?:[a-z]:[\\/]|\.{0,2}[\\/])?[^\s"'<>]+\.(?:png|zip|har|webm)/gi
-  ) ?? [];
-  const artifactPaths = [...new Set([...baseArtifactPaths, ...discoveredArtifacts])];
+  const reporter = testResult?.structuredReporter;
+  const artifactPaths = [
+    ...new Set(
+      [
+        ...baseArtifactPaths,
+        testResult?.reporterPath,
+        testResult?.actorRoleEvidencePath,
+        ...(reporter?.attachments ?? [])
+      ].filter((path): path is string => typeof path === "string")
+    )
+  ];
   const status =
-    chainRun.status === "succeeded"
+    reporter?.status === "failed"
+      ? "failed"
+      : reporter?.status === "blocked"
+        ? "blocked"
+        : chainRun.status === "succeeded"
       ? "passed"
       : chainRun.gaps.length > 0
         ? "blocked"
         : "failed";
   const actualResult =
     status === "passed"
-      ? "Playwright assertions passed."
+      ? reporter
+        ? "Playwright structured reporter passed."
+        : "Playwright exited successfully, but structured reporter evidence was unavailable."
       : output || chainRun.gaps.map((gap) => gap.reason).join("; ") || "Execution failed.";
   return context.knowledgeService.completeExecutionEvidence(evidenceId, {
     status,
@@ -3264,10 +3509,12 @@ async function completeRequirementEvidence(
     actualResult,
     artifactPaths,
     tracePaths: artifactPaths.filter((path) => /trace[^\\/]*\.zip$/i.test(path)),
-    consoleErrors: outputLines.filter((line) => /console.*error/i.test(line)),
-    networkFailures: outputLines.filter((line) =>
-      /net::|network|request failed|response.*\b[45]\d\d\b/i.test(line)
-    )
+    consoleErrors: reporter?.consoleErrors ?? [],
+    networkFailures: reporter?.networkFailures ?? [],
+    reporterPath: testResult?.reporterPath,
+    reporterResult: reporter,
+    actorRoleEvidencePath: testResult?.actorRoleEvidencePath,
+    evidenceRootDir: context.workDir
   });
 }
 
@@ -3294,6 +3541,10 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     (item) => item.knowledgeProjectId === projectId
   );
   const requirementSuiteRuns = context.requirementSuiteRuns.list(projectId);
+  const stability = summarizeStabilityRuns(
+    requirementSuiteRuns,
+    context.repository.executionEvidence
+  );
   const runLedgerEntries = context.runLedger.list({
     knowledgeProjectId: projectId
   });
@@ -3449,6 +3700,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       requirementSuiteRuns: {
         total: requirementSuiteRuns.length,
         byStatus: countBy(requirementSuiteRuns, (item) => item.status),
+        stability,
         active: activeRequirementSuiteRun,
         recent: requirementSuiteRuns.slice(-5)
       },
@@ -3514,7 +3766,8 @@ function knowledgeReview(
   idValue?: string,
   limit = 50,
   minSampleSize = 20,
-  offset = 0
+  offset = 0,
+  input: Record<string, unknown> = {}
 ) {
   const status = knowledgeStatus(context, projectId);
   const project = status.knowledge.project;
@@ -3557,42 +3810,48 @@ function knowledgeReview(
     );
     return {
       project,
-      items,
+      ...paginateReviewItems(items, input),
       impacts: items.map((item) => context.knowledgeService.requirementImpact(item.id))
     };
   }
   if (target === "test-intent") {
+    const items = context.knowledgeService
+      .listTestIntents(projectId)
+      .filter((item) => !idValue || item.id === idValue);
     return {
       project,
-      items: context.knowledgeService
-        .listTestIntents(projectId)
-        .filter((item) => !idValue || item.id === idValue)
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "executable-case") {
+    const items = context.knowledgeService
+      .listExecutableCases(projectId)
+      .filter((item) => !idValue || item.id === idValue);
     return {
       project,
-      items: context.knowledgeService
-        .listExecutableCases(projectId)
-        .filter((item) => !idValue || item.id === idValue)
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "execution-plan") {
+    const items = context.repository.executionPlans.filter(
+      (item) =>
+        item.knowledgeProjectId === projectId &&
+        (!idValue || item.id === idValue)
+    );
     return {
       project,
-      items: context.repository.executionPlans.filter(
-        (item) =>
-          item.knowledgeProjectId === projectId &&
-          (!idValue || item.id === idValue)
-      )
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "requirement-suite-run") {
+    const items = context.requirementSuiteRuns
+      .list(projectId)
+      .filter((item) => !idValue || item.id === idValue);
+    const reviewSummary = requirementSuiteRunCollectionSummary(items);
     return {
       project,
-      items: context.requirementSuiteRuns
-        .list(projectId)
-        .filter((item) => !idValue || item.id === idValue)
+      ...paginateReviewItems(items, input),
+      reviewSummary
     };
   }
   if (target === "run-ledger") {
@@ -3606,10 +3865,19 @@ function knowledgeReview(
         entry.requirementSuiteRunId ? [entry.requirementSuiteRunId] : []
       )
     )];
+    const summaries = runIds.map((runId) => context.runLedger.summary(runId));
+    const pagedEntries = paginateReviewItems(entries, input);
+    const pagedSummaries = paginateReviewItems(summaries, input);
     return {
       project,
-      summaries: runIds.map((runId) => context.runLedger.summary(runId)),
-      entries
+      summaries: pagedSummaries.items,
+      entries: pagedEntries.items,
+      ...(pagedEntries.totalItems === undefined
+        ? {}
+        : {
+            summaryPage: pagedSummaries,
+            entryPage: pagedEntries
+          })
     };
   }
   if (target === "execution-diagnosis") {
@@ -3620,11 +3888,12 @@ function knowledgeReview(
     const items = context.executionDiagnosis
       .list({ knowledgeProjectId: projectId })
       .filter((item) => !idValue || item.id === idValue);
+    const diagnosisSummary = context.executionDiagnosis.summary({
+      knowledgeProjectId: projectId
+    });
     return {
       project,
-      summary: context.executionDiagnosis.summary({
-        knowledgeProjectId: projectId
-      }),
+      summary: diagnosisSummary,
       items,
       legacyAudit: aggregateLegacyDiagnosisAudit(
         context,
@@ -3635,22 +3904,69 @@ function knowledgeReview(
         context.executionDiagnosis.listLegacyReviews(systemId)
       ),
       humanAdjudicationEval: diagnosisEval,
+      reviewSummary: executionDiagnosisReviewSummary({
+        summary: diagnosisSummary,
+        items,
+        nextAction:
+          diagnosisSummary.routing.bugEligible > 0
+            ? "review_product_bugs"
+            : diagnosisSummary.routing.gapRouted > 0
+              ? "review_evidence_gaps"
+              : "no_diagnosis_action"
+      }),
       evalMarkdown: legacyDiagnosisEvalMarkdown(diagnosisEval)
     };
   }
   if (target === "coverage") {
+    const requestedSystemId = optionalStringArg(input, "systemId");
     const intents = context.knowledgeService.listTestIntents(projectId);
     const sets = context.repository.requirementSets.filter(
       (item) => item.knowledgeProjectId === projectId && item.status !== "superseded"
     );
+    const executionLedger = context.knowledgeService.testIntentCoverage(projectId, requestedSystemId);
+    const requestedLimit = optionalNumberArg(input, "limit");
+    const requestedOffset = optionalNumberArg(input, "offset") ?? 0;
+    const nextOffset = requestedLimit !== undefined &&
+      requestedOffset + requestedLimit < executionLedger.items.length
+      ? requestedOffset + requestedLimit
+      : undefined;
+    const pagedLedger = requestedLimit === undefined
+      ? executionLedger
+      : {
+          ...executionLedger,
+          items: executionLedger.items.slice(requestedOffset, requestedOffset + requestedLimit),
+          totalItems: executionLedger.items.length,
+          returnedItems: Math.min(
+            Math.max(executionLedger.items.length - requestedOffset, 0),
+            requestedLimit
+          ),
+          offset: requestedOffset,
+          nextOffset
+        };
     return {
       project,
+      ...(requestedSystemId ? { systemId: requestedSystemId } : {}),
       requirements: sets.length,
       coveredRequirements: new Set(intents.map((item) => item.requirementSetId)).size,
       traceableIntents: intents.filter(
         (item) => item.requirementRefs.length > 0 && item.knowledgeNodeRefs.length > 0
       ).length,
-      totalIntents: intents.length
+      totalIntents: intents.length,
+      executionLedger: pagedLedger,
+      dimensionSummary: summarizeCoverageDimensions(
+        executionLedger.items
+      ),
+      sourceLedger: context.knowledgeService.requirementSourceLedger(projectId),
+      ...(requestedLimit === undefined
+        ? {}
+        : {
+            itemPage: {
+              limit: requestedLimit,
+              offset: requestedOffset,
+              total: executionLedger.items.length,
+              nextOffset
+            }
+          })
     };
   }
   if (target === "requirement-eval-accuracy") {
@@ -3667,26 +3983,51 @@ function knowledgeReview(
     };
   }
   if (target === "system-exploration") {
+    const items = context.systemExploration
+      .list(projectId)
+      .filter((item) => !idValue || item.id === idValue);
     return {
       project,
-      items: context.systemExploration
-        .list(projectId)
-        .filter((item) => !idValue || item.id === idValue)
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "evidence") {
+    const executionEvidence = context.knowledgeService.listExecutionEvidence(projectId);
+    const artifacts = project.systemIds.flatMap((systemId) => [
+      ...context.service.listTestSpecs(systemId),
+      ...context.service.listTestFiles(systemId),
+      ...context.service.listChainRuns(systemId)
+    ]);
+    const pagedEvidence = paginateReviewItems(executionEvidence, input);
+    const pagedArtifacts = paginateReviewItems(artifacts, input);
     return {
       project,
       systems: project.systemIds,
-      executionEvidence: context.knowledgeService.listExecutionEvidence(projectId),
-      artifacts: project.systemIds.flatMap((systemId) => [
-        ...context.service.listTestSpecs(systemId),
-        ...context.service.listTestFiles(systemId),
-        ...context.service.listChainRuns(systemId)
-      ])
+      executionEvidence: pagedEvidence.items,
+      artifacts: pagedArtifacts.items,
+      ...(pagedEvidence.totalItems === undefined
+        ? {}
+        : {
+            executionEvidencePage: pagedEvidence,
+            artifactPage: pagedArtifacts
+          })
     };
   }
   return { ...status.knowledge };
+}
+
+function paginateReviewItems<T>(items: T[], input: Record<string, unknown>) {
+  const limit = optionalNumberArg(input, "limit");
+  if (limit === undefined) return { items };
+  const offset = optionalNumberArg(input, "offset") ?? 0;
+  const page = items.slice(offset, offset + limit);
+  return {
+    items: page,
+    totalItems: items.length,
+    returnedItems: page.length,
+    offset,
+    nextOffset: offset + page.length < items.length ? offset + page.length : undefined
+  };
 }
 
 function reportKnowledgeGap(
@@ -3845,6 +4186,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   const executionPlan = executionPlanId
     ? assertExecutionPlanIsCurrent(context, executionPlanId)
     : undefined;
+  const structuredReporter = resolveStructuredReporterMode(context, input);
   const bridgeCheck = await preflightAgentBridge(context.agentBridge);
   if (!bridgeCheck.ok) {
     throw new Error(`Agent bridge unavailable: ${bridgeCheck.error}`);
@@ -3873,6 +4215,14 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
           optionalStringArg(input, "authProfileId")!
         )
       : findAuthProfile(context, testCase.systemId);
+  await verifyAuthForExecution(context, system, authProfile);
+  const actorJourneyProfiles = executionPlan?.actorJourney?.map((actor) => ({
+    role: actor.role,
+    authProfile: findAuthProfileById(context, testCase.systemId, actor.authProfileId)
+  }));
+  for (const actor of actorJourneyProfiles ?? []) {
+    await verifyAuthForExecution(context, system, actor.authProfile);
+  }
   if (context.agentBridge?.provider === "host-agent") {
     const specsDir = join(context.workDir, "specs");
     const generatedDir = join(context.workDir, "tests", "generated");
@@ -3891,7 +4241,8 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
       workDir: context.workDir,
       outputDir: join(context.workDir, "tests"),
       system,
-      authProfile
+      authProfile,
+      actorJourney: actorJourneyProfiles
     });
     const taskPackage = await prepareAgentTask(context, {
       systemId: system.id,
@@ -3914,7 +4265,11 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
           "requirementSuiteRunId"
         ),
         executionEvidenceId: optionalStringArg(input, "executionEvidenceId"),
-        contextPackPath: optionalStringArg(input, "contextPackPath")
+        contextPackPath: optionalStringArg(input, "contextPackPath"),
+        requiredStepIds: executionPlan?.steps
+          .filter((step) => step.action !== "api")
+          .map((step) => step.id),
+        actorJourneyRoles: actorJourneyProfiles?.map((actor) => actor.role)
       },
       suiteContext: suiteContextArg(input),
       regressionContext: regressionContextArg(input)
@@ -3936,8 +4291,13 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     testCase,
     agentBridge: context.agentBridge,
     runner: context.runner,
+    structuredReporter,
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
-    knowledgeContext: optionalStringArg(input, "knowledgeContext")
+    knowledgeContext: optionalStringArg(input, "knowledgeContext"),
+    actorJourney: actorJourneyProfiles,
+    requiredStepIds: executionPlan?.steps
+      .filter((step) => step.action !== "api")
+      .map((step) => step.id)
   });
   context.service.recordAgentRun(result.generateRun);
   for (const healerRun of result.healerRuns) {
@@ -3945,6 +4305,104 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   }
   context.service.recordChainRun(result.chainRun);
   return result;
+}
+
+function resolveStructuredReporterMode(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>
+) {
+  const requested = optionalStringArg(input, "evidenceMode");
+  if (requested && requested !== "strict" && requested !== "compatibility") {
+    throw new Error("evidenceMode must be strict or compatibility");
+  }
+  if (requested === "compatibility" && !context.runner) {
+    throw new Error(
+      "evidenceMode=compatibility requires an injected runner; real Playwright execution stays strict"
+    );
+  }
+  if (requested === "strict") return true;
+  if (requested === "compatibility") return false;
+  return context.structuredReporter;
+}
+
+async function verifyAuthForExecution(
+  context: BrainCreatorMcpContext,
+  system: SystemProfile,
+  authProfile: AuthProfile
+) {
+  const capture = context.service.getCaptureAuth(authProfile.id);
+  if (!capture) return;
+  let storageStatePath: string | undefined;
+  try {
+    storageStatePath = await materializeAuthStorageState(context, system, authProfile);
+  } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const pending = context.service.listAuthCheckpoints(system.id, "awaiting-user")
+        .find((checkpoint) => checkpoint.authProfileId === authProfile.id);
+      if (!pending) {
+        context.service.createAuthCheckpoint({
+          systemId: system.id,
+          authProfileId: authProfile.id,
+          reason,
+          resumeInstruction: "Refresh or capture a browser login state, then complete this checkpoint before resuming execution."
+        });
+      }
+      throw new BrainCreatorError({
+        code: "BC_AUTH_MATERIALIZATION_FAILED",
+        message: reason,
+        userMessage: {
+          enUS: "Authentication state could not be prepared for execution.",
+          zhCN: "执行前无法准备鉴权状态。"
+        },
+        nextAction: "complete-auth-checkpoint",
+        retryable: true
+      });
+  }
+  if (!storageStatePath) return;
+  const cacheTtlMs = Math.max(
+    5_000,
+    Math.min(300_000, Number(process.env.BRAIN_CREATOR_AUTH_CACHE_TTL_MS ?? 60_000))
+  );
+  const cachedUntil = context.authVerificationCache.get(authProfile.id) ?? 0;
+  if (cachedUntil > Date.now()) return;
+  let verification = await context.authStateVerifier({
+    storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
+    targetUrl: system.baseUrl,
+    allowedUrls: system.urlAllowlist
+  });
+  if (verification.status === "valid") {
+    context.authVerificationCache.set(authProfile.id, Date.now() + cacheTtlMs);
+    return;
+  }
+  const refreshed = await refreshAndVerifyAuthState(context, system, authProfile, verification.reason);
+  if (refreshed?.status === "valid") {
+    context.authVerificationCache.set(authProfile.id, Date.now() + cacheTtlMs);
+    return;
+  }
+  if (refreshed) verification = refreshed;
+  context.authVerificationCache.delete(authProfile.id);
+  const pending = context.service.listAuthCheckpoints(system.id, "awaiting-user")
+    .find((checkpoint) => checkpoint.authProfileId === authProfile.id);
+  if (!pending) {
+    context.service.createAuthCheckpoint({
+      systemId: system.id,
+      authProfileId: authProfile.id,
+      reason: verification.reason ?? "Stored browser authentication is no longer valid.",
+      resumeInstruction: "Refresh the browser login state, then complete this checkpoint before resuming execution."
+    });
+  }
+  throw new BrainCreatorError({
+    code: verification.status === "expired"
+      ? "BC_AUTH_STATE_EXPIRED"
+      : "BC_AUTH_STATE_UNAVAILABLE",
+    message: verification.reason ?? "Stored browser authentication requires user intervention before execution.",
+    userMessage: {
+      enUS: "Stored browser authentication requires user intervention before execution.",
+      zhCN: "保存的浏览器鉴权状态需要人工处理后才能执行。"
+    },
+    nextAction: "complete-auth-checkpoint",
+    retryable: verification.status === "unavailable"
+  });
 }
 
 /**
@@ -4117,7 +4575,19 @@ async function prepareAgentTask(
     regressionContext
   });
   await mkdir(taskDir, { recursive: true });
-  await writeFile(promptPath, hostAgentPrompt({ systemId, agent, inputSummary, args, outputPaths }), "utf8");
+  await writeFile(
+    promptPath,
+    hostAgentPrompt({
+      systemId,
+      agent,
+      inputSummary,
+      args,
+      outputPaths,
+      requiredStepIds: chainContext?.requiredStepIds,
+      actorJourneyRoles: chainContext?.actorJourneyRoles
+    }),
+    "utf8"
+  );
   await writeFile(
     contextPath,
     `${JSON.stringify(
@@ -4272,12 +4742,49 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       pendingTask.chainContext.executionPlanId
     );
   }
+  if (
+    agentOutputStatusArg(input, "status") === "succeeded" &&
+    (pendingTask.agent === "generator" || pendingTask.agent === "healer") &&
+    pendingTask.chainContext
+  ) {
+    const source = await readFile(pendingTask.chainContext.testPath, "utf8").catch((error) => {
+      throw new Error(
+        `Generated test cannot be validated before submission: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
+    const { requiredStepIds = [], actorJourneyRoles = [] } = pendingTask.chainContext;
+    const journeyCheck = validateActorJourneyUsage(
+      source,
+      actorJourneyRoles.map((role) => ({ role }))
+    );
+    if (!journeyCheck.valid) throw new Error(journeyCheck.reason);
+    const instrumentationCheck = validateStepInstrumentation(source, requiredStepIds);
+    if (!instrumentationCheck.valid) throw new Error(instrumentationCheck.reason);
+    const secretFindings = scanGeneratedTestSecrets(context, pendingTask.systemId, source);
+    if (secretFindings.length > 0) {
+      throw new Error(
+        `Generated test contains sensitive material: ${secretFindings.join(", ")}`
+      );
+    }
+  }
+  const stdout = redactHostAgentText(
+    context,
+    pendingTask.systemId,
+    optionalStringArg(input, "stdout") ?? ""
+  );
+  const stderr = redactHostAgentText(
+    context,
+    pendingTask.systemId,
+    optionalStringArg(input, "stderr") ?? ""
+  );
+  const submittedOutputPaths = optionalStringArrayArg(input, "outputPaths");
+  assertWorkspaceOutputPaths(context.workDir, submittedOutputPaths);
   const result = context.service.submitAgentTask({
     taskId,
     status: agentOutputStatusArg(input, "status"),
-    stdout: optionalStringArg(input, "stdout") ?? "",
-    stderr: optionalStringArg(input, "stderr") ?? "",
-    outputPaths: optionalStringArrayArg(input, "outputPaths")
+    stdout,
+    stderr,
+    outputPaths: submittedOutputPaths
   });
   if (result.task.planContext) {
     return finalizeHostAgentPlan(context, result);
@@ -4289,7 +4796,7 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
   const testResult =
     result.agentRun.status === "succeeded" &&
     (result.task.agent === "generator" || result.task.agent === "healer")
-      ? await runSubmittedTest(context, chainContext.testPath)
+      ? await runSubmittedTest(context, chainContext.testPath, result.task.systemId, result.task.id)
       : undefined;
   const healAttempts = chainContext.healAttempts ?? 0;
   const maxHealAttempts = chainContext.maxHealAttempts ?? 1;
@@ -4385,7 +4892,13 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       ? hostAgentFailureReason(result.task.agent, result.agentRun.error, testResult)
       : undefined;
   const chainRunId = id("chain");
-  const artifactPaths = [chainContext.specPath, chainContext.testPath];
+  const artifactPaths = [
+    chainContext.specPath,
+    chainContext.testPath,
+    testResult?.reporterPath,
+    testResult?.actorRoleEvidencePath,
+    ...(testResult?.structuredReporter?.attachments ?? [])
+  ].filter((path): path is string => typeof path === "string");
   const terminalDiagnosis =
     status === "failed" &&
     failureReason &&
@@ -4415,6 +4928,13 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
               : "host-agent-generator",
           healAttempts,
           maxHealAttempts,
+          evidenceAssurance: testResult?.structuredReporter
+            ? "strong"
+            : chainContext.executionEvidenceId
+              ? context.repository.executionEvidence.find(
+                  (item) => item.id === chainContext.executionEvidenceId
+                )?.assuranceLevel
+              : "none",
           evidenceRefs: [
             chainRunId,
             chainContext.executionEvidenceId,
@@ -4914,13 +5434,63 @@ function hostAgentFailureReason(
   return detail;
 }
 
-async function runSubmittedTest(context: BrainCreatorMcpContext, testPath: string) {
+async function runSubmittedTest(
+  context: BrainCreatorMcpContext,
+  testPath: string,
+  systemId: string,
+  runId = "host-agent"
+) {
   const runner = context.runner ?? spawnCommand;
   const testRunPath = relative(context.workDir, testPath).replace(/\\/g, "/");
   try {
-    return await runner("npx", ["playwright", "test", testRunPath], {
+    const rawResult = await runner(
+      "npx",
+      ["playwright", "test", testRunPath, "--workers=1", "--reporter=json", "--trace=on"],
+      {
       cwd: context.workDir
-    });
+      }
+    );
+    const protectedSecrets = protectedSecretsForSystem(context, systemId);
+    const result: CommandResult = {
+      ...rawResult,
+      stdout: redactSensitiveText(rawResult.stdout, protectedSecrets),
+      stderr: redactSensitiveText(rawResult.stderr, protectedSecrets),
+      ...(rawResult.structuredReporter
+        ? {
+            structuredReporter: JSON.parse(
+              redactSensitiveText(JSON.stringify(rawResult.structuredReporter), protectedSecrets)
+            )
+          }
+        : {})
+    };
+    const reporter = result.structuredReporter ?? parseHostReporter(result.stdout);
+    if (!reporter) {
+      return {
+        ...result,
+        exitCode: result.exitCode === 0 ? 1 : result.exitCode,
+        stderr: [
+          result.stderr,
+          "Structured Playwright Reporter output was missing; execution is not auditable."
+        ].filter(Boolean).join("\n")
+      };
+    }
+    const reporterPath = result.reporterPath ?? join(
+      context.workDir,
+      ".brain-creator",
+      "runs",
+      runId,
+      "playwright-report.json"
+    );
+    await mkdir(dirname(reporterPath), { recursive: true });
+    if (!result.reporterPath) {
+      await writeFile(reporterPath, `${JSON.stringify(reporter, null, 2)}\n`, "utf8");
+    }
+    return {
+      ...result,
+      exitCode: normalizeReporterExitCode(result.exitCode, reporter),
+      structuredReporter: reporter,
+      reporterPath
+    };
   } catch (error) {
     return {
       exitCode: 1,
@@ -4930,12 +5500,71 @@ async function runSubmittedTest(context: BrainCreatorMcpContext, testPath: strin
   }
 }
 
+function redactHostAgentText(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  text: string
+) {
+  return redactSensitiveText(text, protectedSecretsForSystem(context, systemId));
+}
+
+function assertWorkspaceOutputPaths(workDir: string, paths: string[] | undefined) {
+  for (const path of paths ?? []) {
+    const absolute = resolve(workDir, path);
+    const offset = relative(resolve(workDir), absolute);
+    if (offset.startsWith("..") || isAbsolute(offset)) {
+      throw new Error("Agent output path must stay inside the Brain Creator workspace");
+    }
+  }
+}
+
+function protectedSecretsForSystem(
+  context: BrainCreatorMcpContext,
+  systemId: string
+) {
+  return Object.fromEntries(
+    context.repository.authProfiles
+      .filter((profile) => profile.projectId === systemId)
+      .flatMap((profile) => {
+        try {
+          return Object.entries(decryptSecrets(profile.encryptedSecrets));
+        } catch {
+          return [];
+        }
+      })
+  );
+}
+
+function parseHostReporter(output: string) {
+  try {
+    return parsePlaywrightJsonReport(JSON.parse(output));
+  } catch {
+    return undefined;
+  }
+}
+
+function scanGeneratedTestSecrets(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  source: string
+) {
+  const protectedValues = Object.entries(protectedSecretsForSystem(context, systemId));
+  return [
+    ...scanSensitiveValues(source, Object.fromEntries(protectedValues)).map(
+      (finding) => `credential:${finding.secretKey}`
+    ),
+    ...scanSensitivePatterns(source).map((finding) => `pattern:${finding.rule}`)
+  ];
+}
+
 function hostAgentPrompt(input: {
   systemId: string;
   agent: AgentRun["agent"];
   inputSummary: string;
   args: string[];
   outputPaths: string[];
+  requiredStepIds?: string[];
+  actorJourneyRoles?: string[];
 }) {
   return [
     `# Brain Creator Host Agent Task`,
@@ -4952,6 +5581,16 @@ function hostAgentPrompt(input: {
     ...(input.agent === "generator" || input.agent === "healer"
       ? [
           "- When Arguments include --seed, import test and expect from that seed instead of @playwright/test; the seed owns authenticated browser setup."
+        ]
+      : []),
+    ...(input.requiredStepIds?.length
+      ? [
+          `- Instrument every declared execution step with bc.step(): ${input.requiredStepIds.join(", ")}.`
+        ]
+      : []),
+    ...(input.actorJourneyRoles && input.actorJourneyRoles.length > 1
+      ? [
+          `- This is a multi-role journey. Use bc.runAsRole() and reference every role: ${input.actorJourneyRoles.join(", ")}.`
         ]
       : []),
     "",
@@ -5176,11 +5815,14 @@ function suiteRunNextAction(bugReports: BugReport[], gaps: Gap[]) {
 }
 
 function suiteRunReviewSummary(review: ReturnType<typeof suiteRunReview>) {
+  const evidencePaths = uniqueStrings(review.runs.flatMap((run) => run.artifactPaths));
   return {
     title: "Suite Run Review",
     status: review.summary.latestStatus ?? "empty",
     metrics: review.summary,
-    evidencePaths: uniqueStrings(review.runs.flatMap((run) => run.artifactPaths)),
+    evidencePaths: evidencePaths.slice(0, 20),
+    evidencePathCount: evidencePaths.length,
+    evidenceTruncated: evidencePaths.length > 20,
     nextAction: review.nextAction,
     userMessage:
       `Suite review: ${review.summary.totalCases} cases, ` +
@@ -5196,11 +5838,14 @@ function bugReviewResultSummary(
   bugs: BugReport[],
   nextAction: string
 ) {
+  const evidencePaths = uniqueStrings(bugs.flatMap((bug) => bug.evidencePaths));
   return {
     title: "Bug Review",
     status: summary.open > 0 || summary.retestFailed > 0 ? "action_required" : "completed",
     metrics: summary,
-    evidencePaths: uniqueStrings(bugs.flatMap((bug) => bug.evidencePaths)),
+    evidencePaths: evidencePaths.slice(0, 20),
+    evidencePathCount: evidencePaths.length,
+    evidenceTruncated: evidencePaths.length > 20,
     nextAction,
     userMessage:
       `Bug review: ${summary.open} open, ${summary.retestFailed} retest failed, ` +
@@ -5698,6 +6343,23 @@ function statusUserSummary(state: {
   openGaps: number;
   unfinishedSuites: number;
   nextAction: string;
+  activeSuite?: {
+    suiteId: string;
+    status: string;
+    totalCases: number;
+    attempted: number;
+    passed: number;
+    failed: number;
+    blocked: number;
+    waiting: number;
+    pending: number;
+    nextCaseNo?: string;
+    currentStage?: string;
+    currentStep?: string;
+    latestEvent?: string;
+    traceId?: string;
+    activeTask?: { taskId: string; caseNo: string; title: string };
+  };
 }) {
   return {
     systemName: state.systemName,
@@ -5713,6 +6375,7 @@ function statusUserSummary(state: {
     nextAction: state.nextAction,
     nextCommand: nextCommandForAction(state.nextAction),
     nextStep: nextStepForAction(state.nextAction),
+    ...(state.activeSuite ? { activeSuite: state.activeSuite } : {}),
     counts: {
       authProfiles: state.authProfiles,
       awaitingAuthCheckpoints: state.awaitingAuthCheckpoints,
@@ -5735,6 +6398,24 @@ function statusMarkdown(summary: ReturnType<typeof statusUserSummary>) {
     `- Open bugs: ${summary.counts.openBugs}`,
     `- Open gaps: ${summary.counts.openGaps}`,
     `- Unfinished suites: ${summary.counts.unfinishedSuites}`,
+    ...(summary.activeSuite
+      ? [
+          `- Active suite: ${summary.activeSuite.suiteId} (${summary.activeSuite.status})`,
+          `- Active suite progress: ${summary.activeSuite.passed}/${summary.activeSuite.totalCases} passed; next ${summary.activeSuite.nextCaseNo ?? "none"}`,
+          ...(summary.activeSuite.currentStage
+            ? [`- Active suite stage: ${summary.activeSuite.currentStage}`]
+            : []),
+          ...(summary.activeSuite.currentStep
+            ? [`- Active suite step: ${summary.activeSuite.currentStep}`]
+            : []),
+          ...(summary.activeSuite.latestEvent
+            ? [`- Active suite event: ${summary.activeSuite.latestEvent}`]
+            : []),
+          ...(summary.activeSuite.traceId
+            ? [`- Active suite trace: ${summary.activeSuite.traceId}`]
+            : [])
+        ]
+      : []),
     "",
     `Next: ${summary.nextStep}`,
     `Command: \`${summary.nextCommand}\``
@@ -5773,6 +6454,136 @@ function statusToolGuidance(nextAction: string) {
     internalToolsPolicy:
       "Use fine-grained bc_* tools only for debugging, audit, or unsupported facade details."
   };
+}
+
+function requirementSuiteRunCollectionSummary(runs: RequirementSuiteRun[]) {
+  const statusCounts = countBy(runs, (run) => run.status);
+  const metrics = {
+    totalRuns: runs.length,
+    byStatus: statusCounts,
+    totalCases: runs.reduce((total, run) => total + run.total, 0),
+    passed: runs.reduce((total, run) => total + run.passed, 0),
+    failed: runs.reduce((total, run) => total + run.failed, 0),
+    blocked: runs.reduce((total, run) => total + run.blocked, 0),
+    skipped: runs.reduce((total, run) => total + run.skipped, 0),
+    cancelled: runs.reduce((total, run) => total + run.cancelled, 0)
+  };
+  const active = runs.some((run) =>
+    ["running", "waiting-for-test-data", "waiting-for-agent", "blocked"].includes(run.status)
+  );
+  return {
+    title: "Requirement Suite Run Review",
+    status: active ? "action_required" : runs.length > 0 ? "completed" : "empty",
+    metrics,
+    nextAction: active ? "resume_or_resolve_blockers" : runs.length > 0 ? "review_suite_results" : "prepare_requirement_suite",
+    userMessage: runs.length === 0
+      ? "No requirement suite runs are available."
+      : `${runs.length} requirement suite run(s), ${metrics.totalCases} case(s): ${metrics.passed} passed, ${metrics.failed} failed, ${metrics.blocked} blocked.`
+  };
+}
+
+function executionDiagnosisReviewSummary(input: {
+  summary: ReturnType<ExecutionDiagnosisService["summary"]>;
+  items: Array<{ evidenceRefs: string[] }>;
+  nextAction: string;
+}) {
+  const evidencePaths = uniqueStrings(input.items.flatMap((item) => item.evidenceRefs));
+  return {
+    title: "Execution Diagnosis Review",
+    status:
+      input.summary.routing.bugEligible > 0 || input.summary.routing.gapRouted > 0
+        ? "action_required"
+        : "completed",
+    metrics: input.summary,
+    evidencePaths: evidencePaths.slice(0, 20),
+    evidencePathCount: evidencePaths.length,
+    evidenceTruncated: evidencePaths.length > 20,
+    nextAction: input.nextAction,
+    userMessage:
+      `Diagnosis review: ${input.summary.total} records, ` +
+      `${input.summary.routing.bugEligible} product-bug candidates, ` +
+      `${input.summary.routing.gapRouted} evidence-gap candidates.`
+  };
+}
+
+export function summarizeStabilityRuns(
+  runs: RequirementSuiteRun[],
+  executionEvidence: ExecutionEvidence[]
+) {
+  const grouped = new Map<string, RequirementSuiteRun[]>();
+  for (const run of runs) {
+    if (!run.stabilityGroupId) continue;
+    const group = grouped.get(run.stabilityGroupId) ?? [];
+    group.push(run);
+    grouped.set(run.stabilityGroupId, group);
+  }
+  return [...grouped.entries()]
+    .sort(([, left], [, right]) => (right.at(-1)?.updatedAt ?? "").localeCompare(left.at(-1)?.updatedAt ?? ""))
+    .slice(0, 20)
+    .map(([groupId, group]) => {
+      const target = Math.max(...group.map((run) => run.stabilityTarget ?? 1));
+      const completed = group.filter((run) => run.status === "completed" || run.status === "failed").length;
+      const blocked = group.filter((run) => run.status === "blocked").length;
+      const failed = group.filter((run) => run.status === "failed").length;
+      const passed = group.filter(
+        (run) => run.status === "completed" && run.failed === 0 && run.blocked === 0
+      ).length;
+      const strongVerified = group.filter((run) =>
+        run.status === "completed" &&
+        run.failed === 0 &&
+        run.blocked === 0 &&
+        run.caseRuns.length === run.total &&
+        run.caseRuns.every((caseRun) => {
+          const evidence = caseRun.executionEvidenceId
+            ? executionEvidence.find((item) => item.id === caseRun.executionEvidenceId)
+            : undefined;
+          return Boolean(
+            evidence &&
+              evidence.status === "passed" &&
+              evidence.assuranceLevel === "strong" &&
+              (evidence.coverage?.missing.length ?? 0) === 0 &&
+              actorJourneyEvidenceMatches(run, evidence)
+          );
+        })
+      ).length;
+      const verdict = blocked > 0
+        ? "blocked"
+        : completed < target
+          ? "running"
+          : target < 2
+            ? "insufficient-sample"
+          : failed > 0
+            ? "unstable"
+            : strongVerified === completed
+              ? "stable"
+              : "unstable";
+      return {
+        stabilityGroupId: groupId,
+        target,
+        iterations: group.length,
+        completed,
+        passed,
+        strongVerified,
+        failed,
+        blocked,
+        verdict,
+        latestRunId: group.at(-1)?.id,
+        nextRunId: group.find((run) => run.stabilityNextRunId)?.stabilityNextRunId
+      };
+    });
+}
+
+function actorJourneyEvidenceMatches(
+  run: RequirementSuiteRun,
+  evidence: ExecutionEvidence
+) {
+  const declaredRoles = (run.actorJourney ?? []).map((item) => item.role ?? "");
+  if (declaredRoles.length === 0) return true;
+  const observedRoles = (evidence.actorJourney ?? []).map((item) => item.role);
+  return (
+    observedRoles.length === declaredRoles.length &&
+    observedRoles.every((role, index) => role === declaredRoles[index])
+  );
 }
 
 function nextFacadeToolForAction(action: string) {
@@ -6198,26 +7009,65 @@ async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestAr
 async function verifyCaseSourceSuiteAuthState(
   context: BrainCreatorMcpContext,
   systemId: string
-) {
+): Promise<(AuthStateVerification & {
+  authRefresh?: { attempted: boolean; provider?: string };
+}) | undefined> {
   const profile = findAuthProfile(context, systemId);
-  if (profile.loginMethod !== "script") {
-    return undefined;
-  }
-  const storageStatePath = context.service.getCaptureAuth(profile.id)?.secrets.storageStatePath;
-  if (!storageStatePath) {
-    return undefined;
-  }
   const system = context.repository.systemProfiles.find((item) => item.id === systemId);
   if (!system) {
     throw new Error("Business system not found");
   }
-  return context.authStateVerifier({
-    storageStatePath: isAbsolute(storageStatePath)
-      ? resolve(storageStatePath)
-      : resolve(context.workDir, storageStatePath),
+  const storageStatePath = await materializeAuthStorageState(context, system, profile);
+  if (!storageStatePath) {
+    return undefined;
+  }
+  const verification = await context.authStateVerifier({
+    storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
     targetUrl: system.baseUrl,
     allowedUrls: system.urlAllowlist
   });
+  if (verification.status === "valid") {
+    return { ...verification, authRefresh: { attempted: false } };
+  }
+  return (
+    (await refreshAndVerifyAuthState(context, system, profile, verification.reason)) ?? verification
+  );
+}
+
+async function refreshAndVerifyAuthState(
+  context: BrainCreatorMcpContext,
+  system: SystemProfile,
+  authProfile: AuthProfile,
+  reason = "Stored browser authentication is no longer valid."
+) {
+  if (!context.authStateRefresher) return undefined;
+  try {
+    const refreshed = await context.authStateRefresher({
+      workDir: context.workDir,
+      system,
+      authProfile,
+      reason
+    });
+    const safePath = await resolveProtectedStorageStatePath(
+      context.workDir,
+      refreshed.storageStatePath
+    );
+    context.service.setAuthStorageStatePath(authProfile.id, refreshed.storageStatePath);
+    const verification = await context.authStateVerifier({
+      storageStatePath: safePath,
+      targetUrl: system.baseUrl,
+      allowedUrls: system.urlAllowlist
+    });
+    return {
+      ...verification,
+      authRefresh: {
+        attempted: true,
+        ...(refreshed.provider ? { provider: refreshed.provider } : {})
+      }
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function findAuthProfile(context: BrainCreatorMcpContext, systemId: string): AuthProfile {
@@ -6378,6 +7228,92 @@ function optionalBooleanArg(input: Record<string, unknown>, key: string): boolea
   return input[key] === true;
 }
 
+async function materializeAuthStorageState(
+  context: BrainCreatorMcpContext,
+  system: SystemProfile,
+  authProfile: AuthProfile,
+  force: boolean = false
+) {
+  const capture = context.service.getCaptureAuth(authProfile.id);
+  const existing = capture?.secrets.storageStatePath;
+  if (existing) return existing;
+  if (!force && (!authProfile.verificationEvidence || authProfile.status !== "succeeded")) return undefined;
+  if (!force && authProfile.loginMethod !== "token" && authProfile.loginMethod !== "cookie") {
+    return undefined;
+  }
+  if (authProfile.loginMethod !== "token" && authProfile.loginMethod !== "cookie") {
+    return undefined;
+  }
+  const hasSecret = authProfile.loginMethod === "token"
+    ? Boolean(capture?.secrets.token)
+    : Boolean(capture?.secrets.cookie);
+  if (!hasSecret) return undefined;
+  const materialized = await context.authStateMaterializer({
+    workDir: context.workDir,
+    system,
+    authProfile
+  });
+  context.service.setAuthStorageStatePath(authProfile.id, materialized.storageStatePath);
+  context.authVerificationCache.delete(authProfile.id);
+  return materialized.storageStatePath;
+}
+
+function actorJourneyArg(input: Record<string, unknown>) {
+  const value = input.actorJourney;
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("actorJourney must be an array");
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`actorJourney[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    return {
+      role: optionalStringArg(record, "role"),
+      authProfileId: stringArg(record, "authProfileId"),
+      afterStepId: optionalStringArg(record, "afterStepId"),
+      sourceRefs: optionalStringArrayArg(record, "sourceRefs") ?? []
+    };
+  });
+}
+
+function explorationScenarioArg(input: Record<string, unknown>) {
+  const value = input.explorationScenario;
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("explorationScenario must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  const name = stringArg(record, "name");
+  const dataRefs = optionalStringArrayArg(record, "dataRefs") ?? [];
+  return {
+    id: optionalStringArg(record, "id"),
+    name,
+    role: optionalStringArg(record, "role"),
+    prerequisiteState: optionalStringArg(record, "prerequisiteState"),
+    dataRefs,
+    testDataLeaseIds: optionalStringArrayArg(record, "testDataLeaseIds") ?? [],
+    selectorValues: recordArg(record, "selectorValues")
+  };
+}
+
+function summarizeCoverageDimensions(
+  items: Array<{
+    coverage?: {
+      required: readonly string[];
+      verified: readonly string[];
+      missing: readonly string[];
+    };
+  }>
+) {
+  const dimensions = [...new Set(items.flatMap((item) => item.coverage?.required ?? []))];
+  return dimensions.map((dimension) => ({
+    dimension,
+    required: items.filter((item) => item.coverage?.required.includes(dimension)).length,
+    verified: items.filter((item) => item.coverage?.verified.includes(dimension)).length,
+    missing: items.filter((item) => item.coverage?.missing.includes(dimension)).length
+  }));
+}
+
 function planContextArg(input: Record<string, unknown>): AgentTask["planContext"] | undefined {
   const value = input.planContext;
   if (value === undefined) {
@@ -6424,6 +7360,8 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   const requirementSuiteRunId = candidate.requirementSuiteRunId;
   const executionEvidenceId = candidate.executionEvidenceId;
   const contextPackPath = candidate.contextPackPath;
+  const requiredStepIds = candidate.requiredStepIds;
+  const actorJourneyRoles = candidate.actorJourneyRoles;
   if (typeof testCaseId !== "string" || typeof specPath !== "string" || typeof testPath !== "string") {
     throw new Error("chainContext requires testCaseId, specPath, and testPath");
   }
@@ -6451,6 +7389,14 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
       throw new Error(`chainContext ${name} must be a string when provided`);
     }
   }
+  for (const [name, value] of Object.entries({ requiredStepIds, actorJourneyRoles })) {
+    if (
+      value !== undefined &&
+      (!Array.isArray(value) || value.some((item) => typeof item !== "string"))
+    ) {
+      throw new Error(`chainContext ${name} must be an array of strings when provided`);
+    }
+  }
   return {
     testCaseId,
     specPath,
@@ -6464,8 +7410,85 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
     executionPlanId: executionPlanId as string | undefined,
     requirementSuiteRunId: requirementSuiteRunId as string | undefined,
     executionEvidenceId: executionEvidenceId as string | undefined,
-    contextPackPath: contextPackPath as string | undefined
+    contextPackPath: contextPackPath as string | undefined,
+    requiredStepIds: requiredStepIds as string[] | undefined,
+    actorJourneyRoles: actorJourneyRoles as string[] | undefined
   };
+}
+
+async function archiveRequirementSuiteRun(
+  context: BrainCreatorMcpContext,
+  run: RequirementSuiteRun
+) {
+  const shouldArchive = isTerminalRequirementSuiteStatus(run.status) || run.status === "blocked";
+  if (!shouldArchive) return undefined;
+  const executableCaseIds = new Set(run.caseRuns.map((item) => item.executableCaseId));
+  const executableCases = run.caseRuns
+    .map((item) => context.repository.executableCases.find((candidate) => candidate.id === item.executableCaseId))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const requirementSetIds = [...new Set(executableCases.map((item) => item.requirementSetId))];
+  const requirementSetIdSet = new Set(requirementSetIds);
+  const requirementSetId = requirementSetIds.length === 1
+    ? requirementSetIds[0]
+    : requirementSetIds.length > 1
+      ? "multi-requirement"
+      : "unscoped";
+  const coverage = context.knowledgeService
+    .testIntentCoverage(run.knowledgeProjectId, run.systemId)
+    .items
+    .filter((item) => requirementSetIdSet.has(item.requirementSetId))
+    .map((item) => ({
+      testIntentId: item.testIntentId,
+      title: item.title,
+      module: item.module,
+      classification: item.classification,
+      classificationReason: item.classificationReason,
+      requirementRefs: item.requirementRefs
+    }));
+  const evidence = run.caseRuns.flatMap((caseRun) => {
+    const item = caseRun.executionEvidenceId
+      ? context.repository.executionEvidence.find((candidate) => candidate.id === caseRun.executionEvidenceId)
+      : undefined;
+    return item ? [item] : [];
+  });
+  const reportPath = join(
+    context.workDir,
+    ".brain-creator",
+    "artifacts",
+    run.systemId,
+    requirementSetId,
+    run.id,
+    "suite-report.html"
+  );
+  const system = context.repository.systemProfiles.find((item) => item.id === run.systemId);
+  await writeStaticSuiteExecutionReport({
+    outputPath: reportPath,
+    title: `Brain Creator requirement suite ${run.id}`,
+    run,
+    requirementSetIds,
+    locale: system?.defaultLocale,
+    evidence,
+    coverage,
+    bugs: context.repository.bugReports
+      .filter((bug) => bug.systemId === run.systemId && executableCaseIds.has(bug.sourceId))
+      .map((bug) => ({ id: bug.id, status: bug.status, caseNo: bug.caseNo, actualResult: bug.actualResult })),
+    gaps: context.repository.gaps
+      .filter((gap) => gap.projectId === run.systemId && (gap.sourceId === run.id || executableCaseIds.has(gap.sourceId)))
+      .map((gap) => ({ id: gap.id, status: gap.status, caseNo: gap.sourceId, reason: gap.reason }))
+  });
+  run.reportPath = reportPath;
+  const artifactManifest = await writeArtifactManifest({
+    workDir: context.workDir,
+    systemId: run.systemId,
+    requirementSetId,
+    suiteRunId: run.id,
+    requirementSetIds,
+    artifactPaths: [reportPath, ...evidence.flatMap((item) => item.artifactPaths)],
+    sourceRefs: requirementSetIds,
+    protectedSecrets: protectedSecretsForSystem(context, run.systemId)
+  });
+  context.repository.persist();
+  return { reportPath, artifactManifest };
 }
 
 function createRequirementBugReport(

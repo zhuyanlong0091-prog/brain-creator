@@ -11,6 +11,7 @@ import type {
 } from "../domain/types.js";
 import { KnowledgeService } from "./service.js";
 import {
+  scorePageCandidates,
   type SystemBrain,
   type SystemBrainPage
 } from "./systemBrain.js";
@@ -23,6 +24,29 @@ afterEach(async () => {
 });
 
 describe("System Brain", () => {
+  it("scores page candidates using page and locator evidence for ambiguity diagnostics", () => {
+    const pages = [
+      page("page-list", "Recruiting List", "/recruiting", [
+        locator("locator-create", "Create Request", "button")
+      ]),
+      page("page-offer", "Offer List", "/offer", [
+        locator("locator-create-offer", "Create Offer", "button")
+      ])
+    ];
+
+    expect(scorePageCandidates(pages, "create recruiting request")).toEqual([
+      expect.objectContaining({
+        pageModelId: "page-list",
+        score: expect.any(Number),
+        matchedEvidence: expect.arrayContaining(["Recruiting List", "Create Request"]),
+        scoreBreakdown: expect.arrayContaining([
+          expect.objectContaining({ evidence: "Recruiting List", contribution: expect.any(Number) })
+        ])
+      }),
+      expect.objectContaining({ pageModelId: "page-offer" })
+    ]);
+  });
+
   it("compiles the unique shortest navigation path into evidence-bound steps", () => {
     const steps = workflowSteps();
     const result = planWorkflowPath(
