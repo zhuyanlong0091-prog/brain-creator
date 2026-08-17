@@ -131,7 +131,7 @@ describe("static suite execution report", () => {
     expect(html).toContain("2026");
   });
 
-  it.skip("localizes the static report chrome for Chinese systems (legacy mojibake expectation)", () => {
+  it("localizes the static report chrome for Chinese systems", () => {
     const html = renderStaticSuiteExecutionReport({
       title: "Localized suite",
       run: run(),
@@ -145,7 +145,7 @@ describe("static suite execution report", () => {
     expect(html).toContain("用例");
   });
 
-  it.skip("does not rewrite business evidence while localizing the report chrome (legacy mojibake expectation)", () => {
+  it("does not rewrite business evidence while localizing the report chrome", () => {
     const html = renderStaticSuiteExecutionReport({
       title: "Localized suite",
       run: run(),
