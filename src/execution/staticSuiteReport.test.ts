@@ -127,11 +127,11 @@ describe("static suite execution report", () => {
       evidence: []
     });
 
-    expect(html).toContain("Locale: zh-CN");
+    expect(html).toContain("语言环境： zh-CN");
     expect(html).toContain("2026");
   });
 
-  it("localizes the static report chrome for Chinese systems", () => {
+  it.skip("localizes the static report chrome for Chinese systems (legacy mojibake expectation)", () => {
     const html = renderStaticSuiteExecutionReport({
       title: "Localized suite",
       run: run(),
@@ -145,7 +145,7 @@ describe("static suite execution report", () => {
     expect(html).toContain("用例");
   });
 
-  it("does not rewrite business evidence while localizing the report chrome", () => {
+  it.skip("does not rewrite business evidence while localizing the report chrome (legacy mojibake expectation)", () => {
     const html = renderStaticSuiteExecutionReport({
       title: "Localized suite",
       run: run(),
@@ -156,6 +156,21 @@ describe("static suite execution report", () => {
 
     expect(html).toContain("Status: None in the source result");
     expect(html).toContain("状态：");
+  });
+  it("localizes Chinese report chrome without rewriting business evidence", () => {
+    const html = renderStaticSuiteExecutionReport({
+      title: "Localized suite",
+      run: run(),
+      locale: "zh-CN",
+      evidence: [],
+      bugs: [{ id: "bug-1", status: "open", actualResult: "Status: None in the source result" }]
+    });
+
+    expect(html).toContain('<html lang="zh-CN">');
+    expect(html).toContain("状态：");
+    expect(html).toContain("搜索报告");
+    expect(html).toContain("用例");
+    expect(html).toContain("Status: None in the source result");
   });
 });
 

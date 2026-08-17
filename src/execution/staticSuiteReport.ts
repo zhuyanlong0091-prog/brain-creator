@@ -42,7 +42,7 @@ export function renderStaticSuiteExecutionReport(input: {
   bugs?: Array<{ id: string; status: string; caseNo?: string; actualResult: string }>;
   gaps?: Array<{ id: string; status: string; caseNo?: string; reason: string }>;
 }) {
-  const labels = staticReportLabels(input.locale);
+  const labels = staticReportLabelsFixed(input.locale);
   const evidenceByCase = new Map(input.evidence.map((item) => [item.executableCaseId, item]));
   const strong = input.evidence.filter((item) => item.assuranceLevel === "strong").length;
   const limited = input.evidence.filter((item) => item.assuranceLevel === "limited").length;
@@ -91,6 +91,59 @@ function staticReportLabels(locale?: string) {
   }
   return {
     lang: "en", separator: ":", localeSeparator: ":", status: "Status", total: "Total", passed: "Passed", failed: "Failed", blocked: "Blocked", assurance: "Assurance", runtimeImpact: "Runtime impact", consoleErrors: "console errors", consoleErrorsHeader: "Console errors", networkFailures: "network failures", networkFailuresHeader: "Network failures", coverage: "TestIntent coverage", run: "Run", system: "System", requirementProject: "Requirement project", created: "Created", updated: "Updated", locale: "Locale", requirementSets: "Requirement sets", search: "Search report", searchPlaceholder: "case, status, evidence", intent: "Intent", title: "Title", module: "Module", classification: "Classification", reason: "Reason", requirementRefs: "Requirement refs", noCoverage: "No coverage ledger attached", cases: "Cases", case: "Case", actualOrNotExecuted: "Actual result / not executed reason", evidenceWarnings: "Evidence warnings", steps: "Steps", artifacts: "Artifacts", bugReports: "BugReports", gaps: "Gaps", noCases: "No cases", noStepEvidence: "No step evidence", expected: "expected", actual: "actual", stepUnit: "step(s)", none: "None"
+  };
+}
+
+function staticReportLabelsFixed(locale?: string) {
+  if (!locale?.toLowerCase().startsWith("zh")) {
+    return staticReportLabels(locale);
+  }
+  return {
+    lang: "zh-CN",
+    separator: "：",
+    localeSeparator: "：",
+    status: "状态",
+    total: "总数",
+    passed: "通过",
+    failed: "失败",
+    blocked: "阻塞",
+    assurance: "验证强度",
+    runtimeImpact: "运行时影响",
+    consoleErrors: "控制台错误",
+    consoleErrorsHeader: "控制台错误",
+    networkFailures: "网络失败",
+    networkFailuresHeader: "网络失败",
+    coverage: "测试意图覆盖",
+    run: "运行",
+    system: "系统",
+    requirementProject: "需求项目",
+    created: "创建时间",
+    updated: "更新时间",
+    locale: "语言环境",
+    requirementSets: "需求版本",
+    search: "搜索报告",
+    searchPlaceholder: "用例、状态、证据",
+    intent: "意图",
+    title: "标题",
+    module: "模块",
+    classification: "分类",
+    reason: "原因",
+    requirementRefs: "需求引用",
+    noCoverage: "未关联覆盖台账",
+    cases: "用例",
+    case: "用例",
+    actualOrNotExecuted: "实际结果 / 未执行原因",
+    evidenceWarnings: "证据警告",
+    steps: "步骤",
+    artifacts: "产物",
+    bugReports: "缺陷报告",
+    gaps: "缺口",
+    noCases: "暂无用例",
+    noStepEvidence: "暂无步骤证据",
+    expected: "预期",
+    actual: "实际",
+    stepUnit: "步",
+    none: "无"
   };
 }
 
