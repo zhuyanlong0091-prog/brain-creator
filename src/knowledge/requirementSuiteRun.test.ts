@@ -257,7 +257,8 @@ describe("RequirementSuiteRunService", () => {
         title: plan.title
       })),
       continueOnBlocked: false,
-      allowCreateTestData: true
+      allowCreateTestData: true,
+      automaticTestData: true
     });
     const started = fixture.service.beginNext(run.id);
 
@@ -292,6 +293,7 @@ describe("RequirementSuiteRunService", () => {
       })
     );
     expect(bound.allowCreateTestData).toBe(true);
+    expect(bound.automaticTestData).toBe(true);
   });
 
   it("holds a completed case until cleanup succeeds, then advances", () => {
@@ -429,6 +431,21 @@ describe("RequirementSuiteRunService", () => {
     expect(authorized.allowCreateTestData).toBe(true);
     expect(repeated.id).toBe(run.id);
     expect(fixture.repository.requirementSuiteRuns).toHaveLength(1);
+  });
+
+  it("enables deterministic automatic test data on an active run", () => {
+    const fixture = suiteFixture();
+    const run = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false
+    });
+
+    const enabled = fixture.service.enableAutomaticTestData(run.id);
+
+    expect(enabled.automaticTestData).toBe(true);
+    expect(fixture.repository.requirementSuiteRuns[0].automaticTestData).toBe(true);
   });
 
   it("cancels unfinished cases and pending work without changing completed results", () => {

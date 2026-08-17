@@ -1130,6 +1130,7 @@ export type RequirementSuiteRun = {
     | "cancelled";
   continueOnBlocked: boolean;
   allowCreateTestData: boolean;
+  automaticTestData?: boolean;
   maxHealAttempts?: number;
   stabilityGroupId?: string;
   stabilityIteration?: number;

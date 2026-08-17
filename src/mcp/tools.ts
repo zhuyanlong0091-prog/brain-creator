@@ -388,6 +388,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       resume: z.boolean().default(false),
       continueOnBlocked: z.boolean().default(false),
       allowCreateTestData: z.boolean().default(false),
+      automaticTestData: z.boolean().default(false),
       caseNos: z.array(z.string()).default([]),
       modules: z.array(z.string()).default([]),
       priorities: z.array(z.string()).default([]),

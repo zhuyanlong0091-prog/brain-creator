@@ -2548,6 +2548,14 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
         activeRequirementSuiteRun.id
       );
     }
+    if (
+      optionalBooleanArg(input, "automaticTestData") &&
+      !activeRequirementSuiteRun.automaticTestData
+    ) {
+      context.requirementSuiteRuns.enableAutomaticTestData(
+        activeRequirementSuiteRun.id
+      );
+    }
     if (activeRequirementSuiteRun.status === "blocked") {
       if (!optionalBooleanArg(input, "resume")) {
         return {
@@ -2664,6 +2672,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     })),
     continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked"),
     allowCreateTestData: optionalBooleanArg(input, "allowCreateTestData"),
+    automaticTestData: optionalBooleanArg(input, "automaticTestData"),
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
     ,stabilityGroupId: repeatCount > 1 ? id("stabilityGroup") : undefined
     ,stabilityIteration: 1
@@ -2869,6 +2878,7 @@ async function executeNextRequirementSuiteCase(
     executableCaseId: executableCase.id,
     confirm: true,
     allowCreate: requirementSuiteRun.allowCreateTestData,
+    automatic: requirementSuiteRun.automaticTestData,
     phase: testDataPhase
   });
   if (testDataPreparation.task) {

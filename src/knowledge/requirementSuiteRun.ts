@@ -26,6 +26,7 @@ type CreateRequirementSuiteRunInput = {
   }>;
   continueOnBlocked: boolean;
   allowCreateTestData?: boolean;
+  automaticTestData?: boolean;
   maxHealAttempts?: number;
   stabilityGroupId?: string;
   stabilityIteration?: number;
@@ -91,6 +92,7 @@ export class RequirementSuiteRunService {
       status: "running",
       continueOnBlocked: input.continueOnBlocked,
       allowCreateTestData: Boolean(input.allowCreateTestData),
+      automaticTestData: Boolean(input.automaticTestData),
       maxHealAttempts: input.maxHealAttempts,
       stabilityGroupId: input.stabilityGroupId,
       stabilityIteration: input.stabilityIteration,
@@ -359,6 +361,16 @@ export class RequirementSuiteRunService {
       toStatus: caseRun.status,
       references: { executionPlanId }
     });
+    return run;
+  }
+
+  enableAutomaticTestData(runId: string): RequirementSuiteRun {
+    const run = this.get(runId);
+    if (!run.automaticTestData) {
+      run.automaticTestData = true;
+      run.updatedAt = timestamp();
+      this.repository.persist();
+    }
     return run;
   }
 
@@ -844,6 +856,7 @@ export class RequirementSuiteRunService {
       status: "running",
       continueOnBlocked: previous.continueOnBlocked,
       allowCreateTestData: previous.allowCreateTestData,
+      automaticTestData: previous.automaticTestData,
       maxHealAttempts: previous.maxHealAttempts,
       stabilityGroupId: previous.stabilityGroupId,
       stabilityIteration: nextIteration,

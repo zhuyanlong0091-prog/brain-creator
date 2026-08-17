@@ -56,7 +56,7 @@ Real Playwright execution uses strict structured evidence by default. `evidenceM
 | Submit data or cleanup evidence | `bc_prepare action=submit-test-data` | Require stable references and non-empty `sourceRefs`; never expose secrets |
 | Prepare execution | `bc_prepare action=prepare-execution` | Persist only a ready immutable plan; blocked and needs-confirmation drafts cannot start Generator |
 | Configure auth | `bc_configure target=auth operation=create|verify|archive` or `bc_configure target=checkpoint` | Verify only through a fresh browser context; never expose secrets |
-| Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true` |
+| Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true`; `automaticTestData=true` may resolve only confirmed deterministic generated/unique values |
 | Execute an existing test document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` | Explicit confirmation required |
 | Regress bugs | `bc_run mode=bug-regression` | Show filters and candidates |
 | Review status | `bc_status`, then `bc_review target="bug"`, `bc_review target="gap"`, `bc_review target=run-ledger`, `bc_review target=execution-diagnosis`, `bc_review target=requirement-eval-accuracy`, or System Brain reviews | Read-only |
