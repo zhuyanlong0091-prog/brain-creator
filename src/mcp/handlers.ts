@@ -22,7 +22,11 @@ import {
   materializeBrowserAuthState,
   type AuthStateMaterializer
 } from "../agent/authStateMaterializer.js";
-import type { AuthStateRefresher } from "../agent/authStateRefresh.js";
+import {
+  AuthStateRefreshRegistry,
+  createDefaultAuthRefreshRegistry,
+  type AuthStateRefresher
+} from "../agent/authStateRefresh.js";
 import { BrainCreatorError, errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
@@ -40,6 +44,8 @@ import { writeArtifactManifest } from "../storage/artifactArchive.js";
 import { writeStaticSuiteExecutionReport } from "../execution/staticSuiteReport.js";
 import { normalizeHostSkillAnalysis } from "../knowledge/policies.js";
 import { buildContextPack } from "../knowledge/retriever.js";
+import { reconcileRequirementCases } from "../knowledge/requirementReconciliation.js";
+import { evaluateStabilityPolicy } from "../knowledge/stabilityPolicy.js";
 import {
   SystemExplorationCoordinator,
   type SystemExplorer
@@ -107,7 +113,8 @@ import type {
   TestDataTask,
   KnowledgeNodeType,
   LegacyDiagnosisDecision,
-  SystemProfile
+  SystemProfile,
+  StabilityPolicy
 } from "../domain/types.js";
 import type { BrainCreatorToolName } from "./tools.js";
 
@@ -128,6 +135,7 @@ export type BrainCreatorMcpContext = {
   authStateVerifier: AuthStateVerifier;
   authStateMaterializer: AuthStateMaterializer;
   authStateRefresher?: AuthStateRefresher;
+  authRefreshRegistry: AuthStateRefreshRegistry;
   authVerificationCache: Map<string, number>;
   feishuReader?: RequirementSourceReader;
 };
@@ -152,6 +160,7 @@ type CreateContextInput = {
   authStateVerifier?: AuthStateVerifier;
   authStateMaterializer?: AuthStateMaterializer;
   authStateRefresher?: AuthStateRefresher;
+  authRefreshRegistry?: AuthStateRefreshRegistry;
   knowledgeDir?: string;
   feishuReader?: RequirementSourceReader;
   systemExplorer?: SystemExplorer;
@@ -209,6 +218,8 @@ export function createBrainCreatorMcpContext(
     authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
     authStateMaterializer: input.authStateMaterializer ?? materializeBrowserAuthState,
     authStateRefresher: input.authStateRefresher,
+    authRefreshRegistry:
+      input.authRefreshRegistry ?? createDefaultAuthRefreshRegistry(input.authStateRefresher),
     authVerificationCache: new Map(),
     feishuReader: input.feishuReader ?? configuredFeishuReader()
   };
@@ -2336,6 +2347,44 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
         title: verification.title
       });
     }
+    if (operation === "refresh") {
+      const systemId = stringArg(input, "systemId");
+      const authProfileId = stringArg(input, "authProfileId");
+      const profile = findAuthProfileById(context, systemId, authProfileId);
+      const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+      if (!system) throw new Error("Business system not found");
+      const refreshed = await refreshAndVerifyAuthState(
+        context,
+        system,
+        profile,
+        optionalStringArg(input, "reason") ?? "Authentication refresh requested by the operator."
+      );
+      if (refreshed?.status === "valid" && refreshed.finalUrl) {
+        return {
+          authRefresh: refreshed.authRefresh,
+          profile: context.service.verifyAuthProfile(profile.id, {
+            targetUrl: system.baseUrl,
+            finalUrl: refreshed.finalUrl,
+            title: refreshed.title
+          }),
+          nextAction: "continue-execution"
+        };
+      }
+      const pending = context.service.listAuthCheckpoints(system.id, "awaiting-user")
+        .find((checkpoint) => checkpoint.authProfileId === profile.id);
+      const checkpoint = pending ?? context.service.createAuthCheckpoint({
+        systemId,
+        authProfileId: profile.id,
+        reason: refreshed?.reason ?? "Authentication refresh requires user intervention.",
+        resumeInstruction: "Refresh the provider session or complete the login checkpoint, then retry auth refresh."
+      });
+      return {
+        status: "needs-user",
+        authRefresh: refreshed?.authRefresh,
+        checkpoint,
+        nextAction: "complete-auth-checkpoint"
+      };
+    }
     if (operation === "archive") {
       const profile = findAuthProfileById(
         context,
@@ -2350,6 +2399,7 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
       env: stringArg(input, "env"),
       role: stringArg(input, "role"),
       loginMethod: loginMethodArg(input, "loginMethod"),
+      refreshProvider: optionalStringArg(input, "refreshProvider") as AuthProfile["refreshProvider"],
       secrets: recordArg(input, "secrets")
     });
   }
@@ -2455,6 +2505,9 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   const actorJourney = actorJourneyArg(input);
   const requestedRepeatCount = optionalNumberArg(input, "repeatCount");
   const repeatCount = Math.max(1, requestedRepeatCount ?? 1);
+  const stabilityPolicy = stabilityPolicyArg(input) ?? (repeatCount > 1
+    ? { targetIterations: repeatCount, minIterations: 2, maxFailureRate: 0, requireStrongEvidence: true, stopOnBlocked: true }
+    : undefined);
   if (!optionalBooleanArg(input, "confirm")) {
     const executionPreflights = selectedSystemId
       ? candidates.map((executableCase) => ({
@@ -2666,6 +2719,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     provider: optionalStringArg(input, "provider"),
     sessionId: optionalStringArg(input, "sessionId"),
     actorJourney,
+    requirementSetIds: stringArrayArg(input, "requirementSetIds"),
     cases: candidates.map((candidate) => ({
       executableCaseId: candidate.id,
       title: candidate.title
@@ -2674,6 +2728,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     allowCreateTestData: optionalBooleanArg(input, "allowCreateTestData"),
     automaticTestData: optionalBooleanArg(input, "automaticTestData"),
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
+    ,stabilityPolicy
     ,stabilityGroupId: repeatCount > 1 ? id("stabilityGroup") : undefined
     ,stabilityIteration: 1
     ,stabilityTarget: repeatCount
@@ -3846,7 +3901,11 @@ function knowledgeReview(
   if (target === "requirement-suite-run") {
     const items = context.requirementSuiteRuns
       .list(projectId)
-      .filter((item) => !idValue || item.id === idValue);
+      .filter((item) => !idValue || item.id === idValue)
+      .map((item) => ({
+        ...item,
+        reconciliation: requirementSuiteReconciliation(context, item)
+      }));
     const reviewSummary = requirementSuiteRunCollectionSummary(items);
     return {
       project,
@@ -6585,13 +6644,7 @@ export function summarizeStabilityRuns(
     .slice(0, 20)
     .map(([groupId, group]) => {
       const target = Math.max(...group.map((run) => run.stabilityTarget ?? 1));
-      const completed = group.filter((run) => run.status === "completed" || run.status === "failed").length;
-      const blocked = group.filter((run) => run.status === "blocked").length;
-      const failed = group.filter((run) => run.status === "failed").length;
-      const passed = group.filter(
-        (run) => run.status === "completed" && run.failed === 0 && run.blocked === 0
-      ).length;
-      const strongVerified = group.filter((run) =>
+      const strongVerifiedRunIds = group.filter((run) =>
         run.status === "completed" &&
         run.failed === 0 &&
         run.blocked === 0 &&
@@ -6608,32 +6661,41 @@ export function summarizeStabilityRuns(
               actorJourneyEvidenceMatches(run, evidence)
           );
         })
-      ).length;
-      const verdict = blocked > 0
-        ? "blocked"
-        : completed < target
-          ? "running"
-          : target < 2
-            ? "insufficient-sample"
-          : failed > 0
-            ? "unstable"
-            : strongVerified === completed
-              ? "stable"
-              : "unstable";
+      ).map((run) => run.id);
+      const policy = group.find((run) => run.stabilityPolicy)?.stabilityPolicy ?? {
+        targetIterations: target,
+        minIterations: 2,
+        maxFailureRate: 0,
+        requireStrongEvidence: true,
+        stopOnBlocked: true
+      };
+      const evaluation = evaluateStabilityPolicy(group, policy, { strongVerifiedRunIds });
       return {
         stabilityGroupId: groupId,
-        target,
-        iterations: group.length,
-        completed,
-        passed,
-        strongVerified,
-        failed,
-        blocked,
-        verdict,
+        ...evaluation,
         latestRunId: group.at(-1)?.id,
-        nextRunId: group.find((run) => run.stabilityNextRunId)?.stabilityNextRunId
+        nextRunId: group.find((run) => run.stabilityNextRunId)?.stabilityNextRunId,
+        nextRunAt: group.at(-1)?.stabilitySchedule?.nextRunAt
       };
     });
+}
+
+function requirementSuiteReconciliation(
+  context: BrainCreatorMcpContext,
+  run: RequirementSuiteRun
+) {
+  const cases = run.caseRuns.flatMap((caseRun) => {
+    const executableCase = context.repository.executableCases.find(
+      (item) => item.id === caseRun.executableCaseId
+    );
+    return executableCase ? [executableCase] : [];
+  });
+  return reconcileRequirementCases({
+    systemId: run.systemId,
+    expectedRequirementSetIds: run.requirementSetIds,
+    expectedCaseIds: run.caseRuns.map((item) => item.executableCaseId),
+    cases
+  });
 }
 
 function actorJourneyEvidenceMatches(
@@ -7073,7 +7135,7 @@ async function verifyCaseSourceSuiteAuthState(
   context: BrainCreatorMcpContext,
   systemId: string
 ): Promise<(AuthStateVerification & {
-  authRefresh?: { attempted: boolean; provider?: string };
+  authRefresh?: { attempted: boolean; provider?: string; status?: string; reason?: string };
 }) | undefined> {
   const profile = findAuthProfile(context, systemId);
   const system = context.repository.systemProfiles.find((item) => item.id === systemId);
@@ -7092,9 +7154,19 @@ async function verifyCaseSourceSuiteAuthState(
   if (verification.status === "valid") {
     return { ...verification, authRefresh: { attempted: false } };
   }
-  return (
-    (await refreshAndVerifyAuthState(context, system, profile, verification.reason)) ?? verification
-  );
+  const refreshed = await refreshAndVerifyAuthState(context, system, profile, verification.reason);
+  if (!refreshed) return verification;
+  return refreshed.status === "valid"
+    ? {
+        ...refreshed,
+        authRefresh: refreshed.authRefresh
+          ? {
+              attempted: true,
+              provider: refreshed.authRefresh.provider
+            }
+          : undefined
+      }
+    : { ...verification, authRefresh: refreshed.authRefresh };
 }
 
 async function refreshAndVerifyAuthState(
@@ -7103,14 +7175,26 @@ async function refreshAndVerifyAuthState(
   authProfile: AuthProfile,
   reason = "Stored browser authentication is no longer valid."
 ) {
-  if (!context.authStateRefresher) return undefined;
   try {
-    const refreshed = await context.authStateRefresher({
+    const refreshed = await context.authRefreshRegistry.refresh({
       workDir: context.workDir,
       system,
       authProfile,
-      reason
+      reason,
+      timeoutMs: Number(process.env.BRAIN_CREATOR_AUTH_REFRESH_TIMEOUT_MS ?? 30_000)
     });
+    if (refreshed.status !== "succeeded" || !refreshed.storageStatePath) {
+      return {
+        status: "unavailable" as const,
+        reason: refreshed.reason ?? "Authentication refresh requires user intervention.",
+        authRefresh: {
+          attempted: true,
+          provider: refreshed.provider,
+          status: refreshed.status,
+          reason: refreshed.reason
+        }
+      };
+    }
     const safePath = await resolveProtectedStorageStatePath(
       context.workDir,
       refreshed.storageStatePath
@@ -7125,11 +7209,20 @@ async function refreshAndVerifyAuthState(
       ...verification,
       authRefresh: {
         attempted: true,
-        ...(refreshed.provider ? { provider: refreshed.provider } : {})
+        provider: refreshed.provider,
+        status: refreshed.status
       }
     };
-  } catch {
-    return undefined;
+  } catch (error) {
+    return {
+      status: "unavailable" as const,
+      reason: error instanceof Error ? error.message : String(error),
+      authRefresh: {
+        attempted: true,
+        status: "failed",
+        reason: error instanceof Error ? error.message : String(error)
+      }
+    };
   }
 }
 
@@ -7732,6 +7825,35 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
     | "gap"
     | "artifact"
     | KnowledgeReviewTarget;
+}
+
+function stabilityPolicyArg(input: Record<string, unknown>): StabilityPolicy | undefined {
+  const value = input.stabilityPolicy;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const numberValue = (key: string) =>
+    typeof candidate[key] === "number" && Number.isFinite(candidate[key])
+      ? candidate[key] as number
+      : undefined;
+  const targetIterations = numberValue("targetIterations");
+  if (!targetIterations || targetIterations < 1) {
+    throw new Error("stabilityPolicy.targetIterations must be a positive number");
+  }
+  return {
+    targetIterations,
+    minIterations: numberValue("minIterations"),
+    maxDurationMs: numberValue("maxDurationMs"),
+    maxFailureRate: numberValue("maxFailureRate"),
+    maxConsecutiveFailures: numberValue("maxConsecutiveFailures"),
+    minIntervalMs: numberValue("minIntervalMs"),
+    maxIntervalMs: numberValue("maxIntervalMs"),
+    requireStrongEvidence: typeof candidate.requireStrongEvidence === "boolean"
+      ? candidate.requireStrongEvidence
+      : undefined,
+    stopOnBlocked: typeof candidate.stopOnBlocked === "boolean"
+      ? candidate.stopOnBlocked
+      : undefined
+  };
 }
 
 function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): value is KnowledgeReviewTarget {

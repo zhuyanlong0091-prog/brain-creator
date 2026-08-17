@@ -52,6 +52,7 @@ type CreateAuthProfileInput = {
   env: string;
   role: string;
   loginMethod: AuthProfile["loginMethod"];
+  refreshProvider?: AuthProfile["refreshProvider"];
   secrets: Record<string, string>;
 };
 
@@ -500,6 +501,7 @@ export class BrainCreatorService {
       env: input.env,
       role: input.role,
       loginMethod: input.loginMethod,
+      refreshProvider: input.refreshProvider,
       encryptedSecrets: encryptSecrets(input.secrets),
       status: "pending",
       createdAt: now,

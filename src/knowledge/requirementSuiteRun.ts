@@ -5,10 +5,14 @@ import type {
   ExecutionPlan,
   RequirementSuiteCaseOutcome,
   RequirementSuiteCaseRun,
-  RequirementSuiteRun
+  RequirementSuiteRun,
+  StabilityPolicy,
+  StabilitySchedule
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import { RunLedgerService } from "./runLedger.js";
+import { reconcileRequirementCases } from "./requirementReconciliation.js";
+import { nextStabilitySchedule } from "./stabilityPolicy.js";
 
 type CreateRequirementSuiteRunInput = {
   knowledgeProjectId: string;
@@ -31,6 +35,8 @@ type CreateRequirementSuiteRunInput = {
   stabilityGroupId?: string;
   stabilityIteration?: number;
   stabilityTarget?: number;
+  stabilityPolicy?: StabilityPolicy;
+  requirementSetIds?: string[];
 };
 
 type CompleteRequirementSuiteCaseInput = RequirementSuiteCaseOutcome;
@@ -66,6 +72,15 @@ export class RequirementSuiteRunService {
       }
     }
     const executableCaseIds = cases.map((item) => item.executableCaseId);
+    const executableCases = executableCaseIds.flatMap((caseId) => {
+      const executableCase = this.repository.executableCases.find((item) => item.id === caseId);
+      return executableCase ? [executableCase] : [];
+    });
+    const requirementSetIds = input.requirementSetIds && input.requirementSetIds.length > 0
+      ? input.requirementSetIds
+      : [
+      ...new Set(executableCases.map((item) => item.requirementSetId))
+    ];
     const existing = this.repository.requirementSuiteRuns.find(
       (run) =>
         run.knowledgeProjectId === input.knowledgeProjectId &&
@@ -97,6 +112,15 @@ export class RequirementSuiteRunService {
       stabilityGroupId: input.stabilityGroupId,
       stabilityIteration: input.stabilityIteration,
       stabilityTarget: input.stabilityTarget,
+      stabilityPolicy: input.stabilityPolicy,
+      stabilitySchedule: stabilitySchedule(input.stabilityPolicy),
+      requirementSetIds,
+      reconciliation: reconcileRequirementCases({
+        systemId: input.systemId,
+        expectedRequirementSetIds: requirementSetIds,
+        expectedCaseIds: executableCaseIds,
+        cases: executableCases
+      }),
       total: cases.length,
       passed: 0,
       failed: 0,
@@ -140,6 +164,25 @@ export class RequirementSuiteRunService {
     );
   }
 
+  reconcile(runId: string) {
+    const run = this.get(runId);
+    const cases = run.caseRuns.flatMap((caseRun) => {
+      const executableCase = this.repository.executableCases.find(
+        (item) => item.id === caseRun.executableCaseId
+      );
+      return executableCase ? [executableCase] : [];
+    });
+    run.reconciliation = reconcileRequirementCases({
+      systemId: run.systemId,
+      expectedRequirementSetIds: run.requirementSetIds,
+      expectedCaseIds: run.caseRuns.map((item) => item.executableCaseId),
+      cases
+    });
+    run.updatedAt = timestamp();
+    this.repository.persist();
+    return run.reconciliation;
+  }
+
   authorizeTestDataCreation(runId: string): RequirementSuiteRun {
     const run = this.get(runId);
     if (!run.allowCreateTestData) {
@@ -167,6 +210,12 @@ export class RequirementSuiteRunService {
       run.status === "completed" ||
       run.status === "failed" ||
       run.status === "cancelled"
+    ) {
+      return { run };
+    }
+    if (
+      run.stabilitySchedule?.nextRunAt &&
+      Date.parse(run.stabilitySchedule.nextRunAt) > Date.now()
     ) {
       return { run };
     }
@@ -861,6 +910,16 @@ export class RequirementSuiteRunService {
       stabilityGroupId: previous.stabilityGroupId,
       stabilityIteration: nextIteration,
       stabilityTarget: previous.stabilityTarget,
+      stabilityPolicy: previous.stabilityPolicy,
+      stabilitySchedule: previous.stabilityPolicy
+        ? nextStabilitySchedule(
+            { status: "active", attemptCount: nextIteration },
+            previous.stabilityPolicy,
+            new Date()
+          )
+        : undefined,
+      requirementSetIds: previous.requirementSetIds,
+      reconciliation: previous.reconciliation,
       total: previous.caseRuns.length,
       passed: 0,
       failed: 0,
@@ -913,4 +972,9 @@ function isTerminal(status: RequirementSuiteRun["status"]) {
 
 function timestamp() {
   return new Date().toISOString();
+}
+
+function stabilitySchedule(policy?: StabilityPolicy): StabilitySchedule | undefined {
+  if (!policy) return undefined;
+  return { status: "active", attemptCount: 1 };
 }
