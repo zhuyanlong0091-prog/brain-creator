@@ -9,6 +9,12 @@ Status meanings:
 - `open`: planned work has not reached its acceptance condition.
 - `deferred`: intentionally outside the current release objective.
 
+The focused regression sample for the remaining execution-quality partials is
+documented in [Real-system regression samples](real-system-regression.md) and
+implemented by `src/quality/realSystemRegression.test.ts`. It strengthens the
+evidence for B1/B4, C1, B5/E6, E4/E5, and F5 without pretending that the wider
+production acceptance conditions are closed.
+
 | ID | Sanitized problem | Status | Target | Acceptance condition / check |
 |---|---|---|---|---|
 | A1 | Facade could not verify authentication | resolved | PR A | `bc_configure auth verify` performs browser-state verification and stores evidence; `controlPlane.test.ts` |

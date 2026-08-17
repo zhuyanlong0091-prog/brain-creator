@@ -59,6 +59,7 @@ Start with [Troubleshooting](troubleshooting.md). Then use Brain Creator review 
 - [Machine-readable documentation index](llms.txt)
 - [Release checklist](release-checklist.md)
 - [Execution quality register](quality/problem-register.md)
+- [Real-system regression samples](quality/real-system-regression.md)
 - [Release notes 2.1.1](release-notes-2.1.1.md)
 - [Release notes 2.0.3](release-notes-2.0.3.md)
 - [Release notes 2.0.2](release-notes-2.0.2.md)
