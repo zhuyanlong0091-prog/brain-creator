@@ -1669,6 +1669,47 @@ describe("handleBrainCreatorTool", () => {
     expect(errorOf(result)).toContain("Artifact path must stay inside workspace");
   });
 
+  it("rejects host agent output paths outside the workspace", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+    const task = context.service.createAgentTask({
+      id: "task-output-boundary",
+      systemId: system.id,
+      agent: "planner",
+      inputSummary: "Boundary check",
+      args: [],
+      outputPaths: ["specs/plan.md"],
+      promptPath: join(workDir, "prompt.md"),
+      contextPath: join(workDir, "context.json")
+    });
+
+    const result = await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+      taskId: task.id,
+      status: "failed",
+      stdout: "",
+      stderr: "outside output",
+      outputPaths: [join(workDir, "..", "outside.md")]
+    });
+
+    expect(result.isError).toBe(true);
+    expect(errorOf(result)).toContain("Agent output path must stay inside");
+    expect(context.repository.agentTasks).toEqual([
+      expect.objectContaining({ id: task.id, status: "pending" })
+    ]);
+  });
+
   it("runs a single agent and records the agent run through MCP", async () => {
     const calls: string[][] = [];
     const context = createBrainCreatorMcpContext({

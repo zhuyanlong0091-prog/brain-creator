@@ -4777,12 +4777,14 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     pendingTask.systemId,
     optionalStringArg(input, "stderr") ?? ""
   );
+  const submittedOutputPaths = optionalStringArrayArg(input, "outputPaths");
+  assertWorkspaceOutputPaths(context.workDir, submittedOutputPaths);
   const result = context.service.submitAgentTask({
     taskId,
     status: agentOutputStatusArg(input, "status"),
     stdout,
     stderr,
-    outputPaths: optionalStringArrayArg(input, "outputPaths")
+    outputPaths: submittedOutputPaths
   });
   if (result.task.planContext) {
     return finalizeHostAgentPlan(context, result);
@@ -5504,6 +5506,16 @@ function redactHostAgentText(
   text: string
 ) {
   return redactSensitiveText(text, protectedSecretsForSystem(context, systemId));
+}
+
+function assertWorkspaceOutputPaths(workDir: string, paths: string[] | undefined) {
+  for (const path of paths ?? []) {
+    const absolute = resolve(workDir, path);
+    const offset = relative(resolve(workDir), absolute);
+    if (offset.startsWith("..") || isAbsolute(offset)) {
+      throw new Error("Agent output path must stay inside the Brain Creator workspace");
+    }
+  }
 }
 
 function protectedSecretsForSystem(
