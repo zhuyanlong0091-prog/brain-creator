@@ -28,6 +28,35 @@ afterEach(async () => {
 });
 
 describe("System exploration coordinator", () => {
+  it("keeps popup interaction selectors scoped to the captured popup", () => {
+    const locator = { first: () => "popup-locator" };
+    const page = {
+      url: () => "https://orders.example.test/details",
+      locator: vi.fn(() => locator)
+    } as unknown as import("@playwright/test").Page;
+    const candidate = {
+      name: "Popup details",
+      role: "button",
+      selector: '[id="popup-details"]',
+      tag: "button",
+      surface: {
+        kind: "popup" as const,
+        url: "https://orders.example.test/details"
+      }
+    };
+
+    expect(interactionLocator(page, candidate, ["https://orders.example.test/"]).first()).toBe(
+      "popup-locator"
+    );
+    expect(() =>
+      interactionLocator(
+        { ...page, url: () => "https://orders.example.test/other" } as unknown as import("@playwright/test").Page,
+        candidate,
+        ["https://orders.example.test/"]
+      )
+    ).toThrow("Popup surface is unavailable");
+  });
+
   it("keeps child frame ordinals stable before allowlist filtering", () => {
     const main = { url: () => "https://orders.example.test/" };
     const outside = { url: () => "https://outside.example.test/frame" };
@@ -42,6 +71,69 @@ describe("System exploration coordinator", () => {
       "https://outside.example.test/frame",
       "https://orders.example.test/frame"
     ]);
+  });
+
+  it("explores a popup state transition without falling back to the main document", async () => {
+    const server = createServer((request, response) => {
+      if (request.url === "/popup") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`
+          <button id="popup-details" aria-expanded="false" aria-controls="popup-panel">Popup details</button>
+          <span id="popup-panel" hidden>Popup panel</span>
+          <script>
+            document.querySelector('#popup-details').onclick = () => {
+              document.querySelector('#popup-details').setAttribute('aria-expanded', 'true');
+              document.querySelector('#popup-panel').hidden = false;
+            };
+          </script>
+        `);
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end('<button id="open-popup" aria-expanded="false" aria-controls="popup">Open popup</button><script>document.querySelector("#open-popup").onclick = () => window.open("/popup", "_blank")</script>');
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}/`;
+    try {
+      const fixture = await createLocalFixture(baseUrl);
+      const result = await new SystemExplorationCoordinator({
+        repository: fixture.repository,
+        service: fixture.domainService,
+        knowledgeService: fixture.knowledgeService,
+        workDir: fixture.workDir,
+        explorer: new PlaywrightSystemExplorer()
+      }).explore({
+        knowledgeProjectId: fixture.projectId,
+        systemId: fixture.systemId,
+        interactionMode: "safe",
+        budget: {
+          maxPages: 1,
+          maxDepth: 0,
+          maxDurationMs: 10_000,
+          maxInteractionsPerPage: 2
+        }
+      });
+
+      expect(result.exploration.status).toBe("completed");
+      expect(result.exploration.interactionTransitions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            targetName: "Popup details",
+            status: "observed",
+            surface: expect.objectContaining({ kind: "popup" }),
+            visibleAdded: expect.arrayContaining(["Popup panel"])
+          })
+        ])
+      );
+      expect(result.brain.pages[0].surfaces).toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind: "popup", url: `${baseUrl}popup` })])
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
   });
 
   it("explores allowlisted pages, persists navigation, and refreshes System Brain", async () => {

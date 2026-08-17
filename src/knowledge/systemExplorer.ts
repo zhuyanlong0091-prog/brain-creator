@@ -468,7 +468,7 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
                     isReadOnlyNavigationUrl(link.url)
                 )
             );
-          const interactions =
+          let interactions =
             input.interactionMode === "safe" && input.budget.maxInteractionsPerPage > 0
               ? await probeSafeInteractions({
                   page,
@@ -482,9 +482,25 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
                   warnings,
                   blockers,
                   popups,
-                  scenario: input.scenario
-                })
+                scenario: input.scenario
+              })
               : [];
+          if (input.interactionMode === "safe" && input.budget.maxInteractionsPerPage > interactions.length) {
+            interactions = [
+              ...interactions,
+              ...(await probeSafePopupInteractions({
+                popups,
+                allowedUrls: input.allowedUrls,
+                artifactDir: input.artifactDir,
+                pageIndex: pages.length,
+                limit: input.budget.maxInteractionsPerPage - interactions.length,
+                deadline,
+                warnings,
+                blockers,
+                scenario: input.scenario
+              }))
+            ];
+          }
           for (const [popupIndex, popup] of popups.entries()) {
             try {
               if (popup.isClosed()) {
@@ -1140,6 +1156,18 @@ export function interactionLocator(
   candidate: SafeInteractionCandidate,
   allowedUrls?: string[]
 ) {
+  if (candidate.surface?.kind === "popup") {
+    const popupUrl = canonicalUrl(page.url());
+    if (popupUrl !== candidate.surface.url) {
+      throw new Error(
+        `Popup surface is unavailable after page recovery: ${candidate.surface.url}`
+      );
+    }
+    if (allowedUrls && !isAllowedExplorationUrl(popupUrl, allowedUrls)) {
+      throw new Error(`Popup surface is outside the business system allowlist: ${popupUrl}`);
+    }
+    return page.locator(candidate.selector);
+  }
   if (candidate.surface?.kind === "iframe") {
     if (
       allowedUrls &&
@@ -1182,6 +1210,158 @@ export function interactionLocator(
     return scoped.locator(candidate.selector);
   }
   return page.locator(candidate.selector);
+}
+
+async function probeSafePopupInteractions(input: {
+  popups: Array<import("@playwright/test").Page>;
+  allowedUrls: string[];
+  artifactDir: string;
+  pageIndex: number;
+  limit: number;
+  deadline: number;
+  warnings: string[];
+  blockers: string[];
+  scenario?: ExplorationScenario;
+}): Promise<SystemInteractionEvidence[]> {
+  const transitions: SystemInteractionEvidence[] = [];
+  let remaining = input.limit;
+  for (const [popupIndex, popup] of input.popups.entries()) {
+    if (remaining <= 0 || Date.now() >= input.deadline) break;
+    if (popup.isClosed()) {
+      input.warnings.push(`Popup closed before safe interaction; popup evidence was retained.`);
+      continue;
+    }
+    const popupUrl = safeCanonicalUrl(popup.url());
+    if (!popupUrl || !isAllowedExplorationUrl(popupUrl, input.allowedUrls)) {
+      input.warnings.push(`Ignored popup interaction outside allowlist: ${popup.url() || "unknown"}`);
+      continue;
+    }
+    const surface: InteractionSurfaceRef = {
+      kind: "popup",
+      url: popupUrl
+    };
+    const candidates = (await collectInteractionCandidatesFromSurface(popup, surface))
+      .map((candidate) => ({
+        candidate,
+        decision: classifySafeInteractionCandidate(candidate, input.scenario)
+      }))
+      .filter(
+        (
+          item
+        ): item is {
+          candidate: SafeInteractionCandidate;
+          decision:
+            | { allowed: true; action: "click"; kind: "tab" | "disclosure" }
+            | { allowed: true; action: "select"; kind: "select"; inputValue: string };
+        } => item.decision.allowed
+      )
+      .slice(0, remaining);
+    for (const [candidateIndex, { candidate, decision }] of candidates.entries()) {
+      if (Date.now() >= input.deadline) break;
+      remaining -= 1;
+      let before: SystemInteractionState;
+      try {
+        before = await captureInteractionState(popup, input.allowedUrls);
+      } catch (error) {
+        const reason = `Popup surface recovery failed while reading interaction state at ${popupUrl}: ${error instanceof Error ? error.message : String(error)}`;
+        input.warnings.push(reason);
+        input.blockers.push(reason);
+        break;
+      }
+      const blockedRequests: Array<{ method: string; url: string }> = [];
+      const routeHandler = async (route: import("@playwright/test").Route) => {
+        const request = route.request();
+        const method = request.method().toUpperCase();
+        const requestUrl = request.url();
+        const unsafeMethod = !["GET", "HEAD", "OPTIONS"].includes(method);
+        const guardedRequest =
+          request.isNavigationRequest() ||
+          request.resourceType() === "xhr" ||
+          request.resourceType() === "fetch";
+        if (
+          unsafeMethod ||
+          (guardedRequest && !isReadOnlyNavigationUrl(requestUrl)) ||
+          (guardedRequest && !isAllowedExplorationUrl(requestUrl, input.allowedUrls))
+        ) {
+          blockedRequests.push({ method, url: requestUrl });
+          await route.abort("blockedbyclient");
+          return;
+        }
+        await route.continue();
+      };
+      await popup.route("**/*", routeHandler);
+      let after = before;
+      let status: SystemInteractionEvidence["status"] = "failed";
+      let screenshotPath: string | undefined;
+      try {
+        const target = interactionLocator(popup, candidate, input.allowedUrls).first();
+        if (!(await target.isVisible())) throw new Error("Safe popup interaction target is not visible");
+        if (decision.action === "select") {
+          await target.selectOption(decision.inputValue, {
+            timeout: interactionTimeout(input.deadline)
+          });
+        } else {
+          await target.click({ timeout: interactionTimeout(input.deadline) });
+        }
+        const settleMs = Math.min(300, Math.max(0, input.deadline - Date.now()));
+        if (settleMs > 0) await popup.waitForTimeout(settleMs);
+        if (popup.isClosed()) throw new Error("Popup closed after safe interaction");
+        after = await captureInteractionState(popup, input.allowedUrls);
+        status =
+          blockedRequests.length > 0
+            ? "blocked"
+            : statesDiffer(before, after)
+              ? "observed"
+              : "no-change";
+        if (status === "observed") {
+          screenshotPath = join(
+            input.artifactDir,
+            `popup-interaction-${String(input.pageIndex + 1).padStart(2, "0")}-${String(
+              popupIndex + 1
+            ).padStart(2, "0")}-${String(candidateIndex + 1).padStart(2, "0")}.png`
+          );
+          await popup.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {
+            screenshotPath = undefined;
+          });
+        }
+      } catch (error) {
+        status = blockedRequests.length > 0 ? "blocked" : "failed";
+        const reason = `Popup surface interaction failed for ${candidate.surface?.url}: ${error instanceof Error ? error.message : String(error)}`;
+        input.warnings.push(reason);
+        input.blockers.push(reason);
+      } finally {
+        await popup.unroute("**/*", routeHandler).catch(() => undefined);
+      }
+      transitions.push({
+        target: {
+          name: candidate.name,
+          role: candidate.role,
+          selector: candidate.selector,
+          kind: decision.kind
+        },
+        action: decision.action,
+        inputValue: decision.action === "select" ? decision.inputValue : undefined,
+        before,
+        after,
+        visibleAdded: difference(after.visibleElements, before.visibleElements),
+        visibleRemoved: difference(before.visibleElements, after.visibleElements),
+        dialogAdded: difference(after.dialogs, before.dialogs),
+        dialogRemoved: difference(before.dialogs, after.dialogs),
+        changedControls: changedControls(before.controlValues, after.controlValues),
+        urlChanged: before.url !== after.url,
+        ...(status === "observed"
+          ? { transitionKind: before.url !== after.url ? "navigation" as const : "state" as const }
+          : {}),
+        blockedRequests,
+        status,
+        surface: candidate.surface,
+        screenshotPath,
+        ...(input.scenario ? { scenarioId: input.scenario.id } : {})
+      });
+      if (status === "failed") break;
+    }
+  }
+  return transitions;
 }
 
 async function captureInteractionState(
@@ -1730,20 +1910,28 @@ function assertResultWithinBudget(
       ) {
         throw new Error("Explorer interaction state is outside the business system allowlist");
       }
-      if (
-        !page.evidence.interactiveElements.some(
-              (element) =>
-            element.selector === interaction.target.selector &&
-            element.name === interaction.target.name &&
-            (!interaction.surface ||
-              (interaction.surface.kind === "document"
-                ? !element.surface || element.surface.kind === "document"
-                : element.surface?.kind === interaction.surface.kind &&
-                  element.surface.url === interaction.surface.url &&
-                  (interaction.surface.kind !== "iframe" ||
-                    element.surface.frameIndex === interaction.surface.frameIndex)))
-        )
-      ) {
+      const targetCaptured = page.evidence.interactiveElements.some(
+        (element) =>
+          element.selector === interaction.target.selector &&
+          element.name === interaction.target.name &&
+          (!interaction.surface ||
+            (interaction.surface.kind === "document"
+              ? !element.surface || element.surface.kind === "document"
+              : element.surface?.kind === interaction.surface.kind &&
+                element.surface.url === interaction.surface.url &&
+                (interaction.surface.kind !== "iframe" ||
+                  element.surface.frameIndex === interaction.surface.frameIndex)))
+      );
+      const popupSurfaceCaptured =
+        interaction.surface?.kind === "popup" &&
+        page.evidence.surfaces?.some(
+          (surface) =>
+            surface.kind === "popup" &&
+            surface.url === interaction.surface?.url &&
+            surface.accessible &&
+            surface.interactiveCount > 0
+        );
+      if (!targetCaptured && !popupSurfaceCaptured) {
         throw new Error("Explorer interaction target is not present in the captured page evidence");
       }
     }

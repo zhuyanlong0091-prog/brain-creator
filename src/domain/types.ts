@@ -190,7 +190,7 @@ export type SystemInteractionState = {
 };
 
 export type InteractionSurfaceRef = {
-  kind: "document" | "iframe" | "shadow-root" | "wujie";
+  kind: "document" | "iframe" | "shadow-root" | "wujie" | "popup";
   url: string;
   parentUrl?: string;
   /** Stable ordinal among child frames on the captured page. */
