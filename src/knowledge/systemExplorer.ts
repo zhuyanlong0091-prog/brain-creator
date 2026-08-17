@@ -21,7 +21,8 @@ import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
 import {
   capturePopupSurfaceEvidence,
   collectBrowserSurfaceEvidence,
-  stableChildFrameEntries as stableBrowserChildFrameEntries
+  stableChildFrameEntries as stableBrowserChildFrameEntries,
+  recoverBrowserSurface
 } from "./browserSurface.js";
 import type { KnowledgeService } from "./service.js";
 
@@ -731,6 +732,54 @@ async function probeSafeInteractions(input: {
       };
     }
     const { candidate, decision } = candidates[index];
+    if (candidate.surface) {
+      const recoveredSurface = await recoverBrowserSurface({
+        surface: candidate.surface,
+        currentUrl: activePageUrl,
+        allowedUrls: input.allowedUrls,
+        maxAttempts: 2,
+        operations: {
+          recoverDocument: async () => ({ status: "recovered", url: activePage.url() }),
+          recoverIframe: async (surface) => {
+            const frame = stableChildFrameEntries(activePage).find(
+              ({ frame, frameIndex }) =>
+                frameIndex === surface.frameIndex && canonicalUrl(frame.url()) === surface.url
+            );
+            return frame
+              ? { status: "recovered", url: canonicalUrl(frame.frame.url()) }
+              : { status: "failed", reason: "Iframe was remounted or is no longer available." };
+          },
+          recoverPopup: async (surface) => {
+            const popup = input.popups.find(
+              (item) => !item.isClosed() && canonicalUrl(item.url()) === surface.url
+            );
+            return popup
+              ? { status: "recovered", url: canonicalUrl(popup.url()) }
+              : { status: "failed", reason: "Popup was closed or is no longer available." };
+          },
+          recoverEmbedded: async (surface) => {
+            const hosts = surface.hostSelectors ?? [];
+            if (hosts.length === 0) {
+              return { status: "blocked", reason: "Embedded surface has no stable host selector." };
+            }
+            let scoped = activePage.locator(hosts[0]);
+            for (const host of hosts.slice(1)) scoped = scoped.locator(host);
+            return (await scoped.count()) > 0
+              ? { status: "recovered", url: surface.url }
+              : { status: "failed", reason: "Embedded surface host was remounted." };
+          }
+        }
+      });
+      if (recoveredSurface.status !== "recovered") {
+        const reason =
+          `Surface recovery ${recoveredSurface.status} for ${candidate.surface.kind}: ${
+            recoveredSurface.reason ?? "unknown reason"
+          }`;
+        input.warnings.push(reason);
+        input.blockers.push(reason);
+        continue;
+      }
+    }
     let before: SystemInteractionState;
     try {
       before = await captureInteractionState(activePage, input.allowedUrls);

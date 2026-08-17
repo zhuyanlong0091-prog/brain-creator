@@ -392,11 +392,25 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       caseNos: z.array(z.string()).default([]),
       modules: z.array(z.string()).default([]),
       priorities: z.array(z.string()).default([]),
+      requirementSetIds: z.array(z.string()).default([]),
       writeBack: z.boolean().default(false),
       confirmWriteBack: z.boolean().default(false),
       confirm: z.boolean().default(false),
       maxHealAttempts: z.number().int().min(0).max(10).optional(),
       repeatCount: z.number().int().min(1).max(5).optional(),
+      stabilityPolicy: z
+        .object({
+          targetIterations: z.number().int().min(1).max(1000),
+          minIterations: z.number().int().min(1).optional(),
+          maxDurationMs: z.number().int().min(1).optional(),
+          maxFailureRate: z.number().min(0).max(1).optional(),
+          maxConsecutiveFailures: z.number().int().min(0).optional(),
+          minIntervalMs: z.number().int().min(0).optional(),
+          maxIntervalMs: z.number().int().min(0).optional(),
+          requireStrongEvidence: z.boolean().optional(),
+          stopOnBlocked: z.boolean().optional()
+        })
+        .optional(),
       bugIds: z.array(z.string()).default([]),
       knowledgeProjectId: z.string().optional(),
       executableCaseId: z.string().optional(),
@@ -468,7 +482,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     description: "Facade configuration entry for system, auth, term, rule, runtime, and auth checkpoint setup.",
     inputSchema: z.object({
       target: z.enum(["system", "auth", "term", "rule", "checkpoint", "knowledge-project", "system-binding", "connector", "runtime"]),
-      operation: z.enum(["create", "verify", "archive", "reload-store", "rebuild-index"]).default("create"),
+      operation: z.enum(["create", "verify", "refresh", "archive", "reload-store", "rebuild-index"]).default("create"),
       knowledgeProjectId: z.string().optional(),
       connector: z.enum(["feishu"]).optional(),
       systemId: z.string().optional(),
@@ -480,6 +494,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       env: z.string().optional(),
       role: z.string().optional(),
       loginMethod: z.enum(["password", "cookie", "token", "script"]).optional(),
+      refreshProvider: z.enum(["token", "cookie", "oauth", "cas", "saml", "host-agent"]).optional(),
       secrets: z.record(z.string(), z.string()).default({}),
       key: z.string().optional(),
       zhCN: z.string().optional(),

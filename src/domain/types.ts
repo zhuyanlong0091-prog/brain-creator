@@ -49,6 +49,7 @@ export type AuthProfile = {
   env: string;
   role: string;
   loginMethod: "password" | "cookie" | "token" | "script";
+  refreshProvider?: "token" | "cookie" | "oauth" | "cas" | "saml" | "host-agent";
   encryptedSecrets: Record<string, string>;
   status: TaskStatus;
   lastVerifiedAt?: string;
@@ -1146,6 +1147,10 @@ export type RequirementSuiteRun = {
   stabilityIteration?: number;
   stabilityTarget?: number;
   stabilityNextRunId?: string;
+  stabilityPolicy?: StabilityPolicy;
+  stabilitySchedule?: StabilitySchedule;
+  requirementSetIds?: string[];
+  reconciliation?: RequirementReconciliation;
   total: number;
   passed: number;
   failed: number;
@@ -1158,6 +1163,39 @@ export type RequirementSuiteRun = {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+};
+
+export type StabilityPolicy = {
+  targetIterations: number;
+  minIterations?: number;
+  maxDurationMs?: number;
+  maxFailureRate?: number;
+  maxConsecutiveFailures?: number;
+  minIntervalMs?: number;
+  maxIntervalMs?: number;
+  requireStrongEvidence?: boolean;
+  stopOnBlocked?: boolean;
+};
+
+export type StabilitySchedule = {
+  status: "active" | "paused" | "completed" | "exhausted";
+  nextRunAt?: string;
+  lastStartedAt?: string;
+  attemptCount?: number;
+};
+
+export type RequirementReconciliation = {
+  status: "complete" | "partial" | "conflicted";
+  systemId: string;
+  requirementSetIds: string[];
+  observedRequirementSetIds: string[];
+  caseIds: string[];
+  missingCaseIds: string[];
+  missingRequirementSetIds: string[];
+  duplicateCompileKeys: string[];
+  crossSystemCaseIds: string[];
+  supersededCaseIds: string[];
+  evaluatedAt: string;
 };
 
 export type ExecutableCase = {

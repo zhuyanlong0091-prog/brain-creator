@@ -18,6 +18,7 @@ This documentation is organized by what you are trying to accomplish. Start with
 | Connect Claude Code, Codex, or another MCP host | [MCP installation](mcp-installation.md) |
 | Look up a CLI command or option | [CLI reference](cli-reference.md) |
 | Diagnose a setup or execution failure | [Troubleshooting](troubleshooting.md) |
+| Understand recovery, auth refresh, reconciliation, and stability controls | [Reliability controls](quality/reliability-controls.md) |
 
 ## Choose A Workflow
 
@@ -60,6 +61,7 @@ Start with [Troubleshooting](troubleshooting.md). Then use Brain Creator review 
 - [Release checklist](release-checklist.md)
 - [Execution quality register](quality/problem-register.md)
 - [Real-system regression samples](quality/real-system-regression.md)
+- [Reliability controls](quality/reliability-controls.md)
 - [Release notes 2.1.1](release-notes-2.1.1.md)
 - [Release notes 2.0.3](release-notes-2.0.3.md)
 - [Release notes 2.0.2](release-notes-2.0.2.md)

@@ -39,3 +39,5 @@ features:
 
 For the sanitized cross-page, auth-refresh, test-data, multi-role, and
 stability regression sample, see [Real-system regression samples](/quality/real-system-regression).
+
+For the production control boundaries behind those capabilities, see [Reliability controls](/quality/reliability-controls).
