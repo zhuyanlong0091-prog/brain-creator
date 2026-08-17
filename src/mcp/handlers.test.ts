@@ -5,7 +5,11 @@ import AdmZip from "adm-zip";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { parseCaseSource } from "../caseSource/parser.js";
-import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
+import {
+  createBrainCreatorMcpContext,
+  handleBrainCreatorTool,
+  summarizeStabilityRuns
+} from "./handlers.js";
 
 const tempDirs: string[] = [];
 
@@ -48,6 +52,34 @@ afterEach(async () => {
 });
 
 describe("handleBrainCreatorTool", () => {
+  it("does not call a single completed stability run stable", () => {
+    const result = summarizeStabilityRuns([
+      {
+        id: "suite-single-run",
+        knowledgeProjectId: "project-1",
+        systemId: "system-1",
+        status: "completed",
+        stabilityGroupId: "stability-single",
+        stabilityTarget: 1,
+        total: 1,
+        passed: 1,
+        failed: 0,
+        blocked: 0,
+        caseRuns: [],
+        updatedAt: "2026-08-17T00:00:00.000Z"
+      } as never
+    ], []);
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        stabilityGroupId: "stability-single",
+        completed: 1,
+        passed: 1,
+        verdict: "insufficient-sample"
+      })
+    ]);
+  });
+
   it("uses the configured Brain Creator workspace when creating MCP context", async () => {
     const previousWorkspace = process.env.BRAIN_CREATOR_WORKSPACE;
     const workDir = await tempDir();

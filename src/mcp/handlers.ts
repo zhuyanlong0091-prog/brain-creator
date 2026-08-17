@@ -6506,7 +6506,7 @@ function executionDiagnosisReviewSummary(input: {
   };
 }
 
-function summarizeStabilityRuns(
+export function summarizeStabilityRuns(
   runs: RequirementSuiteRun[],
   executionEvidence: ExecutionEvidence[]
 ) {
@@ -6550,6 +6550,8 @@ function summarizeStabilityRuns(
         ? "blocked"
         : completed < target
           ? "running"
+          : target < 2
+            ? "insufficient-sample"
           : failed > 0
             ? "unstable"
             : strongVerified === completed
