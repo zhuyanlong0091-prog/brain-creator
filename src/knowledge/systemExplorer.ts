@@ -9,6 +9,7 @@ import type {
   ExplorationScenario,
   Gap,
   InteractionSurfaceRef,
+  InteractionRecoveryEvidence,
   PageCaptureEvidence,
   SystemExploration,
   SystemExplorationBudget,
@@ -53,6 +54,7 @@ export type SystemInteractionEvidence = {
   status: "observed" | "no-change" | "blocked" | "failed";
   surface?: InteractionSurfaceRef;
   reacquiredPage?: boolean;
+  recovery?: InteractionRecoveryEvidence;
   screenshotPath?: string;
   scenarioId?: string;
 };
@@ -278,6 +280,7 @@ export class SystemExplorationCoordinator {
           blockedRequests: transition.blockedRequests,
           status: transition.status,
           reacquiredPage: transition.reacquiredPage,
+          recovery: transition.recovery,
           screenshotPath: transition.screenshotPath,
           scenarioId: transition.scenarioId
         }));
@@ -696,9 +699,20 @@ async function probeSafeInteractions(input: {
   for (let index = 0; index < candidates.length; index += 1) {
     if (Date.now() >= input.deadline) break;
     let reacquiredPage = false;
+    let recovery: InteractionRecoveryEvidence | undefined;
     if (activePage.isClosed()) {
-      const replacement = await reacquirePage(input.context, recoveryUrl(), input.deadline);
+      const fromUrl = activePageUrl;
+      const toUrl = recoveryUrl();
+      const replacement = await reacquirePage(input.context, toUrl, input.deadline);
       if (!replacement) {
+        recovery = {
+          trigger: "page-closed",
+          method: "new-page-and-reload",
+          fromUrl,
+          toUrl,
+          attempts: 1,
+          status: "failed"
+        };
         const reason = `Surface recovery failed before interacting with ${candidateName(candidates[index]?.candidate)} at ${recoveryUrl()}`;
         input.warnings.push(reason);
         input.blockers.push(reason);
@@ -707,6 +721,14 @@ async function probeSafeInteractions(input: {
       activePage = replacement;
       registerPopupListener(activePage);
       reacquiredPage = true;
+      recovery = {
+        trigger: "page-closed",
+        method: "new-page-and-reload",
+        fromUrl,
+        toUrl,
+        attempts: 1,
+        status: "recovered"
+      };
     }
     const { candidate, decision } = candidates[index];
     let before: SystemInteractionState;
@@ -763,7 +785,9 @@ async function probeSafeInteractions(input: {
         } catch (error) {
           if (attempt > 0 || Date.now() >= input.deadline) throw error;
           rememberActivePageUrl(activePage);
-          const replacement = await reacquirePage(input.context, recoveryUrl(), input.deadline);
+          const fromUrl = activePageUrl;
+          const toUrl = recoveryUrl();
+          const replacement = await reacquirePage(input.context, toUrl, input.deadline);
           if (!replacement) throw error;
           await activePage.unroute("**/*", routeHandler).catch(() => undefined);
           activePage = replacement;
@@ -771,16 +795,34 @@ async function probeSafeInteractions(input: {
           routedPages.add(activePage);
           await activePage.route("**/*", routeHandler);
           reacquiredPage = true;
+          recovery = {
+            trigger: "interaction-failure",
+            method: "new-page-and-reload",
+            fromUrl,
+            toUrl,
+            attempts: attempt + 1,
+            status: "recovered"
+          };
         }
       }
       const settleMs = Math.min(300, Math.max(0, input.deadline - Date.now()));
       if (settleMs > 0) await activePage.waitForTimeout(settleMs);
       if (activePage.isClosed()) {
-        const replacement = await reacquirePage(input.context, recoveryUrl(), input.deadline);
+        const fromUrl = activePageUrl;
+        const toUrl = recoveryUrl();
+        const replacement = await reacquirePage(input.context, toUrl, input.deadline);
         if (!replacement) throw new Error("Active page closed and could not be reacquired");
         activePage = replacement;
         registerPopupListener(activePage);
         reacquiredPage = true;
+        recovery = {
+          trigger: "page-closed-after-action",
+          method: "new-page-and-reload",
+          fromUrl,
+          toUrl,
+          attempts: 1,
+          status: "recovered"
+        };
       }
       rememberActivePageUrl(activePage);
       after = await captureInteractionState(activePage, input.allowedUrls);
@@ -839,6 +881,7 @@ async function probeSafeInteractions(input: {
       status,
       surface: candidate.surface,
       ...(reacquiredPage ? { reacquiredPage: true } : {}),
+      ...(recovery ? { recovery } : {}),
       screenshotPath,
       ...(input.scenario ? { scenarioId: input.scenario.id } : {})
     });

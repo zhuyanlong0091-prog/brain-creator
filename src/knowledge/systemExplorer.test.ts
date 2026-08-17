@@ -430,6 +430,14 @@ describe("System exploration coordinator", () => {
     cascade.interactions[0].after.url = "https://orders.example.test/recruiting/details";
     cascade.interactions[0].urlChanged = true;
     (cascade.interactions[0] as { reacquiredPage?: boolean }).reacquiredPage = true;
+    (cascade.interactions[0] as { recovery?: unknown }).recovery = {
+      trigger: "interaction-failure",
+      method: "new-page-and-reload",
+      fromUrl: "https://orders.example.test/recruiting",
+      toUrl: "https://orders.example.test/recruiting",
+      attempts: 2,
+      status: "recovered"
+    };
     const explorer: SystemExplorer = {
       explore: vi.fn().mockResolvedValue({
         pages: [cascade],
@@ -492,7 +500,13 @@ describe("System exploration coordinator", () => {
         inputValue: "intern",
         visibleAdded: ["Replacement Employee"],
         status: "observed",
-        reacquiredPage: true
+        reacquiredPage: true,
+        recovery: expect.objectContaining({
+          trigger: "interaction-failure",
+          method: "new-page-and-reload",
+          attempts: 2,
+          status: "recovered"
+        })
       })
     ]);
     expect(result.exploration.navigationEdges).toEqual([

@@ -222,8 +222,18 @@ export type SystemExplorationInteractionTransition = {
   blockedRequests: Array<{ method: string; url: string }>;
   status: "observed" | "no-change" | "blocked" | "failed";
   reacquiredPage?: boolean;
+  recovery?: InteractionRecoveryEvidence;
   screenshotPath?: string;
   scenarioId?: string;
+};
+
+export type InteractionRecoveryEvidence = {
+  trigger: "page-closed" | "interaction-failure" | "page-closed-after-action";
+  method: "new-page-and-reload";
+  fromUrl: string;
+  toUrl: string;
+  attempts: number;
+  status: "recovered" | "failed";
 };
 
 export type SystemExploration = {
