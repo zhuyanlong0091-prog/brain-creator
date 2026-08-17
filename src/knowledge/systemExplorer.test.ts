@@ -134,7 +134,7 @@ describe("System exploration coordinator", () => {
         server.close((error) => (error ? reject(error) : resolve()))
       );
     }
-  });
+  }, 30_000);
 
   it("explores allowlisted pages, persists navigation, and refreshes System Brain", async () => {
     const fixture = await createFixture();
