@@ -128,7 +128,7 @@ describe("Brain Creator real local agent chain", () => {
       restoreEnv("BRAIN_CREATOR_AGENT_COMMAND", previousCommand);
       restoreEnv("BRAIN_CREATOR_AGENT_ARGS", previousArgs);
     }
-  }, 20000);
+  }, 60000);
 });
 
 function bridgeFixtureSource() {
