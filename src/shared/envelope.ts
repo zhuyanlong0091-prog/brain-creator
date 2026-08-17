@@ -129,6 +129,15 @@ function errorDetail(error: unknown, message: string): BrainCreatorErrorDetail {
       true
     );
   }
+  if (/agent bridge unavailable|bridge.*not configured|bridge.*unavailable/i.test(message)) {
+    return knownError(
+      "BC_AGENT_BRIDGE_UNAVAILABLE",
+      message,
+      "The Agent bridge is unavailable for this execution.",
+      "当前执行所需的 Agent Bridge 不可用。",
+      "configure-agent-bridge"
+    );
+  }
   if (/store.*locked|locked by another writer/i.test(message)) {
     return knownError(
       "BC_STORE_LOCKED",

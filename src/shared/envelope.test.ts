@@ -68,6 +68,15 @@ describe("shared envelope helpers", () => {
         })
       })
     );
+    expect(errorEnvelope(new Error("Agent bridge unavailable: command is not configured"))).toEqual(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          code: "BC_AGENT_BRIDGE_UNAVAILABLE",
+          nextAction: "configure-agent-bridge",
+          retryable: false
+        })
+      })
+    );
     expect(errorEnvelope(new Error("Brain Creator store is locked by another writer"))).toEqual(
       expect.objectContaining({
         error: expect.objectContaining({
