@@ -36,3 +36,6 @@ features:
 | Execute an approved requirement | [Requirement to test](/guides/requirement-to-test) |
 | Connect an Agent host | [MCP installation](/mcp-installation) |
 | Diagnose a problem | [Troubleshooting](/troubleshooting) |
+
+For the sanitized cross-page, auth-refresh, test-data, multi-role, and
+stability regression sample, see [Real-system regression samples](/quality/real-system-regression).
