@@ -195,6 +195,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       dataValue: z.string().optional(),
       error: z.string().optional(),
       allowCreate: z.boolean().default(false),
+      automatic: z.boolean().default(false),
       testDataResolutions: z
         .array(
           z.object({
@@ -402,6 +403,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       operator: z.string().optional(),
       provider: z.string().optional(),
       sessionId: z.string().optional(),
+      evidenceMode: z.enum(["strict", "compatibility"]).optional(),
       responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
@@ -789,7 +791,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     description: "Run generator/test/healer chain for an approved test case.",
     inputSchema: z.object({
       caseId: z.string(),
-      maxHealAttempts: z.number().int().min(0).max(10).optional()
+      maxHealAttempts: z.number().int().min(0).max(10).optional(),
+      evidenceMode: z.enum(["strict", "compatibility"]).optional()
     })
   },
   {
@@ -799,7 +802,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       "一键审批并执行：对草稿用例先调用 bc_approve_plan，审批通过后自动执行 bc_run_chain。用于用户已审核计划、确认可执行的场景，减少两次独立工具调用。",
     inputSchema: z.object({
       caseId: z.string(),
-      maxHealAttempts: z.number().int().min(0).max(10).optional()
+      maxHealAttempts: z.number().int().min(0).max(10).optional(),
+      evidenceMode: z.enum(["strict", "compatibility"]).optional()
     })
   },
   {

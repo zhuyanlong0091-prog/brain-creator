@@ -765,6 +765,82 @@ describe("handleBrainCreatorTool", () => {
     ]);
   });
 
+  it("allows a Facade caller to require strict Reporter evidence with an injected runner", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      runner: async (_command, args) => {
+        const outputIndex = args.indexOf("--output");
+        if (outputIndex >= 0) {
+          await writeFile(args[outputIndex + 1], "import { test } from '@playwright/test';", "utf8");
+        }
+        return args.includes("--reporter=json")
+          ? { exitCode: 0, stdout: structuredPassReport(), stderr: "" }
+          : { exitCode: 0, stdout: args.join(" "), stderr: "" };
+      }
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Strict evidence system",
+        environment: "test",
+        baseUrl: "https://strict.example.test",
+        defaultLocale: "en-US",
+        urlAllowlist: ["https://strict.example.test"]
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth", {
+      projectId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "token",
+      secrets: { token: "secret-token" }
+    });
+    const testCase = context.service.createTestCase({
+      systemId: system.id,
+      requirement: "Strict evidence case",
+      scenarios: [{
+        id: "strict-scenario",
+        title: "Strict evidence",
+        priority: "critical",
+        steps: [{ action: "assert", target: "Result", expected: "visible" }]
+      }],
+      newTerms: [],
+      ruleCheckResult: { passed: true, checks: [] }
+    });
+    context.service.approveTestCase(testCase.id);
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run_chain", {
+        caseId: testCase.id,
+        evidenceMode: "strict"
+      })
+    );
+
+    expect(result.testResult.structuredReporter).toEqual(
+      expect.objectContaining({ status: "passed", total: 1 })
+    );
+    expect(result.chainRun.status).toBe("succeeded");
+  });
+
+  it("does not allow a real process to opt down to compatibility evidence", async () => {
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json")
+    });
+
+    const response = await handleBrainCreatorTool(context, "bc_run_chain", {
+      caseId: "case-not-needed",
+      evidenceMode: "compatibility"
+    });
+
+    expect(response.isError).toBe(true);
+    expect(response.content[0]).toEqual(
+      expect.objectContaining({
+        text: expect.stringContaining("requires an injected runner")
+      })
+    );
+  });
+
   it("returns a host-agent task package instead of running the chain subprocess", async () => {
     const previousProvider = process.env.BRAIN_CREATOR_AGENT_PROVIDER;
     process.env.BRAIN_CREATOR_AGENT_PROVIDER = "host-agent";

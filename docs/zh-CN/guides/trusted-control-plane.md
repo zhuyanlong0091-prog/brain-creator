@@ -87,6 +87,26 @@ Brain Creator Skill 默认使用 `summary`。只有查看特定资产或诊断�
 
 每次转换都会追加到 Gap 生命周期，不会覆盖历史记录。
 
+## 准备确定性测试数据
+
+如果编译后的用例包含带确定性值的 `generated` 或 `unique` 数据配置，Facade
+可以在不打开目标系统的情况下解析该值：
+
+```json
+{
+  "action": "prepare-test-data",
+  "knowledgeProjectId": "knowledge-project-id",
+  "systemId": "system-id",
+  "executableCaseId": "executable-case-id",
+  "confirm": true,
+  "automatic": true
+}
+```
+
+该模式只会写入已经由已确认数据计划推导出的值，不会创建业务记录、伪造查询
+证据，也不会绕过清理规则。已有记录查询、记录创建、审批和清理仍然先预览，
+再通过可审计的 Host Agent 任务完成。
+
 ## 不重启 MCP 刷新存储
 
 外部恢复完成后，可调用 `bc_configure target=runtime operation=reload-store`。存在活动 Suite 或 Agent 任务时，Brain Creator 会拒绝刷新。该命令是受控恢复入口，不代表允许手工修改存储。

@@ -101,6 +101,15 @@ function errorDetail(error: unknown, message: string): BrainCreatorErrorDetail {
       "approve-baseline"
     );
   }
+  if (/test data plan must be confirmed/i.test(message)) {
+    return knownError(
+      "BC_TEST_DATA_NOT_CONFIRMED",
+      message,
+      "Confirm the executable case test-data plan before automatic resolution.",
+      "请先确认可执行用例的测试数据计划，再进行自动解析。",
+      "confirm-test-data-plan"
+    );
+  }
   if (/reporter.*missing|not auditable/i.test(message)) {
     return knownError(
       "BC_REPORTER_MISSING",
@@ -146,6 +155,15 @@ function errorDetail(error: unknown, message: string): BrainCreatorErrorDetail {
       "The execution safety budget was reached before the task completed.",
       "任务在完成前已达到执行安全预算。",
       "review-run-and-gap"
+    );
+  }
+  if (/evidenceMode|compatibility evidence|structured reporter mode/i.test(message)) {
+    return knownError(
+      "BC_EVIDENCE_MODE_POLICY",
+      message,
+      "The requested evidence mode is not allowed for this execution path.",
+      "当前执行路径不允许使用请求的证据模式。",
+      "use-strict-evidence-mode"
     );
   }
   if (/ is required| is invalid|unsupported/i.test(message)) {

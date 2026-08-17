@@ -879,7 +879,8 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemId: stringArg(input, "systemId"),
       executableCaseId: stringArg(input, "executableCaseId"),
       confirm: optionalBooleanArg(input, "confirm"),
-      allowCreate: optionalBooleanArg(input, "allowCreate")
+      allowCreate: optionalBooleanArg(input, "allowCreate"),
+      automatic: optionalBooleanArg(input, "automatic")
     });
   }
   if (action === "submit-test-data") {
@@ -4175,6 +4176,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   const executionPlan = executionPlanId
     ? assertExecutionPlanIsCurrent(context, executionPlanId)
     : undefined;
+  const structuredReporter = resolveStructuredReporterMode(context, input);
   const bridgeCheck = await preflightAgentBridge(context.agentBridge);
   if (!bridgeCheck.ok) {
     throw new Error(`Agent bridge unavailable: ${bridgeCheck.error}`);
@@ -4279,7 +4281,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     testCase,
     agentBridge: context.agentBridge,
     runner: context.runner,
-    structuredReporter: context.structuredReporter,
+    structuredReporter,
     maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
     knowledgeContext: optionalStringArg(input, "knowledgeContext"),
     actorJourney: actorJourneyProfiles,
@@ -4293,6 +4295,24 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   }
   context.service.recordChainRun(result.chainRun);
   return result;
+}
+
+function resolveStructuredReporterMode(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>
+) {
+  const requested = optionalStringArg(input, "evidenceMode");
+  if (requested && requested !== "strict" && requested !== "compatibility") {
+    throw new Error("evidenceMode must be strict or compatibility");
+  }
+  if (requested === "compatibility" && !context.runner) {
+    throw new Error(
+      "evidenceMode=compatibility requires an injected runner; real Playwright execution stays strict"
+    );
+  }
+  if (requested === "strict") return true;
+  if (requested === "compatibility") return false;
+  return context.structuredReporter;
 }
 
 async function verifyAuthForExecution(

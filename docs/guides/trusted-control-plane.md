@@ -11,6 +11,11 @@ Facade tools accept `responseMode`:
 
 The Brain Creator Skill uses `summary` by default. Request `full` only when you need to inspect a specific asset or diagnose a workflow.
 
+Execution evidence is strict by default for real Playwright runs. Callers may set
+`evidenceMode: "strict"` explicitly; `evidenceMode: "compatibility"` is only
+accepted with an injected test runner and cannot downgrade a real process. A run
+without structured Reporter evidence is not an auditable strong pass.
+
 ## Verify authentication
 
 Create a protected browser state first, then verify it through the Facade:
@@ -86,6 +91,28 @@ Use `resolve-gap`, `dismiss-gap`, or `reopen-gap`. First preview with `confirm=f
 - `reopen-gap`: new evidence makes a resolved or dismissed Gap actionable again.
 
 Every transition is appended to the Gap lifecycle. It does not erase prior review history.
+
+## Prepare deterministic test data
+
+When a compiled case contains a deterministic `generated` or `unique` data profile,
+the Facade can resolve that value without opening the target system:
+
+```json
+{
+  "action": "prepare-test-data",
+  "knowledgeProjectId": "knowledge-project-id",
+  "systemId": "system-id",
+  "executableCaseId": "executable-case-id",
+  "confirm": true,
+  "automatic": true
+}
+```
+
+This mode only materializes a value already derived from the approved data plan.
+The executable case data plan must already be confirmed. It does not create a
+business record, claim lookup evidence, or bypass cleanup.
+Existing-record lookup, record creation, approval, and cleanup continue through a
+preview plus an auditable Host Agent task.
 
 ## Reload without restarting MCP
 

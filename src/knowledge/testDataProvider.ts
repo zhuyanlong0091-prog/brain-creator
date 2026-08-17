@@ -17,6 +17,7 @@ type PrepareInput = {
   executableCaseId: string;
   confirm: boolean;
   allowCreate?: boolean;
+  automatic?: boolean;
   phase?: "prepare" | "cleanup";
 };
 
@@ -44,6 +45,7 @@ export type TestDataPrepareResult = {
   status: "preview" | "needs-agent-execution" | "ready";
   operations: PrepareOperation[];
   task?: TestDataTask;
+  autoResolvedProfileIds?: string[];
 };
 
 export type TestDataSubmitResult = {
@@ -89,11 +91,28 @@ export class TestDataProviderService {
       return { status: "ready", operations: [] };
     }
 
+    if (
+      input.automatic &&
+      input.confirm &&
+      executableCase.dataPlan?.requiresConfirmation &&
+      !executableCase.dataPlan.confirmedAt
+    ) {
+      throw new Error("Test data plan must be confirmed before automatic resolution");
+    }
+    const autoResolvedProfileIds = input.automatic && input.confirm
+      ? this.resolveDeterministicOperations(executableCase)
+      : [];
     const operations = this.unresolvedOperations(executableCase).map((operation) =>
       this.prepareOperation(operation, Boolean(input.allowCreate))
     );
     if (operations.length === 0) {
-      return { status: "ready", operations: [] };
+      return {
+        status: "ready",
+        operations: [],
+        ...(autoResolvedProfileIds.length > 0
+          ? { autoResolvedProfileIds }
+          : {})
+      };
     }
     if (!input.confirm) {
       return { status: "preview", operations };
@@ -114,7 +133,14 @@ export class TestDataProviderService {
       action: "lookup-or-create",
       allowCreate: Boolean(input.allowCreate)
     });
-    return { status: "needs-agent-execution", operations, task };
+    return {
+      status: "needs-agent-execution",
+      operations,
+      task,
+      ...(autoResolvedProfileIds.length > 0
+        ? { autoResolvedProfileIds }
+        : {})
+    };
   }
 
   submit(input: SubmitInput): TestDataSubmitResult {
@@ -262,6 +288,26 @@ export class TestDataProviderService {
               lease.status === "active"
           ))
     );
+  }
+
+  private resolveDeterministicOperations(executableCase: ExecutableCase) {
+    const operations = executableCase.dataPlan?.operations.filter(
+      (operation) =>
+        (operation.strategy === "generated" || operation.strategy === "unique") &&
+        operation.decision === "generate" &&
+        operation.status === "proposed" &&
+        Boolean(operation.value?.trim())
+    ) ?? [];
+    if (operations.length === 0) return [];
+    this.knowledgeService.resolveExecutableCaseTestData({
+      executableCaseId: executableCase.id,
+      resolutions: operations.map((operation) => ({
+        profileId: operation.profileId,
+        decision: "use-value" as const,
+        value: operation.value
+      }))
+    });
+    return operations.map((operation) => operation.profileId);
   }
 
   private prepareOperation(
