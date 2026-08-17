@@ -1391,6 +1391,7 @@ export type RunLedgerEntry = {
   caseNo?: string;
   event:
     | "suite-created"
+    | "auth-preflight"
     | "case-started"
     | "test-data-task-requested"
     | "test-data-task-completed"
@@ -1427,6 +1428,7 @@ export type RunLedgerEntry = {
     testCaseId?: string;
     executionPlanId?: string;
     testDataTaskId?: string;
+    authProfileId?: string;
     agentTaskId?: string;
     executionEvidenceId?: string;
     chainRunId?: string;

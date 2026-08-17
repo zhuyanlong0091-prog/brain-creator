@@ -4215,13 +4215,21 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
           optionalStringArg(input, "authProfileId")!
         )
       : findAuthProfile(context, testCase.systemId);
-  await verifyAuthForExecution(context, system, authProfile);
+  await verifyAuthForExecution(context, system, authProfile, {
+    requirementSuiteRunId: optionalStringArg(input, "requirementSuiteRunId"),
+    executableCaseId: optionalStringArg(input, "executableCaseId"),
+    role: "primary"
+  });
   const actorJourneyProfiles = executionPlan?.actorJourney?.map((actor) => ({
     role: actor.role,
     authProfile: findAuthProfileById(context, testCase.systemId, actor.authProfileId)
   }));
   for (const actor of actorJourneyProfiles ?? []) {
-    await verifyAuthForExecution(context, system, actor.authProfile);
+    await verifyAuthForExecution(context, system, actor.authProfile, {
+      requirementSuiteRunId: optionalStringArg(input, "requirementSuiteRunId"),
+      executableCaseId: optionalStringArg(input, "executableCaseId"),
+      role: actor.role
+    });
   }
   if (context.agentBridge?.provider === "host-agent") {
     const specsDir = join(context.workDir, "specs");
@@ -4328,7 +4336,12 @@ function resolveStructuredReporterMode(
 async function verifyAuthForExecution(
   context: BrainCreatorMcpContext,
   system: SystemProfile,
-  authProfile: AuthProfile
+  authProfile: AuthProfile,
+  ledgerContext: {
+    requirementSuiteRunId?: string;
+    executableCaseId?: string;
+    role?: string;
+  } = {}
 ) {
   const capture = context.service.getCaptureAuth(authProfile.id);
   if (!capture) return;
@@ -4347,6 +4360,10 @@ async function verifyAuthForExecution(
           resumeInstruction: "Refresh or capture a browser login state, then complete this checkpoint before resuming execution."
         });
       }
+      recordAuthPreflight(context, authProfile, ledgerContext, {
+        status: "blocked",
+        message: reason
+      });
       throw new BrainCreatorError({
         code: "BC_AUTH_MATERIALIZATION_FAILED",
         message: reason,
@@ -4364,7 +4381,13 @@ async function verifyAuthForExecution(
     Math.min(300_000, Number(process.env.BRAIN_CREATOR_AUTH_CACHE_TTL_MS ?? 60_000))
   );
   const cachedUntil = context.authVerificationCache.get(authProfile.id) ?? 0;
-  if (cachedUntil > Date.now()) return;
+  if (cachedUntil > Date.now()) {
+    recordAuthPreflight(context, authProfile, ledgerContext, {
+      status: "valid",
+      message: "Authentication state reused from the bounded verification cache."
+    });
+    return;
+  }
   let verification = await context.authStateVerifier({
     storageStatePath: await resolveProtectedStorageStatePath(context.workDir, storageStatePath),
     targetUrl: system.baseUrl,
@@ -4372,11 +4395,19 @@ async function verifyAuthForExecution(
   });
   if (verification.status === "valid") {
     context.authVerificationCache.set(authProfile.id, Date.now() + cacheTtlMs);
+    recordAuthPreflight(context, authProfile, ledgerContext, {
+      status: "valid",
+      message: "Authentication state verified in a fresh browser context."
+    });
     return;
   }
   const refreshed = await refreshAndVerifyAuthState(context, system, authProfile, verification.reason);
   if (refreshed?.status === "valid") {
     context.authVerificationCache.set(authProfile.id, Date.now() + cacheTtlMs);
+    recordAuthPreflight(context, authProfile, ledgerContext, {
+      status: "valid",
+      message: `Authentication state refreshed and reverified${refreshed.authRefresh?.provider ? ` by ${refreshed.authRefresh.provider}` : ""}.`
+    });
     return;
   }
   if (refreshed) verification = refreshed;
@@ -4391,6 +4422,10 @@ async function verifyAuthForExecution(
       resumeInstruction: "Refresh the browser login state, then complete this checkpoint before resuming execution."
     });
   }
+  recordAuthPreflight(context, authProfile, ledgerContext, {
+    status: "blocked",
+    message: verification.reason ?? "Stored browser authentication requires user intervention."
+  });
   throw new BrainCreatorError({
     code: verification.status === "expired"
       ? "BC_AUTH_STATE_EXPIRED"
@@ -4402,6 +4437,34 @@ async function verifyAuthForExecution(
     },
     nextAction: "complete-auth-checkpoint",
     retryable: verification.status === "unavailable"
+  });
+}
+
+function recordAuthPreflight(
+  context: BrainCreatorMcpContext,
+  authProfile: AuthProfile,
+  ledgerContext: {
+    requirementSuiteRunId?: string;
+    executableCaseId?: string;
+    role?: string;
+  },
+  input: { status: "valid" | "blocked"; message: string }
+) {
+  if (!ledgerContext.requirementSuiteRunId) return;
+  context.runLedger.append({
+    runType: "requirement-suite",
+    systemId: authProfile.projectId,
+    requirementSuiteRunId: ledgerContext.requirementSuiteRunId,
+    executableCaseId: ledgerContext.executableCaseId,
+    event: "auth-preflight",
+    scope: ledgerContext.executableCaseId ? "case" : "suite",
+    stage: "preflight",
+    toStatus: input.status,
+    outcome: input.status === "valid" ? "passed" : "blocked",
+    message: ledgerContext.role
+      ? `${ledgerContext.role}: ${input.message}`
+      : input.message,
+    references: { authProfileId: authProfile.id }
   });
 }
 

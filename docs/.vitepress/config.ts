@@ -34,7 +34,8 @@ const englishTheme = {
         { text: "MCP installation", link: "/mcp-installation" },
         { text: "Troubleshooting", link: "/troubleshooting" },
         { text: "Release checklist", link: "/release-checklist" },
-        { text: "Execution quality register", link: "/quality/problem-register" }
+        { text: "Execution quality register", link: "/quality/problem-register" },
+        { text: "Real-system regression samples", link: "/quality/real-system-regression" }
       ]
     }
   ],
@@ -86,7 +87,8 @@ const chineseTheme = {
         { text: "CLI 参考", link: "/zh-CN/cli-reference" },
         { text: "MCP 安装", link: "/zh-CN/mcp-installation" },
         { text: "故障排查", link: "/zh-CN/troubleshooting" },
-        { text: "发布清单", link: "/zh-CN/release-checklist" }
+        { text: "发布清单", link: "/zh-CN/release-checklist" },
+        { text: "真实系统回归样本", link: "/zh-CN/quality/real-system-regression" }
       ]
     }
   ],
