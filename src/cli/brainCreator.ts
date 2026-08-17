@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { fileURLToPath } from "node:url";
 import { buildDoctorReport, formatDoctorReport } from "./doctor.js";
 import { installBrainCreatorAssets } from "./installAssets.js";
 import { installBrainCreatorCodexPlugin } from "./installCodexPlugin.js";
@@ -18,6 +17,7 @@ import {
   resolveBrainCreatorWorkspace
 } from "../shared/workspace.js";
 import { BRAIN_CREATOR_VERSION } from "../version.js";
+import { isCliEntryPoint } from "./entrypoint.js";
 
 type CliIo = {
   stdout: (message: string) => void;
@@ -327,7 +327,7 @@ function writeError(io: CliIo, json: boolean, command: string, error: unknown) {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isCliEntryPoint(import.meta.url)) {
   runBrainCreatorCli(process.argv.slice(2)).then((exitCode) => {
     process.exitCode = exitCode;
   });

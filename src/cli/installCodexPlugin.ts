@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeBrainCreatorMcpConfig } from "./writeMcpConfig.js";
+import { isCliEntryPoint } from "./entrypoint.js";
 
 type CommandResult = {
   stdout: string;
@@ -132,7 +133,7 @@ function runCommand(command: string, args: string[], cwd: string): Promise<Comma
   });
 }
 
-if (process.argv[1]?.endsWith("installCodexPlugin.js")) {
+if (isCliEntryPoint(import.meta.url)) {
   runInstallCodexPluginCli(process.argv.slice(2)).then((exitCode) => {
     process.exit(exitCode);
   });

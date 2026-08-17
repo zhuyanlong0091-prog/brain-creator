@@ -8,6 +8,7 @@ import {
   resolveBrainCreatorWorkspace
 } from "../shared/workspace.js";
 import { inspectStoreHealth, type StoreHealth } from "../storage/storeDoctor.js";
+import { isCliEntryPoint } from "./entrypoint.js";
 
 type DoctorEnv = Record<string, string | undefined>;
 type SupportedBridgeProvider = "auto" | "claude" | "codex" | "host-agent" | "disabled";
@@ -497,7 +498,7 @@ function statusIcon(status: DoctorCheck["status"]) {
   return "FAIL";
 }
 
-if (process.argv[1]?.endsWith("doctor.js")) {
+if (isCliEntryPoint(import.meta.url)) {
   const report = buildDoctorReport();
   console.log(formatDoctorReport(report));
   process.exit(report.ok ? 0 : 1);

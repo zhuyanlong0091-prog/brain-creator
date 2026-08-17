@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { access, copyFile, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isCliEntryPoint } from "./entrypoint.js";
 
 export type InstallAssetsOptions = {
   targetDir?: string;
@@ -79,7 +80,7 @@ async function exists(path: string) {
   }
 }
 
-if (process.argv[1]?.endsWith("installAssets.js")) {
+if (isCliEntryPoint(import.meta.url)) {
   const force = process.argv.includes("--force");
   const targetArgIndex = process.argv.findIndex((arg) => arg === "--target");
   const targetDir = targetArgIndex >= 0 ? process.argv[targetArgIndex + 1] : undefined;
