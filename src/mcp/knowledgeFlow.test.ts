@@ -2417,6 +2417,68 @@ describe("Brain Creator requirement-first facade", () => {
     );
   });
 
+  it("previews and claims the next due stability run through the facade", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Scheduler Facade",
+      key: "scheduler-facade",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Scheduler Console",
+      environment: "test",
+      baseUrl: "https://scheduler.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://scheduler.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const run = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      cases: [{ executableCaseId: "case-scheduler", title: "Scheduler case" }],
+      continueOnBlocked: false,
+      stabilityGroupId: "scheduler-group",
+      stabilityIteration: 2,
+      stabilityTarget: 3,
+      stabilityPolicy: { targetIterations: 3, minIntervalMs: 60_000 }
+    });
+    run.stabilitySchedule!.nextRunAt = "2020-01-01T00:00:00.000Z";
+
+    const preview = dataOf(await handleBrainCreatorTool(context, "bc_run", {
+      mode: "requirement-suite",
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      suiteAction: "claim-next-scheduled",
+      scheduleOwner: "external-cron",
+      confirm: false
+    }));
+    expect(preview).toEqual(expect.objectContaining({
+      status: "control-preview",
+      scheduledRuns: [expect.objectContaining({ id: run.id })]
+    }));
+
+    const claimed = dataOf(await handleBrainCreatorTool(context, "bc_run", {
+      mode: "requirement-suite",
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      suiteAction: "claim-next-scheduled",
+      scheduleOwner: "external-cron",
+      confirm: true,
+      scheduleLeaseMs: 60_000
+    }));
+    expect(claimed).toEqual(expect.objectContaining({
+      status: "scheduled-control-applied",
+      requirementSuiteRun: expect.objectContaining({
+        id: run.id,
+        stabilitySchedule: expect.objectContaining({ leaseOwner: "external-cron" })
+      })
+    }));
+  });
+
   it("does not call completed iterations stable without strong execution evidence", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({

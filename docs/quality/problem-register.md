@@ -71,9 +71,9 @@ production acceptance conditions are closed.
 
 This register closes only through its stated acceptance checks. A passing feature test does not close broader evidence, security, or reliability work assigned to a later PR.
 
-## Latest recalibration after PR #120
+## Latest recalibration after PR #122
 
-The register was reviewed against the merged `9d6763d` implementation. The
+The register was reviewed against the merged `d806c74` implementation. The
 status totals remain unchanged because none of the remaining partial items has
 met its full production acceptance condition:
 
@@ -87,8 +87,9 @@ met its full production acceptance condition:
   separates mixed-requirement artifact segments. Complete historical Eval and
   report reconciliation is still partial.
 - **E5 long-cycle stability** now exposes concrete due `scheduledRuns`, lease
-  ownership, and recovery metadata to external schedulers, while production
-  scheduling, long-run thresholds, and operational alerting remain partial.
+  ownership, recovery metadata, and a `claim-next-scheduled` Facade flow to
+  external schedulers, while production scheduling, long-run thresholds, and
+  operational alerting remain partial.
 - **B1/B4 cross-surface recovery** has real-browser evidence for allowlist
   filtering and fail-closed cross-origin behavior. Full recovery across
   remounts, popups, iframes, and multiple origins remains partial.

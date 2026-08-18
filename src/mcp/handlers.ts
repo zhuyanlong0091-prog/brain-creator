@@ -2829,11 +2829,55 @@ async function controlRequirementSuite(
     | "cancel"
     | "retry"
     | "skip"
+    | "claim-next-scheduled"
     | "claim-scheduled"
     | "renew-scheduled"
     | "release-scheduled",
   input: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
+  if (action === "claim-next-scheduled") {
+    const scheduleOwner = optionalStringArg(input, "scheduleOwner");
+    if (!scheduleOwner) throw new Error("scheduleOwner is required for schedule control");
+    const systemId = optionalStringArg(input, "systemId");
+    const dueRuns = context.requirementSuiteRuns
+      .listDueStabilityRuns(projectId)
+      .filter((item) => !systemId || item.systemId === systemId)
+      .sort((left, right) => left.id.localeCompare(right.id));
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        mode: "requirement-suite",
+        status: "control-preview",
+        action,
+        scheduledRuns: dueRuns.slice(0, 20),
+        scheduledRunsTruncated: dueRuns.length > 20,
+        requiresConfirmation: true,
+        nextAction: dueRuns.length > 0
+          ? "Confirm to claim the first due scheduled run."
+          : "No scheduled stability run is due."
+      };
+    }
+    const next = dueRuns[0];
+    if (!next) {
+      return {
+        mode: "requirement-suite",
+        status: "no-due-scheduled-run",
+        action,
+        scheduledRuns: [],
+        nextAction: "Poll again when a scheduled stability run is due."
+      };
+    }
+    const claimed = context.requirementSuiteRuns.claimScheduled(next.id, {
+      owner: scheduleOwner,
+      leaseMs: optionalNumberArg(input, "scheduleLeaseMs")
+    });
+    return {
+      mode: "requirement-suite",
+      status: "scheduled-control-applied",
+      action,
+      requirementSuiteRun: claimed,
+      nextAction: "Continue the claimed requirement suite with suiteAction=continue."
+    };
+  }
   const suiteId = optionalStringArg(input, "suiteId");
   const systemId = optionalStringArg(input, "systemId");
   const run = suiteId
@@ -7898,7 +7942,7 @@ function runModeArg(input: Record<string, unknown>, key: string) {
 
 function suiteActionArg(input: Record<string, unknown>) {
   const value = optionalStringArg(input, "suiteAction") ?? "continue";
-  if (!["continue", "cancel", "retry", "skip", "claim-scheduled", "renew-scheduled", "release-scheduled"].includes(value)) {
+  if (!["continue", "cancel", "retry", "skip", "claim-next-scheduled", "claim-scheduled", "renew-scheduled", "release-scheduled"].includes(value)) {
     throw new Error("suiteAction is invalid");
   }
   return value as
@@ -7906,6 +7950,7 @@ function suiteActionArg(input: Record<string, unknown>) {
     | "cancel"
     | "retry"
     | "skip"
+    | "claim-next-scheduled"
     | "claim-scheduled"
     | "renew-scheduled"
     | "release-scheduled";
