@@ -12,6 +12,8 @@ Authentication refresh uses a provider registry. Token and cookie profiles can b
 
 Use `bc_configure` with `target=auth` and `operation=preflight` to check provider readiness without refreshing credentials, then use `operation=refresh` to request a refresh explicitly. `bc_status` reports registered, configured, and unavailable refresh providers so a host can preflight an OAuth/CAS/SAML profile before a suite waits on it. A provider-specific adapter may implement deeper checks; a registered adapter without a preflight hook is reported as registered-only readiness, not as a successful login.
 
+Requirement Suite execution applies the same readiness gate before creating an execution plan when the selected profile declares a refresh provider or uses token/cookie materialization. A missing or unavailable provider creates one open `requirement-suite-auth-preflight` Gap for the run and prevents the case from entering the Agent/Playwright chain. Manual script profiles without a declared refresh provider continue through the existing verified-browser-state path.
+
 ## Same-system requirement reconciliation
 
 Requirement suites persist the expected requirement-set scope and reconcile executable cases before and during review. The result distinguishes:
