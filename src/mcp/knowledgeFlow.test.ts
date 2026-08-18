@@ -1609,7 +1609,13 @@ describe("Brain Creator requirement-first facade", () => {
       })
     );
     expect(reviewedRun.items).toEqual([
-      expect.objectContaining({ id: completed.requirementSuiteRun.id })
+      expect.objectContaining({
+        id: completed.requirementSuiteRun.id,
+        reconciliation: expect.objectContaining({
+          systemId: system.id,
+          requirementSetIds: [ingested.requirementSet.id]
+        })
+      })
     ]);
     expect(reviewedDiagnosis).toEqual(
       expect.objectContaining({
@@ -2340,6 +2346,60 @@ describe("Brain Creator requirement-first facade", () => {
         verdict: "unstable"
       })
     ]);
+  });
+
+  it("exposes due stability schedules through bc_status for external schedulers", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Scheduled Status",
+      key: "scheduled-status",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Scheduled Console",
+      environment: "test",
+      baseUrl: "https://scheduled.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://scheduled.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const run = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      cases: [{ executableCaseId: "case-scheduled", title: "Scheduled case" }],
+      continueOnBlocked: false,
+      stabilityGroupId: "scheduled-group",
+      stabilityIteration: 1,
+      stabilityTarget: 3,
+      stabilityPolicy: { targetIterations: 3, minIntervalMs: 60_000 }
+    });
+    run.status = "completed";
+    run.passed = 1;
+    run.caseRuns[0].status = "passed";
+    run.stabilitySchedule!.nextRunAt = "2020-01-01T00:00:00.000Z";
+
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      systemId: system.id
+    }));
+
+    expect(status.requirementSuiteRuns).toEqual(
+      expect.objectContaining({
+        total: 1,
+        stability: [
+          expect.objectContaining({
+            stabilityGroupId: "scheduled-group",
+            schedule: expect.objectContaining({ due: true })
+          })
+        ]
+      })
+    );
+    expect(status.requirementSuiteRuns.stability[0].nextRunAt).toBe(
+      "2020-01-01T00:00:00.000Z"
+    );
   });
 
   it("does not call completed iterations stable without strong execution evidence", async () => {

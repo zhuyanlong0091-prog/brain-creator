@@ -903,6 +903,13 @@ describe("System exploration coordinator", () => {
           expect.arrayContaining([
             expect.objectContaining({ kind: "iframe", frameIndex: 0 }),
             expect.objectContaining({ kind: "iframe", frameIndex: 1 }),
+            expect.objectContaining({
+              kind: "iframe",
+              url: expect.stringContaining("/outside-frame"),
+              frameIndex: 2,
+              accessible: false,
+              evidence: "Frame URL is outside the system allowlist"
+            }),
             expect.objectContaining({ kind: "shadow-root" }),
             expect.objectContaining({
               kind: "popup",

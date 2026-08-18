@@ -1137,6 +1137,9 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const executionEvidence = context.repository.executionEvidence.filter(
     (item) => item.systemId === systemId
   );
+  const requirementSuiteRuns = context.repository.requirementSuiteRuns.filter(
+    (run) => run.systemId === systemId
+  );
   const legacyDiagnosisAudit = context.executionDiagnosis.auditLegacy({
     systemId,
     limit: 1
@@ -1263,6 +1266,11 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       unassured: executionEvidence.filter(
         (item) => !item.assuranceLevel || item.assuranceLevel === "none"
       ).length
+    },
+    requirementSuiteRuns: {
+      total: requirementSuiteRuns.length,
+      byStatus: countBy(requirementSuiteRuns, (run) => run.status),
+      stability: summarizeStabilityRuns(requirementSuiteRuns, executionEvidence)
     },
     facadeNextAction: nextAction,
     userSummary,
