@@ -11,8 +11,17 @@ import type {
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import { RunLedgerService } from "./runLedger.js";
-import { reconcileRequirementCases } from "./requirementReconciliation.js";
-import { nextStabilitySchedule } from "./stabilityPolicy.js";
+import {
+  reconcileRequirementCases,
+  reconcileRequirementCoverage
+} from "./requirementReconciliation.js";
+import {
+  claimStabilitySchedule,
+  isStabilityScheduleDue,
+  nextStabilitySchedule,
+  releaseStabilityScheduleLease,
+  renewStabilityScheduleLease
+} from "./stabilityPolicy.js";
 
 type CreateRequirementSuiteRunInput = {
   knowledgeProjectId: string;
@@ -81,6 +90,25 @@ export class RequirementSuiteRunService {
       : [
       ...new Set(executableCases.map((item) => item.requirementSetId))
     ];
+    const knowledgeProject = this.repository.knowledgeProjects.find(
+      (item) => item.id === input.knowledgeProjectId
+    );
+    const coverageSnapshot = knowledgeProject
+      ? reconcileRequirementCoverage({
+          knowledgeProject,
+          systemId: input.systemId,
+          requirementSets: this.repository.requirementSets,
+          testIntents: this.repository.testIntents,
+          cases: this.repository.executableCases,
+          expectedRequirementSetIds: requirementSetIds
+        })
+      : undefined;
+    const reconciliation = coverageSnapshot ?? reconcileRequirementCases({
+      systemId: input.systemId,
+      expectedRequirementSetIds: requirementSetIds,
+      expectedCaseIds: executableCaseIds,
+      cases: executableCases
+    });
     const existing = this.repository.requirementSuiteRuns.find(
       (run) =>
         run.knowledgeProjectId === input.knowledgeProjectId &&
@@ -115,12 +143,8 @@ export class RequirementSuiteRunService {
       stabilityPolicy: input.stabilityPolicy,
       stabilitySchedule: stabilitySchedule(input.stabilityPolicy),
       requirementSetIds,
-      reconciliation: reconcileRequirementCases({
-        systemId: input.systemId,
-        expectedRequirementSetIds: requirementSetIds,
-        expectedCaseIds: executableCaseIds,
-        cases: executableCases
-      }),
+      reconciliation,
+      ...(coverageSnapshot ? { coverageSnapshot } : {}),
       total: cases.length,
       passed: 0,
       failed: 0,
@@ -164,6 +188,89 @@ export class RequirementSuiteRunService {
     );
   }
 
+  listDueStabilityRuns(
+    knowledgeProjectId?: string,
+    now = new Date()
+  ): RequirementSuiteRun[] {
+    return this.repository.requirementSuiteRuns.filter(
+      (run) =>
+        (!knowledgeProjectId || run.knowledgeProjectId === knowledgeProjectId) &&
+        Boolean(run.stabilitySchedule && isStabilityScheduleDue(run.stabilitySchedule, now))
+    );
+  }
+
+  claimScheduled(
+    runId: string,
+    input: { owner: string; leaseMs?: number },
+    now = new Date()
+  ): RequirementSuiteRun {
+    const run = this.get(runId);
+    if (!run.stabilitySchedule) {
+      throw new Error("Requirement suite has no stability schedule");
+    }
+    run.stabilitySchedule = claimStabilitySchedule(
+      run.stabilitySchedule,
+      {
+        owner: input.owner,
+        leaseId: id("stabilityLease"),
+        leaseMs: input.leaseMs ?? 300_000
+      },
+      now
+    );
+    run.updatedAt = now.toISOString();
+    this.repository.persist();
+    this.record(run, {
+      event: "schedule-claimed",
+      scope: "suite",
+      stage: "suite",
+      toStatus: run.status,
+      message: `Stability schedule claimed by ${run.stabilitySchedule.leaseOwner}.`,
+      references: {
+        leaseId: run.stabilitySchedule.leaseId,
+        leaseExpiresAt: run.stabilitySchedule.leaseExpiresAt
+      }
+    });
+    return run;
+  }
+
+  renewScheduledLease(
+    runId: string,
+    input: { owner: string; leaseMs?: number },
+    now = new Date()
+  ): RequirementSuiteRun {
+    const run = this.get(runId);
+    if (!run.stabilitySchedule) {
+      throw new Error("Requirement suite has no stability schedule");
+    }
+    run.stabilitySchedule = renewStabilityScheduleLease(
+      run.stabilitySchedule,
+      { owner: input.owner, leaseMs: input.leaseMs ?? 300_000 },
+      now
+    );
+    run.updatedAt = now.toISOString();
+    this.repository.persist();
+    return run;
+  }
+
+  releaseScheduledLease(
+    runId: string,
+    input: { owner: string; nextRunAt?: string; lastError?: string },
+    now = new Date()
+  ): RequirementSuiteRun {
+    const run = this.get(runId);
+    if (!run.stabilitySchedule) {
+      throw new Error("Requirement suite has no stability schedule");
+    }
+    run.stabilitySchedule = releaseStabilityScheduleLease(
+      run.stabilitySchedule,
+      input,
+      now
+    );
+    run.updatedAt = now.toISOString();
+    this.repository.persist();
+    return run;
+  }
+
   reconcile(runId: string) {
     const run = this.get(runId);
     const cases = run.caseRuns.flatMap((caseRun) => {
@@ -178,6 +285,20 @@ export class RequirementSuiteRunService {
       expectedCaseIds: run.caseRuns.map((item) => item.executableCaseId),
       cases
     });
+    const knowledgeProject = this.repository.knowledgeProjects.find(
+      (item) => item.id === run.knowledgeProjectId
+    );
+    if (knowledgeProject) {
+      run.coverageSnapshot = reconcileRequirementCoverage({
+        knowledgeProject,
+        systemId: run.systemId,
+        requirementSets: this.repository.requirementSets,
+        testIntents: this.repository.testIntents,
+        cases: this.repository.executableCases,
+        expectedRequirementSetIds: run.requirementSetIds
+      });
+      run.reconciliation = run.coverageSnapshot;
+    }
     run.updatedAt = timestamp();
     this.repository.persist();
     return run.reconciliation;
@@ -865,6 +986,15 @@ export class RequirementSuiteRunService {
           : "completed";
     run.currentExecutableCaseId = undefined;
     run.completedAt = now;
+    if (run.stabilitySchedule) {
+      run.stabilitySchedule = {
+        ...run.stabilitySchedule,
+        status: "completed",
+        leaseId: undefined,
+        leaseOwner: undefined,
+        leaseExpiresAt: undefined
+      };
+    }
     run.updatedAt = now;
     this.repository.persist();
     this.record(run, {

@@ -382,9 +382,21 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       caseId: z.string().optional(),
       source: z.string().optional(),
       suiteId: z.string().optional(),
-      suiteAction: z
-        .enum(["continue", "cancel", "retry", "skip"])
-        .default("continue"),
+        suiteAction: z
+          .enum([
+            "continue",
+            "cancel",
+            "retry",
+            "skip",
+            "claim-scheduled",
+            "renew-scheduled",
+            "release-scheduled"
+          ])
+          .default("continue"),
+        scheduleOwner: z.string().optional(),
+        scheduleLeaseMs: z.number().int().positive().optional(),
+        nextRunAt: z.string().optional(),
+        scheduleError: z.string().optional(),
       resume: z.boolean().default(false),
       continueOnBlocked: z.boolean().default(false),
       allowCreateTestData: z.boolean().default(false),
