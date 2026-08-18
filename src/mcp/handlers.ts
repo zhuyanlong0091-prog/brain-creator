@@ -2423,6 +2423,26 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
         title: verification.title
       });
     }
+    if (operation === "preflight") {
+      const systemId = stringArg(input, "systemId");
+      const authProfileId = stringArg(input, "authProfileId");
+      const profile = findAuthProfileById(context, systemId, authProfileId);
+      const system = context.repository.systemProfiles.find((item) => item.id === systemId);
+      if (!system) throw new Error("Business system not found");
+      const authRefresh = await context.authRefreshRegistry.preflight({
+        workDir: context.workDir,
+        system,
+        authProfile: profile,
+        reason: optionalStringArg(input, "reason") ?? "Authentication provider preflight requested."
+      });
+      return {
+        authProfile: context.service.listAuthProfiles(systemId).find((item) => item.id === profile.id),
+        authRefresh,
+        nextAction: authRefresh.status === "ready"
+          ? "Authentication provider is ready for execution."
+          : "Configure the provider or complete the authentication checkpoint before execution."
+      };
+    }
     if (operation === "refresh") {
       const systemId = stringArg(input, "systemId");
       const authProfileId = stringArg(input, "authProfileId");

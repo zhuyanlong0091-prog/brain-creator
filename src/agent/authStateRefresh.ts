@@ -23,9 +23,17 @@ export type AuthRefreshResult = Partial<Pick<AuthRefreshAttempt, "provider" | "s
   storageStatePath?: string;
 };
 
+export type AuthRefreshPreflightResult = {
+  provider: AuthRefreshProvider | string;
+  status: "ready" | "needs-user" | "unavailable";
+  reason?: string;
+  checks?: string[];
+};
+
 export interface AuthRefreshAdapter {
   provider: AuthRefreshProvider;
   supports(input: AuthRefreshInput): boolean;
+  preflight?(input: AuthRefreshInput): Promise<AuthRefreshPreflightResult>;
   refresh(input: AuthRefreshInput): Promise<AuthRefreshResult>;
 }
 
@@ -75,6 +83,47 @@ export class AuthStateRefreshRegistry {
 
   providers(): AuthRefreshProvider[] {
     return [...new Set(this.adapters.map((adapter) => adapter.provider))];
+  }
+
+  async preflight(input: AuthRefreshInput): Promise<AuthRefreshPreflightResult> {
+    const explicitProvider = explicitProviderHint(input.authProfile);
+    const adapter = this.adapters
+      .filter((candidate) => !explicitProvider || candidate.provider === explicitProvider)
+      .find((candidate) => candidate.supports(input));
+    if (!adapter) {
+      return {
+        provider: explicitProvider ?? providerHint(input.authProfile),
+        status: "needs-user",
+        reason: explicitProvider
+          ? `No registered authentication provider is available for preflight: ${explicitProvider}.`
+          : "No registered authentication provider is available for preflight."
+      };
+    }
+    if (!adapter.preflight) {
+      return {
+        provider: adapter.provider,
+        status: "ready",
+        checks: ["adapter-registered"]
+      };
+    }
+    const timeoutMs = Math.max(100, Math.min(120_000, input.timeoutMs ?? 30_000));
+    try {
+      const result = await withTimeout(adapter.preflight(input), timeoutMs);
+      return {
+        ...result,
+        provider: result.provider ?? adapter.provider,
+        ...(result.reason ? { reason: redactAuthText(result.reason, input.authProfile) } : {})
+      };
+    } catch (error) {
+      return {
+        provider: adapter.provider,
+        status: "unavailable",
+        reason: redactAuthText(
+          error instanceof Error ? error.message : String(error),
+          input.authProfile
+        ) || "Authentication provider preflight failed."
+      };
+    }
   }
 
   async refresh(input: AuthRefreshInput): Promise<AuthRefreshAttempt> {
