@@ -70,3 +70,29 @@ production acceptance conditions are closed.
 | total | 41 |
 
 This register closes only through its stated acceptance checks. A passing feature test does not close broader evidence, security, or reliability work assigned to a later PR.
+
+## Latest recalibration after PR #118
+
+The register was reviewed against the merged `c694fac` implementation. The
+status totals remain unchanged because none of the remaining partial items has
+met its full production acceptance condition:
+
+- **C1 authentication refresh** now has explicit provider selection, built-in
+  token/cookie protected-state refresh, host-agent refresh compatibility, and
+  fresh-context re-verification. OAuth, CAS, and SAML production adapters are
+  still partial.
+- **F5 same-system reconciliation** now persists requirement coverage snapshots,
+  detects missing intents/cases, superseded revisions, unbound cases, and
+  separates mixed-requirement artifact segments. Complete historical Eval and
+  report reconciliation is still partial.
+- **E5 long-cycle stability** now exposes due schedules and lease recovery to
+  external schedulers, while production scheduling, long-run thresholds, and
+  operational alerting remain partial.
+- **B1/B4 cross-surface recovery** has real-browser evidence for allowlist
+  filtering and fail-closed cross-origin behavior. Full recovery across
+  remounts, popups, iframes, and multiple origins remains partial.
+
+This slice adds a `bc_status` stability-schedule summary for external schedulers
+and a real-browser regression assertion that an unregistered cross-origin
+iframe is retained as observation evidence but is not treated as an executable
+surface.
