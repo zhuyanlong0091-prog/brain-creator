@@ -13,6 +13,99 @@ afterEach(async () => {
 });
 
 describe("facade control plane", () => {
+  it("preflights an authentication provider without refreshing or exposing secrets", async () => {
+    const workDir = await tempDir();
+    let refreshCalls = 0;
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json"),
+      authRefreshAdapters: [{
+        provider: "oauth",
+        supports: () => true,
+        preflight: async () => ({
+          provider: "oauth",
+          status: "ready",
+          checks: ["oauth-client-configured", "refresh-endpoint-reachable"]
+        }),
+        refresh: async () => {
+          refreshCalls += 1;
+          return { status: "needs-user" };
+        }
+      }]
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "system",
+      name: "OAuth system",
+      environment: "test",
+      baseUrl: "https://oauth.example.test",
+      urlAllowlist: ["https://oauth.example.test"]
+    }));
+    const auth = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "auth",
+      operation: "create",
+      systemId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "script",
+      refreshProvider: "oauth",
+      secrets: { clientSecret: "oauth-secret" }
+    }));
+    const preflight = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "auth",
+      operation: "preflight",
+      systemId: system.id,
+      authProfileId: auth.id
+    }));
+
+    expect(preflight).toEqual(expect.objectContaining({
+      authRefresh: {
+        provider: "oauth",
+        status: "ready",
+        checks: ["oauth-client-configured", "refresh-endpoint-reachable"]
+      },
+      nextAction: "Authentication provider is ready for execution."
+    }));
+    expect(refreshCalls).toBe(0);
+    expect(JSON.stringify(preflight)).not.toContain("oauth-secret");
+  });
+
+  it("returns an actionable needs-user result when an explicit provider is unavailable", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const system = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "system",
+      name: "CAS system",
+      environment: "test",
+      baseUrl: "https://cas.example.test",
+      urlAllowlist: ["https://cas.example.test"]
+    }));
+    const auth = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "auth",
+      operation: "create",
+      systemId: system.id,
+      env: "test",
+      role: "qa",
+      loginMethod: "script",
+      refreshProvider: "cas",
+      secrets: {}
+    }));
+    const preflight = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "auth",
+      operation: "preflight",
+      systemId: system.id,
+      authProfileId: auth.id
+    }));
+
+    expect(preflight.authRefresh).toEqual(expect.objectContaining({
+      provider: "cas",
+      status: "needs-user"
+    }));
+    expect(preflight.nextAction).toContain("Configure the provider");
+  });
+
   it("materializes token auth into a protected browser state before verification", async () => {
     const workDir = await tempDir();
     const materialized: string[] = [];

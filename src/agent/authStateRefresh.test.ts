@@ -70,6 +70,79 @@ describe("auth refresh registry", () => {
     expect(result.reason).toContain("provider");
   });
 
+  it("preflights a registered provider without invoking refresh", async () => {
+    let refreshCalls = 0;
+    const registry = new AuthStateRefreshRegistry([{
+      provider: "cookie",
+      supports: () => true,
+      preflight: async () => ({
+        provider: "cookie",
+        status: "ready",
+        checks: ["cookie-materializer", "browser-context"]
+      }),
+      refresh: async () => {
+        refreshCalls += 1;
+        return { status: "succeeded", storageStatePath: "C:/safe/state.json" };
+      }
+    }]);
+
+    const result = await registry.preflight({
+      workDir: "C:/work",
+      system,
+      authProfile: profile,
+      reason: "before suite",
+      timeoutMs: 100
+    });
+
+    expect(result).toEqual({
+      provider: "cookie",
+      status: "ready",
+      checks: ["cookie-materializer", "browser-context"]
+    });
+    expect(refreshCalls).toBe(0);
+  });
+
+  it("returns needs-user for an explicitly configured provider without an adapter", async () => {
+    const explicitProfile = {
+      ...profile,
+      refreshProvider: "oauth"
+    } as AuthProfile & { refreshProvider: "oauth" };
+
+    const result = await createDefaultAuthRefreshRegistry().preflight({
+      workDir: "C:/work",
+      system,
+      authProfile: explicitProfile,
+      reason: "before suite",
+      timeoutMs: 100
+    });
+
+    expect(result).toMatchObject({ provider: "oauth", status: "needs-user" });
+    expect(result.reason).toContain("oauth");
+  });
+
+  it("bounds provider preflight and redacts provider errors", async () => {
+    const registry = new AuthStateRefreshRegistry([{
+      provider: "cas",
+      supports: () => true,
+      preflight: async () => {
+        throw new Error("CAS password=secret-value is unavailable");
+      },
+      refresh: async () => ({ status: "needs-user" })
+    }]);
+
+    const result = await registry.preflight({
+      workDir: "C:/work",
+      system,
+      authProfile: { ...profile, refreshProvider: "cas" } as AuthProfile,
+      reason: "before suite",
+      timeoutMs: 100
+    });
+
+    expect(result).toMatchObject({ provider: "cas", status: "unavailable" });
+    expect(result.reason).not.toContain("secret-value");
+    expect(result.reason).toContain("[redacted]");
+  });
+
   it("converts provider timeout into a bounded failed attempt", async () => {
     const registry = new AuthStateRefreshRegistry([
       {
