@@ -10,7 +10,7 @@ System exploration records the requested surface (`document`, `iframe`, `popup`,
 
 Authentication refresh uses a provider registry. Token and cookie profiles can be re-materialized into a protected storage state by the built-in adapter. The host-agent adapter preserves the existing Claude/Codex/host callback. OAuth, CAS, and SAML integrations are provider slots, not magic refreshes: when no adapter is registered Brain Creator returns `needs-user` and creates the normal AuthCheckpoint path. Refresh attempts have a bounded timeout and never return raw secrets.
 
-Use `bc_configure` with `target=auth` and `operation=refresh` to request a refresh explicitly.
+Use `bc_configure` with `target=auth` and `operation=refresh` to request a refresh explicitly. `bc_status` reports registered, configured, and unavailable refresh providers so a host can preflight an OAuth/CAS/SAML profile before a suite waits on it.
 
 ## Same-system requirement reconciliation
 
