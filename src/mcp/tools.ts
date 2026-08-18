@@ -388,6 +388,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
             "cancel",
             "retry",
             "skip",
+            "claim-next-scheduled",
             "claim-scheduled",
             "renew-scheduled",
             "release-scheduled"
