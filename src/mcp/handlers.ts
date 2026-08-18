@@ -1159,6 +1159,12 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       };
     })
     .sort((left, right) => Number(right.due) - Number(left.due) || left.runId.localeCompare(right.runId));
+  const configuredRefreshProviders = snapshot.auth.profiles
+    .map((profile) => (profile as AuthProfile & { refreshProvider?: string }).refreshProvider)
+    .filter(Boolean) as string[];
+  const registeredRefreshProviders = context.authRefreshRegistry.providers();
+  const unavailableRefreshProviders = [...new Set(configuredRefreshProviders)]
+    .filter((provider) => !registeredRefreshProviders.includes(provider as typeof registeredRefreshProviders[number]));
   const legacyDiagnosisAudit = context.executionDiagnosis.auditLegacy({
     systemId,
     limit: 1
@@ -1285,6 +1291,11 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       unassured: executionEvidence.filter(
         (item) => !item.assuranceLevel || item.assuranceLevel === "none"
       ).length
+    },
+    authRefresh: {
+      registeredProviders: registeredRefreshProviders,
+      configuredProviders: [...new Set(configuredRefreshProviders)],
+      unavailableProviders: unavailableRefreshProviders
     },
     requirementSuiteRuns: {
       total: requirementSuiteRuns.length,
