@@ -2406,6 +2406,12 @@ describe("Brain Creator requirement-first facade", () => {
         ]
       })
     );
+    expect(status.authRefresh).toEqual(
+      expect.objectContaining({
+        registeredProviders: expect.arrayContaining(["token", "cookie"]),
+        unavailableProviders: []
+      })
+    );
     expect(status.requirementSuiteRuns.stability[0].nextRunAt).toBe(
       "2020-01-01T00:00:00.000Z"
     );

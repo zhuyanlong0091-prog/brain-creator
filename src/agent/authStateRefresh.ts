@@ -73,6 +73,10 @@ export class AuthStateRefreshRegistry {
     return this;
   }
 
+  providers(): AuthRefreshProvider[] {
+    return [...new Set(this.adapters.map((adapter) => adapter.provider))];
+  }
+
   async refresh(input: AuthRefreshInput): Promise<AuthRefreshAttempt> {
     const explicitProvider = explicitProviderHint(input.authProfile);
     const candidates = explicitProvider

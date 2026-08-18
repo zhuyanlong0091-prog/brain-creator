@@ -155,6 +155,7 @@ describe("auth refresh registry", () => {
     };
 
     registry.register(adapter);
+    expect(registry.providers()).toEqual(["oauth"]);
     expect(() => registry.register(adapter)).toThrow(
       "Authentication refresh provider is already registered: oauth"
     );
