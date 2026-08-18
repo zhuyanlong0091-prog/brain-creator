@@ -2389,6 +2389,15 @@ describe("Brain Creator requirement-first facade", () => {
     expect(status.requirementSuiteRuns).toEqual(
       expect.objectContaining({
         total: 1,
+        scheduledRuns: [
+          expect.objectContaining({
+            runId: run.id,
+            knowledgeProjectId: project.id,
+            due: true,
+            stabilityIteration: 1,
+            stabilityTarget: 3
+          })
+        ],
         stability: [
           expect.objectContaining({
             stabilityGroupId: "scheduled-group",

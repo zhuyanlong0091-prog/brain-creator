@@ -1140,6 +1140,25 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const requirementSuiteRuns = context.repository.requirementSuiteRuns.filter(
     (run) => run.systemId === systemId
   );
+  const scheduledRuns = requirementSuiteRuns
+    .filter((run) => Boolean(run.stabilitySchedule))
+    .map((run) => {
+      const schedule = run.stabilitySchedule!;
+      return {
+        runId: run.id,
+        knowledgeProjectId: run.knowledgeProjectId,
+        status: run.status,
+        stabilityGroupId: run.stabilityGroupId,
+        stabilityIteration: run.stabilityIteration,
+        stabilityTarget: run.stabilityTarget,
+        due: isStabilityScheduleDue(schedule, new Date()),
+        nextRunAt: schedule.nextRunAt,
+        leaseOwner: schedule.leaseOwner,
+        leaseExpiresAt: schedule.leaseExpiresAt,
+        lastError: schedule.lastError
+      };
+    })
+    .sort((left, right) => Number(right.due) - Number(left.due) || left.runId.localeCompare(right.runId));
   const legacyDiagnosisAudit = context.executionDiagnosis.auditLegacy({
     systemId,
     limit: 1
@@ -1270,7 +1289,9 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     requirementSuiteRuns: {
       total: requirementSuiteRuns.length,
       byStatus: countBy(requirementSuiteRuns, (run) => run.status),
-      stability: summarizeStabilityRuns(requirementSuiteRuns, executionEvidence)
+      stability: summarizeStabilityRuns(requirementSuiteRuns, executionEvidence),
+      scheduledRuns,
+      scheduledRunsTruncated: scheduledRuns.length > 20
     },
     facadeNextAction: nextAction,
     userSummary,

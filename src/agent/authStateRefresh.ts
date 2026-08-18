@@ -66,6 +66,9 @@ export class AuthStateRefreshRegistry {
   }
 
   register(adapter: AuthRefreshAdapter) {
+    if (this.adapters.some((candidate) => candidate.provider === adapter.provider)) {
+      throw new Error(`Authentication refresh provider is already registered: ${adapter.provider}`);
+    }
     this.adapters.push(adapter);
     return this;
   }
@@ -121,6 +124,7 @@ export function createDefaultAuthRefreshRegistry(
   providerAdapters: AuthRefreshAdapter[] = []
 ) {
   const registry = new AuthStateRefreshRegistry();
+  const registeredProviders = new Set<AuthRefreshProvider>();
   if (hostRefresher) {
     registry.register({
       provider: "host-agent",
@@ -139,8 +143,13 @@ export function createDefaultAuthRefreshRegistry(
         };
       }
     });
+    registeredProviders.add("host-agent");
   }
-  for (const adapter of providerAdapters) registry.register(adapter);
+  for (const adapter of providerAdapters) {
+    if (registeredProviders.has(adapter.provider)) continue;
+    registry.register(adapter);
+    registeredProviders.add(adapter.provider);
+  }
   return registry;
 }
 
