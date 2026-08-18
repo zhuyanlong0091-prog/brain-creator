@@ -1151,6 +1151,7 @@ export type RequirementSuiteRun = {
   stabilitySchedule?: StabilitySchedule;
   requirementSetIds?: string[];
   reconciliation?: RequirementReconciliation;
+  coverageSnapshot?: RequirementCoverageSnapshot;
   total: number;
   passed: number;
   failed: number;
@@ -1182,6 +1183,10 @@ export type StabilitySchedule = {
   nextRunAt?: string;
   lastStartedAt?: string;
   attemptCount?: number;
+  leaseId?: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  lastError?: string;
 };
 
 export type RequirementReconciliation = {
@@ -1196,6 +1201,16 @@ export type RequirementReconciliation = {
   crossSystemCaseIds: string[];
   supersededCaseIds: string[];
   evaluatedAt: string;
+};
+
+export type RequirementCoverageSnapshot = RequirementReconciliation & {
+  knowledgeProjectId: string;
+  expectedTestIntentIds: string[];
+  observedTestIntentIds: string[];
+  missingTestIntentIds: string[];
+  missingExecutableCaseIntentIds: string[];
+  supersededRequirementSetIds: string[];
+  unboundCaseIds: string[];
 };
 
 export type ExecutableCase = {
@@ -1442,6 +1457,7 @@ export type RunLedgerEntry = {
     | "case-retried"
     | "role-switched"
     | "case-skipped"
+    | "schedule-claimed"
     | "suite-cancelled"
     | "suite-completed";
   scope: "suite" | "case";
@@ -1470,6 +1486,8 @@ export type RunLedgerEntry = {
     agentTaskId?: string;
     executionEvidenceId?: string;
     chainRunId?: string;
+    leaseId?: string;
+    leaseExpiresAt?: string;
     diagnosisId?: string;
     bugReportId?: string;
     gapIds?: string[];

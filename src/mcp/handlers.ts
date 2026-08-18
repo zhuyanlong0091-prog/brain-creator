@@ -25,6 +25,7 @@ import {
 import {
   AuthStateRefreshRegistry,
   createDefaultAuthRefreshRegistry,
+  type AuthRefreshAdapter,
   type AuthStateRefresher
 } from "../agent/authStateRefresh.js";
 import { BrainCreatorError, errorEnvelope, successEnvelope } from "../shared/envelope.js";
@@ -44,8 +45,11 @@ import { writeArtifactManifest } from "../storage/artifactArchive.js";
 import { writeStaticSuiteExecutionReport } from "../execution/staticSuiteReport.js";
 import { normalizeHostSkillAnalysis } from "../knowledge/policies.js";
 import { buildContextPack } from "../knowledge/retriever.js";
-import { reconcileRequirementCases } from "../knowledge/requirementReconciliation.js";
-import { evaluateStabilityPolicy } from "../knowledge/stabilityPolicy.js";
+import { reconcileRequirementCoverage } from "../knowledge/requirementReconciliation.js";
+import {
+  evaluateStabilityPolicy,
+  isStabilityScheduleDue
+} from "../knowledge/stabilityPolicy.js";
 import {
   SystemExplorationCoordinator,
   type SystemExplorer
@@ -161,6 +165,7 @@ type CreateContextInput = {
   authStateMaterializer?: AuthStateMaterializer;
   authStateRefresher?: AuthStateRefresher;
   authRefreshRegistry?: AuthStateRefreshRegistry;
+  authRefreshAdapters?: AuthRefreshAdapter[];
   knowledgeDir?: string;
   feishuReader?: RequirementSourceReader;
   systemExplorer?: SystemExplorer;
@@ -170,6 +175,33 @@ export function createBrainCreatorMcpContext(
   input: CreateContextInput = {}
 ): BrainCreatorMcpContext {
   const workDir = input.workDir ?? resolveBrainCreatorWorkspace();
+  const authStateMaterializer = input.authStateMaterializer ?? materializeBrowserAuthState;
+  const genericAuthRefreshAdapters: AuthRefreshAdapter[] = [
+    {
+      provider: "token",
+      supports: (refreshInput) => refreshInput.authProfile.loginMethod === "token",
+      refresh: async (refreshInput) => {
+        const materialized = await authStateMaterializer({
+          workDir: refreshInput.workDir,
+          system: refreshInput.system,
+          authProfile: refreshInput.authProfile
+        });
+        return { status: "succeeded", storageStatePath: materialized.storageStatePath };
+      }
+    },
+    {
+      provider: "cookie",
+      supports: (refreshInput) => refreshInput.authProfile.loginMethod === "cookie",
+      refresh: async (refreshInput) => {
+        const materialized = await authStateMaterializer({
+          workDir: refreshInput.workDir,
+          system: refreshInput.system,
+          authProfile: refreshInput.authProfile
+        });
+        return { status: "succeeded", storageStatePath: materialized.storageStatePath };
+      }
+    }
+  ];
   const repository = input.dataFilePath
     ? new JsonFileBrainCreatorRepository(input.dataFilePath)
     : new ShardedFileBrainCreatorRepository(
@@ -216,10 +248,14 @@ export function createBrainCreatorMcpContext(
     runner: input.runner,
     structuredReporter: input.structuredReporter,
     authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
-    authStateMaterializer: input.authStateMaterializer ?? materializeBrowserAuthState,
+    authStateMaterializer,
     authStateRefresher: input.authStateRefresher,
     authRefreshRegistry:
-      input.authRefreshRegistry ?? createDefaultAuthRefreshRegistry(input.authStateRefresher),
+      input.authRefreshRegistry ??
+      createDefaultAuthRefreshRegistry(input.authStateRefresher, [
+        ...(input.authRefreshAdapters ?? []),
+        ...genericAuthRefreshAdapters
+      ]),
     authVerificationCache: new Map(),
     feishuReader: input.feishuReader ?? configuredFeishuReader()
   };
@@ -2749,7 +2785,13 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
 async function controlRequirementSuite(
   context: BrainCreatorMcpContext,
   projectId: string,
-  action: "cancel" | "retry" | "skip",
+  action:
+    | "cancel"
+    | "retry"
+    | "skip"
+    | "claim-scheduled"
+    | "renew-scheduled"
+    | "release-scheduled",
   input: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
   const suiteId = optionalStringArg(input, "suiteId");
@@ -2766,6 +2808,46 @@ async function controlRequirementSuite(
   }
   if (systemId && run.systemId !== systemId) {
     throw new Error("Requirement suite run belongs to another business system");
+  }
+  if (["claim-scheduled", "renew-scheduled", "release-scheduled"].includes(action)) {
+    const scheduleOwner = optionalStringArg(input, "scheduleOwner");
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        mode: "requirement-suite",
+        status: "control-preview",
+        action,
+        requirementSuiteRun: run,
+        requiresConfirmation: true,
+        nextAction: `Confirm the requirement suite ${action} action.`
+      };
+    }
+    if (!scheduleOwner) throw new Error("scheduleOwner is required for schedule control");
+    const updated =
+      action === "claim-scheduled"
+        ? context.requirementSuiteRuns.claimScheduled(run.id, {
+            owner: scheduleOwner,
+            leaseMs: optionalNumberArg(input, "scheduleLeaseMs")
+          })
+        : action === "renew-scheduled"
+          ? context.requirementSuiteRuns.renewScheduledLease(run.id, {
+              owner: scheduleOwner,
+              leaseMs: optionalNumberArg(input, "scheduleLeaseMs")
+            })
+          : context.requirementSuiteRuns.releaseScheduledLease(run.id, {
+              owner: scheduleOwner,
+              nextRunAt: optionalStringArg(input, "nextRunAt"),
+              lastError: optionalStringArg(input, "scheduleError")
+            });
+    return {
+      mode: "requirement-suite",
+      status: "scheduled-control-applied",
+      action,
+      requirementSuiteRun: updated,
+      nextAction:
+        action === "release-scheduled"
+          ? "The schedule is released; claim it again when the next run is due."
+          : "Continue the requirement suite with suiteAction=continue."
+    };
   }
   const requestedCaseId = optionalStringArg(input, "executableCaseId");
   const targetCase =
@@ -6675,7 +6757,14 @@ export function summarizeStabilityRuns(
         ...evaluation,
         latestRunId: group.at(-1)?.id,
         nextRunId: group.find((run) => run.stabilityNextRunId)?.stabilityNextRunId,
-        nextRunAt: group.at(-1)?.stabilitySchedule?.nextRunAt
+        nextRunAt: group.at(-1)?.stabilitySchedule?.nextRunAt,
+        schedule: group.at(-1)?.stabilitySchedule
+          ? {
+              due: isStabilityScheduleDue(group.at(-1)!.stabilitySchedule!, new Date()),
+              leaseOwner: group.at(-1)!.stabilitySchedule!.leaseOwner,
+              leaseExpiresAt: group.at(-1)!.stabilitySchedule!.leaseExpiresAt
+            }
+          : undefined
       };
     });
 }
@@ -6684,17 +6773,17 @@ function requirementSuiteReconciliation(
   context: BrainCreatorMcpContext,
   run: RequirementSuiteRun
 ) {
-  const cases = run.caseRuns.flatMap((caseRun) => {
-    const executableCase = context.repository.executableCases.find(
-      (item) => item.id === caseRun.executableCaseId
-    );
-    return executableCase ? [executableCase] : [];
-  });
-  return reconcileRequirementCases({
+  const project = context.repository.knowledgeProjects.find(
+    (item) => item.id === run.knowledgeProjectId
+  );
+  if (!project) return run.reconciliation;
+  return reconcileRequirementCoverage({
+    knowledgeProject: project,
     systemId: run.systemId,
-    expectedRequirementSetIds: run.requirementSetIds,
-    expectedCaseIds: run.caseRuns.map((item) => item.executableCaseId),
-    cases
+    requirementSets: context.repository.requirementSets,
+    testIntents: context.repository.testIntents,
+    cases: context.repository.executableCases,
+    expectedRequirementSetIds: run.requirementSetIds
   });
 }
 
@@ -7769,10 +7858,17 @@ function runModeArg(input: Record<string, unknown>, key: string) {
 
 function suiteActionArg(input: Record<string, unknown>) {
   const value = optionalStringArg(input, "suiteAction") ?? "continue";
-  if (!["continue", "cancel", "retry", "skip"].includes(value)) {
+  if (!["continue", "cancel", "retry", "skip", "claim-scheduled", "renew-scheduled", "release-scheduled"].includes(value)) {
     throw new Error("suiteAction is invalid");
   }
-  return value as "continue" | "cancel" | "retry" | "skip";
+  return value as
+    | "continue"
+    | "cancel"
+    | "retry"
+    | "skip"
+    | "claim-scheduled"
+    | "renew-scheduled"
+    | "release-scheduled";
 }
 
 type KnowledgeReviewTarget =

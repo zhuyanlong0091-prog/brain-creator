@@ -247,6 +247,59 @@ describe("RequirementSuiteRunService", () => {
     expect(fixture.repository.requirementSuiteRuns).toHaveLength(1);
   });
 
+  it("claims, renews, and recovers a scheduled stability run", () => {
+    const fixture = suiteFixture();
+    const first = fixture.service.create({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      executionPlans: fixture.plans.slice(0, 1),
+      continueOnBlocked: false,
+      stabilityGroupId: "stability-orders",
+      stabilityIteration: 1,
+      stabilityTarget: 2,
+      stabilityPolicy: { targetIterations: 2, minIntervalMs: 60_000 }
+    });
+    const current = fixture.service.beginNext(first.id).caseRun!;
+    fixture.service.completeCase(first.id, current.executableCaseId, {
+      status: "passed",
+      chainRunId: "chain-stability-1",
+      gapIds: []
+    });
+
+    const scheduled = fixture.repository.requirementSuiteRuns.find(
+      (run) => run.id === first.stabilityNextRunId
+    )!;
+    scheduled.stabilitySchedule!.nextRunAt = "2026-08-17T00:00:00.000Z";
+    const due = fixture.service.listDueStabilityRuns(
+      "knowledge-orders",
+      new Date("2026-08-17T00:01:00.000Z")
+    );
+    expect(due.map((run) => run.id)).toContain(scheduled.id);
+
+    const claimed = fixture.service.claimScheduled(
+      scheduled.id,
+      { owner: "codex", leaseMs: 60_000 },
+      new Date("2026-08-17T00:01:00.000Z")
+    );
+    expect(claimed.stabilitySchedule).toMatchObject({ leaseOwner: "codex" });
+    expect(() => fixture.service.claimScheduled(
+      scheduled.id,
+      { owner: "claude", leaseMs: 60_000 },
+      new Date("2026-08-17T00:01:30.000Z")
+    )).toThrow("another owner");
+
+    claimed.stabilitySchedule!.leaseExpiresAt = "2026-08-17T00:02:00.000Z";
+    const recovered = fixture.service.claimScheduled(
+      scheduled.id,
+      { owner: "claude", leaseMs: 60_000 },
+      new Date("2026-08-17T00:03:00.000Z")
+    );
+    expect(recovered.stabilitySchedule).toMatchObject({ leaseOwner: "claude" });
+    expect(
+      fixture.repository.runLedgerEntries.some((entry) => entry.event === "schedule-claimed")
+    ).toBe(true);
+  });
+
   it("waits for test data preparation before binding the execution plan", () => {
     const fixture = suiteFixture();
     const run = fixture.service.create({

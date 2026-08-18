@@ -19,10 +19,14 @@ export type AuthRefreshAttempt = {
   expiresAt?: string;
 };
 
+export type AuthRefreshResult = Partial<Pick<AuthRefreshAttempt, "provider" | "status" | "expiresAt" | "evidenceRefs" | "reason">> & {
+  storageStatePath?: string;
+};
+
 export interface AuthRefreshAdapter {
   provider: AuthRefreshProvider;
   supports(input: AuthRefreshInput): boolean;
-  refresh(input: AuthRefreshInput): Promise<AuthRefreshAttempt>;
+  refresh(input: AuthRefreshInput): Promise<AuthRefreshResult>;
 }
 
 /**
@@ -39,6 +43,21 @@ export type AuthStateRefresher = (input: {
   provider?: string;
 }>;
 
+/**
+ * Host/plugin supplied implementation for one explicitly configured provider.
+ * The implementation must return a protected storageState path and must not
+ * return raw credentials in the result.
+ */
+export type AuthRefreshProviderHandler = (
+  input: AuthRefreshInput
+) => Promise<AuthRefreshResult>;
+
+export type AuthRefreshAdapterOptions = {
+  provider: AuthRefreshProvider;
+  handler: AuthRefreshProviderHandler;
+  supports?: (input: AuthRefreshInput) => boolean;
+};
+
 export class AuthStateRefreshRegistry {
   private readonly adapters: AuthRefreshAdapter[];
 
@@ -52,18 +71,26 @@ export class AuthStateRefreshRegistry {
   }
 
   async refresh(input: AuthRefreshInput): Promise<AuthRefreshAttempt> {
-    const adapter = this.adapters.find((candidate) => candidate.supports(input));
+    const explicitProvider = explicitProviderHint(input.authProfile);
+    const candidates = explicitProvider
+      ? this.adapters.filter((candidate) => candidate.provider === explicitProvider)
+      : this.adapters;
+    const adapter = candidates.find((candidate) => candidate.supports(input));
     if (!adapter) {
       return {
-        provider: providerHint(input.authProfile),
+        provider: explicitProvider ?? providerHint(input.authProfile),
         status: "needs-user",
-        reason: "No registered authentication refresh provider can refresh this profile."
+        reason: explicitProvider
+          ? `No registered authentication refresh provider can refresh this profile: ${explicitProvider}.`
+          : "No registered authentication refresh provider can refresh this profile."
       };
     }
     const timeoutMs = Math.max(100, Math.min(120_000, input.timeoutMs ?? 30_000));
     try {
       const result = await withTimeout(adapter.refresh(input), timeoutMs);
-      if (result.status === "succeeded" && !result.storageStatePath) {
+      const status = result.status ??
+        (result.storageStatePath ? "succeeded" : "failed");
+      if (status === "succeeded" && !result.storageStatePath) {
         return {
           provider: adapter.provider,
           status: "failed",
@@ -72,6 +99,7 @@ export class AuthStateRefreshRegistry {
       }
       return {
         ...result,
+        status,
         provider: result.provider ?? adapter.provider,
         ...(result.reason ? { reason: redactAuthText(result.reason, input.authProfile) } : {})
       };
@@ -89,7 +117,8 @@ export class AuthStateRefreshRegistry {
 }
 
 export function createDefaultAuthRefreshRegistry(
-  hostRefresher?: AuthStateRefresher
+  hostRefresher?: AuthStateRefresher,
+  providerAdapters: AuthRefreshAdapter[] = []
 ) {
   const registry = new AuthStateRefreshRegistry();
   if (hostRefresher) {
@@ -111,11 +140,33 @@ export function createDefaultAuthRefreshRegistry(
       }
     });
   }
+  for (const adapter of providerAdapters) registry.register(adapter);
   return registry;
 }
 
+/**
+ * Build the default registry from host/plugin callbacks. This keeps provider
+ * credentials and refresh protocols outside Brain Creator while making the
+ * provider choice explicit and testable.
+ */
+export function createConfiguredAuthRefreshRegistry(input: {
+  hostRefresher?: AuthStateRefresher;
+  providers?: AuthRefreshAdapterOptions[];
+} = {}) {
+  const adapters = (input.providers ?? []).map((provider) => ({
+    provider: provider.provider,
+    supports: provider.supports ?? (() => true),
+    refresh: provider.handler
+  } satisfies AuthRefreshAdapter));
+  return createDefaultAuthRefreshRegistry(input.hostRefresher, adapters);
+}
+
+function explicitProviderHint(profile: AuthProfile): AuthRefreshProvider | undefined {
+  return (profile as AuthProfile & { refreshProvider?: AuthRefreshProvider }).refreshProvider;
+}
+
 function providerHint(profile: AuthProfile): AuthRefreshProvider {
-  const explicit = (profile as AuthProfile & { refreshProvider?: AuthRefreshProvider }).refreshProvider;
+  const explicit = explicitProviderHint(profile);
   if (explicit) return explicit;
   if (profile.loginMethod === "token") return "token";
   if (profile.loginMethod === "cookie") return "cookie";

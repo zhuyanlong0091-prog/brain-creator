@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AuthProfile, SystemProfile } from "../domain/types.js";
 import {
   AuthStateRefreshRegistry,
+  createConfiguredAuthRefreshRegistry,
   createDefaultAuthRefreshRegistry,
   type AuthRefreshAdapter
 } from "./authStateRefresh.js";
@@ -88,5 +89,60 @@ describe("auth refresh registry", () => {
 
     expect(result).toMatchObject({ provider: "cookie", status: "failed" });
     expect(result.reason).toContain("timed out");
+  });
+
+  it("does not fall back to host-agent when an explicit provider is unavailable", async () => {
+    const explicitProfile = {
+      ...profile,
+      refreshProvider: "oauth"
+    } as AuthProfile & { refreshProvider: "oauth" };
+    const registry = createDefaultAuthRefreshRegistry(async () => ({
+      storageStatePath: "C:/safe/host-state.json",
+      provider: "host-agent"
+    }));
+
+    const result = await registry.refresh({
+      workDir: "C:/work",
+      system,
+      authProfile: explicitProfile,
+      reason: "expired",
+      timeoutMs: 100
+    });
+
+    expect(result).toMatchObject({ provider: "oauth", status: "needs-user" });
+    expect(result.reason).toContain("oauth");
+  });
+
+  it("registers a provider callback without exposing credentials", async () => {
+    const explicitProfile = {
+      ...profile,
+      refreshProvider: "cas"
+    } as AuthProfile & { refreshProvider: "cas" };
+    const registry = createConfiguredAuthRefreshRegistry({
+      providers: [{
+        provider: "cas",
+        handler: async () => ({
+          storageStatePath: "C:/safe/cas-state.json",
+          expiresAt: "2026-08-17T01:00:00.000Z",
+          evidenceRefs: ["auth-check-cas"]
+        })
+      }]
+    });
+
+    const result = await registry.refresh({
+      workDir: "C:/work",
+      system,
+      authProfile: explicitProfile,
+      reason: "expired",
+      timeoutMs: 100
+    });
+
+    expect(result).toEqual({
+      provider: "cas",
+      status: "succeeded",
+      storageStatePath: "C:/safe/cas-state.json",
+      expiresAt: "2026-08-17T01:00:00.000Z",
+      evidenceRefs: ["auth-check-cas"]
+    });
   });
 });

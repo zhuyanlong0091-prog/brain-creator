@@ -2389,6 +2389,73 @@ describe("Brain Creator requirement-first facade", () => {
       })
     ]);
   });
+
+  it("controls a due stability run through the facade lease actions", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Scheduled Stability",
+      key: "scheduled-stability",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Scheduled Console",
+      environment: "test",
+      baseUrl: "https://scheduled.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://scheduled.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const run = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      cases: [{ executableCaseId: "case-scheduled", title: "Scheduled case" }],
+      continueOnBlocked: false,
+      stabilityPolicy: { targetIterations: 2, minIntervalMs: 60_000 },
+      stabilityIteration: 2,
+      stabilityTarget: 2
+    });
+    run.stabilitySchedule = {
+      status: "active",
+      nextRunAt: "2026-08-17T00:00:00.000Z",
+      attemptCount: 2
+    };
+
+    const preview = dataOf(await handleBrainCreatorTool(context, "bc_run", {
+      mode: "requirement-suite",
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      suiteId: run.id,
+      suiteAction: "claim-scheduled",
+      scheduleOwner: "codex",
+      confirm: false
+    }));
+    expect(preview).toMatchObject({
+      status: "control-preview",
+      action: "claim-scheduled",
+      requiresConfirmation: true
+    });
+
+    const claimed = dataOf(await handleBrainCreatorTool(context, "bc_run", {
+      mode: "requirement-suite",
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      suiteId: run.id,
+      suiteAction: "claim-scheduled",
+      scheduleOwner: "codex",
+      confirm: true
+    }));
+    expect(claimed).toMatchObject({
+      status: "scheduled-control-applied",
+      action: "claim-scheduled",
+      requirementSuiteRun: {
+        stabilitySchedule: { leaseOwner: "codex" }
+      }
+    });
+  });
 });
 
 function dataOf(result: { content: Array<{ type: string; text?: string }> }) {

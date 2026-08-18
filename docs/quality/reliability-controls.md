@@ -8,7 +8,7 @@ System exploration records the requested surface (`document`, `iframe`, `popup`,
 
 ## Authentication refresh
 
-Authentication refresh uses a provider registry. The built-in host-agent adapter preserves the existing Claude/Codex/host callback. Token, cookie, OAuth, CAS, and SAML integrations are provider slots, not magic refreshes: when no adapter is registered Brain Creator returns `needs-user` and creates the normal AuthCheckpoint path. Refresh attempts have a bounded timeout and never return raw secrets.
+Authentication refresh uses a provider registry. Token and cookie profiles can be re-materialized into a protected storage state by the built-in adapter. The host-agent adapter preserves the existing Claude/Codex/host callback. OAuth, CAS, and SAML integrations are provider slots, not magic refreshes: when no adapter is registered Brain Creator returns `needs-user` and creates the normal AuthCheckpoint path. Refresh attempts have a bounded timeout and never return raw secrets.
 
 Use `bc_configure` with `target=auth` and `operation=refresh` to request a refresh explicitly.
 
@@ -20,10 +20,10 @@ Requirement suites persist the expected requirement-set scope and reconcile exec
 - `partial`: a requirement set or executable case is missing.
 - `conflicted`: a case belongs to another system or duplicate current compile keys exist.
 
-The reconciliation is visible from `bc_review` with `target=requirement-suite-run`.
+The reconciliation is visible from `bc_review` with `target=requirement-suite-run`. It also reports missing TestIntents, missing executable cases, superseded revisions, and unbound cases for the same knowledge project.
 
 ## Long-cycle stability
 
 Stability is evaluated with target and minimum sample counts, failure rate, consecutive failures, maximum duration, strong evidence, and blocked-run policy. A single green run remains `insufficient-sample`. When a minimum interval is configured, the next iteration is persisted with `nextRunAt` and is not started early; the next explicit `bc_run`/resume call starts it after the time is due.
 
-This is durable scheduling metadata, not a background worker. Production cron, distributed leases, and vendor-specific auth refresh remain deployment-specific extensions.
+Scheduled stability runs use an explicit claim/lease control plane. An external scheduler or host Agent can preview a due run, claim it with `suiteAction=claim-scheduled`, renew the lease during a long run, and release it with an error for retry. An expired lease can be claimed by another owner, so a crashed process does not permanently strand the run. This is still durable scheduling metadata, not a background worker; production cron and distributed storage remain deployment-specific extensions.

@@ -1,5 +1,7 @@
 import type { StabilityPolicy, StabilitySchedule } from "../domain/types.js";
 
+export class StabilityScheduleError extends Error {}
+
 type StabilityRun = {
   id: string;
   status: string;
@@ -90,5 +92,85 @@ export function nextStabilitySchedule(
   return {
     ...schedule,
     nextRunAt: new Date(now.getTime() + delay).toISOString()
+  };
+}
+
+export function isStabilityScheduleDue(
+  schedule: StabilitySchedule,
+  now = new Date()
+) {
+  if (schedule.status !== "active") return false;
+  const leaseExpired = Boolean(
+    schedule.leaseExpiresAt && Date.parse(schedule.leaseExpiresAt) <= now.getTime()
+  );
+  if (leaseExpired) return true;
+  return Boolean(
+    schedule.nextRunAt && Date.parse(schedule.nextRunAt) <= now.getTime()
+  );
+}
+
+export function claimStabilitySchedule(
+  schedule: StabilitySchedule,
+  input: { owner: string; leaseId: string; leaseMs: number },
+  now = new Date()
+): StabilitySchedule {
+  const owner = input.owner.trim();
+  if (!owner) throw new StabilityScheduleError("Schedule owner is required.");
+  const leaseMs = Math.max(1_000, Math.min(86_400_000, input.leaseMs));
+  const leaseActive = Boolean(
+    schedule.leaseExpiresAt && Date.parse(schedule.leaseExpiresAt) > now.getTime()
+  );
+  if (leaseActive && schedule.leaseOwner !== owner) {
+    throw new StabilityScheduleError("Stability schedule is leased by another owner.");
+  }
+  if (!isStabilityScheduleDue(schedule, now) && !leaseActive) {
+    throw new StabilityScheduleError("Stability schedule is not due yet.");
+  }
+  return {
+    ...schedule,
+    nextRunAt: undefined,
+    leaseId: input.leaseId,
+    leaseOwner: owner,
+    leaseExpiresAt: new Date(now.getTime() + leaseMs).toISOString(),
+    lastStartedAt: now.toISOString(),
+    lastError: undefined
+  };
+}
+
+export function renewStabilityScheduleLease(
+  schedule: StabilitySchedule,
+  input: { owner: string; leaseMs: number },
+  now = new Date()
+): StabilitySchedule {
+  if (schedule.leaseOwner !== input.owner || !schedule.leaseId) {
+    throw new StabilityScheduleError("Schedule lease is not owned by this operator.");
+  }
+  const expiresAt = schedule.leaseExpiresAt ? Date.parse(schedule.leaseExpiresAt) : NaN;
+  if (!Number.isFinite(expiresAt) || expiresAt <= now.getTime()) {
+    throw new StabilityScheduleError("Schedule lease has expired.");
+  }
+  const leaseMs = Math.max(1_000, Math.min(86_400_000, input.leaseMs));
+  return {
+    ...schedule,
+    leaseExpiresAt: new Date(now.getTime() + leaseMs).toISOString()
+  };
+}
+
+export function releaseStabilityScheduleLease(
+  schedule: StabilitySchedule,
+  input: { owner: string; nextRunAt?: string; lastError?: string },
+  now = new Date()
+): StabilitySchedule {
+  if (schedule.leaseOwner !== input.owner || !schedule.leaseId) {
+    throw new StabilityScheduleError("Schedule lease is not owned by this operator.");
+  }
+  return {
+    ...schedule,
+    nextRunAt: input.nextRunAt,
+    leaseId: undefined,
+    leaseOwner: undefined,
+    leaseExpiresAt: undefined,
+    lastStartedAt: schedule.lastStartedAt ?? now.toISOString(),
+    lastError: input.lastError
   };
 }
