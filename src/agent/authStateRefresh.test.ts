@@ -145,4 +145,18 @@ describe("auth refresh registry", () => {
       evidenceRefs: ["auth-check-cas"]
     });
   });
+
+  it("rejects duplicate provider registrations instead of making refresh order implicit", () => {
+    const registry = new AuthStateRefreshRegistry();
+    const adapter: AuthRefreshAdapter = {
+      provider: "oauth",
+      supports: () => true,
+      refresh: async () => ({ status: "needs-user" })
+    };
+
+    registry.register(adapter);
+    expect(() => registry.register(adapter)).toThrow(
+      "Authentication refresh provider is already registered: oauth"
+    );
+  });
 });
