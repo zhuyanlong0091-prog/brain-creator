@@ -51,6 +51,28 @@ describe("stability policy", () => {
 
     expect(result.verdict).toBe("unstable");
     expect(result.failureRate).toBe(0.5);
+    expect(result.thresholds.failureRateExceeded).toBe(true);
+  });
+
+  it("reports production threshold diagnostics instead of only a verdict", () => {
+    const result = evaluateStabilityPolicy(
+      [base(), base({ id: "run-blocked", status: "blocked", blocked: 1 })],
+      {
+        targetIterations: 3,
+        minIterations: 2,
+        maxDurationMs: 1,
+        stopOnBlocked: false,
+        requireStrongEvidence: true
+      },
+      { strongVerifiedRunIds: [] },
+      new Date("2026-08-17T00:02:00.000Z")
+    );
+
+    expect(result.maxDurationExceeded).toBe(true);
+    expect(result.thresholds).toEqual(expect.objectContaining({
+      blockedRunDetected: true,
+      strongEvidenceMissing: true
+    }));
   });
 
   it("provides an explicit next run time for long-cycle execution", () => {

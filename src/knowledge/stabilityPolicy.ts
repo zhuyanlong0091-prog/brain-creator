@@ -25,6 +25,13 @@ export type StabilityEvaluation = {
   failureRate: number;
   consecutiveFailures: number;
   elapsedMs: number;
+  maxDurationExceeded: boolean;
+  thresholds: {
+    failureRateExceeded: boolean;
+    consecutiveFailuresExceeded: boolean;
+    strongEvidenceMissing: boolean;
+    blockedRunDetected: boolean;
+  };
   nextRunAt?: string;
 };
 
@@ -51,19 +58,23 @@ export function evaluateStabilityPolicy(
   const firstTimestamp = runs.map((run) => Date.parse(run.createdAt)).filter(Number.isFinite).sort((a, b) => a - b)[0];
   const elapsedMs = firstTimestamp === undefined ? 0 : Math.max(0, now.getTime() - firstTimestamp);
   const maxDurationExceeded = policy.maxDurationMs !== undefined && elapsedMs > policy.maxDurationMs;
+  const failureRateExceeded = failureRate > (policy.maxFailureRate ?? 0);
+  const consecutiveFailuresExceeded = consecutiveFailures > (policy.maxConsecutiveFailures ?? Number.POSITIVE_INFINITY);
+  const strongEvidenceMissing = (policy.requireStrongEvidence ?? true) && strongVerified < completedRuns.length;
+  const blockedRunDetected = blocked > 0;
   const verdict = blocked > 0 && (policy.stopOnBlocked ?? true)
     ? "blocked"
     : maxDurationExceeded && completedRuns.length < target
       ? "exhausted"
       : completedRuns.length < minIterations
         ? "insufficient-sample"
-        : failureRate > (policy.maxFailureRate ?? 0)
+        : failureRateExceeded
           ? "unstable"
-          : consecutiveFailures > (policy.maxConsecutiveFailures ?? Number.POSITIVE_INFINITY)
+          : consecutiveFailuresExceeded
             ? "unstable"
             : completedRuns.length < target
               ? "running"
-              : (policy.requireStrongEvidence ?? true) && strongVerified < completedRuns.length
+              : strongEvidenceMissing
                 ? "unstable"
                 : "stable";
   return {
@@ -78,7 +89,14 @@ export function evaluateStabilityPolicy(
     strongVerified,
     failureRate,
     consecutiveFailures,
-    elapsedMs
+    elapsedMs,
+    maxDurationExceeded,
+    thresholds: {
+      failureRateExceeded,
+      consecutiveFailuresExceeded,
+      strongEvidenceMissing,
+      blockedRunDetected
+    }
   };
 }
 
