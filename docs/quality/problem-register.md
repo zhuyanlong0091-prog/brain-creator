@@ -101,3 +101,21 @@ met its full production acceptance condition:
 The next slice should connect a real provider implementation and a deployment-
 specific scheduler contract; it must continue to report missing provider or
 scheduler capabilities as explicit readiness gaps.
+
+## Current implementation slice
+
+The provider and scheduling slice is now implemented on the working branch:
+
+- OAuth, CAS, and SAML use a shared HTTP adapter contract and write only
+  protected Playwright storage-state paths. Credentials and protocol endpoints
+  remain AuthProfile configuration, not source-code defaults.
+- Requirement Suite scheduling can process one due iteration through the
+  `process-next-scheduled` Facade action with a lease, retry backoff, and
+  bounded one-at-a-time execution.
+- Stability evaluation now exposes threshold diagnostics for failure rate,
+  consecutive failures, strong evidence, blocked runs, and maximum duration.
+
+The remaining production boundary is operational: a real IdP/CAS/SAML tenant,
+its allowed redirect/service URLs, and an external scheduler must be supplied
+by the deployment. These adapters are not treated as proof of a successful
+login until their returned storage state is verified against the target system.

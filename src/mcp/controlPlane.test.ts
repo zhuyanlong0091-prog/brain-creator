@@ -101,7 +101,8 @@ describe("facade control plane", () => {
 
     expect(preflight.authRefresh).toEqual(expect.objectContaining({
       provider: "cas",
-      status: "needs-user"
+      status: "unavailable",
+      reason: expect.stringContaining("validateEndpoint")
     }));
     expect(preflight.nextAction).toContain("Configure the provider");
   });

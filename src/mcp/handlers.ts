@@ -28,6 +28,7 @@ import {
   type AuthRefreshAdapter,
   type AuthStateRefresher
 } from "../agent/authStateRefresh.js";
+import { createStandardAuthProviderAdapters } from "../agent/standardAuthProviders.js";
 import { BrainCreatorError, errorEnvelope, successEnvelope } from "../shared/envelope.js";
 import {
   resolveBrainCreatorDataFile,
@@ -209,6 +210,9 @@ export function createBrainCreatorMcpContext(
         resolveBrainCreatorDataFile(workDir)
       );
   const service = new BrainCreatorService(repository);
+  const configuredAuthProviders = new Set(
+    (input.authRefreshAdapters ?? []).map((adapter) => adapter.provider)
+  );
   const knowledgeService = new KnowledgeService(
     repository,
     input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir)
@@ -254,6 +258,9 @@ export function createBrainCreatorMcpContext(
       input.authRefreshRegistry ??
       createDefaultAuthRefreshRegistry(input.authStateRefresher, [
         ...(input.authRefreshAdapters ?? []),
+        ...createStandardAuthProviderAdapters().filter(
+          (adapter) => !configuredAuthProviders.has(adapter.provider)
+        ),
         ...genericAuthRefreshAdapters
       ]),
     authVerificationCache: new Map(),
@@ -2850,6 +2857,7 @@ async function controlRequirementSuite(
     | "retry"
     | "skip"
     | "claim-next-scheduled"
+    | "process-next-scheduled"
     | "claim-scheduled"
     | "renew-scheduled"
     | "release-scheduled",
@@ -2897,6 +2905,72 @@ async function controlRequirementSuite(
       requirementSuiteRun: claimed,
       nextAction: "Continue the claimed requirement suite with suiteAction=continue."
     };
+  }
+  if (action === "process-next-scheduled") {
+    const scheduleOwner = optionalStringArg(input, "scheduleOwner");
+    if (!scheduleOwner) throw new Error("scheduleOwner is required for schedule control");
+    const systemId = optionalStringArg(input, "systemId");
+    const dueRuns = context.requirementSuiteRuns
+      .listDueStabilityRuns(projectId)
+      .filter((item) => !systemId || item.systemId === systemId)
+      .sort((left, right) => left.id.localeCompare(right.id));
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        mode: "requirement-suite",
+        status: "control-preview",
+        action,
+        scheduledRuns: dueRuns.slice(0, 20),
+        scheduledRunsTruncated: dueRuns.length > 20,
+        requiresConfirmation: true,
+        nextAction: dueRuns.length > 0
+          ? "Confirm to claim and process the first due scheduled run."
+          : "No scheduled stability run is due."
+      };
+    }
+    const next = dueRuns[0];
+    if (!next) {
+      return {
+        mode: "requirement-suite",
+        status: "no-due-scheduled-run",
+        action,
+        scheduledRuns: [],
+        nextAction: "Poll again when a scheduled stability run is due."
+      };
+    }
+    const claimed = context.requirementSuiteRuns.claimScheduled(next.id, {
+      owner: scheduleOwner,
+      leaseMs: optionalNumberArg(input, "scheduleLeaseMs")
+    });
+    try {
+      const result = await executeNextRequirementSuiteCase(context, claimed.id, {
+        maxHealAttempts: optionalNumberArg(input, "maxHealAttempts")
+      });
+      return {
+        ...result,
+        action,
+        scheduleOwner,
+        scheduledRunId: claimed.id,
+        nextAction: result.status === "completed"
+          ? "The scheduled stability iteration completed. Review stability thresholds."
+          : "Renew the schedule lease while the suite is waiting, then continue the scheduled run."
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const released = context.requirementSuiteRuns.releaseScheduledLease(claimed.id, {
+        owner: scheduleOwner,
+        nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+        lastError: message
+      });
+      return {
+        mode: "requirement-suite",
+        status: "scheduled-run-failed",
+        action,
+        scheduledRunId: claimed.id,
+        requirementSuiteRun: released,
+        error: message,
+        nextAction: "Inspect the failure and retry the scheduled run after the backoff."
+      };
+    }
   }
   const suiteId = optionalStringArg(input, "suiteId");
   const systemId = optionalStringArg(input, "systemId");
@@ -8021,7 +8095,7 @@ function runModeArg(input: Record<string, unknown>, key: string) {
 
 function suiteActionArg(input: Record<string, unknown>) {
   const value = optionalStringArg(input, "suiteAction") ?? "continue";
-  if (!["continue", "cancel", "retry", "skip", "claim-next-scheduled", "claim-scheduled", "renew-scheduled", "release-scheduled"].includes(value)) {
+  if (!["continue", "cancel", "retry", "skip", "claim-next-scheduled", "process-next-scheduled", "claim-scheduled", "renew-scheduled", "release-scheduled"].includes(value)) {
     throw new Error("suiteAction is invalid");
   }
   return value as
@@ -8030,6 +8104,7 @@ function suiteActionArg(input: Record<string, unknown>) {
     | "retry"
     | "skip"
     | "claim-next-scheduled"
+    | "process-next-scheduled"
     | "claim-scheduled"
     | "renew-scheduled"
     | "release-scheduled";
@@ -8099,14 +8174,37 @@ function stabilityPolicyArg(input: Record<string, unknown>): StabilityPolicy | u
   if (!targetIterations || targetIterations < 1) {
     throw new Error("stabilityPolicy.targetIterations must be a positive number");
   }
+  const minIterations = numberValue("minIterations");
+  const maxFailureRate = numberValue("maxFailureRate");
+  const maxConsecutiveFailures = numberValue("maxConsecutiveFailures");
+  const minIntervalMs = numberValue("minIntervalMs");
+  const maxIntervalMs = numberValue("maxIntervalMs");
+  if (minIterations !== undefined && (minIterations < 1 || minIterations > targetIterations)) {
+    throw new Error("stabilityPolicy.minIterations must be between 1 and targetIterations");
+  }
+  if (maxFailureRate !== undefined && (maxFailureRate < 0 || maxFailureRate > 1)) {
+    throw new Error("stabilityPolicy.maxFailureRate must be between 0 and 1");
+  }
+  if (maxConsecutiveFailures !== undefined && maxConsecutiveFailures < 0) {
+    throw new Error("stabilityPolicy.maxConsecutiveFailures must not be negative");
+  }
+  if (minIntervalMs !== undefined && minIntervalMs < 0) {
+    throw new Error("stabilityPolicy.minIntervalMs must not be negative");
+  }
+  if (maxIntervalMs !== undefined && maxIntervalMs < 0) {
+    throw new Error("stabilityPolicy.maxIntervalMs must not be negative");
+  }
+  if (minIntervalMs !== undefined && maxIntervalMs !== undefined && maxIntervalMs < minIntervalMs) {
+    throw new Error("stabilityPolicy.maxIntervalMs must be greater than or equal to minIntervalMs");
+  }
   return {
     targetIterations,
-    minIterations: numberValue("minIterations"),
+    minIterations,
     maxDurationMs: numberValue("maxDurationMs"),
-    maxFailureRate: numberValue("maxFailureRate"),
-    maxConsecutiveFailures: numberValue("maxConsecutiveFailures"),
-    minIntervalMs: numberValue("minIntervalMs"),
-    maxIntervalMs: numberValue("maxIntervalMs"),
+    maxFailureRate,
+    maxConsecutiveFailures,
+    minIntervalMs,
+    maxIntervalMs,
     requireStrongEvidence: typeof candidate.requireStrongEvidence === "boolean"
       ? candidate.requireStrongEvidence
       : undefined,
