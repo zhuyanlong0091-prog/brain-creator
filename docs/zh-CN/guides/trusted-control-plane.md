@@ -93,6 +93,14 @@ System Brain 证据缺失或歧义时会创建 `ExplorationTask`，它不是最�
 
 解决成功后自动重新编译对应 TestIntent。标记失败时必须提供原因，并创建 `system-brain-exploration` Gap；取消只记录决定，不伪造阻塞。
 
+## 授权状态化探索
+
+只读探索无法发现仅在新建、提交、审批、驳回或关闭后出现的控件。此时从一个或多个待处理 ExplorationTask 创建 `ExplorationPlan`，明确鉴权角色、允许路由、授权动作、写次数、时长和清理策略。
+
+依次调用 `bc_prepare action=create-exploration-plan`、预览 `approve-exploration-plan`，再携带人工说明和确认人一次批准。Brain Creator 会拒绝生产环境、未验证或跨系统角色、allowlist 外 URL、危险动作和超预算结果。`start-exploration-plan` 返回受限的宿主 Agent 工作包；测试数据未就绪时先返回 `needs-data`。
+
+浏览器操作完成后，通过 `submit-exploration-result` 回传逐动作来源，以及 PageModel、SystemExploration 或 TrainingSession 证据。清理策略为 `delete` 或 `close` 时，创建的数据必须先释放；否则方案 blocked 并创建高优先级 Gap。成功回传会刷新 System Brain、解决关联 ExplorationTask，并自动续编。使用 `bc_review target=exploration-plan` 复盘；用户拒绝写操作时使用 `cancel-exploration-plan`。
+
 ## 安全处理 Gap
 
 使用 `resolve-gap`、`dismiss-gap` 或 `reopen-gap`。先以 `confirm=false` 预览，再使用 `confirm=true`、非空 `confirmationNote` 和 `evidenceRefs` 确认。

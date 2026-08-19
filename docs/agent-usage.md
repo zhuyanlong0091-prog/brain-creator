@@ -75,6 +75,8 @@ Brain Creator selects the target page from semantic and role-compatible evidence
 
 After navigation planning, Brain Creator evaluates generic `SystemBrainStateTransition` evidence and returns `stateActions`/`statePlan`. A single relevant transition may enrich an existing click/select step or insert one observed step before its assertion, including the captured input value and LocatorPoint. Equal transitions, multiple reusable source steps, missing values, or missing locators become `ambiguous` or `needs-exploration`. Only an explicitly failed exploration creates a `system-brain-exploration` Gap. Business examples are validation fixtures only and must never become planner conditionals.
 
+When evidence requires real writes or role transitions, do not misuse `interactionMode=safe`. Create an `ExplorationPlan` for the pending tasks, show its roles, routes, actions, data policy, write/time budgets, and cleanup policy, then call `approve-exploration-plan confirm=true` only once the user approves the whole plan. Run `start-exploration-plan`; complete any returned test-data tasks before the host Agent executes the work package. Submit exact action evidence through `submit-exploration-result`. Brain Creator validates every action against the approved plan, refreshes System Brain, and resumes compilation. Review with `bc_review target=exploration-plan`; cancel an unstarted plan when approval is declined.
+
 ### 7. Plan Test Data
 
 Compilation returns `testDataPlan`/`dataPlan` for profiles linked to the current TestIntent only. The plan records dependency order, proposed values, lookup queries, reuse/create decisions, secret references, and cleanup policy. Generated candidates remain visible for suite confirmation.
