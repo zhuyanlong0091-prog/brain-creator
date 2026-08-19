@@ -40,9 +40,13 @@ Brain Creator should present:
 - TestDataProfiles and unresolved data dependencies;
 - Requirement Eval coverage and required actions.
 
+Confirmed visual process evidence is materialized as `WorkflowModel` and `StateMachineModel`. Every transition keeps an attachment edge source reference. State models produce positive transition coverage plus missing-prerequisite, role-mismatch, and undefined-transition negative intents where applicable. Cross-role workflows produce an Actor Journey. `RequirementCoverageProfile` reconciles field, workflow, state, permission, and integration references against generated intents.
+
+Critical flow or state attachments must be analyzed and confirmed before the baseline can be approved. Discovery alone does not create a Gap, but it does prevent Brain Creator from claiming complete requirement coverage. Re-running test design after confirmation uses a new input fingerprint and supersedes the earlier field-only draft.
+
 Answer clarifying questions with durable business evidence. Clarifications and missing branches can be confirmed with a note. Direct contradictions require revising the source or baseline.
 
-**Verify:** every TestIntent references at least one requirement clause. Unsupported claims remain visible instead of being treated as facts.
+**Verify:** every TestIntent references at least one requirement clause or confirmed attachment edge. Unsupported claims remain visible instead of being treated as facts. `bc_review target=coverage` shows the process models and per-dimension missing references.
 
 ## 3. Approve The Baseline
 

@@ -36,6 +36,8 @@ For Feishu, Brain Creator uses direct OpenAPI when environment credentials are c
 
 If the source contains images, call `bc_prepare action=analyze-attachments` with the returned `requirementSourceId` before generating test design. Brain Creator downloads each attachment to a controlled local path. When the response is `needs-host-vision`, inspect every `recognitionRequests[].localPath` with the host multimodal capability and submit the schema-valid result through `submit-attachment-analysis`. Present the draft to the user, then call `confirm-attachment-analysis confirm=true` only after explicit confirmation. Discovery alone is not a failure: a Gap is allowed only after the recorded download or recognition retries are exhausted.
 
+After confirmation, run `generate-test-design` again. The design fingerprint includes confirmed attachment analyses, so an earlier draft is rebuilt with WorkflowModel/StateMachineModel clauses, transition tests, negative state tests, Actor Journeys, and dimension coverage. Do not approve a baseline while `unconfirmed-attachment` or `missing-process-coverage` is blocked.
+
 ### 3. Analyze And Design
 
 The Agent calls `bc_prepare action=generate-test-design` and presents:

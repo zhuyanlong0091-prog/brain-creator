@@ -135,19 +135,30 @@ describe("ShardedFileBrainCreatorRepository", () => {
     expect(() => repository.reload()).toThrow(/shard gaps is missing/);
   });
 
-  it("restores an earlier schema 17 store that predates the attachment analysis shard", async () => {
+  it("restores an earlier schema 17 store that predates optional requirement analysis shards", async () => {
     const root = await tempDir();
     const storeDir = join(root, "store");
     new ShardedFileBrainCreatorRepository(storeDir, join(root, "legacy.json"));
     const manifestPath = join(storeDir, "manifest.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.collections = manifest.collections.filter((key: string) => key !== "attachmentAnalyses");
+    const optional = [
+      "attachmentAnalyses",
+      "workflowModels",
+      "stateMachineModels",
+      "requirementCoverageProfiles"
+    ];
+    manifest.collections = manifest.collections.filter((key: string) => !optional.includes(key));
     await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
-    await rm(join(storeDir, "collections", "attachmentAnalyses.json"));
+    await Promise.all(
+      optional.map((key) => rm(join(storeDir, "collections", `${key}.json`)))
+    );
 
     const restored = new ShardedFileBrainCreatorRepository(storeDir, join(root, "legacy.json"));
 
     expect(restored.attachmentAnalyses).toEqual([]);
+    expect(restored.workflowModels).toEqual([]);
+    expect(restored.stateMachineModels).toEqual([]);
+    expect(restored.requirementCoverageProfiles).toEqual([]);
   });
 
   it("projects all system-owned assets without mixing two systems", async () => {

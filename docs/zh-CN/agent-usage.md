@@ -24,6 +24,8 @@ Agent 通过 `bc_configure target=knowledge-project` 创建知识项目，此时
 
 来源包含图片时，生成测试设计前必须使用返回的 `requirementSourceId` 调用 `bc_prepare action=analyze-attachments`。Brain Creator 先把附件下载到受控本地路径；返回 `needs-host-vision` 时，宿主使用多模态能力读取每个 `recognitionRequests[].localPath`，再通过 `submit-attachment-analysis` 提交符合 schema 的结构化结果。结果保持 draft，展示给用户并明确确认后，才能调用 `confirm-attachment-analysis confirm=true`。仅发现附件不是失败，只有已记录的下载或识别重试耗尽后才能创建 Gap。
 
+确认后再次执行 `generate-test-design`。设计指纹包含已确认的附件分析，旧草稿会重建为包含 WorkflowModel/StateMachineModel 条款、状态正负向用例、Actor Journey 和五维覆盖的版本。存在 blocked 的 `unconfirmed-attachment` 或 `missing-process-coverage` 时不得批准基线。
+
 ### 3. 分析与测试设计
 
 `bc_prepare action=generate-test-design` 返回模块、角色、字段、规则、流程、状态、权限、集成、来源引用、置信度、风险、TestIntent、TestDataProfile 和 Gap。

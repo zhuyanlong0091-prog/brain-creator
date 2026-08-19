@@ -38,6 +38,7 @@ import type {
   PageBindingDecision,
   ProbeResult,
   RequirementSet,
+  RequirementCoverageProfile,
   RequirementSuiteRun,
   RunLedgerEntry,
   RequirementSource,
@@ -47,12 +48,20 @@ import type {
   TestDataProfile,
   TestDataTask,
   TestIntent,
+  WorkflowModel,
+  StateMachineModel,
   TestCase,
   TrainingSession
 } from "./types.js";
 
 export const CURRENT_REPOSITORY_SCHEMA_VERSION = 16;
 export const SHARDED_REPOSITORY_SCHEMA_VERSION = 17;
+const OPTIONAL_SCHEMA_17_COLLECTIONS = new Set([
+  "attachmentAnalyses",
+  "workflowModels",
+  "stateMachineModels",
+  "requirementCoverageProfiles"
+]);
 
 export function shardedRepositoryCollectionKeys() {
   return collectionKeys();
@@ -86,6 +95,9 @@ export class InMemoryBrainCreatorRepository {
   requirementSources: RequirementSource[] = [];
   attachmentAnalyses: AttachmentAnalysis[] = [];
   requirementSets: RequirementSet[] = [];
+  workflowModels: WorkflowModel[] = [];
+  stateMachineModels: StateMachineModel[] = [];
+  requirementCoverageProfiles: RequirementCoverageProfile[] = [];
   knowledgeNodes: KnowledgeNode[] = [];
   knowledgeEdges: KnowledgeEdge[] = [];
   testIntents: TestIntent[] = [];
@@ -137,6 +149,9 @@ export class InMemoryBrainCreatorRepository {
     this.requirementSources = [];
     this.attachmentAnalyses = [];
     this.requirementSets = [];
+    this.workflowModels = [];
+    this.stateMachineModels = [];
+    this.requirementCoverageProfiles = [];
     this.knowledgeNodes = [];
     this.knowledgeEdges = [];
     this.testIntents = [];
@@ -185,6 +200,9 @@ export type RepositorySnapshot = Pick<
   | "requirementSources"
   | "attachmentAnalyses"
   | "requirementSets"
+  | "workflowModels"
+  | "stateMachineModels"
+  | "requirementCoverageProfiles"
   | "knowledgeNodes"
   | "knowledgeEdges"
   | "testIntents"
@@ -294,7 +312,9 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
       const rawCollections = manifest.collections;
       const collections = Array.isArray(rawCollections) ? rawCollections : [];
       const expectedCollections = collectionKeys();
-      const requiredCollections = expectedCollections.filter((key) => key !== "attachmentAnalyses");
+      const requiredCollections = expectedCollections.filter(
+        (key) => !OPTIONAL_SCHEMA_17_COLLECTIONS.has(key)
+      );
       if (
         !Array.isArray(rawCollections) ||
         requiredCollections.some((key) => !collections.includes(key)) ||
@@ -403,6 +423,9 @@ function snapshotRepository(
     requirementSources: repository.requirementSources,
     attachmentAnalyses: repository.attachmentAnalyses,
     requirementSets: repository.requirementSets,
+    workflowModels: repository.workflowModels,
+    stateMachineModels: repository.stateMachineModels,
+    requirementCoverageProfiles: repository.requirementCoverageProfiles,
     knowledgeNodes: repository.knowledgeNodes,
     knowledgeEdges: repository.knowledgeEdges,
     testIntents: repository.testIntents,
@@ -469,6 +492,9 @@ function applyRepositorySnapshot(
     repository.requirementSources = snapshot.requirementSources ?? [];
     repository.attachmentAnalyses = snapshot.attachmentAnalyses ?? [];
     repository.requirementSets = snapshot.requirementSets ?? [];
+    repository.workflowModels = snapshot.workflowModels ?? [];
+    repository.stateMachineModels = snapshot.stateMachineModels ?? [];
+    repository.requirementCoverageProfiles = snapshot.requirementCoverageProfiles ?? [];
     repository.knowledgeNodes = snapshot.knowledgeNodes ?? [];
     repository.knowledgeEdges = snapshot.knowledgeEdges ?? [];
     repository.testIntents = snapshot.testIntents ?? [];
@@ -528,7 +554,8 @@ function collectionKeys(): Array<Exclude<keyof RepositorySnapshot, "schemaVersio
     "locatorPoints", "probeResults", "trainingSessions", "actionSteps", "apiFlows",
     "generatedCases", "gaps", "glossaryTerms", "businessRules", "testCases", "agentRuns",
     "agentTasks", "chainRuns", "caseSources", "caseSuites", "caseSuiteRuns", "bugReports",
-    "knowledgeProjects", "requirementSources", "attachmentAnalyses", "requirementSets", "knowledgeNodes",
+    "knowledgeProjects", "requirementSources", "attachmentAnalyses", "requirementSets", "workflowModels",
+    "stateMachineModels", "requirementCoverageProfiles", "knowledgeNodes",
     "knowledgeEdges", "testIntents", "testDataProfiles", "testDataTasks", "testDataLeases",
     "executableCases", "executionPlans", "requirementSuiteRuns", "executionEvidence",
     "executionDiagnoses", "executionDiagnosisReviews", "runLedgerEntries", "compileRuns",
@@ -547,7 +574,7 @@ function readShardedSnapshot(collectionsDir: string): Partial<RepositorySnapshot
   for (const key of collectionKeys()) {
     const filePath = join(collectionsDir, `${key}.json`);
     if (!existsSync(filePath)) {
-      if (key === "attachmentAnalyses") {
+      if (OPTIONAL_SCHEMA_17_COLLECTIONS.has(key)) {
         snapshot[key] = [];
         continue;
       }
@@ -631,6 +658,9 @@ function systemAssets(repository: InMemoryBrainCreatorRepository, systemId: stri
     requirementSources: repository.requirementSources.filter((item) => knowledgeProjectIds.has(item.knowledgeProjectId)),
     attachmentAnalyses: repository.attachmentAnalyses.filter((item) => knowledgeProjectIds.has(item.knowledgeProjectId)),
     requirementSets: repository.requirementSets.filter((item) => requirementSetIds.has(item.id)),
+    workflowModels: repository.workflowModels.filter((item) => requirementSetIds.has(item.requirementSetId)),
+    stateMachineModels: repository.stateMachineModels.filter((item) => requirementSetIds.has(item.requirementSetId)),
+    requirementCoverageProfiles: repository.requirementCoverageProfiles.filter((item) => requirementSetIds.has(item.requirementSetId)),
     knowledgeNodes: repository.knowledgeNodes.filter((item) => visibleKnowledgeNodeIds.has(item.id)),
     knowledgeEdges: repository.knowledgeEdges.filter(
       (item) => visibleKnowledgeNodeIds.has(item.fromNodeId) && visibleKnowledgeNodeIds.has(item.toNodeId)
@@ -674,6 +704,8 @@ function buildAssetIndex(repository: InMemoryBrainCreatorRepository) {
     ...repository.bugReports.map((item) => ({ id: item.id, type: "bug-report", systemId: item.systemId, label: item.caseNo })),
     ...repository.requirementSets.map((item) => ({ id: item.id, type: "requirement-set", projectId: item.knowledgeProjectId, label: item.title })),
     ...repository.attachmentAnalyses.map((item) => ({ id: item.id, type: "attachment-analysis", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.kind })),
+    ...repository.workflowModels.map((item) => ({ id: item.id, type: "workflow-model", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
+    ...repository.stateMachineModels.map((item) => ({ id: item.id, type: "state-machine-model", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
     ...repository.testIntents.map((item) => ({ id: item.id, type: "test-intent", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
     ...repository.executableCases.map((item) => ({ id: item.id, type: "executable-case", systemId: item.systemId, requirementSetId: item.requirementSetId, testIntentId: item.testIntentId, label: item.title })),
     ...repository.executionEvidence.map((item) => ({ id: item.id, type: "execution-evidence", systemId: item.systemId, executableCaseId: item.executableCaseId, requirementSetId: executableCaseById.get(item.executableCaseId)?.requirementSetId, label: item.id })),

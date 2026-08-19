@@ -73,7 +73,7 @@ When the user provides a requirement path or URL:
 2. Call `bc_prepare action=ingest-requirement` with the source.
 3. If the source has attachments, call `bc_prepare action=analyze-attachments`. Use the host multimodal capability for every returned local path, submit schema-valid visual analysis, present the draft, and confirm it only after explicit user approval. Never create an attachment Gap before download or recognition retries are attempted.
 4. Call `bc_prepare action=generate-test-design` using `provider=builtin` by default.
-5. Present atomic clauses and their source anchors, typed coverage, unsupported claims, contradictions, missing branches, risks, test techniques, TestIntents, and TestDataProfiles. Do not collapse the result into one broad requirement summary.
+5. Present atomic clauses and their source anchors, WorkflowModel/StateMachineModel transitions, five-dimension coverage, unsupported claims, contradictions, missing branches, risks, test techniques, TestIntents, and TestDataProfiles. Re-run test design after confirming visual analysis; its fingerprint must invalidate an earlier field-only draft. Do not collapse the result into one broad requirement summary.
 6. Present each pending Eval action. For clarification or a missing branch, call `bc_prepare action=confirm-eval-actions confirm=true` with the selected `actionIds` and the user's non-empty `confirmationNote`. Never infer or fabricate that note.
 7. A blocked contradiction cannot be confirmed. Ask the user to revise or refresh the requirement source, then regenerate the design.
 8. Only after the Eval gate passes, call `bc_prepare action=approve-baseline confirm=true`.

@@ -44,6 +44,8 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 
 需求中的图片属于正文内容。Brain Creator 会先登记并下载 Markdown、DOCX、PDF、HTTP 或飞书附件，再把受控本地文件交给 Claude Code/Codex 的多模态能力；结构化结果需由用户确认后才能进入需求知识。只有下载或识别重试确实失败后才创建附件 Gap，不能因为“尚未识别”直接跳过流程图或状态机。
 
+已确认的流程图和状态机不会只保留为图片摘要：Brain Creator 会生成可追踪的 `WorkflowModel`、`StateMachineModel` 和五维 `RequirementCoverageProfile`，并为每条状态转换生成正向与必要的负向 TestIntent。关键流程附件未确认、流程/状态覆盖缺失或字段用例挤占流程覆盖时，Requirement Eval 会阻止“需求覆盖完整”的结论。可通过 `bc_review target=coverage` 查看模型、来源边和缺失覆盖。
+
 完整步骤见[快速开始](docs/getting-started.md)。安装失败时先看[故障排查](docs/troubleshooting.md)。
 
 ### 工作方式
@@ -138,6 +140,8 @@ Use Brain Creator to analyze this requirement document, generate traceable test 
 The first response should contain a requirement summary, source references, open questions, coverage, and a recommended next step. It should not execute tests before approval.
 
 Images are requirement content. Brain Creator discovers and downloads Markdown, DOCX, PDF, HTTP, and Feishu attachments, then hands controlled local files to the Claude Code or Codex multimodal host. Structured output remains draft until the user confirms it. An attachment Gap is created only after download or recognition retries actually fail, never merely because an image has not been analyzed yet.
+
+Confirmed flowcharts and state machines are not left as image summaries. Brain Creator materializes traceable `WorkflowModel`, `StateMachineModel`, and five-dimension `RequirementCoverageProfile` assets, then generates positive and required negative TestIntents for state transitions. Requirement Eval blocks any claim of complete coverage while critical process evidence is unconfirmed or workflow/state coverage is missing. Review the models, source edges, and missing coverage with `bc_review target=coverage`.
 
 Continue with the [Quickstart](docs/getting-started.md), or go directly to [Troubleshooting](docs/troubleshooting.md) if setup fails.
 
