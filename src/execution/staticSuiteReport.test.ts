@@ -52,7 +52,23 @@ describe("static suite execution report", () => {
         requirementRefs: ["requirement:timeout"]
       }],
       bugs: [{ id: "bug-1", status: "open", actualResult: "Unexpected value" }],
-      gaps: [{ id: "gap-1", status: "open", reason: "Missing role evidence" }]
+      gaps: [{ id: "gap-1", status: "open", reason: "Missing role evidence" }],
+      progress: {
+        current: {
+          sequence: 3,
+          runId: "suite-1",
+          caseTitle: "Approve order",
+          stage: "execution",
+          stepTitle: "Submit approval",
+          status: "running",
+          pageUrl: "https://orders.example.test/approval",
+          elapsedMs: 1250,
+          traceId: "trace-1",
+          createdAt: "2026-08-19T00:00:01.000Z"
+        },
+        possiblyStalled: false,
+        stalledAfterMs: 120000
+      }
     });
 
     expect(html).toContain("Orders &lt;suite&gt;");
@@ -70,6 +86,9 @@ describe("static suite execution report", () => {
     expect(html).toContain("TestIntent coverage");
     expect(html).toContain("strong-verified");
     expect(html).toContain("Auth checkpoint required.");
+    expect(html).toContain("Current progress");
+    expect(html).toContain("Submit approval");
+    expect(html).toContain("orders.example.test/approval");
   });
 
   it("keeps blocked and queued cases visible in the same report", () => {

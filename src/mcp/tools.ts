@@ -1,5 +1,11 @@
 import { z } from "zod";
-import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CallToolResult,
+  ServerNotification,
+  ServerRequest,
+  ToolAnnotations
+} from "@modelcontextprotocol/sdk/types.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 
 export type BrainCreatorToolName =
   | "bc_command"
@@ -70,8 +76,16 @@ type RegisterableMcpServer = {
       inputSchema?: z.ZodObject<z.ZodRawShape>;
       annotations?: ToolAnnotations;
     },
-    handler: (input: Record<string, unknown>) => Promise<CallToolResult>
+    handler: (
+      input: Record<string, unknown>,
+      extra: RequestHandlerExtra<ServerRequest, ServerNotification>
+    ) => Promise<CallToolResult>
   ) => unknown;
+};
+
+export type BrainCreatorToolRequest = {
+  progressToken?: string | number;
+  sendNotification?: (notification: ServerNotification) => Promise<void>;
 };
 
 export type BrainCreatorToolProfile = "facade" | "full";
@@ -504,6 +518,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       provider: z.string().optional(),
       sessionId: z.string().optional(),
       evidenceMode: z.enum(["strict", "compatibility"]).optional(),
+      observationMode: z.enum(["summary", "step-by-step"]).default("summary"),
       responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
@@ -1001,7 +1016,11 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
 
 export function registerBrainCreatorTools(
   server: RegisterableMcpServer,
-  handler: (name: BrainCreatorToolName, input: Record<string, unknown>) => Promise<CallToolResult>,
+  handler: (
+    name: BrainCreatorToolName,
+    input: Record<string, unknown>,
+    request?: BrainCreatorToolRequest
+  ) => Promise<CallToolResult>,
   profile: BrainCreatorToolProfile = "full"
 ) {
   for (const tool of BRAIN_CREATOR_TOOLS.filter(
@@ -1017,7 +1036,10 @@ export function registerBrainCreatorTools(
           ? READ_ONLY_TOOL_ANNOTATIONS
           : undefined
       },
-      (input) => handler(tool.name, input)
+      (input, extra) => handler(tool.name, input, {
+        progressToken: extra._meta?.progressToken,
+        sendNotification: extra.sendNotification
+      })
     );
   }
 }

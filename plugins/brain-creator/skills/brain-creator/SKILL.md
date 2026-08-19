@@ -154,6 +154,8 @@ If a confirmed migration was wrong, preview `bc_prepare action=rollback-legacy-d
 
 Requirement and Document Suites share `bc_review target=run-ledger`. Use `knowledgeProjectId` for Requirement Suite timelines and `systemId` for Excel/Markdown Document Suite timelines. Routine status stays bounded; request a full ledger only for progress diagnosis or audit.
 
+Use `observationMode=summary` for normal `bc_run` calls. Use `step-by-step` only when the user asks to watch detailed execution. MCP Progress Notifications are best-effort; always treat the ordered Run Ledger as the recovery source. Report the current case, step, page, elapsed time, wait reason, and `possiblyStalled` warning from `bc_status`. A stalled warning is not a failed assertion. Point the user to the incrementally updated offline Suite report for assurance, screenshots, traces, Bugs, and Gaps.
+
 ## System
 
 - Use `bc_list_systems` only in full-profile discovery or debugging.

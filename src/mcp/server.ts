@@ -22,7 +22,7 @@ export function createBrainCreatorServer(
 
   registerBrainCreatorTools(
     server,
-    (name, input) => handleBrainCreatorTool(context, name, input),
+    (name, input, request) => handleBrainCreatorTool(context, name, input, request),
     profile
   );
 

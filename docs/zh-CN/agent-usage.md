@@ -127,6 +127,12 @@ Codex 插件默认使用 `host-agent`。出现 `needs_agent_execution` 时：
 用 Brain Creator 恢复上次会话，告诉我当前阻塞和下一步。
 ```
 
+## 执行可见性
+
+`bc_run` 默认使用 `observationMode=summary`，每次操作返回一条有界进度；用户明确要求逐步观察时使用 `observationMode=step-by-step`。宿主提供 MCP progress token 时，Brain Creator 会发送尽力而为的 Progress Notification；宿主不支持通知或连接中断时，带序号的 Run Ledger 仍是权威恢复来源。
+
+`bc_status` 会显示当前用例、步骤、页面、耗时、最后更新时间、等待原因和 `possiblyStalled`。卡住告警只表示超过更新时间阈值，不会把用例自动判为失败。每条用例结束后，Brain Creator 都会增量更新运行目录中的离线 `suite-report.html`，无需等到整个 Suite 终态。
+
 ## 套件控制
 
 - 取消：先预览 `suiteAction=cancel`，再显式确认。保留已完成结果和数据清理义务。
