@@ -42,6 +42,8 @@ npx brain-creator plugin install
 
 Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖情况和下一步，而不是直接运行测试。
 
+需求中的图片属于正文内容。Brain Creator 会先登记并下载 Markdown、DOCX、PDF、HTTP 或飞书附件，再把受控本地文件交给 Claude Code/Codex 的多模态能力；结构化结果需由用户确认后才能进入需求知识。只有下载或识别重试确实失败后才创建附件 Gap，不能因为“尚未识别”直接跳过流程图或状态机。
+
 完整步骤见[快速开始](docs/getting-started.md)。安装失败时先看[故障排查](docs/troubleshooting.md)。
 
 ### 工作方式
@@ -134,6 +136,8 @@ Use Brain Creator to analyze this requirement document, generate traceable test 
 ```
 
 The first response should contain a requirement summary, source references, open questions, coverage, and a recommended next step. It should not execute tests before approval.
+
+Images are requirement content. Brain Creator discovers and downloads Markdown, DOCX, PDF, HTTP, and Feishu attachments, then hands controlled local files to the Claude Code or Codex multimodal host. Structured output remains draft until the user confirms it. An attachment Gap is created only after download or recognition retries actually fail, never merely because an image has not been analyzed yet.
 
 Continue with the [Quickstart](docs/getting-started.md), or go directly to [Troubleshooting](docs/troubleshooting.md) if setup fails.
 

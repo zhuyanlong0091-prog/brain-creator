@@ -47,11 +47,18 @@ import { planWorkflowPath } from "./workflowPathPlanner.js";
 import { buildAssertionContracts, determineAssuranceLevel, missingAssuranceEvidence } from "../execution/assurance.js";
 import { writeStaticExecutionReport } from "../execution/staticReport.js";
 import { decryptSecrets } from "../shared/crypto.js";
+import {
+  RequirementAttachmentPipeline,
+  type AttachmentAnalysisDraft,
+  type RequirementAttachmentDownloader,
+  type RequirementVisualAnalyzer
+} from "./attachmentPipeline.js";
 
 export class KnowledgeService {
   constructor(
     private readonly repository: InMemoryBrainCreatorRepository,
-    private readonly knowledgeDir: string
+    private readonly knowledgeDir: string,
+    private readonly sourceBaseDir = process.cwd()
   ) {}
 
   async createProject(input: { name: string; key: string; defaultLocale: string }) {
@@ -107,8 +114,12 @@ export class KnowledgeService {
     }
 
     const now = timestamp();
+    const normalizedAttachments = normalizeRequirementAttachments(
+      existingSource?.id ?? id("requirementSource"),
+      input.contentPackage.attachments
+    );
     const source: RequirementSource = existingSource ?? {
-      id: id("requirementSource"),
+      id: normalizedAttachments.sourceId,
       knowledgeProjectId: project.id,
       source: input.contentPackage.source,
       sourceType: input.contentPackage.sourceType,
@@ -116,7 +127,7 @@ export class KnowledgeService {
       contentHash: input.contentPackage.contentHash,
       content: input.contentPackage.content,
       blocks: input.contentPackage.blocks,
-      attachments: input.contentPackage.attachments,
+      attachments: normalizedAttachments.attachments,
       warnings: input.contentPackage.warnings,
       accessStatus: "available",
       revision: 0,
@@ -134,7 +145,7 @@ export class KnowledgeService {
       contentHash: input.contentPackage.contentHash,
       content: input.contentPackage.content,
       blocks: input.contentPackage.blocks,
-      attachments: input.contentPackage.attachments,
+      attachments: normalizeRequirementAttachments(source.id, input.contentPackage.attachments).attachments,
       warnings: input.contentPackage.warnings,
       revision: source.revision + 1,
       updatedAt: now
@@ -156,14 +167,7 @@ export class KnowledgeService {
     };
     source.latestRequirementSetId = requirementSet.id;
     this.repository.requirementSets.push(requirementSet);
-    const gaps = input.contentPackage.warnings.map((warning) =>
-      this.createGap(
-        project.id,
-        requirementSet.id,
-        `Requirement source warning: ${warning}`,
-        "requirement-source-warning"
-      )
-    );
+    const gaps: Gap[] = [];
     this.repository.persist();
     await this.writeRequirement(project, source, requirementSet);
     await this.writeProjectIndex(project);
@@ -174,6 +178,41 @@ export class KnowledgeService {
       changed: true,
       previousRequirementSetId: existingSet?.id
     };
+  }
+
+  async prepareRequirementAttachments(input: {
+    sourceId: string;
+    attachmentIds?: string[];
+    fetcher?: typeof fetch;
+    downloader?: RequirementAttachmentDownloader;
+    analyzer?: RequirementVisualAnalyzer;
+  }) {
+    return new RequirementAttachmentPipeline(
+      this.repository,
+      this.knowledgeDir,
+      this.sourceBaseDir
+    ).prepare(input);
+  }
+
+  submitRequirementAttachmentAnalysis(input: {
+    sourceId: string;
+    attachmentId: string;
+    provider: "host-agent" | "adapter";
+    result: AttachmentAnalysisDraft;
+  }) {
+    return new RequirementAttachmentPipeline(
+      this.repository,
+      this.knowledgeDir,
+      this.sourceBaseDir
+    ).submit(input);
+  }
+
+  confirmRequirementAttachmentAnalysis(input: { analysisId: string; confirmedBy?: string }) {
+    return new RequirementAttachmentPipeline(
+      this.repository,
+      this.knowledgeDir,
+      this.sourceBaseDir
+    ).confirm(input);
   }
 
   listRequirementSets(projectId: string) {
@@ -1005,12 +1044,16 @@ export class KnowledgeService {
         contentHash: source.contentHash,
         blockCount: source.blocks.length,
         attachmentCount: source.attachments.length,
-        unreadAttachments: source.attachments.map((attachment) => ({
+        unreadAttachments: source.attachments
+          .filter((attachment) => attachment.status !== "confirmed")
+          .map((attachment) => ({
+          id: attachment.id,
           name: attachment.name,
           url: attachment.url,
           type: attachment.type,
-          status: "unread" as const,
-          reason: "No OCR or visual adapter has analyzed this attachment yet."
+          status: attachment.status ?? "discovered",
+          attempts: attachment.attempts ?? 0,
+          reason: attachment.failureReason ?? "Visual content has not been confirmed yet."
         })),
         requirementSetCount: sets.length,
         nodeCount: nodes.length,
@@ -2275,6 +2318,26 @@ function executableCaseCompileKey(
 
 function timestamp() {
   return new Date().toISOString();
+}
+
+function normalizeRequirementAttachments(
+  sourceId: string,
+  attachments: RequirementContentPackage["attachments"]
+) {
+  return {
+    sourceId,
+    attachments: attachments.map((attachment) => ({
+      ...attachment,
+      id: id("requirementAttachment"),
+      sourceId,
+      status: "discovered" as const,
+      localPath: undefined,
+      attempts: 0,
+      recognitionAttempts: 0,
+      analysisId: undefined,
+      failureReason: undefined
+    }))
+  };
 }
 
 function executionSecretRedactor(

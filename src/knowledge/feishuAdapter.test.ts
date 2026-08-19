@@ -21,6 +21,7 @@ describe("FeishuOpenApiAdapter", () => {
             items: [
               block(3, "Order Approval"),
               block(2, "Orders above 1000 require manager approval."),
+              { block_type: 27, block_id: "image-1", image: { token: "image-token" } },
               { block_type: 31, block_id: "table-1", table: {} }
             ],
             has_more: true,
@@ -41,9 +42,59 @@ describe("FeishuOpenApiAdapter", () => {
     expect(result.title).toBe("Order PRD");
     expect(result.content).toContain("Approved orders are read-only");
     expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining("table")]));
+    expect(result.attachments).toEqual([
+      expect.objectContaining({
+        blockId: "image-1",
+        fileToken: "image-token",
+        status: "discovered"
+      })
+    ]);
     expect(fetcher).toHaveBeenCalledTimes(5);
     expect(fetcher.mock.calls[0][1]?.body).toContain("app-secret");
     expect(JSON.stringify(result)).not.toContain("app-secret");
+  });
+
+  it("downloads Feishu media by stable file token instead of persisting an expiring URL", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ code: 0, tenant_access_token: "tenant-token", expire: 7200 }))
+      .mockResolvedValueOnce(
+        new Response(Buffer.from("image"), {
+          status: 200,
+          headers: { "content-type": "image/png" }
+        })
+      );
+    const adapter = new FeishuOpenApiAdapter({ appId: "app-id", appSecret: "app-secret", fetcher });
+
+    const result = await adapter.downloadAttachment({
+      name: "diagram",
+      fileToken: "image-token",
+      status: "discovered",
+      attempts: 0
+    });
+
+    expect(result.data.toString()).toBe("image");
+    expect(result.mimeType).toBe("image/png");
+    expect(String(fetcher.mock.calls[1][0])).toContain("/drive/v1/medias/image-token/download");
+  });
+
+  it("refreshes Feishu credentials after a rejected media request", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ code: 0, tenant_access_token: "expired-token", expire: 7200 }))
+      .mockResolvedValueOnce(new Response("expired", { status: 401 }))
+      .mockResolvedValueOnce(json({ code: 0, tenant_access_token: "fresh-token", expire: 7200 }))
+      .mockResolvedValueOnce(new Response(Buffer.from("image"), { status: 200 }));
+    const adapter = new FeishuOpenApiAdapter({ appId: "app-id", appSecret: "app-secret", fetcher });
+    const attachment = { name: "diagram", fileToken: "image-token", status: "discovered" as const, attempts: 0 };
+
+    await expect(adapter.downloadAttachment(attachment)).rejects.toThrow("HTTP 401");
+    await expect(adapter.downloadAttachment(attachment)).resolves.toEqual(
+      expect.objectContaining({ data: Buffer.from("image") })
+    );
+    expect(fetcher.mock.calls[3][1]?.headers).toEqual(
+      expect.objectContaining({ authorization: "Bearer fresh-token" })
+    );
   });
 
   it("reads direct Docx links without a Wiki lookup", async () => {

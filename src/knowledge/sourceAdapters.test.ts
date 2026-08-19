@@ -33,6 +33,46 @@ describe("resolveRequirementSource", () => {
     );
   });
 
+  it("discovers local Markdown images as requirement content", async () => {
+    const root = await tempDir();
+    const source = join(root, "requirement.md");
+    await writeFile(source, "# Order Flow\n\n![Approval state](./approval.png)", "utf8");
+    await writeFile(join(root, "approval.png"), Buffer.from("image"));
+
+    const result = await resolveRequirementSource({ source });
+
+    expect(result.status).toBe("ready");
+    if (result.status === "ready") {
+      expect(result.contentPackage.attachments).toEqual([
+        expect.objectContaining({
+          name: "Approval state",
+          url: join(root, "approval.png"),
+          status: "discovered"
+        })
+      ]);
+    }
+  });
+
+  it("changes the requirement hash when an embedded local image changes", async () => {
+    const root = await tempDir();
+    const source = join(root, "requirement.md");
+    const image = join(root, "approval.png");
+    await writeFile(source, "# Order Flow\n\n![Approval state](./approval.png)", "utf8");
+    await writeFile(image, Buffer.from("first-image"));
+    const first = await resolveRequirementSource({ source });
+    await writeFile(image, Buffer.from("second-image"));
+    const second = await resolveRequirementSource({ source });
+
+    expect(first.status).toBe("ready");
+    expect(second.status).toBe("ready");
+    if (first.status === "ready" && second.status === "ready") {
+      expect(first.contentPackage.contentHash).not.toBe(second.contentPackage.contentHash);
+      expect(first.contentPackage.attachments[0].contentHash).not.toBe(
+        second.contentPackage.attachments[0].contentHash
+      );
+    }
+  });
+
   it("resolves relative and Obsidian references from the configured workspace", async () => {
     const root = await tempDir();
     await writeFile(join(root, "requirement.md"), "# Relative\n\nUsers create records.", "utf8");
@@ -63,6 +103,7 @@ describe("resolveRequirementSource", () => {
         '<?xml version="1.0"?><w:document xmlns:w="x"><w:body><w:p><w:r><w:t>Contract Approval</w:t></w:r></w:p><w:p><w:r><w:t>Managers approve contracts.</w:t></w:r></w:p></w:body></w:document>'
       )
     );
+    zip.addFile("word/media/image1.png", Buffer.from("image"));
     zip.writeZip(source);
 
     const result = await resolveRequirementSource({ source });
@@ -70,6 +111,14 @@ describe("resolveRequirementSource", () => {
     expect(result.status).toBe("ready");
     if (result.status === "ready") {
       expect(result.contentPackage.content).toContain("Managers approve contracts");
+      expect(result.contentPackage.attachments).toEqual([
+        expect.objectContaining({
+          name: "image1.png",
+          containerPath: source,
+          containerEntry: "word/media/image1.png",
+          status: "discovered"
+        })
+      ]);
     }
   });
 
@@ -86,14 +135,24 @@ describe("resolveRequirementSource", () => {
     expect(result).toEqual(
       expect.objectContaining({
         status: "ready",
-        contentPackage: expect.objectContaining({ warnings: ["image skipped"] })
+        contentPackage: expect.objectContaining({
+          warnings: ["image skipped"],
+          attachments: [
+            expect.objectContaining({
+              name: "requirement.pdf",
+              containerPath: source,
+              mimeType: "application/pdf",
+              status: "discovered"
+            })
+          ]
+        })
       })
     );
   });
 
   it("reads an HTTP page and strips scripts and markup", async () => {
     const fetcher = vi.fn(async () =>
-      new Response("<html><head><title>CRM Requirement</title><script>secret()</script></head><body><h1>Lead conversion</h1><p>Convert a lead to an opportunity.</p></body></html>", {
+      new Response("<html><head><title>CRM Requirement</title><script>secret()</script></head><body><h1>Lead conversion</h1><p>Convert a lead to an opportunity.</p><img alt=\"Conversion flow\" src=\"/flow.png\"></body></html>", {
         status: 200,
         headers: { "content-type": "text/html" }
       })
@@ -110,6 +169,13 @@ describe("resolveRequirementSource", () => {
       expect(result.contentPackage.title).toBe("CRM Requirement");
       expect(result.contentPackage.content).toContain("Convert a lead");
       expect(result.contentPackage.content).not.toContain("secret()");
+      expect(result.contentPackage.attachments).toEqual([
+        expect.objectContaining({
+          name: "Conversion flow",
+          url: "https://requirements.example.test/flow.png",
+          status: "discovered"
+        })
+      ]);
     }
   });
 

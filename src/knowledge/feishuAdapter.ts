@@ -98,6 +98,26 @@ export class FeishuOpenApiAdapter {
     };
   }
 
+  async downloadAttachment(attachment: RequirementAttachment) {
+    if (!attachment.fileToken) throw new Error("Feishu attachment is missing fileToken");
+    const accessToken = await this.tenantAccessToken();
+    const response = await this.fetcher(
+      `${this.baseUrl}/drive/v1/medias/${encodeURIComponent(attachment.fileToken)}/download`,
+      {
+        headers: authorizationHeaders(accessToken),
+        signal: AbortSignal.timeout(15_000)
+      }
+    );
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) this.cachedToken = undefined;
+      throw new Error(`Feishu media download failed: HTTP ${response.status}`);
+    }
+    return {
+      data: Buffer.from(await response.arrayBuffer()),
+      mimeType: response.headers.get("content-type") ?? attachment.mimeType
+    };
+  }
+
   private async tenantAccessToken() {
     if (this.cachedToken && this.cachedToken.expiresAt > Date.now() + 60_000) {
       return this.cachedToken.value;
@@ -157,9 +177,14 @@ function normalizeBlocks(items: Record<string, unknown>[]) {
       blocks.push({ type: headingLevel ? "heading" : type, text, level: headingLevel });
     }
     if (type === "file" || type === "image") {
+      const detail = asRecord(item[type]);
       attachments.push({
         name: stringValue(item.block_id) || `${type}-${attachments.length + 1}`,
-        type
+        blockId: stringValue(item.block_id) || undefined,
+        fileToken: stringValue(detail.token) || stringValue(detail.file_token) || undefined,
+        type,
+        status: "discovered",
+        attempts: 0
       });
     }
     if (["bitable", "diagram", "mindnote", "sheet", "table", "add-on"].includes(type)) {

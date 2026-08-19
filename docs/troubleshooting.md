@@ -196,7 +196,7 @@ BRAIN_CREATOR_FEISHU_APP_SECRET
 - Without direct credentials, let the host Agent read the document with its Feishu capability and submit a normalized content package.
 - Export DOCX, PDF, or Markdown when neither channel can read the source.
 
-Unparsed tables, whiteboards, and attachments must appear as connector Gaps rather than disappearing silently.
+Unparsed tables, whiteboards, and attachments remain visible as discovered assets. Run `bc_prepare action=analyze-attachments`; Brain Creator creates a connector or attachment Gap only after recorded download/recognition retries fail or access cannot be restored.
 
 ## Requirement Eval Blocks Approval
 

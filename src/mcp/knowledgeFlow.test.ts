@@ -1201,6 +1201,72 @@ describe("Brain Creator requirement-first facade", () => {
     expect(failureContext.repository.requirementSets).toHaveLength(0);
   });
 
+  it("uses bc_prepare for host visual analysis without creating a premature Gap", async () => {
+    const workDir = await tempDir();
+    const imagePath = join(workDir, "approval-flow.png");
+    await writeFile(imagePath, Buffer.from("image"));
+    const context = createBrainCreatorMcpContext({ workDir, dataFilePath: join(workDir, "assets.json") });
+    const project = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "knowledge-project", name: "Approval", key: "approval"
+    }));
+    const source = join(workDir, "requirement.md");
+    const ingested = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "ingest-requirement",
+      knowledgeProjectId: project.id,
+      source,
+      contentPackage: {
+        title: "Approval",
+        content: "Managers approve orders.",
+        blocks: [{ type: "paragraph", text: "Managers approve orders." }],
+        attachments: [{ name: "approval-flow.png", url: imagePath }],
+        source,
+        sourceType: "local-file",
+        contentHash: "approval-attachment",
+        warnings: []
+      }
+    }));
+
+    const prepared = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "analyze-attachments",
+      requirementSourceId: ingested.source.id
+    }));
+    expect(ingested.nextAction).toBe("analyze-attachments");
+    expect(prepared.status).toBe("needs-host-vision");
+    expect(prepared.recognitionRequests).toHaveLength(1);
+    expect(context.repository.gaps).toEqual([]);
+
+    const submitted = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "submit-attachment-analysis",
+      requirementSourceId: ingested.source.id,
+      attachmentId: prepared.recognitionRequests[0].attachmentId,
+      attachmentAnalysis: {
+        kind: "state-machine",
+        markdown: "Draft -> Approved",
+        nodes: [
+          { id: "draft", type: "state", label: "Draft" },
+          { id: "approved", type: "state", label: "Approved" }
+        ],
+        edges: [{ from: "draft", to: "approved", actor: "manager" }],
+        confidence: 0.9
+      }
+    }));
+    expect(submitted.analysis.status).toBe("draft");
+
+    const preview = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "confirm-attachment-analysis",
+      attachmentAnalysisId: submitted.analysis.id
+    }));
+    expect(preview.requiresConfirmation).toBe(true);
+
+    const confirmed = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "confirm-attachment-analysis",
+      attachmentAnalysisId: submitted.analysis.id,
+      confirmedBy: "qa",
+      confirm: true
+    }));
+    expect(confirmed.status).toBe("confirmed");
+  });
+
   it("adds knowledge status and review without requiring a bound runtime system", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({ workDir, dataFilePath: join(workDir, "assets.json") });

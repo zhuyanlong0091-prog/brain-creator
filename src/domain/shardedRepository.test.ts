@@ -28,11 +28,29 @@ describe("ShardedFileBrainCreatorRepository", () => {
       defaultLocale: "en-US",
       urlAllowlist: ["https://orders.example.test"]
     });
+    repository.attachmentAnalyses.push({
+      id: "analysis-1",
+      knowledgeProjectId: "knowledge-1",
+      requirementSetId: "requirement-1",
+      sourceId: "source-1",
+      attachmentId: "attachment-1",
+      kind: "flowchart",
+      markdown: "Start -> End",
+      nodes: [],
+      edges: [],
+      confidence: 0.9,
+      sourceRefs: ["attachment:attachment-1"],
+      provider: "host-agent",
+      status: "draft",
+      createdAt: "2026-08-19T00:00:00.000Z",
+      updatedAt: "2026-08-19T00:00:00.000Z"
+    });
     repository.persist();
 
     const manifest = JSON.parse(await readFile(join(storeDir, "manifest.json"), "utf8"));
     expect(manifest).toEqual(expect.objectContaining({ schemaVersion: 17, format: "sharded" }));
     expect(manifest.collections).toContain("systemProfiles");
+    expect(manifest.collections).toContain("attachmentAnalyses");
     expect(existsSync(join(storeDir, "collections", "systemProfiles.json"))).toBe(true);
     expect(existsSync(join(storeDir, "systems", system.id, "system.json"))).toBe(true);
     expect(existsSync(join(storeDir, "indexes", "asset-index.json"))).toBe(true);
@@ -40,6 +58,7 @@ describe("ShardedFileBrainCreatorRepository", () => {
     const restored = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
     expect(restored.schemaVersion).toBe(17);
     expect(restored.systemProfiles).toEqual([expect.objectContaining({ id: system.id })]);
+    expect(restored.attachmentAnalyses).toEqual([expect.objectContaining({ id: "analysis-1" })]);
 
     await rm(join(storeDir, "indexes", "asset-index.json"));
     restored.rebuildIndexes();
@@ -114,6 +133,21 @@ describe("ShardedFileBrainCreatorRepository", () => {
     await rm(join(storeDir, "collections", "gaps.json"));
 
     expect(() => repository.reload()).toThrow(/shard gaps is missing/);
+  });
+
+  it("restores an earlier schema 17 store that predates the attachment analysis shard", async () => {
+    const root = await tempDir();
+    const storeDir = join(root, "store");
+    new ShardedFileBrainCreatorRepository(storeDir, join(root, "legacy.json"));
+    const manifestPath = join(storeDir, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.collections = manifest.collections.filter((key: string) => key !== "attachmentAnalyses");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
+    await rm(join(storeDir, "collections", "attachmentAnalyses.json"));
+
+    const restored = new ShardedFileBrainCreatorRepository(storeDir, join(root, "legacy.json"));
+
+    expect(restored.attachmentAnalyses).toEqual([]);
   });
 
   it("projects all system-owned assets without mixing two systems", async () => {

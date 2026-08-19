@@ -121,7 +121,7 @@ describe("TestIntent coverage ledger", () => {
         expect.objectContaining({
           sourceId: "source-set-strong",
           attachmentCount: 1,
-          unreadAttachments: [expect.objectContaining({ status: "unread" })]
+          unreadAttachments: [expect.objectContaining({ status: "discovered", attempts: 0 })]
         })
       ])
     );

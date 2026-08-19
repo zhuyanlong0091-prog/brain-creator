@@ -188,7 +188,7 @@ BRAIN_CREATOR_FEISHU_APP_SECRET
 - 没有直连凭据时，让宿主 Agent 读取飞书文档并提交标准内容包。
 - 两种通道都不可用时，导出 DOCX、PDF 或 Markdown。
 
-未解析表格、画板和附件必须形成 connector Gap，不能静默丢失。
+未解析表格、画板和附件先作为已发现资产持续可见。调用 `bc_prepare action=analyze-attachments` 后，只有已记录的下载/识别重试失败或权限无法恢复时，Brain Creator 才创建 connector 或 attachment Gap。
 
 ## Requirement Eval 阻塞
 

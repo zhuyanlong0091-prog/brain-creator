@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { basename, extname, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
 import AdmZip from "adm-zip";
 import { PDFParse } from "pdf-parse";
 import type {
   RequirementContentBlock,
   RequirementContentPackage,
+  RequirementAttachment,
   RequirementSourceType
 } from "../domain/types.js";
 
@@ -25,6 +26,7 @@ type HostConnectorSource = {
 
 export type RequirementSourceReader = {
   readRequirement(source: string): Promise<RequirementContentPackage>;
+  downloadAttachment?(attachment: RequirementAttachment): Promise<{ data: Buffer; mimeType?: string }>;
 };
 
 type SourceAdapterOptions = {
@@ -82,14 +84,28 @@ async function readLocalSource(source: string, original: string, options: Source
   const extension = extname(path).toLowerCase();
   let content = "";
   let warnings: string[] = [];
+  let attachments: RequirementAttachment[] = [];
   if ([".md", ".markdown", ".txt"].includes(extension)) {
     content = data.toString("utf8");
+    if (extension !== ".txt") {
+      attachments = markdownAttachments(content, dirname(path));
+      await hashLocalAttachments(attachments, options.maxBytes);
+    }
   } else if (extension === ".docx") {
-    content = readDocx(data);
+    const result = readDocx(data, path);
+    content = result.content;
+    attachments = result.attachments;
   } else if (extension === ".pdf") {
     const result = await (options.pdfTextExtractor ?? extractPdfText)(data);
     content = result.text;
     warnings = result.warnings;
+    attachments = [{
+      name: basename(path),
+      mimeType: "application/pdf",
+      containerPath: path,
+      status: "discovered",
+      attempts: 0
+    }];
   } else {
     throw new Error(`Unsupported requirement source extension: ${extension || "none"}`);
   }
@@ -98,7 +114,12 @@ async function readLocalSource(source: string, original: string, options: Source
     content,
     source: original,
     sourceType: original.startsWith("obsidian:") || original.startsWith("[[") ? "obsidian" : "local-file",
-    warnings
+    warnings,
+    attachments,
+    hashMaterial: Buffer.concat([
+      data,
+      Buffer.from(attachments.map((attachment) => attachment.contentHash ?? attachment.url ?? "").join("\n"))
+    ])
   });
 }
 
@@ -119,13 +140,16 @@ async function readHttpSource(source: string, options: SourceAdapterOptions) {
   assertSize(Buffer.byteLength(raw), options.maxBytes);
   const contentType = response.headers.get("content-type") ?? "";
   const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(raw)?.[1];
+  const attachments = htmlAttachments(raw, url);
   const content = contentType.includes("html") || /<html/i.test(raw) ? htmlToText(raw) : raw;
   return packageContent({
     title: decodeEntities(title?.trim() || titleFromText(content, url.hostname)),
     content,
     source,
     sourceType: "http",
-    warnings: []
+    warnings: [],
+    attachments,
+    hashMaterial: raw
   });
 }
 
@@ -135,6 +159,8 @@ function packageContent(input: {
   source: string;
   sourceType: RequirementSourceType;
   warnings: string[];
+  attachments?: RequirementAttachment[];
+  hashMaterial?: Buffer | string;
 }): RequirementContentPackage {
   const content = input.content.replace(/\r\n/g, "\n").trim();
   if (!content) throw new Error("Requirement source contains no readable text");
@@ -142,18 +168,19 @@ function packageContent(input: {
     title: input.title,
     content,
     blocks: blocksFromText(content),
-    attachments: [],
+    attachments: input.attachments ?? [],
     source: input.source,
     sourceType: input.sourceType,
-    contentHash: createHash("sha256").update(content).digest("hex"),
+    contentHash: createHash("sha256").update(input.hashMaterial ?? content).digest("hex"),
     warnings: input.warnings
   };
 }
 
-function readDocx(data: Buffer) {
-  const xml = new AdmZip(data).getEntry("word/document.xml")?.getData().toString("utf8");
+function readDocx(data: Buffer, path: string) {
+  const zip = new AdmZip(data);
+  const xml = zip.getEntry("word/document.xml")?.getData().toString("utf8");
   if (!xml) throw new Error("DOCX word/document.xml is missing");
-  return xml
+  const content = xml
     .replace(/<w:tab\b[^>]*\/>/g, "\t")
     .replace(/<\/w:p>/g, "\n")
     .replace(/<[^>]+>/g, "")
@@ -161,6 +188,79 @@ function readDocx(data: Buffer) {
     .map((line) => decodeEntities(line).trim())
     .filter(Boolean)
     .join("\n");
+  const attachments = zip
+    .getEntries()
+    .filter((entry) => !entry.isDirectory && entry.entryName.startsWith("word/media/"))
+    .map((entry) => ({
+      name: basename(entry.entryName),
+      mimeType: mimeTypeFromName(entry.entryName),
+      containerPath: path,
+      containerEntry: entry.entryName,
+      status: "discovered" as const,
+      attempts: 0
+    }));
+  return { content, attachments };
+}
+
+function markdownAttachments(content: string, baseDir: string): RequirementAttachment[] {
+  return [...content.matchAll(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g)].map(
+    (match, index) => {
+      const reference = match[2].trim();
+      const url = /^https?:\/\//i.test(reference)
+        ? reference
+        : isAbsolute(reference)
+          ? reference
+          : resolve(baseDir, reference);
+      return {
+        name: match[1].trim() || basename(reference) || `image-${index + 1}`,
+        url,
+        mimeType: mimeTypeFromName(reference),
+        status: "discovered",
+        attempts: 0
+      };
+    }
+  );
+}
+
+async function hashLocalAttachments(attachments: RequirementAttachment[], maxBytes?: number) {
+  await Promise.all(attachments.map(async (attachment) => {
+    if (!attachment.url || /^https?:\/\//i.test(attachment.url)) return;
+    const fileStat = await stat(attachment.url).catch(() => undefined);
+    if (!fileStat?.isFile()) return;
+    assertSize(fileStat.size, maxBytes);
+    const data = await readFile(attachment.url);
+    attachment.contentHash = createHash("sha256").update(data).digest("hex");
+  }));
+}
+
+function htmlAttachments(raw: string, source: URL): RequirementAttachment[] {
+  return [...raw.matchAll(/<img\b([^>]*)>/gi)].flatMap((match, index) => {
+    const attributes = match[1];
+    const src = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(attributes)?.[1];
+    if (!src) return [];
+    const resolved = new URL(src, source);
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return [];
+    const alt = /\balt\s*=\s*["']([^"']*)["']/i.exec(attributes)?.[1]?.trim();
+    return [{
+      name: alt || basename(resolved.pathname) || `image-${index + 1}`,
+      url: resolved.toString(),
+      mimeType: mimeTypeFromName(resolved.pathname),
+      status: "discovered" as const,
+      attempts: 0
+    }];
+  });
+}
+
+function mimeTypeFromName(value: string) {
+  const extension = extname(value.split(/[?#]/, 1)[0]).toLowerCase();
+  return ({
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml"
+  } as Record<string, string>)[extension];
 }
 
 async function extractPdfText(data: Buffer) {
