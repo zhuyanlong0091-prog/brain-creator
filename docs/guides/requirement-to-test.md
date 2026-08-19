@@ -100,9 +100,9 @@ Ask:
 基于已批准需求和当前 System Brain 编译可执行用例，展示所有补全动作的证据来源。
 ```
 
-Brain Creator may complete an implicit action only when one unique observed path supports it. Multiple equivalent entries, missing targets, missing values, or missing locators block the case.
+Brain Creator may complete an implicit action only when one unique observed path supports it. Multiple equivalent entries, missing targets, missing values, or missing locators create a resumable ExplorationTask. Add or confirm System Brain evidence, then resolve the task to resume compilation. Marking the exploration failed creates the final Gap.
 
-**Verify:** each step has requirement, workflow, page, locator, state-transition, or derived evidence. Review `pathPlan`, `statePlan`, and candidate counts.
+**Verify:** each step has requirement, workflow, page, locator, state-transition, data, or derived evidence. Review `compilationStages`, `pathPlan`, `statePlan`, ExplorationTasks, and candidate counts.
 
 ## 7. Prepare Test Data
 

@@ -100,9 +100,9 @@ Brain Creator 应展示：
 基于已批准需求和当前 System Brain 编译可执行用例，展示所有补全动作的证据来源。
 ```
 
-只有唯一已观察路径存在时，Brain Creator 才能补全隐含动作。等价入口、缺失目标、缺失值或缺失定位器都会阻塞用例。
+只有唯一已观察路径存在时，Brain Creator 才能补全隐含动作。等价入口、缺失目标、缺失值或缺失定位器会创建可恢复的 ExplorationTask。补充或确认 System Brain 证据后解决任务，编译会自动继续；只有将探索标记为失败时才创建最终 Gap。
 
-**验证：** 每个步骤都有需求、流程、页面、定位器、状态转换或 derived 证据。检查 `pathPlan`、`statePlan` 和候选数量。
+**验证：** 每个步骤都有需求、流程、页面、定位器、状态转换、数据或 derived 证据。检查 `compilationStages`、`pathPlan`、`statePlan`、ExplorationTask 和候选数量。
 
 ## 7. 准备测试数据
 

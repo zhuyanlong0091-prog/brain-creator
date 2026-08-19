@@ -10,6 +10,7 @@ import type {
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import type { KnowledgeService } from "./service.js";
+import { executableCaseCompileStatus } from "./caseCompiler.js";
 
 type PrepareInput = {
   knowledgeProjectId: string;
@@ -565,18 +566,18 @@ export class TestDataProviderService {
 
   private refreshCaseStatus(executableCase: ExecutableCase, now: string) {
     if (executableCase.dataPlan?.verdict !== "ready") return;
-    const hasOpenGap = executableCase.gapIds.some((gapId) =>
-      this.repository.gaps.some(
-        (gap) => gap.id === gapId && gap.status === "open"
-      )
+    executableCase.status = executableCaseCompileStatus(
+      this.repository,
+      executableCase
     );
-    executableCase.status = hasOpenGap ? "blocked" : "ready";
     executableCase.updatedAt = now;
     const intent = this.repository.testIntents.find(
       (item) => item.id === executableCase.testIntentId
     );
     if (intent) {
-      intent.status = hasOpenGap ? "blocked" : "compiled";
+      intent.status = executableCase.status === "ready"
+        ? "compiled"
+        : executableCase.status;
       intent.updatedAt = now;
     }
   }

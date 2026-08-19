@@ -421,6 +421,33 @@ describe("Brain Creator requirement-first facade", () => {
       ).nextAction
     ).toBe("explore_system");
 
+    const awaitingEvidence = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "compile-cases",
+        testIntentId: design.testIntents[0].id,
+        systemId: system.id
+      })
+    );
+    expect(awaitingEvidence.executableCase.status).toBe("needs-exploration");
+    const explorationTaskId = awaitingEvidence.executableCase.explorationTaskIds[0];
+    const awaitingStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id
+      })
+    );
+    expect(awaitingStatus.nextAction).toBe("review_exploration_task");
+    expect(awaitingStatus.activeExplorationTaskId).toBe(explorationTaskId);
+    expect(awaitingStatus.knowledge.compilation.explorationTasks).toEqual(
+      expect.objectContaining({ total: 1, pending: 1 })
+    );
+    const summarizedStatus = dataOf(
+      await handleBrainCreatorTool(context, "bc_status", {
+        knowledgeProjectId: project.id,
+        responseMode: "summary"
+      })
+    );
+    expect(summarizedStatus.summary.activeExplorationTaskId).toBe(explorationTaskId);
+
     context.repository.pageModels.push({
       id: "page-next-action",
       projectId: system.id,
@@ -444,15 +471,30 @@ describe("Brain Creator requirement-first facade", () => {
       confidence: 0.98
     });
     await context.knowledgeService.refreshSystemBrain(project.id, system.id);
-    expect(
-      dataOf(
-        await handleBrainCreatorTool(context, "bc_status", {
-          knowledgeProjectId: project.id
-        })
-      ).nextAction
-    ).toBe("compile_cases");
-
-    context.knowledgeService.compileExecutableCases(design.testIntents[0].id, system.id);
+    const previewResolution = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "resolve-exploration-task",
+        explorationTaskId,
+        explorationOutcome: "resolved",
+        evidenceRefs: ["page-model:page-next-action", "locator-point:locator-next-action"],
+        confirm: false
+      })
+    );
+    expect(previewResolution).toEqual(expect.objectContaining({
+      status: "preview",
+      requiresConfirmation: true
+    }));
+    const resumed = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "resolve-exploration-task",
+        explorationTaskId,
+        explorationOutcome: "resolved",
+        evidenceRefs: ["page-model:page-next-action", "locator-point:locator-next-action"],
+        confirm: true
+      })
+    );
+    expect(resumed.resumed.executableCase.status).toBe("ready");
+    expect(resumed.nextAction).toBe("preview-requirement-suite");
     expect(
       dataOf(
         await handleBrainCreatorTool(context, "bc_status", {
@@ -673,7 +715,7 @@ describe("Brain Creator requirement-first facade", () => {
       })
     );
 
-    expect(compiled.executableCase.status).toBe("blocked");
+    expect(compiled.executableCase.status).toBe("needs-data");
     expect(compiled.testDataPlan).toEqual(
       expect.objectContaining({ verdict: "blocked" })
     );
@@ -1512,6 +1554,7 @@ describe("Brain Creator requirement-first facade", () => {
     context.repository.gaps.find(
       (gap) => gap.id === "gap-orders-blocked"
     )!.status = "resolved";
+    blockedCase.status = "ready";
 
     const result = dataOf(
       await handleBrainCreatorTool(context, "bc_run", {
@@ -1592,7 +1635,6 @@ describe("Brain Creator requirement-first facade", () => {
         outputPaths: [result.testPath]
       })
     );
-
     expect(completed.submittedCase.chainRun.status).toBe("failed");
     expect(completed.status).toBe("needs_agent_execution");
     expect(completed.requirementSuiteRun).toEqual(

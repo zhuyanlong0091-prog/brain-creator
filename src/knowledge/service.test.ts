@@ -469,7 +469,7 @@ describe("KnowledgeService", () => {
     )).toBe(true);
   });
 
-  it("creates a gap instead of guessing when an implicit workflow has multiple paths", async () => {
+  it("compiles only the selected intent instead of guessing hidden workflow actions", async () => {
     const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), await tempDir());
     const project = await service.createProject({ name: "Contracts", key: "contracts", defaultLocale: "zh-CN" });
     const ingested = await service.ingestRequirement({
@@ -484,10 +484,12 @@ describe("KnowledgeService", () => {
 
     const compiled = service.compileExecutableCases(design.testIntents[0].id);
 
-    expect(compiled.executableCase.status).toBe("blocked");
-    expect(compiled.gaps).toEqual([
-      expect.objectContaining({ reason: expect.stringContaining("multiple workflow paths") })
+    expect(compiled.executableCase.status).toBe("ready");
+    expect(compiled.executableCase.steps.map((step) => step.action)).toEqual([
+      "navigate", "click", "fill", "assert"
     ]);
+    expect(compiled.executableCase.steps.find((step) => step.action === "click")?.origin).toBe("source");
+    expect(compiled.gaps).toEqual([]);
   });
 
   it("recognizes real UTF-8 Chinese workflows and conditional fields", async () => {
@@ -512,12 +514,12 @@ describe("KnowledgeService", () => {
     const compiled = service.compileExecutableCases(design.testIntents[0].id);
 
     expect(compiled.executableCase.steps.map((step) => step.action)).toEqual([
-      "navigate", "click", "fill", "select", "assert"
+      "navigate", "fill", "assert"
     ]);
-    expect(compiled.executableCase.steps.find((step) => step.action === "click")?.origin).toBe("derived");
+    expect(compiled.executableCase.steps.every((step) => step.sourceRefs.length > 0)).toBe(true);
   });
 
-  it("blocks real UTF-8 Chinese requirements with multiple create paths", async () => {
+  it("does not mix unrelated UTF-8 workflow paths into one selected intent", async () => {
     const service = new KnowledgeService(new InMemoryBrainCreatorRepository(), await tempDir());
     const project = await service.createProject({ name: "Contracts", key: "utf8-contracts", defaultLocale: "zh-CN" });
     const ingested = await service.ingestRequirement({
@@ -530,7 +532,9 @@ describe("KnowledgeService", () => {
     const design = await service.generateTestDesign(ingested.requirementSet.id);
     service.approveRequirementSet(ingested.requirementSet.id);
 
-    expect(service.compileExecutableCases(design.testIntents[0].id).executableCase.status).toBe("blocked");
+    const compiled = service.compileExecutableCases(design.testIntents[0].id);
+    expect(compiled.executableCase.status).toBe("ready");
+    expect(compiled.executableCase.steps.every((step) => step.sourceRefs.length > 0)).toBe(true);
   });
 
   it("reuses an existing design and deprecates impacted nodes only after the new baseline is approved", async () => {

@@ -975,6 +975,43 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       note: stringArg(input, "confirmationNote")
     });
   }
+  if (action === "resolve-exploration-task") {
+    const taskId = stringArg(input, "explorationTaskId");
+    const outcome = explorationTaskOutcomeArg(input, "explorationOutcome");
+    const task = context.repository.explorationTasks.find((item) => item.id === taskId);
+    if (!task) throw new Error("Exploration task not found");
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        task,
+        outcome,
+        evidenceRefs: stringArrayArg(input, "evidenceRefs"),
+        requiresConfirmation: true,
+        nextAction: "Present the exploration evidence and outcome before confirmation."
+      };
+    }
+    const result = context.knowledgeService.resolveExplorationTask({
+      taskId,
+      outcome,
+      evidenceRefs: stringArrayArg(input, "evidenceRefs"),
+      failureReason: optionalStringArg(input, "failureReason")
+    });
+    const resumedStatus = result.resumed?.executableCase.status;
+    return {
+      ...result,
+      status: outcome,
+      nextAction:
+        outcome === "failed"
+          ? "review-gap"
+          : outcome === "cancelled"
+            ? "review-compile-run"
+            : resumedStatus === "ready"
+              ? "preview-requirement-suite"
+              : resumedStatus === "needs-data"
+                ? "resolve-test-data"
+                : "review-exploration-task"
+    };
+  }
   if (action === "resolve-test-data") {
     const executableCaseId = stringArg(input, "executableCaseId");
     const executableCase = context.repository.executableCases.find(
@@ -1158,7 +1195,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
           ...result,
           summary,
           nextAction:
-            result.compileRun.blocked + result.compileRun.ambiguous + result.compileRun.skipped > 0
+            result.compileRun.blocked + result.compileRun.ambiguous + result.compileRun.needsExploration + result.compileRun.needsData + result.compileRun.skipped > 0
               ? "review-compile-run"
               : "preview-requirement-suite"
         };
@@ -1175,9 +1212,11 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     nextAction:
       compiled.executableCase.status === "ready"
         ? "preview-requirement-suite"
-        : compiled.executableCase.dataPlan?.verdict === "blocked"
+        : compiled.executableCase.status === "needs-data"
           ? "resolve-test-data"
-          : "review-system-brain-gaps"
+          : compiled.executableCase.status === "needs-exploration" || compiled.executableCase.status === "ambiguous"
+            ? "review-exploration-task"
+            : "review-compile-blocker"
   };
 }
 
@@ -2608,6 +2647,21 @@ function isRequirementSuiteCandidate(
 ) {
   if (executableCase.status === "ready") return true;
   if (
+    executableCase.status === "needs-data" &&
+    executableCase.dataPlan?.verdict === "blocked"
+  ) {
+    return (
+      executableCase.dataPlan.operations.some(
+        (operation) =>
+          operation.decision === "lookup" &&
+          operation.status === "needs-resolution"
+      ) &&
+      executableCase.dataPlan.operations.every(
+        (operation) => operation.status !== "blocked"
+      )
+    );
+  }
+  if (
     executableCase.status !== "blocked" ||
     executableCase.dataPlan?.verdict !== "blocked"
   ) {
@@ -2637,7 +2691,7 @@ function requirementSuitePreflightBlockers(
   checks: ExecutionPreflightCheck[]
 ) {
   const dataResolutionCandidate =
-    executableCase.status === "blocked" &&
+    (executableCase.status === "blocked" || executableCase.status === "needs-data") &&
     isRequirementSuiteCandidate(context, executableCase);
   return checks.filter((check) => {
     if (check.status === "pass") return false;
@@ -3976,6 +4030,14 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   );
   const testIntents = context.knowledgeService.listTestIntents(projectId);
   const executableCases = context.knowledgeService.listExecutableCases(projectId);
+  const explorationTasks = context.knowledgeService.listExplorationTasks()
+    .filter((item) => item.knowledgeProjectId === projectId);
+  const pendingExplorationTasks = explorationTasks.filter(
+    (item) => item.status === "pending"
+  );
+  const projectCompileRuns = context.repository.compileRuns.filter(
+    (item) => item.knowledgeProjectId === projectId
+  );
   const blockedDataPlans = executableCases.filter(
     (item) => item.dataPlan?.verdict === "blocked"
   );
@@ -4082,6 +4144,8 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   else if (pendingEvalActions.length > 0) nextAction = "confirm_requirement_eval";
   else if (activeRequirementSets.some((item) => item.status === "draft")) {
     nextAction = "review_and_approve_baseline";
+  } else if (pendingExplorationTasks.length > 0) {
+    nextAction = "review_exploration_task";
   } else if (executableCases.some((item) => item.status === "ready")) {
     nextAction = project.systemIds.length > 0 ? "run_requirement_suite" : "bind_system";
   } else if (blockedDataPlans.length > 0) {
@@ -4130,6 +4194,20 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
             executableCaseId: item.id,
             reasons: item.dataPlan?.reasons ?? []
           }))
+        }
+      },
+      compilation: {
+        compileRuns: {
+          total: projectCompileRuns.length,
+          recent: projectCompileRuns
+            .slice(-5)
+            .map(compileRunSummary)
+        },
+        explorationTasks: {
+          total: explorationTasks.length,
+          pending: pendingExplorationTasks.length,
+          byStatus: countBy(explorationTasks, (item) => item.status),
+          recent: explorationTasks.slice(-5)
         }
       },
       executionEvidence: {
@@ -4198,6 +4276,8 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       openGaps: gaps
     },
     connectors: connectorStatus(context, projectId),
+    latestCompileRunId: projectCompileRuns.at(-1)?.id,
+    activeExplorationTaskId: pendingExplorationTasks.at(-1)?.id,
     nextAction
   };
 }
@@ -4231,6 +4311,9 @@ function knowledgeReview(
         systemId: run.systemId,
         createdAt: run.createdAt,
         items: run.items.slice(itemOffset, itemOffset + limit),
+        explorationTasks: context.repository.explorationTasks.filter((task) =>
+          run.items.some((item) => item.explorationTaskIds?.includes(task.id))
+        ),
         totalItems: run.items.length,
         returnedItems: Math.min(Math.max(run.items.length - itemOffset, 0), limit),
         nextItemOffset:
@@ -4523,12 +4606,14 @@ function compileRunSummary(run: CompileRun) {
     status: run.status,
     total: run.total,
     ready: run.ready,
+    needsExploration: run.needsExploration,
+    needsData: run.needsData,
     blocked: run.blocked,
     ambiguous: run.ambiguous,
     skipped: run.skipped,
     reused: run.reused,
     nextAction:
-      run.blocked + run.ambiguous + run.skipped > 0
+      run.blocked + run.ambiguous + run.needsExploration + run.needsData + run.skipped > 0
         ? "review-compile-run"
         : "preview-requirement-suite"
   };
@@ -8824,6 +8909,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "approve-baseline",
       "compile-cases",
       "confirm-page-binding",
+      "resolve-exploration-task",
       "resolve-gap",
       "dismiss-gap",
       "reopen-gap",
@@ -8854,6 +8940,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "approve-baseline"
     | "compile-cases"
     | "confirm-page-binding"
+    | "resolve-exploration-task"
     | "resolve-gap"
     | "dismiss-gap"
     | "reopen-gap"
@@ -9058,6 +9145,17 @@ function requirementContentPackageArg(
     throw new Error(`${key} is invalid`);
   }
   return candidate;
+}
+
+function explorationTaskOutcomeArg(
+  input: Record<string, unknown>,
+  key: string
+): "resolved" | "failed" | "cancelled" {
+  const value = stringArg(input, key);
+  if (value !== "resolved" && value !== "failed" && value !== "cancelled") {
+    throw new Error(`${key} is invalid`);
+  }
+  return value;
 }
 
 function attachmentAnalysisArg(input: Record<string, unknown>, key: string) {

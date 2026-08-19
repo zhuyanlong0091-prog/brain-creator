@@ -347,14 +347,16 @@ describe("State action planner", () => {
       "system-state"
     );
 
-    expect(ambiguous.executableCase.status).toBe("blocked");
+    expect(ambiguous.executableCase.status).toBe("ambiguous");
     expect(ambiguous.executableCase.statePlan).toEqual(
       expect.objectContaining({ verdict: "ambiguous", candidateCount: 2 })
     );
-    expect(ambiguous.gaps).toEqual(
+    expect(ambiguous.gaps).toEqual([]);
+    expect(repository.explorationTasks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          sourceType: "system-brain",
+          kind: "state-action",
+          status: "pending",
           reason: expect.stringContaining(
             "multiple equally relevant state transitions"
           )

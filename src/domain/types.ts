@@ -931,7 +931,14 @@ export type TestIntent = {
   scenarioType?: "positive" | "negative";
   processModelRefs?: string[];
   actorJourney?: string[];
-  status: "draft" | "approved" | "compiled" | "blocked";
+  status:
+    | "draft"
+    | "approved"
+    | "compiled"
+    | "needs-exploration"
+    | "needs-data"
+    | "ambiguous"
+    | "blocked";
   createdAt: string;
   updatedAt: string;
 };
@@ -950,8 +957,16 @@ export type PageBindingDecision = {
 
 export type CompileRunItem = {
   testIntentId: string;
-  result: "ready" | "blocked" | "ambiguous" | "skipped" | "reused";
+  result:
+    | "ready"
+    | "needs-exploration"
+    | "needs-data"
+    | "blocked"
+    | "ambiguous"
+    | "skipped"
+    | "reused";
   executableCaseId?: string;
+  explorationTaskIds?: string[];
   gapIds: string[];
   reason?: string;
 };
@@ -964,12 +979,50 @@ export type CompileRun = {
   status: "completed" | "completed-with-blockers" | "failed";
   total: number;
   ready: number;
+  needsExploration: number;
+  needsData: number;
   blocked: number;
   ambiguous: number;
   skipped: number;
   reused: number;
   items: CompileRunItem[];
   createdAt: string;
+};
+
+export type CompilationStageName =
+  | "requirement-path"
+  | "system-brain"
+  | "test-data"
+  | "step-provenance"
+  | "executable-case";
+
+export type CompilationStageResult = {
+  stage: CompilationStageName;
+  verdict: "ready" | "needs-exploration" | "needs-data" | "ambiguous" | "blocked";
+  reason?: string;
+  sourceRefs: string[];
+};
+
+export type ExplorationTask = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  testIntentId: string;
+  executableCaseId?: string;
+  systemId: string;
+  kind: "page-binding" | "navigation-path" | "state-action" | "locator-evidence";
+  status: "pending" | "resolved" | "failed" | "cancelled";
+  reason: string;
+  query: string;
+  candidatePageModelIds: string[];
+  requestedEvidence: string[];
+  sourceRefs: string[];
+  resultSourceRefs: string[];
+  idempotencyKey: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  failureReason?: string;
 };
 
 export type TestDataProfile = {
@@ -1364,7 +1417,14 @@ export type ExecutableCase = {
   testIntentId: string;
   systemId?: string;
   title: string;
-  status: "ready" | "blocked" | "executed" | "superseded";
+  status:
+    | "ready"
+    | "needs-exploration"
+    | "needs-data"
+    | "ambiguous"
+    | "blocked"
+    | "executed"
+    | "superseded";
   compileKey?: string;
   supersededById?: string;
   preconditions: string[];
@@ -1374,6 +1434,8 @@ export type ExecutableCase = {
   dataPlan?: ExecutableCaseDataPlan;
   coverageDimensions?: CoverageDimension[];
   dataProfileIds: string[];
+  explorationTaskIds?: string[];
+  compilationStages?: CompilationStageResult[];
   gapIds: string[];
   createdAt: string;
   updatedAt: string;

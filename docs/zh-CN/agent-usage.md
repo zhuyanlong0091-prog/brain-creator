@@ -44,7 +44,9 @@ Agent 创建/选择系统与绑定关系，配置鉴权，再调用 `explore-sys
 
 ### 6. 编译用例
 
-`compile-cases` 必须带 `systemId`。Brain Creator 只在唯一最短导航路径和唯一状态转换证据存在时补全隐含动作，并保存 `pathPlan` 与 `statePlan`。候选相同、目标不可达或定位证据缺失时创建 Gap。
+`compile-cases` 必须带 `systemId`。Brain Creator 按需求路径、System Brain、测试数据、步骤来源和最终用例五阶段编译，只在唯一最短导航路径和唯一状态转换证据存在时补全隐含动作，并保存 `pathPlan` 与 `statePlan`。
+
+候选相同、目标不可达或定位证据缺失时，状态为 `ambiguous` 或 `needs-exploration`，并创建可恢复的 `ExplorationTask`，不会立即创建 Gap。System Brain 补充证据后，先预览再确认 `bc_prepare action=resolve-exploration-task`，编译器会自动续编。只有探索明确失败时才创建 `system-brain-exploration` Gap。
 
 ### 7. 规划测试数据
 
@@ -70,7 +72,7 @@ Requirement Suite 先以 `confirm=false` 预览，用户批准后再 `confirm=tr
 
 ## 可信控制面约定
 
-正常 Facade 调用使用 `responseMode=summary`，只有审计特定资产时使用 `full`。需求用例优先通过 `requirementSetId`、`testIntentIds` 或模块一次批量编译，并通过 `bc_review target=compile-run` 分页查看详情。页面歧义必须由用户确认后调用 `confirm-page-binding`；Gap 的解决、忽略和重开必须先预览，再携带人工说明与证据引用确认。鉴权验证必须访问真实页面，不能只修改状态字段。
+正常 Facade 调用使用 `responseMode=summary`，只有审计特定资产时使用 `full`。需求用例优先通过 `requirementSetId`、`testIntentIds` 或模块一次批量编译，并通过 `bc_review target=compile-run` 分页查看详情。页面歧义必须先进入探索；只有用户真实选择了候选页面时才调用 `confirm-page-binding`。探索结论和 Gap 生命周期操作都必须先预览，再携带证据确认。鉴权验证必须访问真实页面，不能只修改状态字段。
 
 ## 用户入口映射
 

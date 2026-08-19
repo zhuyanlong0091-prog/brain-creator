@@ -50,7 +50,7 @@ Compile all approved TestIntents for one requirement:
 
 You can use `testIntentIds` for an explicit subset. The existing single `testIntentId` input remains compatible.
 
-Each batch creates a `CompileRun` with `ready`, `blocked`, `ambiguous`, `skipped`, and `reused` counts. Compilation is keyed by TestIntent, system, requirement hash, and current System Brain evidence. Repeating an unchanged request reuses the case. Changed evidence creates a new case and marks the old case `superseded`.
+Each batch creates a `CompileRun` with `ready`, `needsExploration`, `needsData`, `blocked`, `ambiguous`, `skipped`, and `reused` counts. Compilation is keyed by TestIntent, system, requirement hash, and current System Brain evidence. Repeating an unchanged request reuses the case. Changed evidence creates a new case and marks the old case `superseded`.
 
 Review bounded details with:
 
@@ -81,6 +81,22 @@ When more than one page is plausible, present the candidates and obtain an expli
 ```
 
 The decision is evidence, not a hard-coded product rule. It is scoped to the selected TestIntent and system.
+
+## Resolve compilation exploration
+
+Missing or ambiguous System Brain evidence creates an `ExplorationTask`. It is not a final Gap. Review the task through its CompileRun or `bc_status`, collect the requested page, navigation, state, or locator evidence, then preview and confirm the outcome:
+
+```json
+{
+  "action": "resolve-exploration-task",
+  "explorationTaskId": "explorationTask_xxx",
+  "explorationOutcome": "resolved",
+  "evidenceRefs": ["page-model:page_xxx", "locator-point:locator_xxx"],
+  "confirm": true
+}
+```
+
+A resolved task automatically recompiles its TestIntent. A failed task requires a failure reason and creates a `system-brain-exploration` Gap. Cancellation records the decision without fabricating a blocker.
 
 ## Resolve a Gap safely
 

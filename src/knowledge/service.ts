@@ -7,6 +7,7 @@ import type {
   ExecutableCase,
   ExecutableCaseStep,
   CompileRun,
+  CompilationStageResult,
   ExecutionEvidence,
   Gap,
   KnowledgeNode,
@@ -61,6 +62,11 @@ import {
   buildProcessTestIntents,
   buildRequirementCoverageProfile
 } from "./processModels.js";
+import {
+  compileIntentSemanticSteps,
+  executableCaseCompileStatus,
+  validateStepProvenance
+} from "./caseCompiler.js";
 
 export class KnowledgeService {
   constructor(
@@ -639,7 +645,6 @@ export class KnowledgeService {
     if (requirementSet.status !== "approved") {
       throw new Error("Requirement baseline must be approved before compiling executable cases");
     }
-    const source = this.getRequirementSource(requirementSet.sourceId);
     const compileKey = executableCaseCompileKey(
       this.repository,
       intent,
@@ -651,7 +656,9 @@ export class KnowledgeService {
         item.testIntentId === intent.id &&
         item.systemId === systemId &&
         item.compileKey === compileKey &&
-        item.status !== "superseded"
+        item.status !== "superseded" &&
+        item.status !== "needs-exploration" &&
+        item.status !== "ambiguous"
     );
     if (existing) {
       return {
@@ -664,22 +671,32 @@ export class KnowledgeService {
       requirementSet.evaluationGate?.actions.filter(
         (action) => action.status === "confirmed" && action.confirmationNote
       ) ?? [];
-    const executionContent = [
-      source.content,
-      ...confirmedEvalActions.map((action) => action.confirmationNote as string)
-    ].join("\n");
     const sourceRefs = [
-      source.id,
-      requirementSet.id,
+      ...intent.requirementRefs,
+      `requirement-set:${requirementSet.id}`,
       ...confirmedEvalActions.map((action) => `${requirementSet.id}#eval-action-${action.id}`)
     ];
-    const multiplePaths =
-      /\u5217\u8868[^\n]{0,20}\u65b0\u5efa/.test(source.content) &&
-      /\u8be6\u60c5[^\n]{0,20}\u65b0\u5efa/.test(source.content);
-    const gaps: Gap[] = multiplePaths
-      ? [this.createGap(requirementSet.knowledgeProjectId, requirementSet.id, "multiple workflow paths require user selection")]
-      : [];
-    let steps = gaps.length > 0 ? [] : compileSteps(executionContent, sourceRefs);
+    const semantic = compileIntentSemanticSteps({
+      intent,
+      workflowModels: this.repository.workflowModels.filter(
+        (model) => model.requirementSetId === requirementSet.id
+      ),
+      stateMachineModels: this.repository.stateMachineModels.filter(
+        (model) => model.requirementSetId === requirementSet.id
+      ),
+      additionalSourceRefs: sourceRefs
+    });
+    let steps = semantic.steps;
+    const gaps: Gap[] = [];
+    const explorationTaskIds: string[] = [];
+    const compilationStages: CompilationStageResult[] = [{
+      stage: "requirement-path",
+      verdict: "ready",
+      reason: `Semantic steps compiled from ${semantic.source}`,
+      sourceRefs: semantic.processPathSourceRefs
+    }];
+    let compileStatus: "ready" | "needs-exploration" | "needs-data" | "ambiguous" | "blocked" = "ready";
+    const executableCaseId = id("executableCase");
     let pathPlan: ExecutableCase["pathPlan"];
     let statePlan: ExecutableCase["statePlan"];
     if (systemId) {
@@ -687,92 +704,128 @@ export class KnowledgeService {
       if (!project.systemIds.includes(systemId)) {
         throw new Error("Business system must be bound before compiling executable cases");
       }
-      if (gaps.length === 0) {
-        const brain = buildSystemBrain(this.repository, project.id, systemId);
-        const contextQuery = `${intent.module} ${intent.title} ${intent.objective}`;
-        const confirmedBinding = [...this.repository.pageBindingDecisions]
-          .reverse()
-          .find(
-            (decision) =>
-              decision.testIntentId === intent.id && decision.systemId === systemId
-          );
-        const planned = planWorkflowPath(
-          steps,
+      const brain = buildSystemBrain(this.repository, project.id, systemId);
+      const contextQuery = `${intent.module} ${intent.title} ${intent.objective}`;
+      const confirmedBinding = [...this.repository.pageBindingDecisions]
+        .reverse()
+        .find(
+          (decision) =>
+            decision.testIntentId === intent.id && decision.systemId === systemId
+        );
+      const planned = planWorkflowPath(
+        steps,
+        brain,
+        contextQuery,
+        confirmedBinding?.pageModelId
+      );
+      pathPlan = {
+        verdict: planned.verdict,
+        reason: planned.reason,
+        startPageModelId: planned.startPageModelId,
+        targetPageModelId: planned.targetPageModelId,
+        pageModelIds: planned.pageModelIds,
+        navigationSourceRefs: planned.navigationSourceRefs,
+        candidatePathCount: planned.candidatePathCount,
+        candidatePaths: planned.candidatePaths
+      };
+      if (planned.verdict === "ambiguous" || planned.verdict === "missing") {
+        compileStatus = planned.verdict === "ambiguous" ? "ambiguous" : "needs-exploration";
+        const task = this.createExplorationTask({
+          executableCaseId,
+          intent,
+          systemId,
+          kind: planned.verdict === "ambiguous" ? "page-binding" : "navigation-path",
+          reason: planned.reason ?? "System Brain could not plan a unique workflow path",
+          query: contextQuery,
+          candidatePageModelIds: planned.candidatePaths.flatMap((path) => path.pageModelIds),
+          requestedEvidence: ["page model", "navigation edge", "confirmed page binding"],
+          sourceRefs: semantic.processPathSourceRefs,
+          compileKey
+        });
+        explorationTaskIds.push(task.id);
+        compilationStages.push({
+          stage: "system-brain",
+          verdict: compileStatus,
+          reason: task.reason,
+          sourceRefs: task.sourceRefs
+        });
+      } else {
+        const statePlanned = planStateActions(
+          planned.steps,
           brain,
           contextQuery,
-          confirmedBinding?.pageModelId
+          planned.targetPageModelId
         );
-        pathPlan = {
-          verdict: planned.verdict,
-          reason: planned.reason,
-          startPageModelId: planned.startPageModelId,
-          targetPageModelId: planned.targetPageModelId,
-          pageModelIds: planned.pageModelIds,
-          navigationSourceRefs: planned.navigationSourceRefs,
-          candidatePathCount: planned.candidatePathCount,
-          candidatePaths: planned.candidatePaths
+        statePlan = {
+          verdict: statePlanned.verdict,
+          reason: statePlanned.reason,
+          pageModelId: statePlanned.pageModelId,
+          candidateCount: statePlanned.candidateCount,
+          candidates: statePlanned.candidates,
+          transitionSourceRefs: statePlanned.transitionSourceRefs
         };
-        if (planned.verdict === "ambiguous" || planned.verdict === "missing") {
-          gaps.push(
-            this.createGap(
-              project.id,
-              requirementSet.id,
-              planned.reason ?? "System Brain could not plan a unique workflow path",
-              "system-brain"
-            )
-          );
+        steps = statePlanned.steps;
+        if (statePlanned.verdict === "ambiguous" || statePlanned.verdict === "missing") {
+          compileStatus = statePlanned.verdict === "ambiguous" ? "ambiguous" : "needs-exploration";
+          const task = this.createExplorationTask({
+            executableCaseId,
+            intent,
+            systemId,
+            kind: "state-action",
+            reason: statePlanned.reason ?? "System Brain could not plan a unique state action",
+            query: contextQuery,
+            candidatePageModelIds: statePlanned.pageModelId ? [statePlanned.pageModelId] : [],
+            requestedEvidence: ["state transition", "triggering control", "before and after state"],
+            sourceRefs: uniqueStrings([...semantic.processPathSourceRefs, ...statePlanned.transitionSourceRefs]),
+            compileKey
+          });
+          explorationTaskIds.push(task.id);
+          compilationStages.push({ stage: "system-brain", verdict: compileStatus, reason: task.reason, sourceRefs: task.sourceRefs });
         } else {
-          const statePlanned = planStateActions(
-            planned.steps,
-            brain,
-            contextQuery,
-            planned.targetPageModelId
-          );
-          statePlan = {
-            verdict: statePlanned.verdict,
-            reason: statePlanned.reason,
-            pageModelId: statePlanned.pageModelId,
-            candidateCount: statePlanned.candidateCount,
-            candidates: statePlanned.candidates,
-            transitionSourceRefs: statePlanned.transitionSourceRefs
-          };
-          if (
-            statePlanned.verdict === "ambiguous" ||
-            statePlanned.verdict === "missing"
-          ) {
-            steps = statePlanned.steps;
-            gaps.push(
-              this.createGap(
-                project.id,
-                requirementSet.id,
-                statePlanned.reason ??
-                  "System Brain could not plan a unique state action",
-                "system-brain"
-              )
-            );
-          } else {
-            const bound = bindStepsToSystemBrain(
-              statePlanned.steps,
-              brain,
-              contextQuery
-            );
-            steps = bound.steps;
-            const reasons = [
-              ...new Set(bound.missingEvidence.map((item) => item.reason))
-            ];
-            gaps.push(
-              ...reasons.map((reason) =>
-                this.createGap(
-                  project.id,
-                  requirementSet.id,
-                  reason,
-                  "system-brain"
+          const bound = bindStepsToSystemBrain(statePlanned.steps, brain, contextQuery);
+          steps = bound.steps;
+          const reasons = [...new Set(bound.missingEvidence.map((item) => item.reason))];
+          if (reasons.length > 0) {
+            compileStatus = "needs-exploration";
+            const task = this.createExplorationTask({
+              executableCaseId,
+              intent,
+              systemId,
+              kind: "locator-evidence",
+              reason: reasons.join("; "),
+              query: contextQuery,
+              candidatePageModelIds: planned.targetPageModelId ? [planned.targetPageModelId] : [],
+              requestedEvidence: ["locator point", "action binding", "assertion evidence"],
+              sourceRefs: uniqueStrings([
+                ...semantic.processPathSourceRefs,
+                ...bound.missingEvidence.flatMap(
+                  (item) => steps.find((step) => step.id === item.stepId)?.sourceRefs ?? []
                 )
-              )
-            );
+              ]),
+              compileKey
+            });
+            explorationTaskIds.push(task.id);
+            compilationStages.push({ stage: "system-brain", verdict: "needs-exploration", reason: task.reason, sourceRefs: task.sourceRefs });
+          } else {
+            compilationStages.push({
+              stage: "system-brain",
+              verdict: "ready",
+              sourceRefs: uniqueStrings([
+                ...planned.navigationSourceRefs,
+                ...statePlanned.transitionSourceRefs,
+                ...steps.flatMap((step) => step.sourceRefs.filter((ref) => /^(page-model|locator-point|probe-result|action-step|training-session|api-flow):/.test(ref)))
+              ])
+            });
           }
         }
       }
+    } else {
+      compilationStages.push({
+        stage: "system-brain",
+        verdict: "ready",
+        reason: "System binding was not requested for this compatibility compile",
+        sourceRefs: []
+      });
     }
     const dataProfiles = this.repository.testDataProfiles.filter(
       (profile) =>
@@ -783,9 +836,15 @@ export class KnowledgeService {
     );
     const dataPlanned = planTestData(dataProfiles, steps);
     steps = dataPlanned.steps;
-    if (dataPlanned.plan.verdict === "blocked") {
+    const structuralDataReasons = dataPlanned.plan.operations
+      .filter((operation) => operation.status === "blocked")
+      .map((operation) => operation.reason ?? `Test data for ${operation.field} is structurally blocked`);
+    const dataNeedsDecision = dataPlanned.plan.operations.some(
+      (operation) => operation.status === "needs-resolution"
+    );
+    if (structuralDataReasons.length > 0) {
       gaps.push(
-        ...dataPlanned.plan.reasons.map((reason) =>
+        ...structuralDataReasons.map((reason) =>
           this.createGap(
             requirementSet.knowledgeProjectId,
             requirementSet.id,
@@ -794,16 +853,59 @@ export class KnowledgeService {
           )
         )
       );
+      compileStatus = "blocked";
+      compilationStages.push({
+        stage: "test-data",
+        verdict: "blocked",
+        reason: structuralDataReasons.join("; "),
+        sourceRefs: dataPlanned.plan.sourceRefs
+      });
+    } else if (dataNeedsDecision) {
+      if (compileStatus === "ready") compileStatus = "needs-data";
+      compilationStages.push({
+        stage: "test-data",
+        verdict: "needs-data",
+        reason: dataPlanned.plan.reasons.join("; ") || "Test data requires confirmation",
+        sourceRefs: dataPlanned.plan.sourceRefs
+      });
+    } else {
+      compilationStages.push({
+        stage: "test-data",
+        verdict: "ready",
+        sourceRefs: dataPlanned.plan.sourceRefs
+      });
     }
+    const provenance = validateStepProvenance(steps);
+    if (!provenance.valid) {
+      const reason = `Compiled steps lack source provenance: ${provenance.invalidStepIds.join(", ")}`;
+      gaps.push(this.createGap(requirementSet.knowledgeProjectId, requirementSet.id, reason, "case-compiler"));
+      compileStatus = "blocked";
+      compilationStages.push({ stage: "step-provenance", verdict: "blocked", reason, sourceRefs: [] });
+    } else {
+      compilationStages.push({
+        stage: "step-provenance",
+        verdict: "ready",
+        sourceRefs: uniqueStrings(steps.flatMap((step) => step.sourceRefs))
+      });
+    }
+    compilationStages.push({
+      stage: "executable-case",
+      verdict: compileStatus,
+      sourceRefs: uniqueStrings([
+        ...semantic.processPathSourceRefs,
+        ...steps.flatMap((step) => step.sourceRefs),
+        ...dataPlanned.plan.sourceRefs
+      ])
+    });
     const now = timestamp();
     const executableCase: ExecutableCase = {
-      id: id("executableCase"),
+      id: executableCaseId,
       knowledgeProjectId: requirementSet.knowledgeProjectId,
       requirementSetId: requirementSet.id,
       testIntentId: intent.id,
       systemId,
       title: intent.title,
-      status: gaps.length > 0 ? "blocked" : "ready",
+      status: compileStatus,
       compileKey,
       preconditions: intent.preconditions,
       steps,
@@ -812,6 +914,8 @@ export class KnowledgeService {
       dataPlan: dataPlanned.plan,
       coverageDimensions: intent.coverageDimensions,
       dataProfileIds: dataProfiles.map((profile) => profile.id),
+      explorationTaskIds,
+      compilationStages,
       gapIds: gaps.map((gap) => gap.id),
       createdAt: now,
       updatedAt: now
@@ -828,7 +932,7 @@ export class KnowledgeService {
       previous.updatedAt = now;
     }
     this.repository.executableCases.push(executableCase);
-    intent.status = gaps.length > 0 ? "blocked" : "compiled";
+    intent.status = compileStatus === "ready" ? "compiled" : compileStatus;
     intent.updatedAt = now;
     this.repository.persist();
     return { executableCase, gaps, reused: false };
@@ -872,15 +976,20 @@ export class KnowledgeService {
         const compiled = this.compileExecutableCases(intent.id, input.systemId);
         const result = compiled.reused
           ? "reused"
-          : compiled.executableCase.pathPlan?.verdict === "ambiguous"
-            ? "ambiguous"
-            : compiled.executableCase.status === "ready"
-              ? "ready"
-              : "blocked";
+          : compiled.executableCase.status === "needs-exploration"
+            ? "needs-exploration"
+            : compiled.executableCase.status === "needs-data"
+              ? "needs-data"
+              : compiled.executableCase.status === "ambiguous"
+                ? "ambiguous"
+                : compiled.executableCase.status === "ready"
+                  ? "ready"
+                  : "blocked";
         return {
           testIntentId: intent.id,
           result,
           executableCaseId: compiled.executableCase.id,
+          explorationTaskIds: compiled.executableCase.explorationTaskIds,
           gapIds: compiled.executableCase.gapIds
         };
       } catch (error) {
@@ -903,11 +1012,13 @@ export class KnowledgeService {
       status:
         count("skipped") === items.length
           ? "failed"
-          : count("blocked") + count("ambiguous") + count("skipped") > 0
+          : count("blocked") + count("ambiguous") + count("needs-exploration") + count("needs-data") + count("skipped") > 0
             ? "completed-with-blockers"
             : "completed",
       total: items.length,
       ready: count("ready"),
+      needsExploration: count("needs-exploration"),
+      needsData: count("needs-data"),
       blocked: count("blocked"),
       ambiguous: count("ambiguous"),
       skipped: count("skipped"),
@@ -965,10 +1076,122 @@ export class KnowledgeService {
     return decision;
   }
 
+  listExplorationTasks(input: {
+    requirementSetId?: string;
+    testIntentId?: string;
+    systemId?: string;
+    status?: "pending" | "resolved" | "failed" | "cancelled";
+  } = {}) {
+    return this.repository.explorationTasks.filter(
+      (task) =>
+        (!input.requirementSetId || task.requirementSetId === input.requirementSetId) &&
+        (!input.testIntentId || task.testIntentId === input.testIntentId) &&
+        (!input.systemId || task.systemId === input.systemId) &&
+        (!input.status || task.status === input.status)
+    );
+  }
+
+  resolveExplorationTask(input: {
+    taskId: string;
+    outcome: "resolved" | "failed" | "cancelled";
+    evidenceRefs?: string[];
+    failureReason?: string;
+  }) {
+    const task = this.repository.explorationTasks.find((item) => item.id === input.taskId);
+    if (!task) throw new Error("Exploration task not found");
+    if (task.status !== "pending") throw new Error("Exploration task is not pending");
+    const now = timestamp();
+    const evidenceRefs = uniqueStrings(input.evidenceRefs ?? []);
+    if (input.outcome === "resolved" && evidenceRefs.length === 0) {
+      throw new Error("Resolved exploration requires evidenceRefs");
+    }
+    task.status = input.outcome;
+    task.resultSourceRefs = evidenceRefs;
+    task.updatedAt = now;
+    task.resolvedAt = now;
+    const executableCase = task.executableCaseId
+      ? this.repository.executableCases.find((item) => item.id === task.executableCaseId)
+      : undefined;
+    if (input.outcome === "failed") {
+      const reason = input.failureReason?.trim() || `Exploration failed: ${task.reason}`;
+      task.failureReason = reason;
+      const gap = this.createGap(
+        task.knowledgeProjectId,
+        task.id,
+        reason,
+        "system-brain-exploration"
+      );
+      if (executableCase) {
+        executableCase.status = "blocked";
+        executableCase.gapIds = uniqueStrings([...executableCase.gapIds, gap.id]);
+        executableCase.updatedAt = now;
+      }
+      const intent = this.getTestIntent(task.testIntentId);
+      intent.status = "blocked";
+      intent.updatedAt = now;
+      this.repository.persist();
+      return { task, executableCase, gap };
+    }
+    if (input.outcome === "cancelled") {
+      this.repository.persist();
+      return { task, executableCase };
+    }
+    this.repository.persist();
+    const compiled = this.compileExecutableCases(task.testIntentId, task.systemId);
+    return { task, resumed: compiled };
+  }
+
   getCompileRun(idValue: string) {
     const run = this.repository.compileRuns.find((item) => item.id === idValue);
     if (!run) throw new Error("Compile run not found");
     return run;
+  }
+
+  private createExplorationTask(input: {
+    executableCaseId: string;
+    intent: TestIntent;
+    systemId: string;
+    kind: "page-binding" | "navigation-path" | "state-action" | "locator-evidence";
+    reason: string;
+    query: string;
+    candidatePageModelIds: string[];
+    requestedEvidence: string[];
+    sourceRefs: string[];
+    compileKey: string;
+  }) {
+    const idempotencyKey = createHash("sha256")
+      .update(`${input.compileKey}:${input.kind}:${input.reason}`)
+      .digest("hex");
+    const existing = this.repository.explorationTasks.find(
+      (task) => task.idempotencyKey === idempotencyKey && task.status === "pending"
+    );
+    if (existing) {
+      existing.executableCaseId = input.executableCaseId;
+      existing.updatedAt = timestamp();
+      return existing;
+    }
+    const now = timestamp();
+    const task = {
+      id: id("explorationTask"),
+      knowledgeProjectId: input.intent.knowledgeProjectId,
+      requirementSetId: input.intent.requirementSetId,
+      testIntentId: input.intent.id,
+      executableCaseId: input.executableCaseId,
+      systemId: input.systemId,
+      kind: input.kind,
+      status: "pending" as const,
+      reason: input.reason,
+      query: input.query,
+      candidatePageModelIds: uniqueStrings(input.candidatePageModelIds),
+      requestedEvidence: uniqueStrings(input.requestedEvidence),
+      sourceRefs: uniqueStrings(input.sourceRefs),
+      resultSourceRefs: [],
+      idempotencyKey,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.repository.explorationTasks.push(task);
+    return task;
   }
 
   resolveExecutableCaseTestData(input: {
@@ -1001,15 +1224,10 @@ export class KnowledgeService {
         gap.status = "resolved";
         gap.updatedAt = now;
       }
-      const hasOpenGap = executableCase.gapIds.some((gapId) =>
-        this.repository.gaps.some(
-          (gap) => gap.id === gapId && gap.status === "open"
-        )
-      );
-      executableCase.status = hasOpenGap ? "blocked" : "ready";
+      executableCase.status = executableCaseCompileStatus(this.repository, executableCase);
       executableCase.updatedAt = now;
       const intent = this.getTestIntent(executableCase.testIntentId);
-      intent.status = hasOpenGap ? "blocked" : "compiled";
+      intent.status = executableCase.status === "ready" ? "compiled" : executableCase.status;
       intent.updatedAt = now;
     }
     this.repository.persist();
@@ -1028,7 +1246,11 @@ export class KnowledgeService {
       executableCase.dataPlan,
       timestamp()
     );
+    executableCase.status = executableCaseCompileStatus(this.repository, executableCase);
     executableCase.updatedAt = timestamp();
+    const intent = this.getTestIntent(executableCase.testIntentId);
+    intent.status = executableCase.status === "ready" ? "compiled" : executableCase.status;
+    intent.updatedAt = executableCase.updatedAt;
     this.repository.persist();
     return executableCase;
   }
@@ -2443,48 +2665,8 @@ function clearRequirementDesign(
   }
 }
 
-function compileSteps(content: string, sourceRefs: string[]): ExecutableCaseStep[] {
-  const steps: ExecutableCaseStep[] = [];
-  const add = (step: Omit<ExecutableCaseStep, "id" | "order" | "sourceRefs">) =>
-    steps.push({ ...step, id: id("step"), order: steps.length + 1, sourceRefs });
-  add({
-    action: "navigate",
-    instruction: "Open the target module entry page",
-    targetSemantic: "module entry",
-    origin: "derived"
-  });
-  if (/\u65b0\u5efa|create|new|\u586b\u5199|fill/i.test(content)) {
-    add({
-      action: "click",
-      instruction: "Start a new business record before filling the form",
-      targetSemantic: "new record action",
-      origin: /\u65b0\u5efa|create|new/i.test(content) ? "source" : "derived"
-    });
-  }
-  if (/\u586b\u5199|fill|form|\u8868\u5355/i.test(content)) {
-    add({
-      action: "fill",
-      instruction: "Fill required fields with generated data",
-      targetSemantic: "business form",
-      origin: "source"
-    });
-  }
-  if (/\u9009\u62e9.+(?:\u540e|\u5219|\u65f6)|select.+then|type/i.test(content)) {
-    add({
-      action: "select",
-      instruction: "Select the requirement-defined option",
-      targetSemantic: "conditional selector",
-      origin: "source"
-    });
-  }
-  add({
-    action: "assert",
-    instruction: "Verify the resulting state and conditional fields",
-    targetSemantic: "requirement outcome",
-    expected: "Behavior matches the approved requirement",
-    origin: "source"
-  });
-  return steps;
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
 function normalizeKey(value: string) {

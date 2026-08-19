@@ -121,7 +121,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, confirming Requirement Eval, reviewing or rolling back historical execution diagnoses, approving a baseline, exploring System Brain, compiling evidence-bound cases, preparing test data, and confirming immutable execution preflight snapshots.",
+      "Requirement-first facade for ingesting sources, confirming Requirement Eval, reviewing or rolling back historical execution diagnoses, approving a baseline, exploring System Brain, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, and confirming immutable execution preflight snapshots.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
@@ -137,6 +137,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "approve-baseline",
         "compile-cases",
         "confirm-page-binding",
+        "resolve-exploration-task",
         "resolve-gap",
         "dismiss-gap",
         "reopen-gap",
@@ -160,6 +161,9 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       testIntentIds: z.array(z.string()).default([]),
       modules: z.array(z.string()).default([]),
       pageModelId: z.string().optional(),
+      explorationTaskId: z.string().optional(),
+      explorationOutcome: z.enum(["resolved", "failed", "cancelled"]).optional(),
+      failureReason: z.string().optional(),
       role: z.string().optional(),
       gapId: z.string().optional(),
       evidenceRefs: z.array(z.string()).default([]),
