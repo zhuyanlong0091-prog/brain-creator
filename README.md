@@ -64,7 +64,7 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 核心边界：
 
 - 未批准的需求基线不执行。
-- 缺少页面、流程或数据证据时创建 Gap，不猜测业务动作。
+- 缺少页面或流程证据时先创建可恢复的 ExplorationTask；探索失败后才创建 Gap。缺少测试数据时进入 `needs-data`，不猜测业务动作或数据。
 - 需求预期、系统观察和执行结果分层保存，当前系统行为不能覆盖需求定义。
 - 知识按 `knowledgeProjectId` 隔离，运行资产按 `systemId` 隔离。
 - 产品不符合预期才是 Bug；自动化、鉴权、环境、网络和测试数据问题归入对应 Gap。
@@ -81,7 +81,7 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 
 Agent 默认使用高阶 Facade 工具。只有调试、审计或兼容旧流程时才需要底层 `bc_*` 工具。完整映射见 [Agent 使用指南](docs/agent-usage.md)。
 
-可信控制面不要求手工修改运行数据：鉴权可通过 Facade 创建、真实浏览器验证和归档；需求可按 RequirementSet、TestIntent 子集或模块一次批量编译；页面歧义通过人工确认绑定；Gap 支持带说明和证据的解决、忽略与重开。普通调用默认使用 `responseMode=summary`，详细结果通过可分页的 CompileRun 复盘。参见 [可信控制面](docs/zh-CN/guides/trusted-control-plane.md)。
+可信控制面不要求手工修改运行数据：鉴权可通过 Facade 创建、真实浏览器验证和归档；需求可按 RequirementSet、TestIntent 子集或模块一次批量编译；编译按需求路径、System Brain、测试数据、步骤来源和最终用例五阶段执行；页面或动作证据不足时先进入可恢复探索，探索明确失败后才形成 Gap。普通调用默认使用 `responseMode=summary`，详细结果通过可分页的 CompileRun 复盘。参见 [可信控制面](docs/zh-CN/guides/trusted-control-plane.md)。
 
 ### 安装模式
 
@@ -161,7 +161,7 @@ Requirement / Feishu / Web page / Existing test cases
 Brain Creator enforces these boundaries:
 
 - An unapproved requirement baseline cannot run.
-- Missing page, workflow, or data evidence creates a Gap instead of a guessed action.
+- Missing page or workflow evidence creates a resumable ExplorationTask before any Gap. Missing test data enters `needs-data`; Brain Creator does not guess actions or values.
 - Requirement expectations, system observations, and execution results remain separate.
 - Knowledge is isolated by `knowledgeProjectId`; runtime assets are isolated by `systemId`.
 - Only a verified product mismatch becomes a Bug. Automation, auth, environment, network, and test-data failures become typed Gaps.
@@ -178,7 +178,7 @@ Brain Creator enforces these boundaries:
 
 The Agent uses high-level Facade tools by default. Low-level `bc_*` tools are for compatibility, audit, and debugging. See the [Agent usage guide](docs/agent-usage.md) for the mapping.
 
-The trusted control plane removes manual runtime-store edits: auth can be created, browser-verified, and archived through the Facade; approved intents can be batch compiled by requirement, explicit IDs, or module; ambiguous pages require a confirmed binding; and Gaps support evidence-backed resolve, dismiss, and reopen transitions. Normal calls use `responseMode=summary`, with paged CompileRun detail available for review. See [Trusted control plane](docs/guides/trusted-control-plane.md).
+The trusted control plane removes manual runtime-store edits: auth can be created, browser-verified, and archived through the Facade; approved intents can be batch compiled by requirement, explicit IDs, or module; compilation records requirement-path, System Brain, test-data, provenance, and final-case stages; missing page or action evidence enters a resumable exploration before a final Gap. Normal calls use `responseMode=summary`, with paged CompileRun detail available for review. See [Trusted control plane](docs/guides/trusted-control-plane.md).
 
 ### Installation modes
 

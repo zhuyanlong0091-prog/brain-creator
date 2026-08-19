@@ -45,7 +45,7 @@ Brain Creator Skill 默认使用 `summary`。只有查看特定资产或诊断�
 
 可通过 `testIntentIds` 指定子集；原有单条 `testIntentId` 继续兼容。
 
-每次批量编译都会生成 `CompileRun`，统计 `ready`、`blocked`、`ambiguous`、`skipped` 和 `reused`。幂等键由 TestIntent、系统、需求 hash 和当前 System Brain 证据组成。输入未变化时复用已有用例；证据变化时生成新用例，并将旧用例标记为 `superseded`。
+每次批量编译都会生成 `CompileRun`，统计 `ready`、`needsExploration`、`needsData`、`blocked`、`ambiguous`、`skipped` 和 `reused`。幂等键由 TestIntent、系统、需求 hash 和当前 System Brain 证据组成。输入未变化时复用已有用例；证据变化时生成新用例，并将旧用例标记为 `superseded`。
 
 使用以下调用分页查看详情：
 
@@ -76,6 +76,22 @@ Brain Creator Skill 默认使用 `summary`。只有查看特定资产或诊断�
 ```
 
 该记录是当前 TestIntent 和系统范围内的证据，不是写死在代码中的业务规则。
+
+## 解决编译探索任务
+
+System Brain 证据缺失或歧义时会创建 `ExplorationTask`，它不是最终 Gap。通过 CompileRun 或 `bc_status` 查看任务，补充页面、导航、状态或定位证据，然后先预览再确认结果：
+
+```json
+{
+  "action": "resolve-exploration-task",
+  "explorationTaskId": "explorationTask_xxx",
+  "explorationOutcome": "resolved",
+  "evidenceRefs": ["page-model:page_xxx", "locator-point:locator_xxx"],
+  "confirm": true
+}
+```
+
+解决成功后自动重新编译对应 TestIntent。标记失败时必须提供原因，并创建 `system-brain-exploration` Gap；取消只记录决定，不伪造阻塞。
 
 ## 安全处理 Gap
 

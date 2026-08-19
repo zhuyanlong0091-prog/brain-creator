@@ -340,7 +340,7 @@ describe("Test data planner", () => {
 
     const compiled = service.compileExecutableCases(selectedIntent.id);
 
-    expect(compiled.executableCase.status).toBe("blocked");
+    expect(compiled.executableCase.status).toBe("needs-data");
     expect(compiled.executableCase.dataProfileIds).toEqual([
       relatedProfiles[0].id
     ]);
@@ -355,9 +355,7 @@ describe("Test data planner", () => {
         ]
       })
     );
-    expect(compiled.gaps).toEqual([
-      expect.objectContaining({ sourceType: "test-data-plan" })
-    ]);
+    expect(compiled.gaps).toEqual([]);
 
     const resolved = service.resolveExecutableCaseTestData({
       executableCaseId: compiled.executableCase.id,
@@ -375,12 +373,7 @@ describe("Test data planner", () => {
     expect(resolved.executableCase.dataPlan).toEqual(
       expect.objectContaining({ verdict: "ready" })
     );
-    expect(resolved.resolvedGaps).toEqual([
-      expect.objectContaining({
-        sourceType: "test-data-plan",
-        status: "resolved"
-      })
-    ]);
+    expect(resolved.resolvedGaps).toEqual([]);
   });
 });
 

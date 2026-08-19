@@ -145,7 +145,8 @@ describe("ShardedFileBrainCreatorRepository", () => {
       "attachmentAnalyses",
       "workflowModels",
       "stateMachineModels",
-      "requirementCoverageProfiles"
+      "requirementCoverageProfiles",
+      "explorationTasks"
     ];
     manifest.collections = manifest.collections.filter((key: string) => !optional.includes(key));
     await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
@@ -159,6 +160,7 @@ describe("ShardedFileBrainCreatorRepository", () => {
     expect(restored.workflowModels).toEqual([]);
     expect(restored.stateMachineModels).toEqual([]);
     expect(restored.requirementCoverageProfiles).toEqual([]);
+    expect(restored.explorationTasks).toEqual([]);
   });
 
   it("projects all system-owned assets without mixing two systems", async () => {

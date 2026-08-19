@@ -30,6 +30,7 @@ import type {
   ExecutionDiagnosisReview,
   ExecutionPlan,
   ExecutionEvidence,
+  ExplorationTask,
   KnowledgeEdge,
   KnowledgeNode,
   KnowledgeProject,
@@ -60,7 +61,8 @@ const OPTIONAL_SCHEMA_17_COLLECTIONS = new Set([
   "attachmentAnalyses",
   "workflowModels",
   "stateMachineModels",
-  "requirementCoverageProfiles"
+  "requirementCoverageProfiles",
+  "explorationTasks"
 ]);
 
 export function shardedRepositoryCollectionKeys() {
@@ -112,6 +114,7 @@ export class InMemoryBrainCreatorRepository {
   executionDiagnosisReviews: ExecutionDiagnosisReview[] = [];
   runLedgerEntries: RunLedgerEntry[] = [];
   compileRuns: CompileRun[] = [];
+  explorationTasks: ExplorationTask[] = [];
   pageBindingDecisions: PageBindingDecision[] = [];
 
   persist() {
@@ -166,6 +169,7 @@ export class InMemoryBrainCreatorRepository {
     this.executionDiagnosisReviews = [];
     this.runLedgerEntries = [];
     this.compileRuns = [];
+    this.explorationTasks = [];
     this.pageBindingDecisions = [];
     this.persist();
   }
@@ -217,6 +221,7 @@ export type RepositorySnapshot = Pick<
   | "executionDiagnosisReviews"
   | "runLedgerEntries"
   | "compileRuns"
+  | "explorationTasks"
   | "pageBindingDecisions"
 >;
 
@@ -440,6 +445,7 @@ function snapshotRepository(
     executionDiagnosisReviews: repository.executionDiagnosisReviews,
     runLedgerEntries: repository.runLedgerEntries,
     compileRuns: repository.compileRuns,
+    explorationTasks: repository.explorationTasks,
     pageBindingDecisions: repository.pageBindingDecisions
   };
 }
@@ -544,7 +550,12 @@ function applyRepositorySnapshot(
         entry.runType ??
         (entry.caseSuiteId ? "document-suite" : "requirement-suite")
     }));
-    repository.compileRuns = snapshot.compileRuns ?? [];
+    repository.compileRuns = (snapshot.compileRuns ?? []).map((run) => ({
+      ...run,
+      needsExploration: run.needsExploration ?? 0,
+      needsData: run.needsData ?? 0
+    }));
+    repository.explorationTasks = snapshot.explorationTasks ?? [];
     repository.pageBindingDecisions = snapshot.pageBindingDecisions ?? [];
 }
 
@@ -559,7 +570,7 @@ function collectionKeys(): Array<Exclude<keyof RepositorySnapshot, "schemaVersio
     "knowledgeEdges", "testIntents", "testDataProfiles", "testDataTasks", "testDataLeases",
     "executableCases", "executionPlans", "requirementSuiteRuns", "executionEvidence",
     "executionDiagnoses", "executionDiagnosisReviews", "runLedgerEntries", "compileRuns",
-    "pageBindingDecisions"
+    "explorationTasks", "pageBindingDecisions"
   ];
 }
 
@@ -677,6 +688,7 @@ function systemAssets(repository: InMemoryBrainCreatorRepository, systemId: stri
     executionDiagnosisReviews: repository.executionDiagnosisReviews.filter((item) => item.systemId === systemId),
     runLedgerEntries: repository.runLedgerEntries.filter((item) => item.systemId === systemId),
     compileRuns: repository.compileRuns.filter((item) => item.systemId === systemId),
+    explorationTasks: repository.explorationTasks.filter((item) => item.systemId === systemId),
     pageBindingDecisions: repository.pageBindingDecisions.filter((item) => item.systemId === systemId)
   };
 }
@@ -706,6 +718,7 @@ function buildAssetIndex(repository: InMemoryBrainCreatorRepository) {
     ...repository.attachmentAnalyses.map((item) => ({ id: item.id, type: "attachment-analysis", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.kind })),
     ...repository.workflowModels.map((item) => ({ id: item.id, type: "workflow-model", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
     ...repository.stateMachineModels.map((item) => ({ id: item.id, type: "state-machine-model", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
+    ...repository.explorationTasks.map((item) => ({ id: item.id, type: "exploration-task", systemId: item.systemId, requirementSetId: item.requirementSetId, label: item.reason })),
     ...repository.testIntents.map((item) => ({ id: item.id, type: "test-intent", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
     ...repository.executableCases.map((item) => ({ id: item.id, type: "executable-case", systemId: item.systemId, requirementSetId: item.requirementSetId, testIntentId: item.testIntentId, label: item.title })),
     ...repository.executionEvidence.map((item) => ({ id: item.id, type: "execution-evidence", systemId: item.systemId, executableCaseId: item.executableCaseId, requirementSetId: executableCaseById.get(item.executableCaseId)?.requirementSetId, label: item.id })),

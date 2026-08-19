@@ -30,7 +30,7 @@ npx brain-creator doctor --json
 | Login, CAPTCHA, or 2FA blocks progress | [Authentication needs a checkpoint](#authentication-needs-a-checkpoint) |
 | Feishu link cannot be read | [Feishu source cannot be loaded](#feishu-source-cannot-be-loaded) |
 | Requirement baseline cannot be approved | [Requirement Eval blocks approval](#requirement-eval-blocks-approval) |
-| Compilation creates a Gap | [System evidence is incomplete](#system-evidence-is-incomplete) |
+| Compilation needs exploration | [System evidence is incomplete](#system-evidence-is-incomplete) |
 | A test failure looks like an automation problem | [Bug and Gap classification looks wrong](#bug-and-gap-classification-looks-wrong) |
 | A new session does not know where to continue | [Session state needs recovery](#session-state-needs-recovery) |
 
@@ -225,6 +225,8 @@ Do not bind and execute a system simply to evade an unresolved requirement gate.
 **Fix**
 
 Refresh System Brain or submit focused page/training evidence from the host browser. Use safe exploration only for bounded tab, disclosure, and native-select interactions. Use training evidence for complex menus, form entry, and business workflow transitions.
+
+Review the returned ExplorationTask through `bc_status` or its CompileRun. After adding evidence, preview and confirm `bc_prepare action=resolve-exploration-task`. Brain Creator recompiles automatically. Do not mark the task failed until the evidence attempt is exhausted; failure creates the final Gap.
 
 Brain Creator should not choose one ambiguous path automatically.
 

@@ -50,7 +50,7 @@ Requirement expectations and observed behavior are separate layers. A mismatch i
 
 The compiler converts an approved `TestIntent` into an `ExecutableCase` for one bound `systemId`.
 
-It may add an implicit navigation or state action only when the evidence supports one unique, high-confidence path. Ambiguous routes, missing values, missing locators, and unreachable pages block compilation and create a Gap.
+It may add an implicit navigation or state action only when the evidence supports one unique, high-confidence path. Ambiguous routes, missing values, missing locators, and unreachable pages produce a resumable `ExplorationTask`. The compiler records five stage verdicts and resumes after evidence is added. A final Gap is created only when exploration explicitly fails; unresolved test data uses `needs-data`.
 
 This rule prevents an Agent from silently inventing the kind of hidden action a human tester might infer from context.
 

@@ -192,7 +192,7 @@ describe("System Brain", () => {
     expect(result.steps).toEqual(workflowSteps());
   });
 
-  it("persists a unique path plan and creates a Gap when the graph becomes ambiguous", async () => {
+  it("persists a unique path plan and requests exploration when the graph becomes ambiguous", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const service = new KnowledgeService(repository, await tempDir());
     const project = await service.createProject({
@@ -239,7 +239,7 @@ describe("System Brain", () => {
       "system-path"
     );
 
-    expect(ambiguous.executableCase.status).toBe("blocked");
+    expect(ambiguous.executableCase.status).toBe("ambiguous");
     expect(ambiguous.executableCase.pathPlan).toEqual(
       expect.objectContaining({
         verdict: "ambiguous",
@@ -257,14 +257,30 @@ describe("System Brain", () => {
         ])
       })
     );
-    expect(ambiguous.gaps).toEqual(
+    expect(ambiguous.gaps).toEqual([]);
+    expect(repository.explorationTasks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          sourceType: "system-brain",
+          kind: "page-binding",
+          status: "pending",
           reason: expect.stringContaining("multiple equally short navigation paths")
         })
       ])
     );
+    const ambiguousTask = repository.explorationTasks.find(
+      (task) => ambiguous.executableCase.explorationTaskIds?.includes(task.id)
+    )!;
+    repository.systemExplorations = repository.systemExplorations.filter(
+      (exploration) => exploration.id !== "exploration-shortcut"
+    );
+    const resumed = service.resolveExplorationTask({
+      taskId: ambiguousTask.id,
+      outcome: "resolved",
+      evidenceRefs: ["system-exploration:exploration-path"]
+    });
+    expect(resumed.task.status).toBe("resolved");
+    expect(resumed.resumed?.executableCase.status).toBe("ready");
+    expect(ambiguous.executableCase.status).toBe("superseded");
   });
 
   it("builds an isolated, idempotent system view from page, training, cascade, and API evidence", async () => {
@@ -497,18 +513,39 @@ describe("System Brain", () => {
         sourceRefs: expect.arrayContaining(["locator-point:locator-create"])
       })
     );
-    expect(blocked.executableCase.status).toBe("blocked");
-    expect(blocked.gaps).toEqual([
+    expect(blocked.executableCase.status).toBe("needs-exploration");
+    expect(blocked.gaps).toEqual([]);
+    expect(repository.explorationTasks).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceType: "system-brain",
+        kind: "locator-evidence",
+        status: "pending",
         reason: expect.stringContaining("page evidence")
       })
-    ]);
-    expect(roleMismatch.executableCase.status).toBe("blocked");
-    expect(roleMismatch.gaps).toEqual(
+    ]));
+    const failedTask = repository.explorationTasks.find(
+      (task) => blocked.executableCase.explorationTaskIds?.includes(task.id)
+    )!;
+    const failed = service.resolveExplorationTask({
+      taskId: failedTask.id,
+      outcome: "failed",
+      failureReason: "The target system exposes no matching page or control."
+    });
+    expect(failed.executableCase?.status).toBe("blocked");
+    expect(failed.task.failureReason).toBe(
+      "The target system exposes no matching page or control."
+    );
+    expect(failed.gap).toEqual(expect.objectContaining({
+      sourceType: "system-brain-exploration",
+      sourceId: failedTask.id,
+      reason: "The target system exposes no matching page or control."
+    }));
+    expect(roleMismatch.executableCase.status).toBe("needs-exploration");
+    expect(roleMismatch.gaps).toEqual([]);
+    expect(repository.explorationTasks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          sourceType: "system-brain",
+          kind: "locator-evidence",
+          status: "pending",
           reason: expect.stringContaining("no locator evidence for fill")
         })
       ])

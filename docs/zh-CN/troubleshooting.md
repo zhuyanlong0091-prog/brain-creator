@@ -30,7 +30,7 @@ npx brain-creator doctor --json
 | 登录、CAPTCHA 或 2FA 阻塞 | [鉴权需要 Checkpoint](#鉴权需要-checkpoint) |
 | 无法读取飞书链接 | [飞书来源读取失败](#飞书来源读取失败) |
 | 无法批准需求基线 | [Requirement Eval 阻塞](#requirement-eval-阻塞) |
-| 编译创建 Gap | [系统证据不完整](#系统证据不完整) |
+| 编译需要探索 | [系统证据不完整](#系统证据不完整) |
 | 自动化问题被当作 Bug | [Bug 与 Gap 分类异常](#bug-与-gap-分类异常) |
 | 新会话不知道如何继续 | [恢复会话状态](#恢复会话状态) |
 
@@ -217,6 +217,8 @@ BRAIN_CREATOR_FEISHU_APP_SECRET
 **修复**
 
 刷新 System Brain，或让宿主浏览器提交聚焦的页面/训练证据。安全探索只用于受限 Tab、折叠和原生下拉。复杂菜单、数据输入和业务状态变化使用训练证据。
+
+通过 `bc_status` 或 CompileRun 查看返回的 ExplorationTask。补充证据后，先预览再确认 `bc_prepare action=resolve-exploration-task`，系统会自动续编。证据尝试未结束前不要把任务标记为失败；失败才会创建最终 Gap。
 
 Brain Creator 不应自动挑选一条模糊路径。
 
