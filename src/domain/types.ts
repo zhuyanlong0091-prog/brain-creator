@@ -1025,6 +1025,54 @@ export type ExplorationTask = {
   failureReason?: string;
 };
 
+export type ExplorationPlanAction = {
+  id: string;
+  name: string;
+  route: string;
+  role?: string;
+  write: boolean;
+  sourceRefs: string[];
+};
+
+export type ExplorationActionEvidence = {
+  actionId: string;
+  action: string;
+  route: string;
+  role?: string;
+  sourceRefs: string[];
+};
+
+export type ExplorationPlan = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  systemId: string;
+  explorationTaskIds: string[];
+  executableCaseIds: string[];
+  actorJourney: ActorJourneyConfig[];
+  allowedRoutes: string[];
+  allowedActions: ExplorationPlanAction[];
+  forbiddenActions: string[];
+  testDataLeaseIds: string[];
+  cleanupPolicy: "delete" | "close" | "retain-with-label";
+  maxWrites: number;
+  maxDurationMs: number;
+  status: "draft" | "approved" | "running" | "completed" | "blocked" | "cancelled";
+  approvalNote?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  actionEvidence: ExplorationActionEvidence[];
+  evidenceRefs: string[];
+  systemExplorationIds: string[];
+  pageModelIds: string[];
+  trainingSessionIds: string[];
+  gapIds: string[];
+  idempotencyKey: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
 export type TestDataProfile = {
   id: string;
   knowledgeProjectId: string;

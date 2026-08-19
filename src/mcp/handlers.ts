@@ -60,6 +60,7 @@ import {
   type TestDataSubmitResult
 } from "../knowledge/testDataProvider.js";
 import { ExecutionPreflightService } from "../knowledge/executionPreflight.js";
+import { StatefulExplorationPlanService } from "../knowledge/statefulExplorationPlan.js";
 import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js";
 import { RunLedgerService } from "../knowledge/runLedger.js";
 import { ExecutionDiagnosisService } from "../knowledge/executionDiagnosis.js";
@@ -133,6 +134,7 @@ export type BrainCreatorMcpContext = {
   runLedger: RunLedgerService;
   executionDiagnosis: ExecutionDiagnosisService;
   systemExploration: SystemExplorationCoordinator;
+  statefulExplorationPlans: StatefulExplorationPlanService;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
@@ -246,6 +248,10 @@ export function createBrainCreatorMcpContext(
       workDir,
       explorer: input.systemExplorer
     }),
+    statefulExplorationPlans: new StatefulExplorationPlanService(
+      repository,
+      knowledgeService
+    ),
     workDir,
     agentBridge:
       input.agentBridge ??
@@ -974,6 +980,93 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       role: optionalStringArg(input, "role"),
       note: stringArg(input, "confirmationNote")
     });
+  }
+  if (action === "create-exploration-plan") {
+    const plan = context.statefulExplorationPlans.create({
+      explorationTaskIds: stringArrayArg(input, "explorationTaskIds"),
+      actorJourney: actorJourneyArg(input),
+      allowedRoutes: stringArrayArg(input, "allowedRoutes"),
+      allowedActions: explorationPlanActionsArg(input),
+      forbiddenActions: stringArrayArg(input, "forbiddenActions"),
+      cleanupPolicy: explorationCleanupPolicyArg(input, "cleanupPolicy"),
+      maxWrites: optionalNumberArg(input, "maxWrites"),
+      maxDurationMs: optionalNumberArg(input, "maxDurationMs")
+    });
+    return {
+      status: plan.status,
+      plan,
+      requiresConfirmation: true,
+      nextAction: "approve-exploration-plan"
+    };
+  }
+  if (action === "approve-exploration-plan") {
+    const plan = context.statefulExplorationPlans.get(
+      stringArg(input, "explorationPlanId")
+    );
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        plan,
+        requiresConfirmation: true,
+        nextAction:
+          "Present the roles, routes, writes, data policy, duration, and cleanup policy before one explicit approval."
+      };
+    }
+    return {
+      status: "approved",
+      plan: context.statefulExplorationPlans.approve({
+        planId: plan.id,
+        note: stringArg(input, "confirmationNote"),
+        approvedBy: stringArg(input, "confirmedBy")
+      }),
+      nextAction: "start-exploration-plan"
+    };
+  }
+  if (action === "cancel-exploration-plan") {
+    const plan = context.statefulExplorationPlans.get(
+      stringArg(input, "explorationPlanId")
+    );
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        plan,
+        requiresConfirmation: true,
+        nextAction: "Confirm cancellation with a reason, or approve the exploration plan."
+      };
+    }
+    return {
+      status: "cancelled",
+      plan: context.statefulExplorationPlans.cancel({
+        planId: plan.id,
+        note: stringArg(input, "confirmationNote")
+      }),
+      nextAction: "review-compile-run"
+    };
+  }
+  if (action === "start-exploration-plan") {
+    const result = context.statefulExplorationPlans.start(
+      stringArg(input, "explorationPlanId")
+    );
+    return {
+      ...result,
+      nextAction:
+        result.status === "needs-data"
+          ? "prepare-test-data"
+          : "execute-authorized-exploration"
+    };
+  }
+  if (action === "submit-exploration-result") {
+    const result = await context.statefulExplorationPlans.submit(
+      explorationResultArg(input)
+    );
+    return {
+      ...result,
+      status: result.plan.status,
+      nextAction:
+        result.plan.status === "completed"
+          ? "review-resumed-compile-run"
+          : "review-exploration-gap"
+    };
   }
   if (action === "resolve-exploration-task") {
     const taskId = stringArg(input, "explorationTaskId");
@@ -4035,6 +4128,11 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const pendingExplorationTasks = explorationTasks.filter(
     (item) => item.status === "pending"
   );
+  const explorationPlans = context.statefulExplorationPlans.list()
+    .filter((item) => item.knowledgeProjectId === projectId);
+  const activeExplorationPlan = explorationPlans
+    .filter((item) => ["draft", "approved", "running"].includes(item.status))
+    .at(-1);
   const projectCompileRuns = context.repository.compileRuns.filter(
     (item) => item.knowledgeProjectId === projectId
   );
@@ -4135,6 +4233,12 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     nextAction = "review_and_resume_requirement_suite";
   } else if (activeRequirementSuiteRun?.status === "running") {
     nextAction = "continue_requirement_suite";
+  } else if (activeExplorationPlan?.status === "running") {
+    nextAction = "complete_exploration_plan";
+  } else if (activeExplorationPlan?.status === "approved") {
+    nextAction = "start_exploration_plan";
+  } else if (activeExplorationPlan?.status === "draft") {
+    nextAction = "approve_exploration_plan";
   } else if (pendingTestDataTasks.length > 0) {
     nextAction = "complete_test_data_task";
   } else if (cleanupDue.length > 0) {
@@ -4208,6 +4312,12 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
           pending: pendingExplorationTasks.length,
           byStatus: countBy(explorationTasks, (item) => item.status),
           recent: explorationTasks.slice(-5)
+        },
+        explorationPlans: {
+          total: explorationPlans.length,
+          byStatus: countBy(explorationPlans, (item) => item.status),
+          active: activeExplorationPlan,
+          recent: explorationPlans.slice(-5)
         }
       },
       executionEvidence: {
@@ -4278,6 +4388,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     connectors: connectorStatus(context, projectId),
     latestCompileRunId: projectCompileRuns.at(-1)?.id,
     activeExplorationTaskId: pendingExplorationTasks.at(-1)?.id,
+    activeExplorationPlanId: activeExplorationPlan?.id,
     nextAction
   };
 }
@@ -4529,6 +4640,19 @@ function knowledgeReview(
     const items = context.systemExploration
       .list(projectId)
       .filter((item) => !idValue || item.id === idValue);
+    return {
+      project,
+      ...paginateReviewItems(items, input)
+    };
+  }
+  if (target === "exploration-plan") {
+    const items = context.statefulExplorationPlans
+      .list({ requirementSetId: optionalStringArg(input, "requirementSetId") })
+      .filter(
+        (item) =>
+          item.knowledgeProjectId === projectId &&
+          (!idValue || item.id === idValue)
+      );
     return {
       project,
       ...paginateReviewItems(items, input)
@@ -8277,6 +8401,79 @@ function suiteActionArg(input: Record<string, unknown>) {
     | "release-scheduled";
 }
 
+function explorationPlanActionsArg(input: Record<string, unknown>) {
+  const value = input.explorationPlanActions;
+  if (!Array.isArray(value)) throw new Error("explorationPlanActions must be an array");
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`explorationPlanActions[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    return {
+      name: stringArg(record, "name"),
+      route: stringArg(record, "route"),
+      role: optionalStringArg(record, "role"),
+      write: optionalBooleanArg(record, "write"),
+      sourceRefs: stringArrayArg(record, "sourceRefs")
+    };
+  });
+}
+
+function explorationCleanupPolicyArg(
+  input: Record<string, unknown>,
+  key: string
+) {
+  const value = stringArg(input, key);
+  if (value !== "delete" && value !== "close" && value !== "retain-with-label") {
+    throw new Error(`${key} is invalid`);
+  }
+  return value;
+}
+
+function explorationResultArg(input: Record<string, unknown>) {
+  const value = input.explorationResult;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("explorationResult must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  const status = stringArg(record, "status");
+  if (status !== "succeeded" && status !== "failed") {
+    throw new Error("explorationResult.status is invalid");
+  }
+  const cleanupStatus = stringArg(record, "cleanupStatus");
+  if (cleanupStatus !== "completed" && cleanupStatus !== "not-required" && cleanupStatus !== "failed") {
+    throw new Error("explorationResult.cleanupStatus is invalid");
+  }
+  const rawActions = record.actionEvidence;
+  if (!Array.isArray(rawActions)) {
+    throw new Error("explorationResult.actionEvidence must be an array");
+  }
+  return {
+    planId: stringArg(input, "explorationPlanId"),
+    status: status as "succeeded" | "failed",
+    durationMs: numberArg(record, "durationMs"),
+    actionEvidence: rawActions.map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error(`explorationResult.actionEvidence[${index}] must be an object`);
+      }
+      const action = item as Record<string, unknown>;
+      return {
+        actionId: stringArg(action, "actionId"),
+        action: stringArg(action, "action"),
+        route: stringArg(action, "route"),
+        role: optionalStringArg(action, "role"),
+        sourceRefs: stringArrayArg(action, "sourceRefs")
+      };
+    }),
+    evidenceRefs: stringArrayArg(record, "evidenceRefs"),
+    pageModelIds: stringArrayArg(record, "pageModelIds"),
+    systemExplorationIds: stringArrayArg(record, "systemExplorationIds"),
+    trainingSessionIds: stringArrayArg(record, "trainingSessionIds"),
+    cleanupStatus: cleanupStatus as "completed" | "not-required" | "failed",
+    error: optionalStringArg(record, "error")
+  };
+}
+
 type KnowledgeReviewTarget =
   | "requirement"
   | "knowledge"
@@ -8284,6 +8481,7 @@ type KnowledgeReviewTarget =
   | "requirement-eval-accuracy"
   | "system-brain"
   | "system-exploration"
+  | "exploration-plan"
   | "test-intent"
   | "executable-case"
   | "execution-plan"
@@ -8308,6 +8506,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "requirement-eval-accuracy",
       "system-brain",
       "system-exploration",
+      "exploration-plan",
       "test-intent",
       "executable-case",
       "execution-plan",
@@ -8389,6 +8588,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "requirement-eval-accuracy",
     "system-brain",
     "system-exploration",
+    "exploration-plan",
     "test-intent",
     "executable-case",
     "execution-plan",
@@ -8909,6 +9109,11 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "approve-baseline",
       "compile-cases",
       "confirm-page-binding",
+      "create-exploration-plan",
+      "approve-exploration-plan",
+      "cancel-exploration-plan",
+      "start-exploration-plan",
+      "submit-exploration-result",
       "resolve-exploration-task",
       "resolve-gap",
       "dismiss-gap",
@@ -8940,6 +9145,11 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "approve-baseline"
     | "compile-cases"
     | "confirm-page-binding"
+    | "create-exploration-plan"
+    | "approve-exploration-plan"
+    | "cancel-exploration-plan"
+    | "start-exploration-plan"
+    | "submit-exploration-result"
     | "resolve-exploration-task"
     | "resolve-gap"
     | "dismiss-gap"

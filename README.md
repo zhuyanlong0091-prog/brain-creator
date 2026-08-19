@@ -81,7 +81,7 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 
 Agent 默认使用高阶 Facade 工具。只有调试、审计或兼容旧流程时才需要底层 `bc_*` 工具。完整映射见 [Agent 使用指南](docs/agent-usage.md)。
 
-可信控制面不要求手工修改运行数据：鉴权可通过 Facade 创建、真实浏览器验证和归档；需求可按 RequirementSet、TestIntent 子集或模块一次批量编译；编译按需求路径、System Brain、测试数据、步骤来源和最终用例五阶段执行；页面或动作证据不足时先进入可恢复探索，探索明确失败后才形成 Gap。普通调用默认使用 `responseMode=summary`，详细结果通过可分页的 CompileRun 复盘。参见 [可信控制面](docs/zh-CN/guides/trusted-control-plane.md)。
+可信控制面不要求手工修改运行数据：鉴权可通过 Facade 创建、真实浏览器验证和归档；需求可按 RequirementSet、TestIntent 子集或模块一次批量编译；编译按需求路径、System Brain、测试数据、步骤来源和最终用例五阶段执行；页面或动作证据不足时先进入可恢复探索。需要真实写操作或跨角色流转时，Agent 先生成受 URL、角色、动作、写次数、时长和清理策略约束的 ExplorationPlan，用户一次批准整套方案后才执行，证据回传会刷新 System Brain 并自动续编。普通调用默认使用 `responseMode=summary`，详细结果通过可分页的 CompileRun 和 ExplorationPlan 复盘。参见 [可信控制面](docs/zh-CN/guides/trusted-control-plane.md)。
 
 ### 安装模式
 
@@ -178,7 +178,7 @@ Brain Creator enforces these boundaries:
 
 The Agent uses high-level Facade tools by default. Low-level `bc_*` tools are for compatibility, audit, and debugging. See the [Agent usage guide](docs/agent-usage.md) for the mapping.
 
-The trusted control plane removes manual runtime-store edits: auth can be created, browser-verified, and archived through the Facade; approved intents can be batch compiled by requirement, explicit IDs, or module; compilation records requirement-path, System Brain, test-data, provenance, and final-case stages; missing page or action evidence enters a resumable exploration before a final Gap. Normal calls use `responseMode=summary`, with paged CompileRun detail available for review. See [Trusted control plane](docs/guides/trusted-control-plane.md).
+The trusted control plane removes manual runtime-store edits: auth can be created, browser-verified, and archived through the Facade; approved intents can be batch compiled by requirement, explicit IDs, or module; compilation records requirement-path, System Brain, test-data, provenance, and final-case stages. When evidence requires real writes or role transitions, the Agent creates an ExplorationPlan bounded by URL, role, action, write, time, and cleanup policies. One user approval authorizes only that plan; submitted evidence refreshes System Brain and resumes compilation. Normal calls use `responseMode=summary`, with paged CompileRun and ExplorationPlan review available. See [Trusted control plane](docs/guides/trusted-control-plane.md).
 
 ### Installation modes
 

@@ -98,6 +98,14 @@ Missing or ambiguous System Brain evidence creates an `ExplorationTask`. It is n
 
 A resolved task automatically recompiles its TestIntent. A failed task requires a failure reason and creates a `system-brain-exploration` Gap. Cancellation records the decision without fabricating a blocker.
 
+## Authorize stateful exploration
+
+Read-only exploration cannot discover controls that appear only after create, submit, approval, rejection, or close transitions. For those cases, create an `ExplorationPlan` from one or more pending ExplorationTasks. The plan must name the authenticated roles, allowlisted routes, authorized actions, write budget, duration, and cleanup policy.
+
+Use `bc_prepare action=create-exploration-plan`, preview `approve-exploration-plan`, and confirm it once with a human note and confirmer. Brain Creator rejects production environments, unverified cross-system roles, out-of-scope URLs, destructive actions, and over-budget results. `start-exploration-plan` returns a bounded host-Agent work package; unresolved data returns `needs-data` first.
+
+After browser execution, submit action-level source references plus PageModel, SystemExploration, or TrainingSession evidence with `submit-exploration-result`. Created test data must be released for `delete` or `close` cleanup policies. Missing cleanup blocks the plan and creates a high-severity Gap. A successful result refreshes System Brain, resolves every linked ExplorationTask, and resumes compilation automatically. Review the audit trail with `bc_review target=exploration-plan`. Use `cancel-exploration-plan` when the user declines the proposed writes.
+
 ## Resolve a Gap safely
 
 Use `resolve-gap`, `dismiss-gap`, or `reopen-gap`. First preview with `confirm=false`; then repeat with `confirm=true`, a non-empty `confirmationNote`, and `evidenceRefs`.

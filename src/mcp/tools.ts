@@ -137,6 +137,11 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "approve-baseline",
         "compile-cases",
         "confirm-page-binding",
+        "create-exploration-plan",
+        "approve-exploration-plan",
+        "cancel-exploration-plan",
+        "start-exploration-plan",
+        "submit-exploration-result",
         "resolve-exploration-task",
         "resolve-gap",
         "dismiss-gap",
@@ -162,6 +167,19 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       modules: z.array(z.string()).default([]),
       pageModelId: z.string().optional(),
       explorationTaskId: z.string().optional(),
+      explorationTaskIds: z.array(z.string()).default([]),
+      explorationPlanId: z.string().optional(),
+      allowedRoutes: z.array(z.string().url()).default([]),
+      explorationPlanActions: z.array(z.object({
+        name: z.string().min(1),
+        route: z.string().url(),
+        role: z.string().optional(),
+        write: z.boolean().default(false),
+        sourceRefs: z.array(z.string()).min(1)
+      })).default([]),
+      forbiddenActions: z.array(z.string()).default([]),
+      cleanupPolicy: z.enum(["delete", "close", "retain-with-label"]).optional(),
+      maxWrites: z.number().int().min(0).max(20).optional(),
       explorationOutcome: z.enum(["resolved", "failed", "cancelled"]).optional(),
       failureReason: z.string().optional(),
       role: z.string().optional(),
@@ -270,6 +288,23 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       content: z.string().optional(),
       module: z.string().optional(),
       sourceRefs: z.array(z.string()).default([]),
+      explorationResult: z.object({
+        status: z.enum(["succeeded", "failed"]),
+        durationMs: z.number().int().min(0),
+        actionEvidence: z.array(z.object({
+          actionId: z.string(),
+          action: z.string(),
+          route: z.string().url(),
+          role: z.string().optional(),
+          sourceRefs: z.array(z.string()).min(1)
+        })).min(1),
+        evidenceRefs: z.array(z.string()).min(1),
+        pageModelIds: z.array(z.string()).default([]),
+        systemExplorationIds: z.array(z.string()).default([]),
+        trainingSessionIds: z.array(z.string()).default([]),
+        cleanupStatus: z.enum(["completed", "not-required", "failed"]),
+        error: z.string().optional()
+      }).optional(),
       confidence: z.number().min(0).max(1).optional(),
       pageEvidence: z
         .object({
@@ -490,6 +525,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "requirement-eval-accuracy",
         "system-brain",
         "system-exploration",
+        "exploration-plan",
         "test-intent",
         "executable-case",
         "execution-plan",
@@ -500,6 +536,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "compile-run"
       ]),
       knowledgeProjectId: z.string().optional(),
+      requirementSetId: z.string().optional(),
       systemId: z.string().optional(),
       systemName: z.string().optional(),
       environment: z.string().optional(),
