@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
+  AttachmentAnalysis,
   ExecutableCase,
   ExecutableCaseStep,
   CompileRun,
@@ -18,6 +19,7 @@ import type {
   RequirementContentPackage,
   RequirementSet,
   RequirementSource,
+  RequirementCoverageProfile,
   TestIntent,
   CoverageDimension,
   AssertionContractType
@@ -53,6 +55,12 @@ import {
   type RequirementAttachmentDownloader,
   type RequirementVisualAnalyzer
 } from "./attachmentPipeline.js";
+import {
+  augmentAnalysisWithProcessModels,
+  buildProcessModels,
+  buildProcessTestIntents,
+  buildRequirementCoverageProfile
+} from "./processModels.js";
 
 export class KnowledgeService {
   constructor(
@@ -208,11 +216,30 @@ export class KnowledgeService {
   }
 
   confirmRequirementAttachmentAnalysis(input: { analysisId: string; confirmedBy?: string }) {
-    return new RequirementAttachmentPipeline(
+    const analysis = new RequirementAttachmentPipeline(
       this.repository,
       this.knowledgeDir,
       this.sourceBaseDir
     ).confirm(input);
+    const requirementSet = this.getRequirementSet(analysis.requirementSetId);
+    requirementSet.status = "draft";
+    requirementSet.approvedAt = undefined;
+    requirementSet.evaluationGate = undefined;
+    requirementSet.updatedAt = timestamp();
+    for (const node of this.repository.knowledgeNodes.filter(
+      (item) => item.requirementSetId === requirementSet.id
+    )) {
+      node.status = "draft";
+      node.updatedAt = requirementSet.updatedAt;
+    }
+    for (const intent of this.repository.testIntents.filter(
+      (item) => item.requirementSetId === requirementSet.id
+    )) {
+      intent.status = "draft";
+      intent.updatedAt = requirementSet.updatedAt;
+    }
+    this.repository.persist();
+    return analysis;
   }
 
   listRequirementSets(projectId: string) {
@@ -226,7 +253,7 @@ export class KnowledgeService {
   ) {
     const requirementSet = this.getRequirementSet(requirementSetId);
     const source = this.getRequirementSource(requirementSet.sourceId);
-    const analysis =
+    const textAnalysis =
       analysisOverride ??
       analyzeRequirement({
         requirementSetId,
@@ -235,20 +262,41 @@ export class KnowledgeService {
         sourceRef: source.id,
         provider
       });
+    const attachmentAnalyses = this.repository.attachmentAnalyses.filter(
+      (item) => item.requirementSetId === requirementSetId
+    );
+    const proposedModels = buildProcessModels({
+      knowledgeProjectId: requirementSet.knowledgeProjectId,
+      requirementSetId,
+      analyses: attachmentAnalyses
+    });
+    const analysis = augmentAnalysisWithProcessModels(textAnalysis, proposedModels, attachmentAnalyses);
     const evaluation = evaluatePolicyOutput(analysis);
+    const inputHash = requirementDesignInputHash(requirementSet, attachmentAnalyses);
     const existingIntents = this.repository.testIntents.filter(
       (item) => item.requirementSetId === requirementSetId
     );
-    if (existingIntents.length > 0) {
+    const existingCoverageProfile = this.repository.requirementCoverageProfiles.find(
+      (item) => item.requirementSetId === requirementSetId && item.inputHash === inputHash
+    );
+    if (existingIntents.length > 0 && existingCoverageProfile) {
       const requirementGaps = this.repository.gaps.filter(
         (gap) =>
           gap.projectId === requirementSet.knowledgeProjectId &&
           gap.sourceId === requirementSetId
       );
+      const criticalAttachments = criticalUnconfirmedAttachments(source, attachmentAnalyses);
+      const reusedEvaluation = applyProcessEvaluation(
+        evaluation,
+        existingCoverageProfile,
+        criticalAttachments
+      );
       requirementSet.evaluationGate ??= buildRequirementEvaluationGate(
         analysis,
-        evaluation,
-        requirementGaps
+        reusedEvaluation,
+        requirementGaps,
+        existingCoverageProfile,
+        criticalAttachments
       );
       this.repository.persist();
       const coveredClauseSourceRefs = [
@@ -257,7 +305,7 @@ export class KnowledgeService {
       return {
         reused: true,
         analysis,
-        evaluation,
+        evaluation: reusedEvaluation,
         evaluationGate: requirementSet.evaluationGate,
         gaps: requirementGaps.filter((gap) => gap.status === "open"),
         impact: this.requirementImpact(requirementSetId),
@@ -272,6 +320,13 @@ export class KnowledgeService {
         dataProfiles: this.repository.testDataProfiles.filter(
           (item) => item.requirementSetId === requirementSetId
         ),
+        workflowModels: this.repository.workflowModels.filter(
+          (item) => item.requirementSetId === requirementSetId
+        ),
+        stateMachineModels: this.repository.stateMachineModels.filter(
+          (item) => item.requirementSetId === requirementSetId
+        ),
+        coverageProfile: existingCoverageProfile,
         coverage: {
           totalClauses: analysis.clauses.length,
           coveredClauseSourceRefs,
@@ -282,6 +337,7 @@ export class KnowledgeService {
         }
       };
     }
+    if (existingIntents.length > 0) clearRequirementDesign(this.repository, requirementSetId);
     const now = timestamp();
     const previousNodes = requirementSet.previousRequirementSetId
       ? this.repository.knowledgeNodes.filter(
@@ -316,8 +372,40 @@ export class KnowledgeService {
     this.repository.knowledgeNodes.push(...nodes);
     const edges = this.createKnowledgeEdges(requirementSet.knowledgeProjectId, resolvedNodes);
     requirementSet.affectedNodeIds = [...affectedNodeIds];
-    const design = designTests({ knowledgeProjectId: requirementSet.knowledgeProjectId, analysis });
-    this.repository.testIntents.push(...design.testIntents);
+    const baseDesign = designTests({ knowledgeProjectId: requirementSet.knowledgeProjectId, analysis });
+    const testIntents = buildProcessTestIntents({
+      knowledgeProjectId: requirementSet.knowledgeProjectId,
+      analysis,
+      workflowModels: proposedModels.workflowModels,
+      stateMachineModels: proposedModels.stateMachineModels,
+      baseIntents: baseDesign.testIntents
+    });
+    const coverageProfile = buildRequirementCoverageProfile({
+      knowledgeProjectId: requirementSet.knowledgeProjectId,
+      requirementSetId,
+      inputHash,
+      analysis,
+      intents: testIntents,
+      workflowModels: proposedModels.workflowModels,
+      stateMachineModels: proposedModels.stateMachineModels
+    });
+    const coveredClauseSourceRefs = [...new Set(testIntents.flatMap((intent) => intent.requirementRefs))];
+    const design = {
+      ...baseDesign,
+      testIntents,
+      coverage: {
+        totalClauses: analysis.clauses.length,
+        coveredClauseSourceRefs,
+        uncoveredClauseSourceRefs: analysis.clauses
+          .map((clause) => clause.sourceRef)
+          .filter((sourceRef) => !coveredClauseSourceRefs.includes(sourceRef)),
+        intentCount: testIntents.length
+      }
+    };
+    this.repository.workflowModels.push(...proposedModels.workflowModels);
+    this.repository.stateMachineModels.push(...proposedModels.stateMachineModels);
+    this.repository.requirementCoverageProfiles.push(coverageProfile);
+    this.repository.testIntents.push(...testIntents);
     this.repository.testDataProfiles.push(...design.dataProfiles);
     const gaps = [
       ...analysis.openQuestions.map((question) =>
@@ -337,25 +425,42 @@ export class KnowledgeService {
         )
       )
     ];
-    requirementSet.evaluationGate = buildRequirementEvaluationGate(analysis, evaluation, gaps);
+    const criticalAttachments = criticalUnconfirmedAttachments(source, attachmentAnalyses);
+    const processEvaluation = applyProcessEvaluation(
+      evaluation,
+      coverageProfile,
+      criticalAttachments
+    );
+    requirementSet.evaluationGate = buildRequirementEvaluationGate(
+      analysis,
+      processEvaluation,
+      gaps,
+      coverageProfile,
+      criticalAttachments
+    );
     this.repository.persist();
     await this.writeAnalysis(
       requirementSet,
       analysis,
       design.testIntents,
-      evaluation,
+      processEvaluation,
       design.coverage,
-      requirementSet.evaluationGate
+      requirementSet.evaluationGate,
+      coverageProfile,
+      proposedModels.workflowModels,
+      proposedModels.stateMachineModels
     );
     await this.writeModuleKnowledge(requirementSet, analysis, design.testIntents);
     return {
       analysis,
-      evaluation,
+      evaluation: processEvaluation,
       evaluationGate: requirementSet.evaluationGate,
       nodes,
       edges,
       gaps,
       impact: this.requirementImpact(requirementSet.id),
+      ...proposedModels,
+      coverageProfile,
       ...design
     };
   }
@@ -1776,7 +1881,10 @@ export class KnowledgeService {
     intents: TestIntent[],
     evaluation: ReturnType<typeof evaluatePolicyOutput>,
     coverage: ReturnType<typeof designTests>["coverage"],
-    evaluationGate: RequirementEvaluationGate
+    evaluationGate: RequirementEvaluationGate,
+    coverageProfile?: RequirementCoverageProfile,
+    workflowModels = this.repository.workflowModels.filter((item) => item.requirementSetId === set.id),
+    stateMachineModels = this.repository.stateMachineModels.filter((item) => item.requirementSetId === set.id)
   ) {
     const project = this.getProject(set.knowledgeProjectId);
     const requirementDir = join(this.knowledgeDir, project.key, "requirements", set.id);
@@ -1829,6 +1937,23 @@ export class KnowledgeService {
         ...(analysis.missingBranches.length > 0
           ? analysis.missingBranches.map((item) => `- ${item}`)
           : ["- None"]),
+        "",
+        "## Process Models",
+        `- Workflow models: ${workflowModels.length}`,
+        `- State-machine models: ${stateMachineModels.length}`,
+        ...workflowModels.map(
+          (model) => `- Workflow ${model.id}: ${model.transitions.length} transitions; actors=${model.actors.join(", ") || "none"}; sources=${model.sourceRefs.join(", ")}`
+        ),
+        ...stateMachineModels.map(
+          (model) => `- State machine ${model.id}: ${model.states.length} states, ${model.transitions.length} transitions; sources=${model.sourceRefs.join(", ")}`
+        ),
+        "",
+        "## Coverage Dimensions",
+        ...(coverageProfile
+          ? Object.entries(coverageProfile.dimensions).map(
+              ([dimension, detail]) => `- ${dimension}: ${detail.coveredRefs.length}/${detail.requirementRefs.length}; intents=${detail.intentCount}; missing=${detail.missingRefs.join(", ") || "none"}`
+            )
+          : ["- Not generated"]),
         "",
         "## Open Questions",
         ...(analysis.openQuestions.length > 0 ? analysis.openQuestions.map((item) => `- ${item}`) : ["- None"]),
@@ -2125,7 +2250,9 @@ export class KnowledgeService {
 function buildRequirementEvaluationGate(
   analysis: RequirementAnalysis,
   evaluation: ReturnType<typeof evaluatePolicyOutput>,
-  gaps: Gap[]
+  gaps: Gap[],
+  coverageProfile?: RequirementCoverageProfile,
+  criticalAttachments: Array<{ message: string; sourceRefs: string[] }> = []
 ): RequirementEvaluationGate {
   const createdAt = timestamp();
   const actions: RequirementEvalAction[] = [];
@@ -2175,6 +2302,12 @@ function buildRequirementEvaluationGate(
   for (const unsupportedClaim of evaluation.unsupportedClaims) {
     addAction("unsupported-claim", unsupportedClaim, [], "blocked");
   }
+  for (const attachment of criticalAttachments) {
+    addAction("unconfirmed-attachment", attachment.message, attachment.sourceRefs, "blocked");
+  }
+  for (const reason of coverageProfile?.reasons ?? []) {
+    addAction("missing-process-coverage", reason, [], "blocked");
+  }
   if (evaluation.verdict === "blocked" && !actions.some((action) => action.status === "blocked")) {
     addAction(
       "unsupported-claim",
@@ -2184,14 +2317,15 @@ function buildRequirementEvaluationGate(
     );
   }
 
+  const blocked = actions.some((action) => action.status === "blocked");
   return {
     policyId: analysis.policyId,
     policyVersion: analysis.policyVersion,
-    verdict: evaluation.verdict,
+    verdict: blocked ? "blocked" : evaluation.verdict,
     score: evaluation.score,
     coverage: evaluation.coverage,
     status:
-      evaluation.verdict === "blocked" || actions.some((action) => action.status === "blocked")
+      evaluation.verdict === "blocked" || blocked
         ? "blocked"
         : actions.some((action) => action.status === "pending")
           ? "needs-confirmation"
@@ -2199,6 +2333,114 @@ function buildRequirementEvaluationGate(
     actions,
     generatedAt: createdAt
   };
+}
+
+function requirementDesignInputHash(
+  requirementSet: RequirementSet,
+  analyses: AttachmentAnalysis[]
+) {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      contentHash: requirementSet.contentHash,
+      policyVersion: "2.1.0",
+      attachments: analyses
+        .map((analysis) => ({
+          id: analysis.id,
+          kind: analysis.kind,
+          status: analysis.status,
+          updatedAt: analysis.updatedAt,
+          sourceRefs: analysis.sourceRefs
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id))
+    }))
+    .digest("hex");
+}
+
+function criticalUnconfirmedAttachments(
+  source: RequirementSource,
+  analyses: AttachmentAnalysis[]
+) {
+  const byAttachment = new Map(analyses.map((analysis) => [analysis.attachmentId, analysis]));
+  return source.attachments.flatMap((attachment) => {
+    const attachmentId = attachment.id;
+    if (!attachmentId || attachment.status === "confirmed") return [];
+    const analysis = byAttachment.get(attachmentId);
+    const looksLikeProcess =
+      analysis?.kind === "flowchart" ||
+      analysis?.kind === "state-machine" ||
+      /flow|workflow|state|process|approval|\u6d41\u7a0b|\u72b6\u6001|\u5ba1\u6279/i.test(attachment.name);
+    if (!looksLikeProcess) return [];
+    return [{
+      message: `Confirm structured process evidence for attachment ${attachment.name} before approving complete requirement coverage`,
+      sourceRefs: analysis?.sourceRefs ?? [`attachment:${attachmentId}`]
+    }];
+  });
+}
+
+function applyProcessEvaluation(
+  evaluation: ReturnType<typeof evaluatePolicyOutput>,
+  coverageProfile: RequirementCoverageProfile,
+  criticalAttachments: Array<{ message: string; sourceRefs: string[] }>
+): ReturnType<typeof evaluatePolicyOutput> {
+  const blockedReasons = [
+    ...criticalAttachments.map((attachment) => attachment.message),
+    ...coverageProfile.reasons
+  ];
+  if (blockedReasons.length === 0) return evaluation;
+  return {
+    ...evaluation,
+    verdict: "blocked",
+    score: Math.min(evaluation.score, 50),
+    reasons: [...new Set([...evaluation.reasons, ...blockedReasons])],
+    requiredActions: [
+      ...new Set([
+        ...evaluation.requiredActions,
+        ...(criticalAttachments.length > 0
+          ? ["Analyze and confirm critical process attachments"]
+          : []),
+        ...(coverageProfile.reasons.length > 0
+          ? ["Restore traceable workflow and state test coverage"]
+          : [])
+      ])
+    ]
+  };
+}
+
+function clearRequirementDesign(
+  repository: InMemoryBrainCreatorRepository,
+  requirementSetId: string
+) {
+  const nodeIds = new Set(
+    repository.knowledgeNodes
+      .filter((node) => node.requirementSetId === requirementSetId)
+      .map((node) => node.id)
+  );
+  repository.knowledgeEdges = repository.knowledgeEdges.filter(
+    (edge) => !nodeIds.has(edge.fromNodeId) && !nodeIds.has(edge.toNodeId)
+  );
+  repository.knowledgeNodes = repository.knowledgeNodes.filter(
+    (node) => node.requirementSetId !== requirementSetId
+  );
+  repository.testIntents = repository.testIntents.filter(
+    (intent) => intent.requirementSetId !== requirementSetId
+  );
+  repository.testDataProfiles = repository.testDataProfiles.filter(
+    (profile) => profile.requirementSetId !== requirementSetId
+  );
+  repository.workflowModels = repository.workflowModels.filter(
+    (model) => model.requirementSetId !== requirementSetId
+  );
+  repository.stateMachineModels = repository.stateMachineModels.filter(
+    (model) => model.requirementSetId !== requirementSetId
+  );
+  repository.requirementCoverageProfiles = repository.requirementCoverageProfiles.filter(
+    (profile) => profile.requirementSetId !== requirementSetId
+  );
+  const requirementSet = repository.requirementSets.find((item) => item.id === requirementSetId);
+  if (requirementSet) {
+    requirementSet.affectedNodeIds = [];
+    requirementSet.evaluationGate = undefined;
+  }
 }
 
 function compileSteps(content: string, sourceRefs: string[]): ExecutableCaseStep[] {

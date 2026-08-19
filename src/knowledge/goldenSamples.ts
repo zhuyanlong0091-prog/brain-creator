@@ -1,10 +1,16 @@
-import type { KnowledgeNodeType } from "../domain/types.js";
+import type { AttachmentAnalysis, KnowledgeNodeType } from "../domain/types.js";
 import {
   analyzeRequirement,
   designTests,
   evaluatePolicyOutput,
   type RequirementAnalysis
 } from "./policies.js";
+import {
+  augmentAnalysisWithProcessModels,
+  buildProcessModels,
+  buildProcessTestIntents,
+  buildRequirementCoverageProfile
+} from "./processModels.js";
 
 export type RequirementGoldenSample = {
   id: string;
@@ -228,6 +234,93 @@ export function summarizeRequirementGoldenSamples(results: RequirementGoldenResu
       0
     ),
     domains: [...new Set(results.map((result) => result.sample.domain))].sort()
+  };
+}
+
+export const PROCESS_REQUIREMENT_GOLDEN_SAMPLE = {
+  id: "order-cross-role-process-image",
+  domain: "order",
+  title: "Order lifecycle visual requirement",
+  content: "An order follows the attached workflow and state model.",
+  analyses: [
+    processGoldenAnalysis("flowchart", "golden-flow", [
+      { id: "create", type: "step", label: "Create order" },
+      { id: "review", type: "step", label: "Review order" },
+      { id: "complete", type: "step", label: "Complete order" }
+    ], [
+      { from: "create", to: "review", condition: "submit", actor: "requester" },
+      { from: "review", to: "complete", condition: "approve", actor: "manager" }
+    ]),
+    processGoldenAnalysis("state-machine", "golden-state", [
+      { id: "draft", type: "state", label: "Draft" },
+      { id: "submitted", type: "state", label: "Submitted" },
+      { id: "approved", type: "state", label: "Approved" }
+    ], [
+      { from: "draft", to: "submitted", condition: "submit", actor: "requester" },
+      { from: "submitted", to: "approved", condition: "approve", actor: "manager" }
+    ])
+  ]
+} as const;
+
+export function evaluateProcessRequirementGoldenSample() {
+  const sample = PROCESS_REQUIREMENT_GOLDEN_SAMPLE;
+  const baseAnalysis = analyzeRequirement({
+    requirementSetId: `golden:${sample.id}`,
+    title: sample.title,
+    content: sample.content,
+    sourceRef: `golden-source:${sample.id}`
+  });
+  const models = buildProcessModels({
+    knowledgeProjectId: `golden-project:${sample.domain}`,
+    requirementSetId: baseAnalysis.requirementSetId,
+    analyses: [...sample.analyses]
+  });
+  const analysis = augmentAnalysisWithProcessModels(baseAnalysis, models, [...sample.analyses]);
+  const design = designTests({
+    knowledgeProjectId: `golden-project:${sample.domain}`,
+    analysis
+  });
+  const testIntents = buildProcessTestIntents({
+    knowledgeProjectId: `golden-project:${sample.domain}`,
+    analysis,
+    workflowModels: models.workflowModels,
+    stateMachineModels: models.stateMachineModels,
+    baseIntents: design.testIntents
+  });
+  const coverageProfile = buildRequirementCoverageProfile({
+    knowledgeProjectId: `golden-project:${sample.domain}`,
+    requirementSetId: baseAnalysis.requirementSetId,
+    inputHash: "golden-process-input",
+    analysis,
+    intents: testIntents,
+    workflowModels: models.workflowModels,
+    stateMachineModels: models.stateMachineModels
+  });
+  return { sample, analysis, ...models, testIntents, coverageProfile };
+}
+
+function processGoldenAnalysis(
+  kind: "flowchart" | "state-machine",
+  idValue: string,
+  nodes: AttachmentAnalysis["nodes"],
+  edges: AttachmentAnalysis["edges"]
+): AttachmentAnalysis {
+  return {
+    id: idValue,
+    knowledgeProjectId: "golden-project:order",
+    requirementSetId: "golden:order-cross-role-process-image",
+    sourceId: "golden-source:order-cross-role-process-image",
+    attachmentId: `${idValue}-attachment`,
+    kind,
+    markdown: nodes.map((node) => node.label).join(" -> "),
+    nodes,
+    edges,
+    confidence: 0.98,
+    sourceRefs: [`golden-attachment:${idValue}`],
+    provider: "host-agent",
+    status: "confirmed",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z"
   };
 }
 

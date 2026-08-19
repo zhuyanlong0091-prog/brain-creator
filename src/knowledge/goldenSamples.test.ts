@@ -5,7 +5,8 @@ import {
   REQUIREMENT_GOLDEN_SAMPLES,
   evaluateRequirementGoldenSample,
   summarizeRequirementGoldenSamples,
-  buildGoldenExecutionFixture
+  buildGoldenExecutionFixture,
+  evaluateProcessRequirementGoldenSample
 } from "./goldenSamples.js";
 import { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
@@ -132,6 +133,24 @@ describe("Requirement Brain golden samples", () => {
     expect(fixture.classifications.failed).toBe(6);
     expect(fixture.classifications["not-selected"]).toBe(374);
     expect(fixture.classifications.superseded).toBe(22);
+  });
+
+  it("restores workflow, state, negative-path, and cross-role coverage from confirmed visual evidence", () => {
+    const result = evaluateProcessRequirementGoldenSample();
+
+    expect(result.workflowModels).toHaveLength(1);
+    expect(result.stateMachineModels).toHaveLength(1);
+    expect(result.coverageProfile.status).toBe("complete");
+    expect(result.coverageProfile.dimensions.workflow.missingRefs).toEqual([]);
+    expect(result.coverageProfile.dimensions.state.missingRefs).toEqual([]);
+    expect(result.testIntents.filter((intent) => intent.scenarioType === "positive").length).toBeGreaterThanOrEqual(4);
+    expect(result.testIntents.filter((intent) => intent.scenarioType === "negative").length).toBeGreaterThanOrEqual(5);
+    expect(result.testIntents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ actorJourney: ["requester", "manager"] })
+      ])
+    );
+    expect(result.testIntents.every((intent) => intent.requirementRefs.length > 0)).toBe(true);
   });
 
   it("reconciles the 457-intent golden scale fixture through the real coverage ledger", () => {

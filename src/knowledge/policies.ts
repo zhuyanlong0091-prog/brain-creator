@@ -10,12 +10,12 @@ import type {
 
 export const REQUIREMENT_ANALYSIS_POLICY = {
   id: "brain-creator.requirement-analysis",
-  version: "2.0.0"
+  version: "2.1.0"
 } as const;
 
 export const TEST_DESIGN_POLICY = {
   id: "brain-creator.test-design",
-  version: "2.0.0"
+  version: "2.1.0"
 } as const;
 
 export type RequirementClause = {

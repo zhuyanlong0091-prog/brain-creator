@@ -580,6 +580,10 @@ describe("Brain Creator requirement-first facade", () => {
     expect(compiled.nextAction).toBe("preview-requirement-suite");
     expect(coveragePage.executionLedger.items).toHaveLength(1);
     expect(coveragePage.executionLedger.totalItems).toBe(2);
+    expect(coveragePage.requirementCoverageProfiles).toEqual([
+      expect.objectContaining({ requirementSetId: ingested.requirementSet.id, status: "complete" })
+    ]);
+    expect(coveragePage.processModels).toEqual({ workflows: [], stateMachines: [] });
     expect(coveragePage.itemPage).toEqual({
       limit: 1,
       offset: 0,

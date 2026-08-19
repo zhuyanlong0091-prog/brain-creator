@@ -40,9 +40,13 @@ Brain Creator 应展示：
 - TestDataProfile 和未解决数据依赖；
 - Requirement Eval 覆盖率和必要动作。
 
+已确认的图片流程证据会落为 `WorkflowModel` 和 `StateMachineModel`，每条转换都保留附件边的来源引用。状态模型会生成正向转换用例，并在适用时生成缺少前置状态、角色不匹配和未定义转换等负向用例；跨角色流程会生成 Actor Journey。`RequirementCoverageProfile` 会对账字段、流程、状态、权限和集成五类需求引用与 TestIntent。
+
+关键流程图或状态机在识别并确认前不能批准基线。仅发现附件不会创建 Gap，但 Brain Creator 也不能据此声称需求覆盖完整。确认后再次生成测试设计会使用新的输入指纹，替代先前偏字段的草稿。
+
 使用持久业务证据回答澄清问题。澄清项与缺失分支可以携带说明确认；直接矛盾必须修订来源或基线。
 
-**验证：** 每个 TestIntent 至少引用一条需求条款；无依据结论保持可见，不能成为事实。
+**验证：** 每个 TestIntent 至少引用一条需求条款或已确认附件边；无依据结论保持可见，不能成为事实。使用 `bc_review target=coverage` 查看流程模型和各维度缺失引用。
 
 ## 3. 批准需求基线
 

@@ -4371,6 +4371,10 @@ function knowledgeReview(
       (item) => item.knowledgeProjectId === projectId && item.status !== "superseded"
     );
     const executionLedger = context.knowledgeService.testIntentCoverage(projectId, requestedSystemId);
+    const requirementSetIds = new Set(sets.map((item) => item.id));
+    const processCoverageProfiles = context.repository.requirementCoverageProfiles.filter(
+      (item) => requirementSetIds.has(item.requirementSetId)
+    );
     const requestedLimit = optionalNumberArg(input, "limit");
     const requestedOffset = optionalNumberArg(input, "offset") ?? 0;
     const nextOffset = requestedLimit !== undefined &&
@@ -4403,6 +4407,15 @@ function knowledgeReview(
       dimensionSummary: summarizeCoverageDimensions(
         executionLedger.items
       ),
+      requirementCoverageProfiles: processCoverageProfiles,
+      processModels: {
+        workflows: context.repository.workflowModels.filter(
+          (item) => requirementSetIds.has(item.requirementSetId)
+        ),
+        stateMachines: context.repository.stateMachineModels.filter(
+          (item) => requirementSetIds.has(item.requirementSetId)
+        )
+      },
       sourceLedger: context.knowledgeService.requirementSourceLedger(projectId),
       ...(requestedLimit === undefined
         ? {}

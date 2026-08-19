@@ -723,6 +723,8 @@ export type RequirementEvalActionKind =
   | "contradiction"
   | "missing-branch"
   | "uncovered-coverage"
+  | "unconfirmed-attachment"
+  | "missing-process-coverage"
   | "unsupported-claim";
 
 export type RequirementEvalAction = {
@@ -816,6 +818,66 @@ export type KnowledgeEdge = {
   createdAt: string;
 };
 
+export type ProcessModelStatus = "draft" | "confirmed" | "conflicted";
+
+export type WorkflowModel = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  attachmentAnalysisId: string;
+  title: string;
+  actors: string[];
+  steps: Array<{
+    id: string;
+    label: string;
+    actor?: string;
+    sourceRefs: string[];
+  }>;
+  transitions: Array<{
+    id: string;
+    from: string;
+    to: string;
+    condition?: string;
+    actor?: string;
+    sourceRefs: string[];
+  }>;
+  startStepIds: string[];
+  endStepIds: string[];
+  sourceRefs: string[];
+  confidence: number;
+  status: ProcessModelStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StateMachineModel = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  attachmentAnalysisId: string;
+  title: string;
+  states: Array<{
+    id: string;
+    label: string;
+    initial: boolean;
+    terminal: boolean;
+    sourceRefs: string[];
+  }>;
+  transitions: Array<{
+    id: string;
+    from: string;
+    to: string;
+    trigger?: string;
+    actor?: string;
+    sourceRefs: string[];
+  }>;
+  sourceRefs: string[];
+  confidence: number;
+  status: ProcessModelStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type TestDesignTechnique =
   | "equivalence-partitioning"
   | "boundary-value"
@@ -831,6 +893,27 @@ export type CoverageDimension =
   | "permission"
   | "integration";
 
+export type RequirementCoverageProfile = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  inputHash: string;
+  dimensions: Record<
+    CoverageDimension,
+    {
+      requirementRefs: string[];
+      coveredRefs: string[];
+      missingRefs: string[];
+      intentCount: number;
+    }
+  >;
+  workflowModelIds: string[];
+  stateMachineModelIds: string[];
+  status: "complete" | "needs-user" | "blocked";
+  reasons: string[];
+  generatedAt: string;
+};
+
 export type TestIntent = {
   id: string;
   knowledgeProjectId: string;
@@ -845,6 +928,9 @@ export type TestIntent = {
   knowledgeNodeRefs: string[];
   techniques: TestDesignTechnique[];
   coverageDimensions?: CoverageDimension[];
+  scenarioType?: "positive" | "negative";
+  processModelRefs?: string[];
+  actorJourney?: string[];
   status: "draft" | "approved" | "compiled" | "blocked";
   createdAt: string;
   updatedAt: string;
