@@ -59,7 +59,7 @@ describe("KnowledgeService", () => {
     expect(changed.previousRequirementSetId).toBe(first.requirementSet.id);
   });
 
-  it("records source parser warnings as gaps instead of silently dropping content", async () => {
+  it("keeps parser warnings visible without creating a Gap before attachment processing is attempted", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const service = new KnowledgeService(repository, await tempDir());
     const project = await service.createProject({ name: "Wiki", key: "wiki-warnings", defaultLocale: "en-US" });
@@ -68,9 +68,38 @@ describe("KnowledgeService", () => {
 
     const result = await service.ingestRequirement({ projectId: project.id, contentPackage });
 
-    expect(result.gaps).toEqual([
-      expect.objectContaining({ sourceType: "requirement-source-warning", status: "open" })
-    ]);
+    expect(result.gaps).toEqual([]);
+    expect(result.source.warnings).toEqual(["Feishu table block requires separate extraction"]);
+    expect(repository.gaps).toEqual([]);
+  });
+
+  it("does not trust host-provided attachment lifecycle state", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({ name: "Host", key: "host-attachment", defaultLocale: "en-US" });
+    const contentPackage = requirementPackage("host-attachment", "Users approve requests.");
+    contentPackage.attachments = [{
+      id: "untrusted-id",
+      sourceId: "untrusted-source",
+      name: "flow.png",
+      status: "confirmed",
+      localPath: "C:\\untrusted\\flow.png",
+      analysisId: "untrusted-analysis",
+      attempts: 99
+    }];
+
+    const result = await service.ingestRequirement({ projectId: project.id, contentPackage });
+
+    expect(result.source.attachments[0]).toEqual(
+      expect.objectContaining({
+        id: expect.not.stringMatching(/^untrusted/),
+        sourceId: result.source.id,
+        status: "discovered",
+        attempts: 0,
+        localPath: undefined,
+        analysisId: undefined
+      })
+    );
   });
 
   it("restores knowledge assets from the versioned JSON repository", async () => {

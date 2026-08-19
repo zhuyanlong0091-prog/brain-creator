@@ -34,6 +34,8 @@ The Agent calls `bc_prepare action=ingest-requirement` for Markdown, TXT, DOCX, 
 
 For Feishu, Brain Creator uses direct OpenAPI when environment credentials are configured. Otherwise the host Agent reads the document with its lark capability and submits a normalized `RequirementContentPackage`.
 
+If the source contains images, call `bc_prepare action=analyze-attachments` with the returned `requirementSourceId` before generating test design. Brain Creator downloads each attachment to a controlled local path. When the response is `needs-host-vision`, inspect every `recognitionRequests[].localPath` with the host multimodal capability and submit the schema-valid result through `submit-attachment-analysis`. Present the draft to the user, then call `confirm-attachment-analysis confirm=true` only after explicit confirmation. Discovery alone is not a failure: a Gap is allowed only after the recorded download or recognition retries are exhausted.
+
 ### 3. Analyze And Design
 
 The Agent calls `bc_prepare action=generate-test-design` and presents:

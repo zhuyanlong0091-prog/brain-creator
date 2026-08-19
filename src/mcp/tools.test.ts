@@ -116,6 +116,20 @@ describe("BRAIN_CREATOR_TOOLS", () => {
     ).toBe(true);
     expect(
       prepare?.inputSchema.safeParse({
+        action: "submit-attachment-analysis",
+        requirementSourceId: "source-1",
+        attachmentId: "attachment-1",
+        attachmentAnalysis: {
+          kind: "flowchart",
+          markdown: "Start -> End",
+          nodes: [],
+          edges: [],
+          confidence: 0.8
+        }
+      }).success
+    ).toBe(true);
+    expect(
+      prepare?.inputSchema.safeParse({
         action: "resolve-gap",
         gapId: "gap-1",
         systemId: "system-1",

@@ -215,7 +215,8 @@ export function createBrainCreatorMcpContext(
   );
   const knowledgeService = new KnowledgeService(
     repository,
-    input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir)
+    input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir),
+    workDir
   );
   const testDataProvider = new TestDataProviderService(
     repository,
@@ -792,11 +793,79 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       projectId: knowledgeProjectId,
       contentPackage: resolved.contentPackage
     });
+    const pendingAttachments = result.source.attachments.filter(
+      (attachment) => attachment.status !== "confirmed"
+    );
     return {
       ...result,
       status: result.changed ? "draft-created" : "unchanged",
-      nextAction: result.changed ? "generate-test-design" : "review-existing-baseline"
+      attachmentSummary: {
+        total: result.source.attachments.length,
+        pending: pendingAttachments.length
+      },
+      nextAction:
+        pendingAttachments.length > 0
+          ? "analyze-attachments"
+          : result.changed
+            ? "generate-test-design"
+            : "review-existing-baseline"
     };
+  }
+  if (action === "analyze-attachments") {
+    const sourceId = stringArg(input, "requirementSourceId");
+    const downloader = context.feishuReader?.downloadAttachment
+      ? context.feishuReader.downloadAttachment.bind(context.feishuReader)
+      : undefined;
+    const result = await context.knowledgeService.prepareRequirementAttachments({
+      sourceId,
+      attachmentIds: stringArrayArg(input, "attachmentIds"),
+      downloader
+    });
+    return {
+      status: result.recognitionRequests.length > 0
+        ? "needs-host-vision"
+        : result.gaps.length > 0
+          ? "blocked"
+          : "structured",
+      ...result,
+      requiredOutput: result.recognitionRequests.length > 0 ? "AttachmentAnalysis" : undefined,
+      nextAction:
+        result.recognitionRequests.length > 0
+          ? "Use the host multimodal capability on each localPath, then submit each structured result with submit-attachment-analysis."
+          : result.gaps.length > 0
+            ? "Restore connector access or resolve the attachment Gap before approving the requirement baseline."
+            : "Review and confirm each draft attachment analysis."
+    };
+  }
+  if (action === "submit-attachment-analysis") {
+    const analysis = context.knowledgeService.submitRequirementAttachmentAnalysis({
+      sourceId: stringArg(input, "requirementSourceId"),
+      attachmentId: stringArg(input, "attachmentId"),
+      provider: "host-agent",
+      result: attachmentAnalysisArg(input, "attachmentAnalysis")
+    });
+    return {
+      status: "draft-created",
+      analysis,
+      nextAction: "Present the structured visual interpretation and ask the user to confirm it."
+    };
+  }
+  if (action === "confirm-attachment-analysis") {
+    if (!optionalBooleanArg(input, "confirm")) {
+      const analysisId = stringArg(input, "attachmentAnalysisId");
+      const analysis = context.repository.attachmentAnalyses.find((item) => item.id === analysisId);
+      if (!analysis) throw new Error("Attachment analysis not found");
+      return {
+        status: "preview",
+        analysis,
+        requiresConfirmation: true,
+        nextAction: "Ask the user to confirm this visual interpretation before it enters requirement knowledge."
+      };
+    }
+    return context.knowledgeService.confirmRequirementAttachmentAnalysis({
+      analysisId: stringArg(input, "attachmentAnalysisId"),
+      confirmedBy: optionalStringArg(input, "confirmedBy")
+    });
   }
   if (action === "generate-analysis" || action === "generate-test-design") {
     const provider = policyProviderArg(input, "provider");
@@ -8731,6 +8800,9 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     ![
       "ingest-requirement",
       "refresh-requirement",
+      "analyze-attachments",
+      "submit-attachment-analysis",
+      "confirm-attachment-analysis",
       "generate-analysis",
       "generate-test-design",
       "confirm-eval-actions",
@@ -8758,6 +8830,9 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
   return value as
     | "ingest-requirement"
     | "refresh-requirement"
+    | "analyze-attachments"
+    | "submit-attachment-analysis"
+    | "confirm-attachment-analysis"
     | "generate-analysis"
     | "generate-test-design"
     | "confirm-eval-actions"
@@ -8970,6 +9045,52 @@ function requirementContentPackageArg(
     throw new Error(`${key} is invalid`);
   }
   return candidate;
+}
+
+function attachmentAnalysisArg(input: Record<string, unknown>, key: string) {
+  const value = input[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${key} must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  const kinds = new Set(["table", "flowchart", "state-machine", "wireframe", "text-image", "other"]);
+  if (
+    typeof record.kind !== "string" ||
+    !kinds.has(record.kind) ||
+    typeof record.markdown !== "string" ||
+    !record.markdown.trim() ||
+    !Array.isArray(record.nodes) ||
+    !Array.isArray(record.edges) ||
+    typeof record.confidence !== "number" ||
+    record.confidence < 0 ||
+    record.confidence > 1
+  ) {
+    throw new Error(`${key} is invalid`);
+  }
+  return {
+    kind: record.kind as "table" | "flowchart" | "state-machine" | "wireframe" | "text-image" | "other",
+    markdown: record.markdown,
+    nodes: record.nodes.map((node, index) => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) {
+        throw new Error(`${key}.nodes[${index}] is invalid`);
+      }
+      const item = node as Record<string, unknown>;
+      return { id: stringArg(item, "id"), type: stringArg(item, "type"), label: stringArg(item, "label") };
+    }),
+    edges: record.edges.map((edge, index) => {
+      if (!edge || typeof edge !== "object" || Array.isArray(edge)) {
+        throw new Error(`${key}.edges[${index}] is invalid`);
+      }
+      const item = edge as Record<string, unknown>;
+      return {
+        from: stringArg(item, "from"),
+        to: stringArg(item, "to"),
+        condition: optionalStringArg(item, "condition"),
+        actor: optionalStringArg(item, "actor")
+      };
+    }),
+    confidence: record.confidence
+  };
 }
 
 function pageEvidenceArg(input: Record<string, unknown>, key: string) {

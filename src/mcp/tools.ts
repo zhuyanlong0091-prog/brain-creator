@@ -126,6 +126,9 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       action: z.enum([
         "ingest-requirement",
         "refresh-requirement",
+        "analyze-attachments",
+        "submit-attachment-analysis",
+        "confirm-attachment-analysis",
         "generate-analysis",
         "generate-test-design",
         "confirm-eval-actions",
@@ -149,6 +152,10 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       ]),
       knowledgeProjectId: z.string().optional(),
       requirementSetId: z.string().optional(),
+      requirementSourceId: z.string().optional(),
+      attachmentId: z.string().optional(),
+      attachmentIds: z.array(z.string()).default([]),
+      attachmentAnalysisId: z.string().optional(),
       testIntentId: z.string().optional(),
       testIntentIds: z.array(z.string()).default([]),
       modules: z.array(z.string()).default([]),
@@ -314,7 +321,18 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
           title: z.string(),
           content: z.string(),
           blocks: z.array(z.object({ type: z.string(), text: z.string(), level: z.number().optional() })),
-          attachments: z.array(z.object({ name: z.string(), url: z.string().optional(), type: z.string().optional() })),
+          attachments: z.array(z.object({
+            blockId: z.string().optional(),
+            fileToken: z.string().optional(),
+            name: z.string(),
+            mimeType: z.string().optional(),
+            url: z.string().optional(),
+            type: z.string().optional(),
+            containerPath: z.string().optional(),
+            containerEntry: z.string().optional(),
+            pageNumber: z.number().int().positive().optional(),
+            contentHash: z.string().optional(),
+          })),
           source: z.string(),
           sourceType: z.enum(["local-file", "http", "feishu", "obsidian", "host-connector"]),
           contentHash: z.string(),
@@ -322,7 +340,21 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
           warnings: z.array(z.string())
         })
         .optional(),
-      analysisPackage: z.record(z.string(), z.unknown()).optional()
+      analysisPackage: z.record(z.string(), z.unknown()).optional(),
+      attachmentAnalysis: z
+        .object({
+          kind: z.enum(["table", "flowchart", "state-machine", "wireframe", "text-image", "other"]),
+          markdown: z.string().min(1),
+          nodes: z.array(z.object({ id: z.string(), type: z.string(), label: z.string() })),
+          edges: z.array(z.object({
+            from: z.string(),
+            to: z.string(),
+            condition: z.string().optional(),
+            actor: z.string().optional()
+          })),
+          confidence: z.number().min(0).max(1)
+        })
+        .optional()
     })
   },
   {

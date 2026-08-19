@@ -9,6 +9,7 @@ import {
 import { dirname, join } from "node:path";
 import type {
   ActionStep,
+  AttachmentAnalysis,
   AgentRun,
   AgentTask,
   ApiFlow,
@@ -83,6 +84,7 @@ export class InMemoryBrainCreatorRepository {
   bugReports: BugReport[] = [];
   knowledgeProjects: KnowledgeProject[] = [];
   requirementSources: RequirementSource[] = [];
+  attachmentAnalyses: AttachmentAnalysis[] = [];
   requirementSets: RequirementSet[] = [];
   knowledgeNodes: KnowledgeNode[] = [];
   knowledgeEdges: KnowledgeEdge[] = [];
@@ -133,6 +135,7 @@ export class InMemoryBrainCreatorRepository {
     this.bugReports = [];
     this.knowledgeProjects = [];
     this.requirementSources = [];
+    this.attachmentAnalyses = [];
     this.requirementSets = [];
     this.knowledgeNodes = [];
     this.knowledgeEdges = [];
@@ -180,6 +183,7 @@ export type RepositorySnapshot = Pick<
   | "schemaVersion"
   | "knowledgeProjects"
   | "requirementSources"
+  | "attachmentAnalyses"
   | "requirementSets"
   | "knowledgeNodes"
   | "knowledgeEdges"
@@ -287,11 +291,18 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
       if (manifest.format !== "sharded" || manifest.schemaVersion !== SHARDED_REPOSITORY_SCHEMA_VERSION) {
         throw new Error("Brain Creator sharded store manifest is invalid");
       }
-      const collections = manifest.collections as unknown[];
+      const rawCollections = manifest.collections;
+      const collections = Array.isArray(rawCollections) ? rawCollections : [];
       const expectedCollections = collectionKeys();
+      const requiredCollections = expectedCollections.filter((key) => key !== "attachmentAnalyses");
       if (
-        collections.length !== expectedCollections.length ||
-        expectedCollections.some((key) => !collections.includes(key))
+        !Array.isArray(rawCollections) ||
+        requiredCollections.some((key) => !collections.includes(key)) ||
+        collections.some(
+          (key) =>
+            typeof key !== "string" ||
+            !expectedCollections.includes(key as (typeof expectedCollections)[number])
+        )
       ) {
         throw new Error("Brain Creator sharded store manifest collections are invalid");
       }
@@ -390,6 +401,7 @@ function snapshotRepository(
     schemaVersion,
     knowledgeProjects: repository.knowledgeProjects,
     requirementSources: repository.requirementSources,
+    attachmentAnalyses: repository.attachmentAnalyses,
     requirementSets: repository.requirementSets,
     knowledgeNodes: repository.knowledgeNodes,
     knowledgeEdges: repository.knowledgeEdges,
@@ -455,6 +467,7 @@ function applyRepositorySnapshot(
     repository.bugReports = snapshot.bugReports ?? [];
     repository.knowledgeProjects = snapshot.knowledgeProjects ?? [];
     repository.requirementSources = snapshot.requirementSources ?? [];
+    repository.attachmentAnalyses = snapshot.attachmentAnalyses ?? [];
     repository.requirementSets = snapshot.requirementSets ?? [];
     repository.knowledgeNodes = snapshot.knowledgeNodes ?? [];
     repository.knowledgeEdges = snapshot.knowledgeEdges ?? [];
@@ -515,7 +528,7 @@ function collectionKeys(): Array<Exclude<keyof RepositorySnapshot, "schemaVersio
     "locatorPoints", "probeResults", "trainingSessions", "actionSteps", "apiFlows",
     "generatedCases", "gaps", "glossaryTerms", "businessRules", "testCases", "agentRuns",
     "agentTasks", "chainRuns", "caseSources", "caseSuites", "caseSuiteRuns", "bugReports",
-    "knowledgeProjects", "requirementSources", "requirementSets", "knowledgeNodes",
+    "knowledgeProjects", "requirementSources", "attachmentAnalyses", "requirementSets", "knowledgeNodes",
     "knowledgeEdges", "testIntents", "testDataProfiles", "testDataTasks", "testDataLeases",
     "executableCases", "executionPlans", "requirementSuiteRuns", "executionEvidence",
     "executionDiagnoses", "executionDiagnosisReviews", "runLedgerEntries", "compileRuns",
@@ -534,6 +547,10 @@ function readShardedSnapshot(collectionsDir: string): Partial<RepositorySnapshot
   for (const key of collectionKeys()) {
     const filePath = join(collectionsDir, `${key}.json`);
     if (!existsSync(filePath)) {
+      if (key === "attachmentAnalyses") {
+        snapshot[key] = [];
+        continue;
+      }
       throw new Error(`Brain Creator shard ${key} is missing`);
     }
     const value = JSON.parse(readFileSync(filePath, "utf8"));
@@ -612,6 +629,7 @@ function systemAssets(repository: InMemoryBrainCreatorRepository, systemId: stri
     bugReports: repository.bugReports.filter((item) => item.systemId === systemId),
     knowledgeProjects: repository.knowledgeProjects.filter((item) => knowledgeProjectIds.has(item.id)),
     requirementSources: repository.requirementSources.filter((item) => knowledgeProjectIds.has(item.knowledgeProjectId)),
+    attachmentAnalyses: repository.attachmentAnalyses.filter((item) => knowledgeProjectIds.has(item.knowledgeProjectId)),
     requirementSets: repository.requirementSets.filter((item) => requirementSetIds.has(item.id)),
     knowledgeNodes: repository.knowledgeNodes.filter((item) => visibleKnowledgeNodeIds.has(item.id)),
     knowledgeEdges: repository.knowledgeEdges.filter(
@@ -655,6 +673,7 @@ function buildAssetIndex(repository: InMemoryBrainCreatorRepository) {
     ...repository.caseSuiteRuns.map((item) => ({ id: item.id, type: "case-suite-run", systemId: item.systemId, label: item.id })),
     ...repository.bugReports.map((item) => ({ id: item.id, type: "bug-report", systemId: item.systemId, label: item.caseNo })),
     ...repository.requirementSets.map((item) => ({ id: item.id, type: "requirement-set", projectId: item.knowledgeProjectId, label: item.title })),
+    ...repository.attachmentAnalyses.map((item) => ({ id: item.id, type: "attachment-analysis", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.kind })),
     ...repository.testIntents.map((item) => ({ id: item.id, type: "test-intent", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
     ...repository.executableCases.map((item) => ({ id: item.id, type: "executable-case", systemId: item.systemId, requirementSetId: item.requirementSetId, testIntentId: item.testIntentId, label: item.title })),
     ...repository.executionEvidence.map((item) => ({ id: item.id, type: "execution-evidence", systemId: item.systemId, executableCaseId: item.executableCaseId, requirementSetId: executableCaseById.get(item.executableCaseId)?.requirementSetId, label: item.id })),

@@ -628,7 +628,65 @@ export type RequirementSourceType =
   | "host-connector";
 
 export type RequirementContentBlock = { type: string; text: string; level?: number };
-export type RequirementAttachment = { name: string; url?: string; type?: string };
+export type RequirementAttachmentStatus =
+  | "discovered"
+  | "downloading"
+  | "downloaded"
+  | "recognizing"
+  | "structured"
+  | "confirmed"
+  | "needs-auth"
+  | "failed";
+
+export type RequirementAttachment = {
+  id?: string;
+  sourceId?: string;
+  blockId?: string;
+  fileToken?: string;
+  name: string;
+  mimeType?: string;
+  /** Legacy source packages used type for either MIME type or block kind. */
+  type?: string;
+  url?: string;
+  containerPath?: string;
+  containerEntry?: string;
+  pageNumber?: number;
+  status?: RequirementAttachmentStatus;
+  localPath?: string;
+  contentHash?: string;
+  attempts?: number;
+  recognitionAttempts?: number;
+  analysisId?: string;
+  failureReason?: string;
+};
+
+export type AttachmentAnalysisKind =
+  | "table"
+  | "flowchart"
+  | "state-machine"
+  | "wireframe"
+  | "text-image"
+  | "other";
+
+export type AttachmentAnalysis = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  sourceId: string;
+  attachmentId: string;
+  kind: AttachmentAnalysisKind;
+  markdown: string;
+  nodes: Array<{ id: string; type: string; label: string }>;
+  edges: Array<{ from: string; to: string; condition?: string; actor?: string }>;
+  confidence: number;
+  sourceRefs: string[];
+  provider: "host-agent" | "adapter";
+  status: "draft" | "confirmed" | "failed";
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt?: string;
+  confirmedBy?: string;
+};
 
 export type RequirementContentPackage = {
   title: string;
