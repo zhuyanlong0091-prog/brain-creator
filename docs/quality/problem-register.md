@@ -71,19 +71,21 @@ production acceptance conditions are closed.
 
 This register closes only through its stated acceptance checks. A passing feature test does not close broader evidence, security, or reliability work assigned to a later PR.
 
-## Latest recalibration after PR #123
+## Latest recalibration after PR #124
 
-The register was reviewed against the merged scheduled-claim implementation. The
+The register was reviewed against the merged auth-provider preflight implementation. The
 status totals remain unchanged because none of the remaining partial items has
 met its full production acceptance condition:
 
 - **C1 authentication refresh** now has explicit provider selection, provider
   preflight through `bc_configure target=auth operation=preflight`, built-in
   token/cookie protected-state refresh, host-agent refresh compatibility, and
-  fresh-context re-verification. `bc_status` now exposes registered,
+  Requirement Suite execution gating, and fresh-context re-verification. `bc_status` now exposes registered,
   configured, and unavailable refresh providers. OAuth, CAS, and SAML
   production adapters are still partial; preflight only proves adapter
-  readiness and does not replace real provider authentication.
+  readiness and does not replace real provider authentication. Manual script
+  profiles without a declared refresh provider remain on the verified-browser-
+  state path.
 - **F5 same-system reconciliation** now persists requirement coverage snapshots,
   detects missing intents/cases, superseded revisions, unbound cases, and
   separates mixed-requirement artifact segments. Complete historical Eval and

@@ -3166,6 +3166,65 @@ async function executeNextRequirementSuiteCase(
       executableCase.id
     );
   }
+  const suiteAuthProfileId =
+    requirementSuiteRun.authProfileId ??
+    requirementSuiteRun.actorJourney?.[0]?.authProfileId;
+  const suiteAuthProfile = suiteAuthProfileId
+    ? context.repository.authProfiles.find((item) => item.id === suiteAuthProfileId)
+    : undefined;
+  const requiresAuthProviderPreflight =
+    suiteAuthProfile &&
+    (Boolean(suiteAuthProfile.refreshProvider) ||
+      suiteAuthProfile.loginMethod === "token" ||
+      suiteAuthProfile.loginMethod === "cookie");
+  if (suiteAuthProfile && requiresAuthProviderPreflight) {
+    const authProviderPreflight = await context.authRefreshRegistry.preflight({
+      workDir: context.workDir,
+      system: context.repository.systemProfiles.find(
+        (item) => item.id === requirementSuiteRun.systemId
+      )!,
+      authProfile: suiteAuthProfile,
+      reason: "Requirement suite execution preflight."
+    });
+    if (authProviderPreflight.status !== "ready") {
+      const existingGap = context.repository.gaps.find(
+        (gap) =>
+          gap.projectId === requirementSuiteRun.systemId &&
+          gap.sourceType === "requirement-suite-auth-preflight" &&
+          gap.sourceId === requirementSuiteRun.id &&
+          gap.status === "open"
+      );
+      const gap = existingGap ?? context.service.reportGap({
+        projectId: requirementSuiteRun.systemId,
+        sourceType: "requirement-suite-auth-preflight",
+        sourceId: requirementSuiteRun.id,
+        reason:
+          authProviderPreflight.reason ??
+          `Authentication provider ${authProviderPreflight.provider} is not ready.`,
+        severity: "high",
+        owner: "qa"
+      });
+      const blockedRun = context.requirementSuiteRuns.completeCase(
+        requirementSuiteRun.id,
+        executableCase.id,
+        {
+          status: "blocked",
+          gapIds: [gap.id],
+          failureType: "auth_failure",
+          error: gap.reason
+        }
+      );
+      return {
+        mode: "requirement-suite",
+        status: "blocked",
+        authProviderPreflight,
+        gap,
+        requirementSuiteRun: blockedRun,
+        nextAction:
+          "Configure or complete the authentication provider, resolve the Gap, then explicitly resume the requirement suite."
+      };
+    }
+  }
   const executionPreflight = context.executionPreflight.prepare({
     knowledgeProjectId: requirementSuiteRun.knowledgeProjectId,
     systemId: requirementSuiteRun.systemId,
