@@ -12,6 +12,7 @@ Use the consolidated `brain-creator` command to install, inspect, diagnose, and 
 | `brain-creator config write` | Intentionally write MCP configuration | `npx brain-creator config write --provider codex` |
 | `brain-creator plugin install` | Install the Codex plugin and host-agent configuration | `npx brain-creator plugin install` |
 | `brain-creator export` | Export a completed Suite run with its evidence manifest | `npx brain-creator export --suite <id> --output exports/suite.zip` |
+| `brain-creator artifacts` | Preview/apply artifact migration, rollback, or retention | `npx brain-creator artifacts migrate` |
 | `brain-creator mcp` | Start the MCP server over stdio | `npx brain-creator mcp` |
 | `brain-creator help legacy` | List standalone compatibility executables | `npx brain-creator help legacy` |
 | `brain-creator --version` | Print the installed version | `npx brain-creator --version` |
@@ -118,7 +119,19 @@ npx brain-creator mcp
 brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>] [--json]
 ```
 
-Exports a completed document Suite as a portable ZIP containing `manifest.json` and available evidence. Missing files are listed in the manifest. The repository, secrets, browser storage state, and unrelated workspace files are excluded.
+Exports a completed document or Requirement Suite as a portable ZIP containing its owned source, analysis, cases, specs, tests, evidence, report, index, and manifest files. Missing files are listed in the export manifest. The repository, secrets, browser storage state, and unrelated workspace files are excluded.
+
+## `brain-creator artifacts`
+
+```text
+brain-creator artifacts migrate [--target <path>] [--confirm] [--json]
+brain-creator artifacts rollback --migration <id> --confirm [--target <path>] [--json]
+brain-creator artifacts retention --older-than-days <days> [--system <id>] [--target <path>] [--confirm] [--json]
+```
+
+Migration and retention are dry-run by default. Migration moves recognized root `specs/` and `tests/generated/` files into their System, requirement revision, Suite, and case ownership, places unresolvable files under `artifacts/unresolved/`, updates repository paths, and writes `legacy-path-index.json`. Rollback verifies hashes before restoring files and references.
+
+Retention considers only terminal Suite directories with a manifest. Active runs and the run referenced by `latest.json` are excluded. `--confirm` is mandatory for any file mutation. `brain-creator migrate artifacts` remains an accepted migration alias.
 
 ## Compatibility Commands
 

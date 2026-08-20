@@ -14,7 +14,7 @@ type GenerateSeedFileInput = {
 
 export async function generateSeedFile(input: GenerateSeedFileInput) {
   await mkdir(input.outputDir, { recursive: true });
-  const seedPath = join(input.outputDir, `seed-${input.system.id}.spec.ts`);
+  const seedPath = join(input.outputDir, `seed-${input.system.id}.fixture.ts`);
   const secrets = decryptSecrets(input.authProfile.encryptedSecrets);
   const storageStatePath = await resolveAuthStorageState(input, secrets.storageStatePath);
   const actorRoles = await Promise.all(

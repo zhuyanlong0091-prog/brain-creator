@@ -61,9 +61,11 @@ export function playwrightTestArgs(
   input: {
     browserMode?: BrowserExecutionMode;
     structuredReporter: boolean;
+    configPath?: string;
   }
 ) {
   const args = ["playwright", "test", testPath, "--workers=1"];
+  if (input.configPath) args.push("--config", input.configPath);
   if (input.browserMode === "observe") args.push("--headed");
   if (input.structuredReporter) args.push("--reporter=json", "--trace=on");
   return args;

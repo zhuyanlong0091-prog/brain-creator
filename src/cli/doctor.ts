@@ -89,6 +89,7 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
       message: `Generated knowledge will use ${knowledgeDir}.`
     },
     storageCheck(storage),
+    legacyArtifactCheck(workspace, fileExists),
     toolProfileCheck(toolProfile),
     feishuConnectorCheck(feishu),
     bridgeCommandCheck(env, commandExists, agentBridge),
@@ -140,6 +141,27 @@ function storageCheck(storage: StoreHealth): DoctorCheck {
     status: storage.status,
     message: storage.message,
     remediation: storage.remediation
+  };
+}
+
+function legacyArtifactCheck(
+  workspace: string,
+  fileExists: (path: string) => boolean
+): DoctorCheck {
+  const legacyPaths = [join(workspace, "specs"), join(workspace, "tests", "generated")]
+    .filter(fileExists);
+  if (legacyPaths.length === 0) {
+    return {
+      name: "Artifact ownership",
+      status: "pass",
+      message: "No legacy root artifact directories were detected."
+    };
+  }
+  return {
+    name: "Artifact ownership",
+    status: "warn",
+    message: `Legacy artifact directories need review: ${legacyPaths.join(", ")}.`,
+    remediation: "Run brain-creator artifacts migrate for a dry-run before confirming migration."
   };
 }
 

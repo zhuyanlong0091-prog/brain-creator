@@ -2222,6 +2222,13 @@ describe("Brain Creator requirement-first facade", () => {
       })
     );
     expect(context.repository.testDataTasks[0].status).toBe("cancelled");
+    const archivedRoot = join(cancelled.requirementSuiteRun.reportPath, "..", "..");
+    await expect(readFile(join(archivedRoot, "source", "requirements.json"), "utf8"))
+      .resolves.toContain('"requirementSets"');
+    await expect(readFile(join(archivedRoot, "analysis", "knowledge-and-coverage.json"), "utf8"))
+      .resolves.toContain('"coverage"');
+    await expect(readFile(join(archivedRoot, "cases", "executable-cases.json"), "utf8"))
+      .resolves.toContain('"executableCases"');
 
     const status = dataOf(
       await handleBrainCreatorTool(context, "bc_status", {

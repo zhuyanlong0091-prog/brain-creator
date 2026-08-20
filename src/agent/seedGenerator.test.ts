@@ -35,7 +35,7 @@ describe("generateSeedFile", () => {
 
     const content = await readFile(result.seedPath, "utf8");
     expect(result).toEqual({
-      seedPath: expect.stringContaining("seed-system_1.spec.ts"),
+      seedPath: expect.stringContaining("seed-system_1.fixture.ts"),
       loginMethod: "token",
       secretKeys: ["token"]
     });

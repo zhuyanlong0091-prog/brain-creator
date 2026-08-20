@@ -99,6 +99,27 @@ describe("Brain Creator doctor", () => {
     expect(formatDoctorReport(report)).toContain("Brain Creator doctor: action required");
   });
 
+  it("warns about legacy root artifacts without mutating them", () => {
+    const cwd = resolve("business-project");
+    const report = buildDoctorReport({
+      cwd,
+      env: {
+        BRAIN_CREATOR_AGENT_PROVIDER: "host-agent",
+        BRAIN_CREATOR_AGENT_TIMEOUT_MS: "120000"
+      },
+      commandExists: () => false,
+      fileExists: (path) => path === join(cwd, "tests", "generated")
+    });
+
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "Artifact ownership",
+        status: "warn",
+        remediation: expect.stringContaining("artifacts migrate")
+      })
+    ]));
+  });
+
   it("reports Codex provider readiness when configured", () => {
     const cwd = resolve("business-project");
     const report = buildDoctorReport({

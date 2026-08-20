@@ -8,6 +8,7 @@ export default defineConfig({
       "**/node_modules/**",
       "**/.git/**",
       "**/.brain-creator-test/**",
+      "**/.brain-creator/**",
       "tests/e2e/**",
       "tests/generated/**",
       "tests/seed-*.spec.ts"
