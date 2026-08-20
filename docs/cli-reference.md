@@ -155,11 +155,14 @@ They remain available for existing automation. New documentation and examples us
 | `BRAIN_CREATOR_AGENT_TIMEOUT_MS` | Agent call timeout | `120000` |
 | `BRAIN_CREATOR_KNOWLEDGE_DIR` | External knowledge root | `<absolute-knowledge-path>` |
 | `BRAIN_CREATOR_STORE_DIR` | Schema 17 sharded runtime store | `<workspace>/.brain-creator/store` |
+| `BRAIN_CREATOR_RUNTIME_CONFIG` | Optional runtime configuration override | `<workspace>/.brain-creator/config/runtime.json` |
 | `BRAIN_CREATOR_FEISHU_APP_ID` | Feishu OpenAPI app ID | environment secret reference |
 | `BRAIN_CREATOR_FEISHU_APP_SECRET` | Feishu OpenAPI app secret | environment secret reference |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE` | Explicit browser executable | local Chrome/Edge path |
 
 Claude and Codex subprocess providers also support provider-specific command and argument variables. Use `brain-creator config write` to generate a valid starting configuration instead of composing them manually.
+
+Runtime settings can also be updated through `bc_configure target=runtime operation=update` and applied with `operation=reload-config`. The MCP process remains alive. Environment variables take precedence over the runtime file, active runs block reload, and runtime configuration accepts only `env:`/`file:` references for provider and connector values.
 
 ## Exit And Error Behavior
 

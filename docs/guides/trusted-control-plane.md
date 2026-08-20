@@ -140,7 +140,14 @@ preview plus an auditable Host Agent task.
 
 ## Reload without restarting MCP
 
-Use `bc_configure target=runtime operation=reload-store` after an external restore operation. Brain Creator refuses the reload while a Suite or Agent task is active. This command is a controlled recovery path, not permission to edit the store manually.
+Use `bc_configure target=runtime operation=reload-store` after an external restore operation. Brain Creator refuses the reload while a Suite or Agent task is active. Runtime Bridge and connector settings can be updated without restarting MCP:
+
+```text
+bc_configure target=runtime operation=update bridgeProvider=codex bridgeCommand=codex
+bc_configure target=runtime operation=reload-config
+```
+
+The runtime file stores only executable settings and `env:`/`file:` references. Environment variables have highest priority. Brain Creator validates and preflights a candidate before persisting or activating it; a failed reload keeps the previous configuration. This command is a controlled recovery/configuration path, not permission to edit the store or runtime file manually.
 
 ## Error contract
 

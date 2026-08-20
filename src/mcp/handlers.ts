@@ -14,6 +14,15 @@ import { checkBusinessRules } from "../agent/qualityGate.js";
 import { extractCandidateTerms } from "../agent/termExtractor.js";
 import { createConfiguredAgentBridge } from "../agent/bridgeProvider.js";
 import {
+  mergeRuntimeConfiguration,
+  readRuntimeConfiguration,
+  resolveRuntimeConfigurationPath,
+  runtimeEnvironment,
+  writeRuntimeConfiguration,
+  type RuntimeConfiguration,
+  type RuntimeConfigurationPatch
+} from "../agent/runtimeConfiguration.js";
+import {
   verifyStoredBrowserAuth,
   type AuthStateVerification,
   type AuthStateVerifier
@@ -160,6 +169,12 @@ export type BrainCreatorMcpContext = {
   authRefreshRegistry: AuthStateRefreshRegistry;
   authVerificationCache: Map<string, number>;
   feishuReader?: RequirementSourceReader;
+  runtimeConfiguration?: RuntimeConfiguration;
+  runtimeConfigurationPath: string;
+  reloadRuntimeConfiguration: (input?: {
+    configuration?: RuntimeConfiguration;
+    persist?: boolean;
+  }) => Promise<{ configuration?: RuntimeConfiguration; bridgeProvider?: string; connectorStatus: string; path: string }>;
 };
 
 type HostAgentTaskPackage = {
@@ -193,6 +208,8 @@ export function createBrainCreatorMcpContext(
   input: CreateContextInput = {}
 ): BrainCreatorMcpContext {
   const workDir = input.workDir ?? resolveBrainCreatorWorkspace();
+  const initialRuntimeConfiguration = readRuntimeConfiguration(workDir);
+  const initialRuntimeEnvironment = runtimeEnvironment(initialRuntimeConfiguration, process.env);
   const authStateMaterializer = input.authStateMaterializer ?? materializeBrowserAuthState;
   const genericAuthRefreshAdapters: AuthRefreshAdapter[] = [
     {
@@ -247,7 +264,8 @@ export function createBrainCreatorMcpContext(
     repository,
     runLedger
   );
-  return {
+  const runtimeManaged = !input.agentBridge && !input.runner;
+  const context: BrainCreatorMcpContext = {
     repository,
     service,
     knowledgeService,
@@ -270,7 +288,9 @@ export function createBrainCreatorMcpContext(
     workDir,
     agentBridge:
       input.agentBridge ??
-      (input.runner ? commandRunnerAgentBridge(input.runner) : createConfiguredAgentBridge()),
+      (input.runner
+        ? commandRunnerAgentBridge(input.runner)
+        : createConfiguredAgentBridge({ env: initialRuntimeEnvironment })),
     runner: input.runner,
     structuredReporter: input.structuredReporter,
     authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
@@ -286,8 +306,47 @@ export function createBrainCreatorMcpContext(
         ...genericAuthRefreshAdapters
       ]),
     authVerificationCache: new Map(),
-    feishuReader: input.feishuReader ?? configuredFeishuReader()
+    feishuReader: input.feishuReader ?? configuredFeishuReader(initialRuntimeEnvironment),
+    runtimeConfiguration: initialRuntimeConfiguration,
+    runtimeConfigurationPath: resolveRuntimeConfigurationPath(workDir),
+    reloadRuntimeConfiguration: async (reloadInput = {}) => {
+      const configuration = reloadInput.configuration === undefined
+        ? readRuntimeConfiguration(workDir)
+        : reloadInput.configuration;
+      const candidateEnvironment = runtimeEnvironment(configuration, process.env);
+      const candidateBridge = runtimeManaged
+        ? createConfiguredAgentBridge({ env: candidateEnvironment })
+        : context.agentBridge;
+      if (runtimeManaged && configuration?.bridgeProvider !== "disabled") {
+        const bridgeCheck = await preflightAgentBridge(candidateBridge);
+        if (!bridgeCheck.ok) {
+          throw new BrainCreatorError({
+            code: "BC_RUNTIME_PREFLIGHT_FAILED",
+            message: bridgeCheck.error ?? "Runtime bridge preflight failed",
+            userMessage: {
+              enUS: `Runtime configuration preflight failed: ${bridgeCheck.error ?? "unknown error"}`,
+              zhCN: `运行时配置预检失败：${bridgeCheck.error ?? "未知错误"}`
+            },
+            nextAction: "review-runtime-config",
+            retryable: true
+          });
+        }
+      }
+      if (reloadInput.persist && configuration) writeRuntimeConfiguration(workDir, configuration);
+      if (runtimeManaged) {
+        context.agentBridge = candidateBridge;
+        context.feishuReader = configuredFeishuReader(candidateEnvironment);
+      }
+      context.runtimeConfiguration = configuration;
+      return {
+        ...(configuration ? { configuration } : {}),
+        ...(candidateBridge?.provider ? { bridgeProvider: candidateBridge.provider } : {}),
+        connectorStatus: context.feishuReader ? "feishu-configured" : "host-agent-fallback",
+        path: resolveRuntimeConfigurationPath(workDir)
+      };
+    }
   };
+  return context;
 }
 
 export async function handleBrainCreatorTool(
@@ -1652,6 +1711,13 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       configuredProviders: [...new Set(configuredRefreshProviders)],
       unavailableProviders: unavailableRefreshProviders
     },
+    runtime: {
+      configurationPath: context.runtimeConfigurationPath,
+      configurationConfigured: Boolean(context.runtimeConfiguration),
+      bridgeProvider: context.agentBridge?.provider ?? context.runtimeConfiguration?.bridgeProvider ?? "disabled",
+      connectorStatus: context.feishuReader ? "feishu-configured" : "host-agent-fallback",
+      reloadOperation: "bc_configure target=runtime operation=reload-config"
+    },
     requirementSuiteRuns: {
       total: requirementSuiteRuns.length,
       byStatus: countBy(requirementSuiteRuns, (run) => run.status),
@@ -2696,7 +2762,7 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
   const target = configureTargetArg(input, "target");
   if (target === "runtime") {
     const operation = optionalStringArg(input, "operation") ?? "reload-store";
-    if (operation !== "reload-store" && operation !== "rebuild-index") {
+    if (!["update", "reload-config", "reload-store", "rebuild-index"].includes(operation)) {
       throw new Error("runtime operation is invalid");
     }
     const active = [
@@ -2719,6 +2785,35 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
         nextAction: "review-active-runs",
         retryable: true
       });
+    }
+    if (operation === "update") {
+      const patch: RuntimeConfigurationPatch = {
+        ...(optionalStringArg(input, "bridgeProvider")
+          ? { bridgeProvider: optionalStringArg(input, "bridgeProvider") as RuntimeConfiguration["bridgeProvider"] }
+          : {}),
+        ...(optionalStringArg(input, "bridgeCommand") ? { bridgeCommand: optionalStringArg(input, "bridgeCommand") } : {}),
+        ...(Array.isArray(input.bridgeArgs) ? { bridgeArgs: stringArrayArg(input, "bridgeArgs") } : {}),
+        ...(optionalNumberArg(input, "bridgeTimeoutMs") !== undefined
+          ? { bridgeTimeoutMs: optionalNumberArg(input, "bridgeTimeoutMs") }
+          : {}),
+        ...(input.providerConfigs !== undefined ? { providerConfigs: recordArg(input, "providerConfigs") } : {}),
+        ...(input.connectorConfigs !== undefined ? { connectorConfigs: recordArg(input, "connectorConfigs") } : {})
+      };
+      const configuration = mergeRuntimeConfiguration(context.runtimeConfiguration, patch);
+      return {
+        status: "config-reloaded",
+        operation,
+        ...(await context.reloadRuntimeConfiguration({ configuration, persist: true })),
+        nextAction: "review-status"
+      };
+    }
+    if (operation === "reload-config") {
+      return {
+        status: "config-reloaded",
+        operation,
+        ...(await context.reloadRuntimeConfiguration()),
+        nextAction: "review-status"
+      };
     }
     if (operation === "rebuild-index") {
       if (!(context.repository instanceof ShardedFileBrainCreatorRepository)) {
@@ -5050,9 +5145,9 @@ function connectorStatus(context?: BrainCreatorMcpContext, projectId?: string) {
   };
 }
 
-function configuredFeishuReader(): RequirementSourceReader | undefined {
-  const appId = process.env.BRAIN_CREATOR_FEISHU_APP_ID;
-  const appSecret = process.env.BRAIN_CREATOR_FEISHU_APP_SECRET;
+function configuredFeishuReader(environment: Record<string, string | undefined> = process.env): RequirementSourceReader | undefined {
+  const appId = environment.BRAIN_CREATOR_FEISHU_APP_ID;
+  const appSecret = environment.BRAIN_CREATOR_FEISHU_APP_SECRET;
   return appId && appSecret ? new FeishuOpenApiAdapter({ appId, appSecret }) : undefined;
 }
 

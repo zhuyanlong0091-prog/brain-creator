@@ -19,7 +19,7 @@ production acceptance conditions are closed.
 |---|---|---|---|---|
 | A1 | Facade could not verify authentication | resolved | PR A | `bc_configure auth verify` performs browser-state verification and stores evidence; `controlPlane.test.ts` |
 | A2 | Case compilation accepted only one TestIntent | resolved | PR A | Requirement, intent-list, and module batch selection are idempotent; `service.test.ts`, `controlPlane.test.ts` |
-| A3 | Operators changed runtime state by editing the store | partial | PR A/PR E | Auth, page binding, Gap, and reload controls exist; navigation/state corrections still need BrowserSurface controls |
+| A3 | Operators changed runtime state by editing the store | resolved | PR A/PR E/PR G | Facade controls cover auth, page binding, Gap, store reload, runtime Bridge/connector update, candidate preflight, active-run blocking, and old-config preservation |
 | A4 | State changes required MCP restarts | partial | PR A/PR B | Store reload is in-process and blocked during active runs; sharded repository must remove whole-store reload pressure |
 | A5 | Generated output had no ownership hierarchy | resolved | PR B/PR F | New Planner/Generator/Reporter output is written under a versioned System/requirement/Suite tree with readable case names, manifest, index, and latest pointer; historical files have dry-run migration, unresolved preservation, legacy index, and rollback tests |
 | A6 | Gaps had no usable lifecycle | resolved | PR A | Resolve, dismiss, and reopen require a note and evidence references; `service.test.ts`, `controlPlane.test.ts` |
