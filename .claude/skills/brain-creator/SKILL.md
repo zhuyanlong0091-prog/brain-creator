@@ -25,7 +25,7 @@ New installations use `BRAIN_CREATOR_TOOL_PROFILE=facade`. Prefer these high-lev
 
 - `bc_prepare`: ingest requirements, generate analysis and test design, approve baselines, run bounded system exploration, submit evidence, batch compile cases, confirm page bindings, and control Gap lifecycles.
 - `bc_status`: inspect knowledge projects or runtime systems and choose the next action.
-- `bc_configure`: create knowledge projects, systems, auth, rules, terms, bindings, checkpoints, verify or archive auth, inspect connectors, and reload the store safely.
+- `bc_configure`: create knowledge projects, systems, auth, rules, terms, bindings, checkpoints, verify or archive auth, inspect connectors, update/reload runtime Bridge configuration, and reload the store safely.
 - `bc_run`: preview or execute requirement suites, approved cases, document suites, and bug regression.
 - `bc_review`: review requirements, knowledge, coverage, Requirement Eval history, System Brain, CompileRuns, executable cases, evidence, suites, bugs, and Gaps.
 - `bc_intent_preview`: preview ambiguous operational wording without executing it.
@@ -172,6 +172,7 @@ Brain Creator-generated files belong under `.brain-creator/artifacts/<system>/<r
 ## Auth
 
 - Prefer `bc_configure target=auth`; `bc_create_auth` remains an internal compatibility tool.
+- Runtime configuration uses `bc_configure target=runtime operation=update|reload-config`. Environment variables have highest priority; never put secrets directly in the runtime file. Reload is blocked during active runs and failed preflight keeps the previous configuration.
 - Verify saved auth and use workspace-local storage state under `.brain-creator/auth/`.
 - `bc_create_auth_checkpoint` pauses protected login work safely.
 

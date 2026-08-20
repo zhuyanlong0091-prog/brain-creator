@@ -219,6 +219,8 @@ npx brain-creator artifacts retention --older-than-days 90
 npx brain-creator artifacts retention --older-than-days 90 --confirm
 ```
 
+Runtime Bridge and connector settings can be changed without restarting MCP via `bc_configure target=runtime operation=update|reload-config`. `.brain-creator/config/runtime.json` stores only commands, timeouts, and `env:`/`file:` references; environment variables have priority, active runs block reload, and failed preflight preserves the previous configuration. `bc_status` shows Bridge and connector readiness.
+
 ### Documentation
 
 - [Searchable documentation site](https://zhuyanlong0091-prog.github.io/brain-creator/)

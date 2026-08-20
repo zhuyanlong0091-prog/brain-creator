@@ -133,7 +133,14 @@ System Brain 证据缺失或歧义时会创建 `ExplorationTask`，它不是最�
 
 ## 不重启 MCP 刷新存储
 
-外部恢复完成后，可调用 `bc_configure target=runtime operation=reload-store`。存在活动 Suite 或 Agent 任务时，Brain Creator 会拒绝刷新。该命令是受控恢复入口，不代表允许手工修改存储。
+外部恢复完成后，可调用 `bc_configure target=runtime operation=reload-store`。存在活动 Suite 或 Agent 任务时，Brain Creator 会拒绝刷新。Bridge 和连接器配置可以在不重启 MCP 的情况下更新：
+
+```text
+bc_configure target=runtime operation=update bridgeProvider=codex bridgeCommand=codex
+bc_configure target=runtime operation=reload-config
+```
+
+运行时文件只保存命令、超时和 `env:`/`file:` 引用，环境变量拥有最高优先级。Brain Creator 会先校验并预检候选配置，成功后才持久化和激活；预检失败会保留旧配置。该命令是受控恢复/配置入口，不代表允许手工修改存储或运行时文件。
 
 ## 错误契约
 

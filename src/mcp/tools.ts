@@ -585,7 +585,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     description: "Facade configuration entry for system, auth, term, rule, runtime, and auth checkpoint setup.",
     inputSchema: z.object({
       target: z.enum(["system", "auth", "term", "rule", "checkpoint", "knowledge-project", "system-binding", "connector", "runtime"]),
-      operation: z.enum(["create", "verify", "preflight", "refresh", "archive", "reload-store", "rebuild-index"]).default("create"),
+      operation: z.enum(["create", "verify", "preflight", "refresh", "archive", "update", "reload-config", "reload-store", "rebuild-index"]).default("create"),
       knowledgeProjectId: z.string().optional(),
       connector: z.enum(["feishu"]).optional(),
       systemId: z.string().optional(),
@@ -610,6 +610,12 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       testCaseId: z.string().optional(),
       reason: z.string().optional(),
       resumeInstruction: z.string().optional(),
+      bridgeProvider: z.enum(["auto", "claude", "codex", "host-agent", "disabled"]).optional(),
+      bridgeCommand: z.string().optional(),
+      bridgeArgs: z.array(z.string()).optional(),
+      bridgeTimeoutMs: z.number().int().min(1000).max(600000).optional(),
+      providerConfigs: z.record(z.string(), z.string()).optional(),
+      connectorConfigs: z.record(z.string(), z.string()).optional(),
       responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },
