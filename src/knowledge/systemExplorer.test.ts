@@ -70,6 +70,98 @@ describe("System exploration coordinator", () => {
     }
   }, 30_000);
 
+  it("keeps aria-controls selectors consistent for safe interactions", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`
+        <button aria-expanded="false" aria-controls="details-panel">Details</button>
+        <div id="details-panel" hidden>Details panel</div>
+        <script>
+          document.querySelector('button').onclick = () => {
+            document.querySelector('button').setAttribute('aria-expanded', 'true');
+            document.querySelector('#details-panel').hidden = false;
+            fetch('/api/details/list', { method: 'POST' }).catch(() => {});
+          };
+        </script>
+      `);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}/`;
+
+    try {
+      const fixture = await createLocalFixture(baseUrl);
+      const result = await new SystemExplorationCoordinator({
+        repository: fixture.repository,
+        service: fixture.domainService,
+        knowledgeService: fixture.knowledgeService,
+        workDir: fixture.workDir,
+        explorer: new PlaywrightSystemExplorer()
+      }).explore({
+        knowledgeProjectId: fixture.projectId,
+        systemId: fixture.systemId,
+        interactionMode: "safe",
+        budget: { maxPages: 1, maxDepth: 0, maxInteractionsPerPage: 1, maxDurationMs: 10_000 }
+      });
+
+      expect(result.exploration.status).toBe("completed");
+      expect(result.exploration.gapIds).toEqual([]);
+      expect(result.exploration.interactionTransitions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            targetSelector: '[aria-controls="details-panel"]',
+            status: "observed",
+            transitionKind: "state",
+            blockedRequests: []
+          })
+        ])
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  }, 30_000);
+
+  it("captures role tabs used as SPA navigation controls", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`
+        <div role="tab" id="overview-tab" aria-controls="overview-panel">Overview</div>
+        <div id="overview-panel">Overview panel</div>
+      `);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}/`;
+
+    try {
+      const fixture = await createLocalFixture(baseUrl);
+      const result = await new SystemExplorationCoordinator({
+        repository: fixture.repository,
+        service: fixture.domainService,
+        knowledgeService: fixture.knowledgeService,
+        workDir: fixture.workDir,
+        explorer: new PlaywrightSystemExplorer()
+      }).explore({
+        knowledgeProjectId: fixture.projectId,
+        systemId: fixture.systemId,
+        interactionMode: "safe",
+        budget: { maxPages: 1, maxDepth: 0, maxInteractionsPerPage: 1, maxDurationMs: 10_000 }
+      });
+
+      expect(result.exploration.status).toBe("completed");
+      expect(result.exploration.gapIds).toEqual([]);
+      expect(result.brain.pages[0]?.locators).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "Overview" })])
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  }, 30_000);
+
   it("keeps popup interaction selectors scoped to the captured popup", () => {
     const locator = { first: () => "popup-locator" };
     const page = {
