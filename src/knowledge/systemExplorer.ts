@@ -119,6 +119,10 @@ const DEFAULT_BUDGET: SystemExplorationBudget = {
   maxInteractionsPerPage: 0
 };
 
+const INTERACTIVE_ELEMENT_SELECTOR =
+  'button, input, select, textarea, a[href], [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="radio"]';
+const MAX_RENDER_WAIT_MS = 5_000;
+
 export class SystemExplorationCoordinator {
   private readonly explorer: SystemExplorer;
 
@@ -450,6 +454,7 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
             blockers.push(`Authentication required at ${finalUrl}`);
             continue;
           }
+          await waitForInteractiveContent(page, deadline);
           const capture = await capturePage(
             page,
             finalUrl,
@@ -1648,9 +1653,7 @@ async function capturePage(
   });
   const domText = await page.locator("body").innerText().catch(() => "");
   const interactiveElements: PageCaptureEvidence["interactiveElements"] = await page
-    .locator(
-      'button, input, select, textarea, a[href], [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="radio"]'
-    )
+    .locator(INTERACTIVE_ELEMENT_SELECTOR)
     .evaluateAll((elements) =>
       elements.slice(0, 200).map((element, position) => {
         const html = element as unknown as {
@@ -1857,6 +1860,26 @@ async function capturePage(
     issues,
     surfaces
   };
+}
+
+async function waitForInteractiveContent(
+  page: import("@playwright/test").Page,
+  deadline: number
+) {
+  const timeout = Math.min(MAX_RENDER_WAIT_MS, Math.max(0, deadline - Date.now()));
+  if (timeout === 0) return;
+  await page
+    .waitForFunction(
+      (selector) => {
+        const browserGlobal = globalThis as typeof globalThis & {
+          document: { querySelectorAll: (value: string) => { length: number } };
+        };
+        return browserGlobal.document.querySelectorAll(selector).length > 0;
+      },
+      INTERACTIVE_ELEMENT_SELECTOR,
+      { timeout }
+    )
+    .catch(() => undefined);
 }
 
 async function reacquirePage(
