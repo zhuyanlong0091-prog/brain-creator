@@ -121,6 +121,29 @@ describe("StatefulExplorationPlanService", () => {
     })).toThrow("action is forbidden");
   });
 
+  it("rejects an actor journey role that does not match its AuthProfile", () => {
+    const fixture = createFixture();
+    const plan = fixture.service.create({
+      explorationTaskIds: ["exploration-task-1"],
+      actorJourney: [{ role: "approver", authProfileId: "auth-requester" }],
+      allowedRoutes: ["https://orders.example.test/orders"],
+      allowedActions: [{
+        name: "Approve order",
+        route: "https://orders.example.test/orders",
+        role: "approver",
+        write: true,
+        sourceRefs: ["source:approve"]
+      }],
+      cleanupPolicy: "retain-with-label"
+    });
+
+    expect(() => fixture.service.approve({
+      planId: plan.id,
+      note: "Role binding must be rejected.",
+      approvedBy: "qa@example.test"
+    })).toThrow("does not match AuthProfile role");
+  });
+
   it("requires write actions to name a role when an exploration spans multiple actors", () => {
     const fixture = createFixture();
     fixture.repository.authProfiles.push({

@@ -210,6 +210,9 @@ export class StatefulExplorationPlanService {
       ) {
         throw new Error(`Exploration role requires verified authentication: ${actor.role ?? actor.authProfileId}`);
       }
+      if (actor.role?.trim() && auth.role.trim() !== actor.role.trim()) {
+        throw new Error(`Exploration role does not match AuthProfile role: ${actor.role}`);
+      }
     }
     for (const action of plan.allowedActions) {
       if (matchesForbidden(action.name, plan.forbiddenActions)) {
