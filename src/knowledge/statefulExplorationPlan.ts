@@ -105,6 +105,15 @@ export class StatefulExplorationPlanService {
     if (allowedActions.some((action) => action.write) && actorJourney.length === 0) {
       throw new Error("Stateful write exploration requires an authenticated actor journey");
     }
+    if (actorJourney.length > 1) {
+      const actorRoles = actorJourney.map((actor) => actor.role?.trim());
+      if (actorRoles.some((role) => !role) || new Set(actorRoles).size !== actorRoles.length) {
+        throw new Error("Multi-actor stateful exploration requires distinct authorized roles");
+      }
+      if (allowedActions.some((action) => action.write && !action.role)) {
+        throw new Error("Multi-actor stateful exploration actions must name an authorized role");
+      }
+    }
     const executableCaseIds = unique(tasks.flatMap((task) =>
       task.executableCaseId ? [task.executableCaseId] : []
     ));
@@ -291,6 +300,7 @@ export class StatefulExplorationPlanService {
       throw new Error("Exploration result requires authorized action evidence");
     }
     const evidence = input.actionEvidence.map((item) => this.validateActionEvidence(plan, item));
+    this.validateActorJourneyOrder(plan, evidence);
     const writeCount = evidence.filter(({ action }) => action.write).length;
     if (writeCount > plan.maxWrites) {
       throw new Error("Exploration result exceeded the authorized write count");
@@ -387,6 +397,28 @@ export class StatefulExplorationPlanService {
     for (const sessionId of unique(input.trainingSessionIds)) {
       const session = this.repository.trainingSessions.find((item) => item.id === sessionId);
       if (!session || session.projectId !== plan.systemId) throw new Error(`Training evidence is outside the exploration system: ${sessionId}`);
+    }
+  }
+
+  private validateActorJourneyOrder(
+    plan: ExplorationPlan,
+    evidence: Array<{ action: ExplorationPlanAction; evidence: ExplorationActionEvidence }>
+  ) {
+    if (plan.actorJourney.length < 2) return;
+    const actorOrder = new Map(
+      plan.actorJourney.map((actor, index) => [actor.role?.trim(), index])
+    );
+    let lastOrder = -1;
+    for (const item of evidence) {
+      const role = item.evidence.role?.trim();
+      const order = role ? actorOrder.get(role) : undefined;
+      if (order === undefined) {
+        throw new Error("Exploration evidence role is not part of the authorized actor journey");
+      }
+      if (order < lastOrder) {
+        throw new Error("Exploration evidence violates actor journey order");
+      }
+      lastOrder = order;
     }
   }
 

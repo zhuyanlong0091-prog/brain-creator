@@ -121,6 +121,38 @@ describe("StatefulExplorationPlanService", () => {
     })).toThrow("action is forbidden");
   });
 
+  it("requires write actions to name a role when an exploration spans multiple actors", () => {
+    const fixture = createFixture();
+    fixture.repository.authProfiles.push({
+      id: "auth-approver",
+      projectId: "system-1",
+      env: "test",
+      role: "approver",
+      loginMethod: "token",
+      encryptedSecrets: {},
+      status: "succeeded",
+      lastVerifiedAt: now(),
+      createdAt: now(),
+      updatedAt: now()
+    });
+
+    expect(() => fixture.service.create({
+      explorationTaskIds: ["exploration-task-1"],
+      actorJourney: [
+        { role: "requester", authProfileId: "auth-requester" },
+        { role: "approver", authProfileId: "auth-approver" }
+      ],
+      allowedRoutes: ["https://orders.example.test/orders"],
+      allowedActions: [{
+        name: "Submit order",
+        route: "https://orders.example.test/orders",
+        write: true,
+        sourceRefs: ["source:submit"]
+      }],
+      cleanupPolicy: "retain-with-label"
+    })).toThrow("must name an authorized role");
+  });
+
   it("waits for test data before returning an evidence-bound host work package", () => {
     const fixture = createFixture({ needsData: true });
     const plan = approvedPlan(fixture);
@@ -219,6 +251,88 @@ describe("StatefulExplorationPlanService", () => {
       taskId: "exploration-task-1",
       outcome: "resolved"
     }));
+  });
+
+  it("rejects evidence that switches back to an earlier actor", async () => {
+    const fixture = createFixture();
+    fixture.repository.authProfiles.push({
+      id: "auth-approver",
+      projectId: "system-1",
+      env: "test",
+      role: "approver",
+      loginMethod: "token",
+      encryptedSecrets: {},
+      status: "succeeded",
+      lastVerifiedAt: now(),
+      createdAt: now(),
+      updatedAt: now()
+    });
+    const plan = fixture.service.create({
+      explorationTaskIds: ["exploration-task-1"],
+      actorJourney: [
+        { role: "requester", authProfileId: "auth-requester" },
+        { role: "approver", authProfileId: "auth-approver" }
+      ],
+      allowedRoutes: ["https://orders.example.test/orders"],
+      allowedActions: [
+        {
+          name: "Submit order",
+          route: "https://orders.example.test/orders",
+          role: "requester",
+          write: true,
+          sourceRefs: ["source:submit"]
+        },
+        {
+          name: "Approve order",
+          route: "https://orders.example.test/orders",
+          role: "approver",
+          write: true,
+          sourceRefs: ["source:approve"]
+        }
+      ],
+      cleanupPolicy: "retain-with-label",
+      maxWrites: 3
+    });
+    fixture.service.approve({
+      planId: plan.id,
+      note: "Approved for ordered actor journey.",
+      approvedBy: "qa@example.test"
+    });
+    fixture.service.start(plan.id);
+
+    await expect(fixture.service.submit({
+      planId: plan.id,
+      status: "succeeded",
+      durationMs: 1_000,
+      actionEvidence: [
+        {
+          actionId: plan.allowedActions[0].id,
+          action: "Submit order",
+          route: "https://orders.example.test/orders",
+          role: "requester",
+          sourceRefs: ["evidence:submit"]
+        },
+        {
+          actionId: plan.allowedActions[1].id,
+          action: "Approve order",
+          route: "https://orders.example.test/orders",
+          role: "approver",
+          sourceRefs: ["evidence:approve"]
+        },
+        {
+          actionId: plan.allowedActions[0].id,
+          action: "Submit order",
+          route: "https://orders.example.test/orders",
+          role: "requester",
+          sourceRefs: ["evidence:unexpected-switch-back"]
+        }
+      ],
+      evidenceRefs: ["evidence:actor-journey"],
+      pageModelIds: [],
+      systemExplorationIds: [],
+      trainingSessionIds: [],
+      cleanupStatus: "not-required"
+    })).rejects.toThrow("actor journey order");
   });
 
   it("blocks completion and creates a gap while created test data still needs cleanup", async () => {
