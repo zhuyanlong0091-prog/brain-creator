@@ -122,6 +122,12 @@ Review `skipped`, `cancelled`, and `attempts` through `bc_status` or `bc_review 
 
 Use `bc_review target=run-ledger` with `knowledgeProjectId` for a Requirement Suite or `systemId` for an Excel/Markdown Document Suite, plus an optional Suite `id`, when the user asks what happened, where execution is waiting, or why it stopped. The timeline links TestDataTask, ExecutionPlan, AgentTask, ExecutionEvidence, ChainRun, BugReport, and Gap references without copying artifact contents into status context. `bc_status` returns only active summaries and the 20 most recent events to keep routine context bounded.
 
+## Artifact ownership and maintenance
+
+Planner, Generator, Reporter, and Suite output is owned by `.brain-creator/artifacts/<system>/<requirement>-v<revision>/<suite-run>/`. Do not ask the host Agent to place new files in root `specs/` or `tests/generated/`.
+
+When historical files exist, run `brain-creator artifacts migrate` first and present the resolved/unresolved counts. Apply only after explicit confirmation. Rollback and retention also require explicit confirmation; retention never selects an active run or the run referenced by `latest.json`. Use `brain-creator export --suite <id>` to produce a complete, secret-scanned archive for either a document or Requirement Suite.
+
 For a terminal Requirement Suite failure, read `bc_status.knowledge.executionDiagnoses` first and use `bc_review target=execution-diagnosis` when detail is needed. The diagnosis gate records the normalized failure class, controlled Healer budget, verdict, and evidence IDs. Only `product_bug` may create a BugReport; automation, locator, data, auth, environment, network, execution, and unknown verdicts remain Gaps. Do not infer a product defect from raw Playwright text after Brain Creator has classified it.
 
 Document suites and bug regression use the same gate. For an Excel/Markdown flow without a KnowledgeProject, pass `systemId` to `bc_status` or `bc_review target=execution-diagnosis`. A document failure creates a BugReport only for `product_bug`. During regression, `passed` moves the existing bug to `retest-passed`, `product_bug` moves it to `retest-failed`, and a technical diagnosis restores the prior bug status while returning a blocked result and Gap. Host Agent regression tasks retain `regressionContext` across Generator and Healer submissions.

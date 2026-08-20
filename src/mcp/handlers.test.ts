@@ -1,6 +1,6 @@
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import AdmZip from "adm-zip";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -248,7 +248,7 @@ describe("handleBrainCreatorTool", () => {
     expect(JSON.stringify(authProfiles)).not.toContain("secret-token");
     expect(seed).toEqual(
       expect.objectContaining({
-        seedPath: expect.stringContaining(`seed-${system.id}.spec.ts`),
+        seedPath: expect.stringContaining(`seed-${system.id}.fixture.ts`),
         loginMethod: "token",
         secretKeys: ["token"]
       })
@@ -1118,8 +1118,10 @@ describe("handleBrainCreatorTool", () => {
         "npx",
         "playwright",
         "test",
-        `tests/generated/${testCase.id}.spec.ts`,
+        relative(workDir, taskPackage.testPath).replace(/\\/g, "/"),
         "--workers=1",
+        "--config",
+        relative(workDir, join(dirname(dirname(taskPackage.testPath)), "playwright.config.ts")).replace(/\\/g, "/"),
         "--reporter=json",
         "--trace=on"
       ]
@@ -1536,8 +1538,10 @@ describe("handleBrainCreatorTool", () => {
         "npx",
         "playwright",
         "test",
-        `tests/generated/${testCase.id}.spec.ts`,
+        relative(workDir, taskPackage.testPath).replace(/\\/g, "/"),
         "--workers=1",
+        "--config",
+        relative(workDir, join(dirname(dirname(taskPackage.testPath)), "playwright.config.ts")).replace(/\\/g, "/"),
         "--reporter=json",
         "--trace=on"
       ],
@@ -1545,8 +1549,10 @@ describe("handleBrainCreatorTool", () => {
         "npx",
         "playwright",
         "test",
-        `tests/generated/${testCase.id}.spec.ts`,
+        relative(workDir, taskPackage.testPath).replace(/\\/g, "/"),
         "--workers=1",
+        "--config",
+        relative(workDir, join(dirname(dirname(taskPackage.testPath)), "playwright.config.ts")).replace(/\\/g, "/"),
         "--reporter=json",
         "--trace=on"
       ]

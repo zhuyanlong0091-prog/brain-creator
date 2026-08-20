@@ -14,6 +14,12 @@ import {
 import { playwrightTestArgs } from "../execution/browserObservation.js";
 import { decryptSecrets } from "../shared/crypto.js";
 import { redactSensitiveText, scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
+import {
+  artifactFileName,
+  resolveArtifactRunLayout,
+  writeArtifactPlaywrightConfig,
+  type ArtifactRunLayout
+} from "../storage/artifactWorkspace.js";
 import type {
   AgentRun,
   AuthProfile,
@@ -163,6 +169,8 @@ type RunChainInput = {
   actorJourney?: Array<{ role: string; authProfile: AuthProfile }>;
   requiredStepIds?: string[];
   browserMode?: BrowserExecutionMode;
+  artifactLayout?: ArtifactRunLayout;
+  caseNo?: string;
 };
 
 export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
@@ -246,8 +254,9 @@ export function commandRunnerAgentBridge(runner: CommandRunner): AgentBridge {
 }
 
 export async function generatePlanDraft(input: GeneratePlanDraftInput) {
-  const contextDir = join(input.workDir, "specs", "_context");
-  const seedDir = join(input.workDir, "tests");
+  const runRoot = resolve(dirname(input.specPath), "..");
+  const contextDir = join(runRoot, "analysis");
+  const seedDir = join(runRoot, "tests");
   const prompt = await buildAgentPrompt({
     outputDir: contextDir,
     system: input.system,
@@ -307,13 +316,33 @@ export async function runChain(input: RunChainInput) {
     throw new Error("Test case must be approved before running chain");
   }
 
-  const specsDir = join(input.workDir, "specs");
-  const generatedDir = join(input.workDir, "tests", "generated");
-  const specPath = join(specsDir, `${input.testCase.id}.md`);
-  const testPath = join(generatedDir, `${input.testCase.id}.spec.ts`);
+  const layout = input.artifactLayout ?? resolveArtifactRunLayout({
+    workDir: input.workDir,
+    systemKey: input.system.name,
+    requirementKey: "unscoped",
+    suiteRunId: `chain-${input.testCase.id}`
+  });
+  const specName = artifactFileName({
+    caseNo: input.caseNo,
+    title: input.testCase.requirement,
+    extension: ".md",
+    contentHash: input.testCase.id
+  });
+  const testName = artifactFileName({
+    caseNo: input.caseNo,
+    title: input.testCase.requirement,
+    extension: ".spec.ts",
+    contentHash: input.testCase.id
+  });
+  const specPath = join(layout.specsDir, specName);
+  const testPath = join(layout.testsDir, testName);
+  const playwrightConfigPath = await writeArtifactPlaywrightConfig({
+    workDir: input.workDir,
+    layout
+  });
   const testRunPath = relative(input.workDir, testPath).replace(/\\/g, "/");
-  await mkdir(specsDir, { recursive: true });
-  await mkdir(generatedDir, { recursive: true });
+  await mkdir(layout.specsDir, { recursive: true });
+  await mkdir(layout.testsDir, { recursive: true });
   await writeFile(
     specPath,
     [formatScenariosAsMarkdown(input.testCase.scenarios), input.knowledgeContext]
@@ -324,7 +353,7 @@ export async function runChain(input: RunChainInput) {
 
   const seed = await generateSeedFile({
     workDir: input.workDir,
-    outputDir: join(input.workDir, "tests"),
+    outputDir: layout.testsDir,
     system: input.system,
     authProfile: input.authProfile,
     actorJourney: input.actorJourney
@@ -384,11 +413,12 @@ export async function runChain(input: RunChainInput) {
     }
     const args = playwrightTestArgs(testRunPath, {
       browserMode: input.browserMode,
-      structuredReporter: structuredReporterEnabled
+      structuredReporter: structuredReporterEnabled,
+      configPath: relative(input.workDir, playwrightConfigPath).replace(/\\/g, "/")
     });
     const actorRoleEvidencePath =
       input.actorJourney && input.actorJourney.length > 1
-        ? join(input.workDir, ".brain-creator", "runs", input.testCase.id, "actor-journey.jsonl")
+        ? join(layout.evidenceDir, `${input.testCase.id}-actor-journey.jsonl`)
         : undefined;
     if (actorRoleEvidencePath) await mkdir(dirname(actorRoleEvidencePath), { recursive: true });
     const rawResult = await runner("npx", args, {
@@ -428,13 +458,7 @@ export async function runChain(input: RunChainInput) {
         ...(actorRoleEvidencePath ? { actorRoleEvidencePath } : {})
       };
     }
-    const reporterPath = join(
-      input.workDir,
-      ".brain-creator",
-      "runs",
-      input.testCase.id,
-      "playwright-report.json"
-    );
+    const reporterPath = join(layout.evidenceDir, `${input.testCase.id}-playwright-report.json`);
     await mkdir(dirname(reporterPath), { recursive: true });
     const safeReporter = redactStructuredReporter(reporter, protectedSecrets);
     await writeFile(reporterPath, `${JSON.stringify(safeReporter, null, 2)}\n`, "utf8");

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import AdmZip from "adm-zip";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import type { CaseSuiteRun } from "../domain/types.js";
+import type { RequirementSuiteRun } from "../domain/types.js";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import { decryptSecrets } from "../shared/crypto.js";
 import { scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
@@ -34,6 +34,7 @@ export type ArtifactManifestInput = {
   artifactPaths: string[];
   sourceRefs?: string[];
   protectedSecrets?: Record<string, string>;
+  ownershipDirectory?: string;
 };
 
 export type ArtifactSecurityFinding = {
@@ -86,8 +87,23 @@ export async function writeArtifactManifest(input: ArtifactManifestInput): Promi
     safePart(input.requirementSetId ?? "unscoped"),
     safePart(input.suiteRunId ?? "unscoped")
   ];
-  const manifestPath = resolve(input.workDir, ...ownership, "manifest.json");
-  const artifacts = await describeArtifacts(input.workDir, input.artifactPaths);
+  const ownershipDirectory = input.ownershipDirectory
+    ? resolve(input.ownershipDirectory)
+    : resolve(input.workDir, ...ownership);
+  const ownershipOffset = relative(resolve(input.workDir), ownershipDirectory);
+  if (ownershipOffset.startsWith("..") || isAbsolute(ownershipOffset)) {
+    throw new Error("Artifact ownership directory must stay inside workspace");
+  }
+  const manifestPath = resolve(ownershipDirectory, "manifest.json");
+  const ownedArtifactPaths = input.ownershipDirectory
+    ? (await collectFiles(ownershipDirectory)).filter(
+        (path) => !["manifest.json", "index.md"].includes(path.split(/[\\/]/).at(-1) ?? "")
+      )
+    : [];
+  const artifacts = await describeArtifacts(
+    input.workDir,
+    [...new Set([...input.artifactPaths, ...ownedArtifactPaths])]
+  );
   const directoryAudit = await auditArtifactDirectory({
     workDir: input.workDir,
     directoryPath: dirname(manifestPath),
@@ -141,7 +157,39 @@ export async function writeArtifactManifest(input: ArtifactManifestInput): Promi
   }
   await mkdir(dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  await writeFile(
+    resolve(ownershipDirectory, "index.md"),
+    renderArtifactIndex(manifest),
+    "utf8"
+  );
+  await writeFile(
+    resolve(ownershipDirectory, "..", "latest.json"),
+    JSON.stringify({
+      suiteRunId: input.suiteRunId ?? "unscoped",
+      manifestPath: normalizeArchivePath(relative(input.workDir, manifestPath)),
+      updatedAt: createdAt
+    }, null, 2),
+    "utf8"
+  );
   return manifest;
+}
+
+function renderArtifactIndex(manifest: ArtifactManifest) {
+  const lines = [
+    "# Brain Creator Artifact Run",
+    "",
+    `- System: ${manifest.systemId}`,
+    `- Requirement: ${manifest.requirementSetId ?? "unscoped"}`,
+    `- Suite run: ${manifest.suiteRunId ?? "unscoped"}`,
+    `- Created: ${manifest.createdAt}`,
+    "",
+    "## Artifacts",
+    "",
+    ...manifest.artifacts.map((artifact) =>
+      `- ${artifact.status === "present" ? "[x]" : "[ ]"} ${artifact.path}`
+    )
+  ];
+  return `${lines.join("\n")}\n`;
 }
 
 export async function exportCaseSuiteArchive(input: {
@@ -150,9 +198,21 @@ export async function exportCaseSuiteArchive(input: {
   suiteRunId: string;
   outputPath: string;
 }) {
-  const suiteRun = input.repository.caseSuiteRuns.find((item) => item.id === input.suiteRunId);
+  const caseSuiteRun = input.repository.caseSuiteRuns.find((item) => item.id === input.suiteRunId);
+  const requirementSuiteRun = input.repository.requirementSuiteRuns.find(
+    (item) => item.id === input.suiteRunId
+  );
+  const suiteRun = caseSuiteRun ?? requirementSuiteRun;
   if (!suiteRun) throw new Error("Case suite run not found");
-  const described = await describeArtifacts(input.workDir, suiteRun.artifactPaths);
+  const explicitArtifactPaths = caseSuiteRun
+    ? caseSuiteRun.artifactPaths
+    : requirementSuiteArtifactPaths(input.repository, requirementSuiteRun!);
+  const ownedDirectory = await findOwnedSuiteDirectory(input.workDir, suiteRun.id);
+  const ownedPaths = ownedDirectory ? await collectFiles(ownedDirectory) : [];
+  const described = await describeArtifacts(
+    input.workDir,
+    [...new Set([...explicitArtifactPaths, ...ownedPaths])]
+  );
   const protectedSecrets = input.repository.authProfiles
     .filter((profile) => profile.projectId === suiteRun.systemId)
     .flatMap((profile) => {
@@ -221,7 +281,13 @@ export async function exportCaseSuiteArchive(input: {
     version: 1,
     suiteRunId: suiteRun.id,
     systemId: suiteRun.systemId,
-    sourceId: suiteRun.sourceId,
+    ...(caseSuiteRun ? { sourceId: caseSuiteRun.sourceId } : {}),
+    ...(requirementSuiteRun
+      ? {
+          knowledgeProjectId: requirementSuiteRun.knowledgeProjectId,
+          requirementSetIds: requirementSuiteRun.requirementSetIds ?? []
+        }
+      : {}),
     createdAt: new Date().toISOString(),
     suiteRun,
     artifacts: described.filter((item) => item.status === "present"),
@@ -253,6 +319,72 @@ export async function exportCaseSuiteArchive(input: {
     artifactCount: manifest.artifacts.length,
     missingArtifacts: manifest.missingArtifacts
   };
+}
+
+function requirementSuiteArtifactPaths(
+  repository: InMemoryBrainCreatorRepository,
+  run: RequirementSuiteRun
+) {
+  const executableCaseIds = new Set(run.caseRuns.map((item) => item.executableCaseId));
+  const testCaseIds = new Set(
+    run.caseRuns.map((item) => item.testCaseId).filter((value): value is string => Boolean(value))
+  );
+  const chainRunIds = new Set(
+    run.caseRuns.map((item) => item.chainRunId).filter((value): value is string => Boolean(value))
+  );
+  const evidence = repository.executionEvidence.filter(
+    (item) => executableCaseIds.has(item.executableCaseId) || testCaseIds.has(item.testCaseId)
+  );
+  const chains = repository.chainRuns.filter(
+    (item) => chainRunIds.has(item.id) || testCaseIds.has(item.testCaseId)
+  );
+  const tasks = repository.agentTasks.filter(
+    (item) => item.chainContext?.requirementSuiteRunId === run.id
+  );
+  return [
+    run.reportPath,
+    ...chains.flatMap((item) => [item.specPath, item.testPath]),
+    ...tasks.flatMap((item) => [item.promptPath, item.contextPath, ...item.outputPaths]),
+    ...evidence.flatMap((item) => [
+      item.contextPackPath,
+      item.reporterPath,
+      ...item.tracePaths,
+      ...item.artifactPaths,
+      ...item.steps.flatMap((step) => [
+        step.screenshotPath,
+        ...(step.evidenceRefs ?? []),
+        ...(step.traceRefs ?? [])
+      ])
+    ])
+  ].filter((path): path is string => Boolean(path));
+}
+
+async function findOwnedSuiteDirectory(workDir: string, suiteRunId: string) {
+  const artifactRoot = resolve(workDir, ".brain-creator", "artifacts");
+  for (const manifestPath of await findNamedFiles(artifactRoot, "manifest.json")) {
+    try {
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { suiteRunId?: string };
+      if (manifest.suiteRunId === suiteRunId) return dirname(manifestPath);
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+async function findNamedFiles(root: string, name: string): Promise<string[]> {
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    const files: string[] = [];
+    for (const entry of entries) {
+      const file = resolve(root, entry.name);
+      if (entry.isDirectory()) files.push(...await findNamedFiles(file, name));
+      else if (entry.isFile() && entry.name === name) files.push(file);
+    }
+    return files;
+  } catch {
+    return [];
+  }
 }
 
 async function scanArtifactSecrets(

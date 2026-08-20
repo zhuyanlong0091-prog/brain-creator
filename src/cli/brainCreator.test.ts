@@ -40,6 +40,22 @@ function dependencies(
       artifactCount: 1,
       missingArtifacts: []
     })),
+    migrateArtifacts: vi.fn(async () => ({
+      status: "planned" as const,
+      migrationId: "artifact-migration-1",
+      entries: 2,
+      unresolved: 0
+    })),
+    rollbackArtifactMigration: vi.fn(async () => ({
+      status: "rolled-back" as const,
+      migrationId: "artifact-migration-1",
+      restored: 2
+    })),
+    retainArtifacts: vi.fn(async () => ({
+      status: "planned" as const,
+      entries: 1,
+      bytes: 128
+    })),
     ...overrides
   };
 }
@@ -68,6 +84,7 @@ describe("Brain Creator CLI", () => {
       expect(output).toContain("brain-creator config");
       expect(output).toContain("brain-creator plugin install");
       expect(output).toContain("brain-creator export");
+      expect(output).toContain("brain-creator artifacts");
       expect(output).toContain("brain-creator mcp");
       expect(output).not.toContain("brain-creator-install-assets");
       expect(io.stderr).not.toHaveBeenCalled();
@@ -84,7 +101,7 @@ describe("Brain Creator CLI", () => {
     expect(output).toContain("Compatibility aliases");
   });
 
-  it.each(["init", "doctor", "config", "plugin", "export", "mcp"])(
+  it.each(["init", "doctor", "config", "plugin", "export", "artifacts", "mcp"])(
     "prints focused help for the %s command",
     async (command) => {
       const io = createIo();
@@ -205,6 +222,53 @@ describe("Brain Creator CLI", () => {
       suiteRunId: "suite_1",
       targetDir: "C:\\project",
       outputPath: "exports\\suite.zip"
+    });
+  });
+
+  it("plans artifact migration by default and only applies with confirmation", async () => {
+    const deps = dependencies();
+
+    expect(await runBrainCreatorCli(
+      ["artifacts", "migrate", "--target", "C:\\project", "--json"],
+      createIo(),
+      deps
+    )).toBe(0);
+    expect(deps.migrateArtifacts).toHaveBeenCalledWith({
+      targetDir: "C:\\project",
+      confirm: false
+    });
+
+    expect(await runBrainCreatorCli(
+      ["migrate", "artifacts", "--target", "C:\\project", "--confirm"],
+      createIo(),
+      deps
+    )).toBe(0);
+    expect(deps.migrateArtifacts).toHaveBeenLastCalledWith({
+      targetDir: "C:\\project",
+      confirm: true
+    });
+  });
+
+  it("requires confirmation for rollback and supports retention dry-run", async () => {
+    const deps = dependencies();
+    const rejected = createIo();
+    expect(await runBrainCreatorCli(
+      ["artifacts", "rollback", "--migration", "artifact-migration-1"],
+      rejected,
+      deps
+    )).toBe(1);
+    expect(rejected.stderr).toHaveBeenCalledWith(expect.stringContaining("--confirm"));
+
+    expect(await runBrainCreatorCli(
+      ["artifacts", "retention", "--older-than-days", "30", "--system", "system_orders"],
+      createIo(),
+      deps
+    )).toBe(0);
+    expect(deps.retainArtifacts).toHaveBeenCalledWith({
+      targetDir: undefined,
+      olderThanDays: 30,
+      systemId: "system_orders",
+      confirm: false
     });
   });
 

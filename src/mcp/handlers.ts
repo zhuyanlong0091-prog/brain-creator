@@ -43,6 +43,12 @@ import {
 } from "../knowledge/sourceAdapters.js";
 import { FeishuOpenApiAdapter } from "../knowledge/feishuAdapter.js";
 import { writeArtifactManifest } from "../storage/artifactArchive.js";
+import {
+  artifactFileName,
+  resolveArtifactRunLayout,
+  writeArtifactPlaywrightConfig,
+  type ArtifactRunLayout
+} from "../storage/artifactWorkspace.js";
 import { writeStaticSuiteExecutionReport } from "../execution/staticSuiteReport.js";
 import {
   browserObservationCapability,
@@ -125,7 +131,8 @@ import type {
   KnowledgeNodeType,
   LegacyDiagnosisDecision,
   SystemProfile,
-  StabilityPolicy
+  StabilityPolicy,
+  TestCase
 } from "../domain/types.js";
 import type {
   BrainCreatorToolName,
@@ -3811,12 +3818,12 @@ async function executeRequirementSuiteCase(
   executableCase.updatedAt = new Date().toISOString();
   context.repository.persist();
   const contextPack = executionPlan.contextPack;
-  const contextPackPath = join(
-    context.workDir,
-    ".brain-creator",
-    "knowledge-context",
-    `${executionPlan.id}.json`
+  const artifactLayout = requirementArtifactLayout(
+    context,
+    requirementSuiteRun,
+    executableCase
   );
+  const contextPackPath = join(artifactLayout.analysisDir, `${executionPlan.id}-context.json`);
   await mkdir(dirname(contextPackPath), { recursive: true });
   await writeFile(contextPackPath, `${JSON.stringify(contextPack, null, 2)}\n`, "utf8");
   const scenario: TestCaseScenario = {
@@ -3850,7 +3857,7 @@ async function executeRequirementSuiteCase(
     executionPlan,
     contextPack,
     executionEvidence.id,
-    context.workDir
+    artifactLayout.evidenceDir
   );
   let result;
   try {
@@ -3865,6 +3872,7 @@ async function executeRequirementSuiteCase(
       executionEvidenceId: executionEvidence.id,
       contextPackPath,
       knowledgeContext,
+      artifactLayout,
       browserMode: requirementSuiteRun.browserMode ?? "headless"
     });
   } catch (error) {
@@ -4189,9 +4197,9 @@ function formatRequirementGeneratorContext(
   executionPlan: ExecutionPlan,
   contextPack: ReturnType<typeof buildContextPack>,
   evidenceId: string,
-  workDir: string
+  evidenceRoot: string
 ) {
-  const evidenceDir = join(workDir, ".brain-creator", "evidence", evidenceId);
+  const evidenceDir = join(evidenceRoot, evidenceId);
   return [
     "## Brain Creator Knowledge Context",
     "",
@@ -5069,11 +5077,19 @@ async function generatePlan(context: BrainCreatorMcpContext, input: Record<strin
     throw new Error("Business system not found");
   }
   const authProfile = findAuthProfile(context, systemId);
-  const specPath =
-    optionalStringArg(input, "specPath") ?? join(context.workDir, "specs", `${systemId}-plan.md`);
+  const planLayout = resolveArtifactRunLayout({
+    workDir: context.workDir,
+    systemKey: system.name,
+    requirementKey: "draft-plan",
+    suiteRunId: `plan-${system.id}`
+  });
+  const specPath = optionalStringArg(input, "specPath") ?? join(
+    planLayout.specsDir,
+    artifactFileName({ title: requirement, extension: ".md", contentHash: systemId })
+  );
   if (context.agentBridge?.provider === "host-agent") {
     const prompt = await buildAgentPrompt({
-      outputDir: join(context.workDir, "specs", "_context"),
+      outputDir: planLayout.analysisDir,
       system,
       requirement,
       glossaryTerms: context.service.listGlossaryTerms({ projectId: systemId, query: "" }),
@@ -5082,7 +5098,7 @@ async function generatePlan(context: BrainCreatorMcpContext, input: Record<strin
     });
     const seed = await generateSeedFile({
       workDir: context.workDir,
-      outputDir: join(context.workDir, "tests"),
+      outputDir: planLayout.testsDir,
       system,
       authProfile
     });
@@ -5184,13 +5200,22 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
       role: actor.role
     });
   }
+  const artifactScope = resolveChainArtifactScope(context, input, system, testCase);
   if (context.agentBridge?.provider === "host-agent") {
-    const specsDir = join(context.workDir, "specs");
-    const generatedDir = join(context.workDir, "tests", "generated");
-    const specPath = join(specsDir, `${testCase.id}.md`);
-    const testPath = join(generatedDir, `${testCase.id}.spec.ts`);
-    await mkdir(specsDir, { recursive: true });
-    await mkdir(generatedDir, { recursive: true });
+    const specPath = join(artifactScope.layout.specsDir, artifactFileName({
+      caseNo: artifactScope.caseNo,
+      title: testCase.requirement,
+      extension: ".md",
+      contentHash: testCase.id
+    }));
+    const testPath = join(artifactScope.layout.testsDir, artifactFileName({
+      caseNo: artifactScope.caseNo,
+      title: testCase.requirement,
+      extension: ".spec.ts",
+      contentHash: testCase.id
+    }));
+    await mkdir(artifactScope.layout.specsDir, { recursive: true });
+    await mkdir(artifactScope.layout.testsDir, { recursive: true });
     await writeFile(
       specPath,
       [formatScenariosAsMarkdown(testCase.scenarios), optionalStringArg(input, "knowledgeContext")]
@@ -5200,7 +5225,7 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     );
     const seed = await generateSeedFile({
       workDir: context.workDir,
-      outputDir: join(context.workDir, "tests"),
+      outputDir: artifactScope.layout.testsDir,
       system,
       authProfile,
       actorJourney: actorJourneyProfiles
@@ -5260,7 +5285,9 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     requiredStepIds: executionPlan?.steps
       .filter((step) => step.action !== "api")
       .map((step) => step.id),
-    browserMode
+    browserMode,
+    artifactLayout: artifactScope.layout,
+    caseNo: artifactScope.caseNo
   });
   context.service.recordAgentRun(result.generateRun);
   for (const healerRun of result.healerRuns) {
@@ -5268,6 +5295,71 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
   }
   context.service.recordChainRun(result.chainRun);
   return result;
+}
+
+function requirementArtifactLayout(
+  context: BrainCreatorMcpContext,
+  run: RequirementSuiteRun,
+  executableCase: ExecutableCase
+) {
+  const system = context.repository.systemProfiles.find((item) => item.id === run.systemId);
+  const requirement = context.repository.requirementSets.find(
+    (item) => item.id === executableCase.requirementSetId
+  );
+  return resolveArtifactRunLayout({
+    workDir: context.workDir,
+    systemKey: system?.name ?? run.systemId,
+    requirementKey: requirement?.title ?? executableCase.requirementSetId,
+    requirementVersion: requirement?.version,
+    suiteRunId: run.id
+  });
+}
+
+function resolveChainArtifactScope(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>,
+  system: SystemProfile,
+  testCase: TestCase
+): { layout: ArtifactRunLayout; caseNo?: string } {
+  const supplied = input.artifactLayout;
+  const requirementSuiteRunId = optionalStringArg(input, "requirementSuiteRunId");
+  const executableCaseId = optionalStringArg(input, "executableCaseId");
+  const requirementSuiteRun = requirementSuiteRunId
+    ? context.repository.requirementSuiteRuns.find((item) => item.id === requirementSuiteRunId)
+    : undefined;
+  const executableCase = executableCaseId
+    ? context.repository.executableCases.find((item) => item.id === executableCaseId)
+    : undefined;
+  const caseRun = requirementSuiteRun?.caseRuns.find(
+    (item) => item.executableCaseId === executableCaseId || item.testCaseId === testCase.id
+  );
+  if (isArtifactRunLayout(supplied)) {
+    return {
+      layout: supplied,
+      ...(caseRun ? { caseNo: `TC-${String(caseRun.order).padStart(3, "0")}` } : {})
+    };
+  }
+  if (requirementSuiteRun && executableCase) {
+    return {
+      layout: requirementArtifactLayout(context, requirementSuiteRun, executableCase),
+      ...(caseRun ? { caseNo: `TC-${String(caseRun.order).padStart(3, "0")}` } : {})
+    };
+  }
+  return {
+    layout: resolveArtifactRunLayout({
+      workDir: context.workDir,
+      systemKey: system.name,
+      requirementKey: "unscoped",
+      suiteRunId: `chain-${testCase.id}`
+    })
+  };
+}
+
+function isArtifactRunLayout(value: unknown): value is ArtifactRunLayout {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ArtifactRunLayout>;
+  return [candidate.root, candidate.specsDir, candidate.testsDir, candidate.evidenceDir]
+    .every((path) => typeof path === "string");
 }
 
 function resolveStructuredReporterMode(
@@ -6480,12 +6572,19 @@ async function runSubmittedTest(
 ) {
   const runner = context.runner ?? spawnCommand;
   const testRunPath = relative(context.workDir, testPath).replace(/\\/g, "/");
+  const artifactLayout = artifactLayoutFromTestPath(context.workDir, testPath);
+  const playwrightConfigPath = artifactLayout
+    ? await writeArtifactPlaywrightConfig({ workDir: context.workDir, layout: artifactLayout })
+    : undefined;
   try {
     const rawResult = await runner(
       "npx",
       playwrightTestArgs(testRunPath, {
         browserMode,
-        structuredReporter: true
+        structuredReporter: true,
+        ...(playwrightConfigPath
+          ? { configPath: relative(context.workDir, playwrightConfigPath).replace(/\\/g, "/") }
+          : {})
       }),
       {
       cwd: context.workDir
@@ -6515,12 +6614,10 @@ async function runSubmittedTest(
         ].filter(Boolean).join("\n")
       };
     }
-    const reporterPath = result.reporterPath ?? join(
+    const reporterPath = result.reporterPath ?? hostReporterPath(
       context.workDir,
-      ".brain-creator",
-      "runs",
-      runId,
-      "playwright-report.json"
+      testPath,
+      runId
     );
     await mkdir(dirname(reporterPath), { recursive: true });
     if (!result.reporterPath) {
@@ -6539,6 +6636,33 @@ async function runSubmittedTest(
       stderr: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+function artifactLayoutFromTestPath(workDir: string, testPath: string): ArtifactRunLayout | undefined {
+  const normalized = relative(workDir, testPath).replace(/\\/g, "/");
+  if (!normalized.startsWith(".brain-creator/artifacts/")) return undefined;
+  const root = dirname(dirname(resolve(workDir, testPath)));
+  return {
+    root,
+    sourceDir: join(root, "source"),
+    analysisDir: join(root, "analysis"),
+    casesDir: join(root, "cases"),
+    specsDir: join(root, "specs"),
+    testsDir: join(root, "tests"),
+    evidenceDir: join(root, "evidence"),
+    reportDir: join(root, "report"),
+    manifestPath: join(root, "manifest.json"),
+    indexPath: join(root, "index.md"),
+    latestPath: join(root, "..", "latest.json")
+  };
+}
+
+function hostReporterPath(workDir: string, testPath: string, runId: string) {
+  const normalized = relative(workDir, testPath).replace(/\\/g, "/");
+  if (normalized.startsWith(".brain-creator/artifacts/")) {
+    return join(dirname(dirname(resolve(workDir, testPath))), "evidence", `${runId}-playwright-report.json`);
+  }
+  return join(workDir, ".brain-creator", "runs", runId, "playwright-report.json");
 }
 
 function redactHostAgentText(
@@ -8555,16 +8679,26 @@ async function archiveRequirementSuiteRun(
       : undefined;
     return item ? [item] : [];
   });
-  const reportPath = join(
-    context.workDir,
-    ".brain-creator",
-    "artifacts",
-    run.systemId,
-    requirementSetId,
-    run.id,
-    "suite-report.html"
-  );
   const system = context.repository.systemProfiles.find((item) => item.id === run.systemId);
+  const singleRequirement = requirementSetIds.length === 1
+    ? context.repository.requirementSets.find((item) => item.id === requirementSetIds[0])
+    : undefined;
+  const artifactLayout = resolveArtifactRunLayout({
+    workDir: context.workDir,
+    systemKey: system?.name ?? run.systemId,
+    requirementKey: singleRequirement?.title ?? requirementSetId,
+    requirementVersion: singleRequirement?.version,
+    suiteRunId: run.id
+  });
+  const snapshotPaths = await writeRequirementSuiteSnapshots(
+    context,
+    run,
+    requirementSetIds,
+    executableCases,
+    coverage,
+    artifactLayout
+  );
+  const reportPath = join(artifactLayout.reportDir, "suite-report.html");
   await writeStaticSuiteExecutionReport({
     outputPath: reportPath,
     title: `Brain Creator requirement suite ${run.id}`,
@@ -8588,12 +8722,70 @@ async function archiveRequirementSuiteRun(
     requirementSetId,
     suiteRunId: run.id,
     requirementSetIds,
-    artifactPaths: [reportPath, ...evidence.flatMap((item) => item.artifactPaths)],
+    artifactPaths: [
+      ...snapshotPaths,
+      reportPath,
+      ...evidence.flatMap((item) => item.artifactPaths)
+    ],
     sourceRefs: requirementSetIds,
+    ownershipDirectory: artifactLayout.root,
     protectedSecrets: protectedSecretsForSystem(context, run.systemId)
   });
   context.repository.persist();
   return { reportPath, artifactManifest };
+}
+
+async function writeRequirementSuiteSnapshots(
+  context: BrainCreatorMcpContext,
+  run: RequirementSuiteRun,
+  requirementSetIds: string[],
+  executableCases: ExecutableCase[],
+  coverage: Array<Record<string, unknown>>,
+  layout: ArtifactRunLayout
+) {
+  const requirementIdSet = new Set(requirementSetIds);
+  const requirementSets = context.repository.requirementSets.filter(
+    (item) => requirementIdSet.has(item.id)
+  );
+  const sourceIds = new Set(requirementSets.map((item) => item.sourceId));
+  const sourcePath = join(layout.sourceDir, "requirements.json");
+  const analysisPath = join(layout.analysisDir, "knowledge-and-coverage.json");
+  const casesPath = join(layout.casesDir, "executable-cases.json");
+  await Promise.all([
+    mkdir(layout.sourceDir, { recursive: true }),
+    mkdir(layout.analysisDir, { recursive: true }),
+    mkdir(layout.casesDir, { recursive: true })
+  ]);
+  await Promise.all([
+    writeFile(sourcePath, `${JSON.stringify({
+      knowledgeProject: context.repository.knowledgeProjects.find(
+        (item) => item.id === run.knowledgeProjectId
+      ),
+      requirementSets,
+      requirementSources: context.repository.requirementSources.filter(
+        (item) => sourceIds.has(item.id)
+      )
+    }, null, 2)}\n`, "utf8"),
+    writeFile(analysisPath, `${JSON.stringify({
+      coverage,
+      workflowModels: context.repository.workflowModels.filter(
+        (item) => requirementIdSet.has(item.requirementSetId)
+      ),
+      stateMachineModels: context.repository.stateMachineModels.filter(
+        (item) => requirementIdSet.has(item.requirementSetId)
+      ),
+      attachmentAnalyses: context.repository.attachmentAnalyses.filter(
+        (item) => requirementIdSet.has(item.requirementSetId)
+      )
+    }, null, 2)}\n`, "utf8"),
+    writeFile(casesPath, `${JSON.stringify({
+      executableCases,
+      executionPlans: context.repository.executionPlans.filter(
+        (item) => executableCases.some((candidate) => candidate.id === item.executableCaseId)
+      )
+    }, null, 2)}\n`, "utf8")
+  ]);
+  return [sourcePath, analysisPath, casesPath];
 }
 
 function createRequirementBugReport(

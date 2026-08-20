@@ -123,6 +123,12 @@ Codex 插件默认使用 `host-agent`。出现 `needs_agent_execution` 时：
 
 对于已有系统，`bc_session_resume` 或 `bc_status` 会一次返回系统、鉴权、checkpoint、规则、术语、用例、最近运行、产物、开放 Gap、bridge preflight 和推荐动作，避免 6 到 7 次独立查询。
 
+## 产物归属与维护
+
+Planner、Generator、Reporter 和 Suite 产物统一归属到 `.brain-creator/artifacts/<系统>/<需求>-v<版本>/<Suite 运行>/`。不要要求宿主 Agent 把新文件写入根目录 `specs/` 或 `tests/generated/`。
+
+存在历史文件时，先运行 `brain-creator artifacts migrate` 并向用户展示可确定归属和 unresolved 数量，获得明确确认后才应用。回滚和 retention 同样需要显式确认；清理不会选择活动运行或 `latest.json` 指向的运行。使用 `brain-creator export --suite <id>` 导出文档 Suite 或 Requirement Suite 的完整脱敏归档。
+
 ```text
 用 Brain Creator 恢复上次会话，告诉我当前阻塞和下一步。
 ```

@@ -16,5 +16,6 @@ describe("GitHub CI workflow", () => {
     const content = await readFile("vitest.config.ts", "utf8");
 
     expect(content).toContain("tests/seed-*.spec.ts");
+    expect(content).toContain("**/.brain-creator/**");
   });
 });

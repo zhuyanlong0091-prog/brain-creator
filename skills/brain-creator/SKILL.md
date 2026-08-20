@@ -158,6 +158,8 @@ Use `observationMode=summary` for normal `bc_run` calls. Use `step-by-step` only
 
 `observationMode` controls progress detail. When the user explicitly asks to watch the live browser, pass `browserMode=observe` to both preview and confirmed `bc_run`; otherwise keep the default `headless`. Do not switch a running Suite's browser mode. If observe mode reports no interactive desktop, explain the capability blocker instead of silently falling back. A visible browser is an observation aid, not execution evidence.
 
+Brain Creator-generated files belong under `.brain-creator/artifacts/<system>/<requirement>-v<revision>/<suite-run>/`; do not write new specs or tests to root `specs/` or `tests/generated/`. Use `brain-creator artifacts migrate` as a dry-run before asking the user to confirm historical migration. Rollback and retention always require explicit `--confirm`; never clean an active or latest run. Use `brain-creator export --suite <id>` for a complete, secret-scanned Suite archive.
+
 ## System
 
 - Use `bc_list_systems` only in full-profile discovery or debugging.

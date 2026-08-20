@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   commandRunnerAgentBridge,
@@ -233,6 +233,25 @@ describe("generatePlanDraft", () => {
 });
 
 describe("runChain", () => {
+  it("writes new generated artifacts into an owned run directory", async () => {
+    const workDir = await tempDir();
+    const result = await runChain({
+      workDir,
+      system: systemProfile(),
+      authProfile: authProfile(),
+      testCase: approvedTestCase(),
+      agentBridge: async ({ outputPaths }) => {
+        await writeFile(outputPaths[0], "import { test } from '@playwright/test';", "utf8");
+        return { exitCode: 0, stdout: "agent ok", stderr: "" };
+      },
+      runner: async () => ({ exitCode: 0, stdout: "passed", stderr: "" })
+    });
+
+    expect(result.specPath.replace(/\\/g, "/")).toContain("/.brain-creator/artifacts/");
+    expect(result.testPath.replace(/\\/g, "/")).toContain("/.brain-creator/artifacts/");
+    expect(result.specPath).not.toContain(`${join(workDir, "specs")}`);
+  });
+
   it("stops before rerunning Playwright when Healer removes an assertion", async () => {
     const workDir = await tempDir();
     let testRuns = 0;
@@ -552,7 +571,14 @@ describe("runChain", () => {
 
     expect(commands).toEqual([
       expect.arrayContaining(["playwright", "agent", "generator"]),
-      ["playwright", "test", `tests/generated/${testCase.id}.spec.ts`, "--workers=1"]
+      [
+        "playwright",
+        "test",
+        relative(workDir, result.testPath).replace(/\\/g, "/"),
+        "--workers=1",
+        "--config",
+        relative(workDir, join(result.testPath, "..", "..", "playwright.config.ts")).replace(/\\/g, "/")
+      ]
     ]);
     expect(result.chainRun).toEqual(
       expect.objectContaining({
@@ -699,7 +725,7 @@ describe("runChain", () => {
 
     expect(result.testResult.stdout).not.toContain("secret-token");
     expect(result.testResult.stderr).not.toContain("secret-token");
-    const reporter = await readFile(join(workDir, ".brain-creator", "runs", "case_1", "playwright-report.json"), "utf8");
+    const reporter = await readFile(result.testResult.reporterPath!, "utf8");
     expect(reporter).not.toContain("secret-token");
   });
 
@@ -731,12 +757,12 @@ describe("runChain", () => {
 
     expect(commands).toEqual([
       expect.arrayContaining(["playwright", "agent", "generator"]),
-      ["playwright", "test", "tests/generated/case_1.spec.ts", "--workers=1"],
+      ["playwright", "test", relative(workDir, result.testPath).replace(/\\/g, "/"), "--workers=1", "--config", relative(workDir, join(result.testPath, "..", "..", "playwright.config.ts")).replace(/\\/g, "/")],
       expect.arrayContaining(["playwright", "agent", "healer"]),
-      ["playwright", "test", "tests/generated/case_1.spec.ts", "--workers=1"]
+      ["playwright", "test", relative(workDir, result.testPath).replace(/\\/g, "/"), "--workers=1", "--config", relative(workDir, join(result.testPath, "..", "..", "playwright.config.ts")).replace(/\\/g, "/")]
     ]);
     expect(commands[2]).toEqual(
-      expect.arrayContaining(["--seed", expect.stringContaining("seed-system_1.spec.ts")])
+      expect.arrayContaining(["--seed", expect.stringContaining("seed-system_1.fixture.ts")])
     );
     expect(result.chainRun.status).toBe("succeeded");
     expect(result.chainRun.healRunId).toEqual(expect.stringMatching(/^agent_/));

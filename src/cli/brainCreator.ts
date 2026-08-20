@@ -10,6 +10,15 @@ import {
 } from "./writeMcpConfig.js";
 import { startBrainCreatorServer } from "../mcp/server.js";
 import { exportCaseSuiteArchive } from "../storage/artifactArchive.js";
+import {
+  applyArtifactMigration,
+  planArtifactMigration,
+  rollbackArtifactMigration as rollbackArtifactMigrationInWorkspace
+} from "../storage/artifactMigration.js";
+import {
+  applyArtifactRetention,
+  planArtifactRetention
+} from "../storage/artifactRetention.js";
 import { ShardedFileBrainCreatorRepository } from "../domain/repository.js";
 import {
   resolveBrainCreatorDataFile,
@@ -33,6 +42,9 @@ export type BrainCreatorCliDependencies = {
   formatDoctorReport: typeof formatDoctorReport;
   startMcp: typeof startBrainCreatorServer;
   exportSuite: typeof exportSuiteFromWorkspace;
+  migrateArtifacts: typeof migrateArtifactsFromWorkspace;
+  rollbackArtifactMigration: typeof rollbackArtifactMigrationFromWorkspace;
+  retainArtifacts: typeof retainArtifactsFromWorkspace;
 };
 
 const defaultDependencies: BrainCreatorCliDependencies = {
@@ -43,7 +55,10 @@ const defaultDependencies: BrainCreatorCliDependencies = {
   buildDoctorReport,
   formatDoctorReport,
   startMcp: startBrainCreatorServer,
-  exportSuite: exportSuiteFromWorkspace
+  exportSuite: exportSuiteFromWorkspace,
+  migrateArtifacts: migrateArtifactsFromWorkspace,
+  rollbackArtifactMigration: rollbackArtifactMigrationFromWorkspace,
+  retainArtifacts: retainArtifactsFromWorkspace
 };
 
 const help = `Brain Creator ${BRAIN_CREATOR_VERSION}
@@ -55,6 +70,9 @@ Usage:
   brain-creator config write [--provider <provider>] [--global] [--target <path>]
   brain-creator plugin install [--target <path>]
   brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>]
+  brain-creator artifacts migrate [--target <path>] [--confirm]
+  brain-creator artifacts rollback --migration <id> --confirm [--target <path>]
+  brain-creator artifacts retention --older-than-days <days> [--system <id>] [--confirm]
   brain-creator mcp
   brain-creator --version
 
@@ -76,6 +94,7 @@ const commandHelp: Record<string, string> = {
   config: `Usage:\n  brain-creator config [show] [--target <path>] [--json]\n  brain-creator config write [--provider <provider>] [--global] [--target <path>] [--json]\n\nShow is read-only and redacts secret-like environment values.`,
   plugin: `Usage: brain-creator plugin install [--target <path>] [--package-root <path>] [--json]\n\nInstalls the Codex plugin and configures host-agent execution.`,
   export: `Usage: brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>] [--json]\n\nExports a portable Suite archive with evidence manifest and hashes.`,
+  artifacts: `Usage:\n  brain-creator artifacts migrate [--target <path>] [--confirm]\n  brain-creator artifacts rollback --migration <id> --confirm [--target <path>]\n  brain-creator artifacts retention --older-than-days <days> [--system <id>] [--target <path>] [--confirm]\n\nMigration and retention are dry-run by default. Mutations require --confirm.`,
   mcp: `Usage: brain-creator mcp\n\nStarts the Brain Creator MCP server over stdio.`
 };
 
@@ -128,6 +147,12 @@ export async function runBrainCreatorCli(
     }
     if (command === "export") {
       return await runExport(commandArgs, json, io, dependencies);
+    }
+    if (command === "artifacts") {
+      return await runArtifacts(commandArgs, json, io, dependencies);
+    }
+    if (command === "migrate" && commandArgs[0] === "artifacts") {
+      return await runArtifacts(["migrate", ...commandArgs.slice(1)], json, io, dependencies);
     }
     if (command === "mcp") {
       assertAllowedArgs(commandArgs, [], []);
@@ -272,6 +297,80 @@ async function runExport(
   return 0;
 }
 
+async function runArtifacts(
+  args: string[],
+  json: boolean,
+  io: CliIo,
+  dependencies: BrainCreatorCliDependencies
+) {
+  const [action, ...actionArgs] = args;
+  if (action === "migrate") {
+    assertAllowedArgs(actionArgs, ["--target"], ["--confirm", "--dry-run"]);
+    if (actionArgs.includes("--confirm") && actionArgs.includes("--dry-run")) {
+      throw new Error("--confirm cannot be combined with --dry-run");
+    }
+    const result = await dependencies.migrateArtifacts({
+      targetDir: optionValue(actionArgs, "--target"),
+      confirm: actionArgs.includes("--confirm")
+    });
+    writeSuccess(
+      io,
+      json,
+      "artifacts migrate",
+      result,
+      result.status === "planned"
+        ? `Artifact migration dry-run: ${result.entries} files; ${result.unresolved} unresolved. Re-run with --confirm to apply.`
+        : `Artifact migration applied: ${result.migrated} files; migration ${result.migrationId}.`
+    );
+    return 0;
+  }
+  if (action === "rollback") {
+    assertAllowedArgs(actionArgs, ["--target", "--migration"], ["--confirm"]);
+    if (!actionArgs.includes("--confirm")) throw new Error("Artifact rollback requires --confirm");
+    const migrationId = optionValue(actionArgs, "--migration");
+    if (!migrationId) throw new Error("--migration requires a value");
+    const result = await dependencies.rollbackArtifactMigration({
+      targetDir: optionValue(actionArgs, "--target"),
+      migrationId
+    });
+    writeSuccess(io, json, "artifacts rollback", result, `Artifact migration rolled back: ${migrationId}`);
+    return 0;
+  }
+  if (action === "retention") {
+    assertAllowedArgs(
+      actionArgs,
+      ["--target", "--older-than-days", "--system"],
+      ["--confirm", "--dry-run"]
+    );
+    if (actionArgs.includes("--confirm") && actionArgs.includes("--dry-run")) {
+      throw new Error("--confirm cannot be combined with --dry-run");
+    }
+    const rawDays = optionValue(actionArgs, "--older-than-days");
+    if (!rawDays) throw new Error("--older-than-days requires a value");
+    const olderThanDays = Number(rawDays);
+    if (!Number.isInteger(olderThanDays) || olderThanDays < 1) {
+      throw new Error("--older-than-days must be a positive integer");
+    }
+    const result = await dependencies.retainArtifacts({
+      targetDir: optionValue(actionArgs, "--target"),
+      olderThanDays,
+      systemId: optionValue(actionArgs, "--system"),
+      confirm: actionArgs.includes("--confirm")
+    });
+    writeSuccess(
+      io,
+      json,
+      "artifacts retention",
+      result,
+      result.status === "planned"
+        ? `Artifact retention dry-run: ${result.entries} Suite runs; ${result.bytes} bytes. Re-run with --confirm to delete.`
+        : `Artifact retention completed: ${result.deleted} Suite runs; ${result.bytesFreed} bytes freed.`
+    );
+    return 0;
+  }
+  throw new Error("Unknown artifacts command. Use migrate, rollback, or retention");
+}
+
 async function exportSuiteFromWorkspace(input: {
   suiteRunId: string;
   targetDir?: string;
@@ -288,6 +387,67 @@ async function exportSuiteFromWorkspace(input: {
     suiteRunId: input.suiteRunId,
     outputPath: input.outputPath ?? `${input.suiteRunId}.brain-creator.zip`
   });
+}
+
+async function migrateArtifactsFromWorkspace(input: {
+  targetDir?: string;
+  confirm: boolean;
+}) {
+  const { workspace, repository } = workspaceRepository(input.targetDir);
+  const plan = await planArtifactMigration({ repository, workDir: workspace });
+  if (!input.confirm) {
+    return {
+      status: "planned" as const,
+      migrationId: plan.id,
+      entries: plan.entries.length,
+      unresolved: plan.entries.filter((entry) => entry.ownership === "unresolved").length
+    };
+  }
+  return applyArtifactMigration({ repository, workDir: workspace, plan });
+}
+
+async function rollbackArtifactMigrationFromWorkspace(input: {
+  targetDir?: string;
+  migrationId: string;
+}) {
+  const { workspace, repository } = workspaceRepository(input.targetDir);
+  return rollbackArtifactMigrationInWorkspace({
+    repository,
+    workDir: workspace,
+    migrationId: input.migrationId
+  });
+}
+
+async function retainArtifactsFromWorkspace(input: {
+  targetDir?: string;
+  olderThanDays: number;
+  systemId?: string;
+  confirm: boolean;
+}) {
+  const { workspace, repository } = workspaceRepository(input.targetDir);
+  const plan = await planArtifactRetention({
+    repository,
+    workDir: workspace,
+    olderThanDays: input.olderThanDays,
+    systemId: input.systemId
+  });
+  if (!input.confirm) {
+    return {
+      status: "planned" as const,
+      entries: plan.entries.length,
+      bytes: plan.entries.reduce((total, entry) => total + entry.bytes, 0)
+    };
+  }
+  return applyArtifactRetention({ workDir: workspace, plan, confirm: true });
+}
+
+function workspaceRepository(targetDir?: string) {
+  const workspace = resolveBrainCreatorWorkspace(targetDir ?? process.cwd(), process.env);
+  const repository = new ShardedFileBrainCreatorRepository(
+    resolveBrainCreatorStoreDir(workspace, process.env),
+    resolveBrainCreatorDataFile(workspace, process.env)
+  );
+  return { workspace, repository };
 }
 
 function optionValue(args: string[], name: string) {

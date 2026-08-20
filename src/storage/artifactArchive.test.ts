@@ -228,6 +228,65 @@ describe("artifact archive", () => {
     expect(await readFile(outputPath)).toBeInstanceOf(Buffer);
   });
 
+  it("exports a complete owned Requirement Suite directory", async () => {
+    const root = await tempDir();
+    const owned = join(root, ".brain-creator", "artifacts", "orders", "checkout-v2", "requirement_run_1");
+    for (const category of ["source", "analysis", "cases", "specs", "tests", "evidence", "report"]) {
+      await mkdir(join(owned, category), { recursive: true });
+      await writeFile(join(owned, category, `${category}.txt`), category, "utf8");
+    }
+    await writeFile(join(owned, "manifest.json"), JSON.stringify({
+      systemId: "system_orders",
+      requirementSetId: "requirement_checkout",
+      suiteRunId: "requirement_run_1",
+      createdAt: "2026-08-20T00:00:00.000Z",
+      artifacts: [],
+      sourceRefs: []
+    }), "utf8");
+    await writeFile(join(owned, "index.md"), "# Requirement run", "utf8");
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.requirementSuiteRuns.push({
+      id: "requirement_run_1",
+      knowledgeProjectId: "project_orders",
+      systemId: "system_orders",
+      status: "completed",
+      continueOnBlocked: false,
+      allowCreateTestData: false,
+      requirementSetIds: ["requirement_checkout"],
+      total: 0,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      reportPath: join(owned, "report", "report.txt"),
+      caseRuns: [],
+      createdAt: "2026-08-20T00:00:00.000Z",
+      updatedAt: "2026-08-20T00:01:00.000Z",
+      completedAt: "2026-08-20T00:01:00.000Z"
+    });
+
+    const outputPath = join(root, "exports", "requirement-suite.zip");
+    const result = await exportCaseSuiteArchive({
+      repository,
+      workDir: root,
+      suiteRunId: "requirement_run_1",
+      outputPath
+    });
+    const names = new AdmZip(outputPath).getEntries().map((entry) => entry.entryName);
+
+    expect(result.artifactCount).toBe(9);
+    expect(names).toEqual(expect.arrayContaining([
+      "manifest.json",
+      expect.stringContaining("source/source.txt"),
+      expect.stringContaining("analysis/analysis.txt"),
+      expect.stringContaining("tests/tests.txt"),
+      expect.stringContaining("evidence/evidence.txt"),
+      expect.stringContaining("report/report.txt"),
+      expect.stringContaining("index.md")
+    ]));
+  });
+
   it("rejects artifact paths outside the workspace", async () => {
     const root = await tempDir();
 

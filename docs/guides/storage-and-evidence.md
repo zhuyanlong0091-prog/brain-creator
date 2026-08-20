@@ -42,13 +42,34 @@ When the index is missing and no Suite or Agent task is active, rebuild it throu
 
 ## Evidence manifests
 
-Completed document Suite runs write a manifest under:
+New document and Requirement Suite artifacts use one ownership tree:
 
 ```text
-.brain-creator/artifacts/<system>/<requirement>/<suite-run>/manifest.json
+.brain-creator/artifacts/<system>/<requirement>-v<revision>/<suite-run>/
+  source/
+  analysis/
+  cases/
+  specs/
+  tests/
+  evidence/
+  report/
+  manifest.json
+  index.md
 ```
 
-Each present artifact records a workspace-relative path, byte count, SHA-256 hash, and source references. Missing evidence is recorded explicitly. Artifact paths outside the workspace are rejected.
+`latest.json` is stored beside the Suite directories. Each present artifact records a workspace-relative path, byte count, SHA-256 hash, and source references. Missing evidence is recorded explicitly. Artifact paths outside the workspace are rejected.
+
+Historical root artifacts are managed through the consolidated CLI. Both migration and retention are previews until `--confirm` is supplied:
+
+```bash
+npx brain-creator artifacts migrate
+npx brain-creator artifacts migrate --confirm
+npx brain-creator artifacts rollback --migration <migration-id> --confirm
+npx brain-creator artifacts retention --older-than-days 90
+npx brain-creator artifacts retention --older-than-days 90 --confirm
+```
+
+Migration verifies hashes, updates stored paths, writes `legacy-path-index.json`, and supports rollback. Files whose ownership cannot be proven are preserved under `artifacts/unresolved/`. Retention selects only terminal, non-latest Suite directories with a manifest.
 
 ## Export
 
@@ -56,6 +77,9 @@ Export a completed document Suite as a portable ZIP:
 
 ```bash
 npx brain-creator export --suite <suite-run-id> --output exports/suite.zip
+```
+
+The archive contains the owned source, analysis, cases, specs, tests, evidence, report, index, and manifest files. It does not include the repository, secret material, browser storage state, or unrelated workspace files. Bridge and host-agent Generator/Healer outputs are checked before Playwright can run or a task can be accepted, and ZIP export performs a second scan. Missing evidence is listed in the manifest instead of silently omitted.
 
 ## Structured execution evidence
 
@@ -70,7 +94,4 @@ The static HTML report is written beside the Markdown evidence report. A process
 
 ## Authentication secret handling
 
-New auth ciphertext uses a random local key at `.brain-creator/secret.key`. Set `BRAIN_CREATOR_SECRET_KEY` for an externally managed key, or `BRAIN_CREATOR_SECRET_KEY_FILE` for a managed key file path. The environment variable has priority. Existing `enc:v1` values are decrypted and re-encrypted as `enc:v2` when the profile is read. Generated token/cookie seeds reference `BRAIN_CREATOR_AUTH_TOKEN` or `BRAIN_CREATOR_AUTH_COOKIE`; they never contain the credential value.
-```
-
-The archive contains `manifest.json` and available evidence files. It does not include the repository, secret material, browser storage state, or unrelated workspace files. Bridge and host-agent Generator/Healer outputs are checked before Playwright can run or a task can be accepted, and ZIP export performs a second scan. All stages scan known protected credential values and high-confidence credential patterns such as private keys, JWTs, Bearer tokens, and literal password/token/cookie fields. Missing evidence is listed in the manifest instead of silently omitted.
+New auth ciphertext uses a random local key at `.brain-creator/secret.key`. Set `BRAIN_CREATOR_SECRET_KEY` for an externally managed key, or `BRAIN_CREATOR_SECRET_KEY_FILE` for a managed key file path. The environment variable has priority. Existing `enc:v1` values are decrypted and re-encrypted as `enc:v2` when the profile is read. Generated token/cookie seeds reference `BRAIN_CREATOR_AUTH_TOKEN` or `BRAIN_CREATOR_AUTH_COOKIE`; they never contain the credential value. All artifact stages scan known protected credential values and high-confidence credential patterns such as private keys, JWTs, Bearer tokens, and literal password/token/cookie fields.

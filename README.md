@@ -94,9 +94,19 @@ Agent 默认使用高阶 Facade 工具。只有调试、审计或兼容旧流程
 - **源码开发**：克隆本仓库，运行 `npm install`、`npm test` 和 `npm run build`。
 - **全局 CLI**：可运行 `npm install -g brain-creator`，但项目本地安装更容易固定版本。
 
-CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin`、`export` 和 `mcp`。使用 `brain-creator config` 查看脱敏配置；旧版独立命令仍兼容，可用 `brain-creator help legacy` 查看。
+CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin`、`export`、`artifacts` 和 `mcp`。使用 `brain-creator config` 查看脱敏配置；旧版独立命令仍兼容，可用 `brain-creator help legacy` 查看。
 
 默认运行数据使用 `.brain-creator/store/` 下的 schema 17 分片仓库。首次启动会检测旧的 `.brain-creator/local-assets.json`，创建时间戳备份后迁移；`BRAIN_CREATOR_STORE_DIR` 可指定分片仓库位置。
+
+新生成的 source、analysis、cases、specs、tests、evidence 和 report 统一归档到 `.brain-creator/artifacts/<system>/<requirement>-v<revision>/<suite-run>/`。历史根目录产物先 dry-run，再显式确认迁移；迁移会生成旧路径索引并支持回滚。清理同样默认只预览，活动运行和 `latest.json` 指向的运行不会被删除：
+
+```bash
+npx brain-creator artifacts migrate
+npx brain-creator artifacts migrate --confirm
+npx brain-creator artifacts rollback --migration <migration-id> --confirm
+npx brain-creator artifacts retention --older-than-days 90
+npx brain-creator artifacts retention --older-than-days 90 --confirm
+```
 
 ### 文档
 
@@ -195,9 +205,19 @@ The trusted control plane removes manual runtime-store edits: auth can be create
 - **Source checkout:** clone this repository, then run `npm install`, `npm test`, and `npm run build`.
 - **Global CLI:** `npm install -g brain-creator` is supported, but a project-local install pins the version.
 
-The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, `export`, and `mcp`. Compatibility executables remain available under `brain-creator help legacy`.
+The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, `export`, `artifacts`, and `mcp`. Compatibility executables remain available under `brain-creator help legacy`.
 
 Runtime state is stored by default in the schema 17 sharded repository under `.brain-creator/store/`. On first startup Brain Creator detects `.brain-creator/local-assets.json`, creates a timestamped backup, and migrates it. Set `BRAIN_CREATOR_STORE_DIR` to choose another shard directory.
+
+New source, analysis, case, spec, test, evidence, and report files are owned by `.brain-creator/artifacts/<system>/<requirement>-v<revision>/<suite-run>/`. Historical root artifacts are dry-run before explicit migration, receive a legacy path index, and can be rolled back. Retention is also preview-only by default and never selects active or latest runs:
+
+```bash
+npx brain-creator artifacts migrate
+npx brain-creator artifacts migrate --confirm
+npx brain-creator artifacts rollback --migration <migration-id> --confirm
+npx brain-creator artifacts retention --older-than-days 90
+npx brain-creator artifacts retention --older-than-days 90 --confirm
+```
 
 ### Documentation
 
