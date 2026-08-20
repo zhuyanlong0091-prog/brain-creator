@@ -306,28 +306,34 @@ describe("runChain", () => {
   it("uses the structured Playwright reporter when requested", async () => {
     const workDir = await tempDir();
     const testCase = approvedTestCase();
+    const runnerArgs: string[][] = [];
     const result = await runChain({
       workDir,
       system: systemProfile(),
       authProfile: authProfile(),
       testCase,
       structuredReporter: true,
+      browserMode: "observe",
       agentBridge: async ({ outputPaths }) => {
         await writeFile(outputPaths[0], "import { test } from '@playwright/test'; test('generated', () => {});", "utf8");
         return { exitCode: 0, stdout: "agent ok", stderr: "" };
       },
-      runner: async (_command, args) => ({
-        exitCode: 0,
-        stdout: args.includes("--reporter=json")
-          ? JSON.stringify({
-              stats: { duration: 12, expected: 1, unexpected: 0, skipped: 0 },
-              suites: [{ specs: [{ id: "assertion-1", title: "workflow", tests: [{ results: [{ status: "passed" }] }] }] }]
-            })
-          : "agent ok",
-        stderr: ""
-      })
+      runner: async (_command, args) => {
+        runnerArgs.push(args);
+        return {
+          exitCode: 0,
+          stdout: args.includes("--reporter=json")
+            ? JSON.stringify({
+                stats: { duration: 12, expected: 1, unexpected: 0, skipped: 0 },
+                suites: [{ specs: [{ id: "assertion-1", title: "workflow", tests: [{ results: [{ status: "passed" }] }] }] }]
+              })
+            : "agent ok",
+          stderr: ""
+        };
+      }
     });
 
+    expect(runnerArgs[0]).toContain("--headed");
     expect(result.testResult.structuredReporter).toEqual(
       expect.objectContaining({ status: "passed", total: 1, passed: 1 })
     );

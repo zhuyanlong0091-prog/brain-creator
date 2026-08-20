@@ -133,6 +133,8 @@ Codex 插件默认使用 `host-agent`。出现 `needs_agent_execution` 时：
 
 `bc_status` 会显示当前用例、步骤、页面、耗时、最后更新时间、等待原因和 `possiblyStalled`。卡住告警只表示超过更新时间阈值，不会把用例自动判为失败。每条用例结束后，Brain Creator 都会增量更新运行目录中的离线 `suite-report.html`，无需等到整个 Suite 终态。
 
+`observationMode` 只控制进度消息粒度，不会打开浏览器窗口。用户明确要求旁观时，预览和确认执行都传入 `browserMode=observe`。运行中的 Suite 不允许切换模式；Host Agent 续跑、Healer 重试、文档套件续跑和 Bug 回归都会继承已选模式。观察模式必须运行在交互式桌面会话中；CI、Windows 服务会话或缺少 `DISPLAY/WAYLAND_DISPLAY` 的 Linux 会返回可操作的能力阻断，不会静默降级。可见窗口只能辅助判断执行轨迹，最终结论仍以 Reporter、断言、截图和 trace 为准。
+
 ## 套件控制
 
 - 取消：先预览 `suiteAction=cancel`，再显式确认。保留已完成结果和数据清理义务。

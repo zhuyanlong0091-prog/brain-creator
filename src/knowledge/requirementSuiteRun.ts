@@ -2,6 +2,7 @@ import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ExecutionFailureType,
   ActorJourneyConfig,
+  BrowserExecutionMode,
   ExecutionPlan,
   RequirementSuiteCaseOutcome,
   RequirementSuiteCaseRun,
@@ -31,6 +32,7 @@ type CreateRequirementSuiteRunInput = {
   provider?: string;
   sessionId?: string;
   actorJourney?: ActorJourneyConfig[];
+  browserMode?: BrowserExecutionMode;
   executionPlans?: ExecutionPlan[];
   cases?: Array<{
     executableCaseId: string;
@@ -132,6 +134,7 @@ export class RequirementSuiteRunService {
       provider: input.provider,
       sessionId: input.sessionId,
       actorJourney: input.actorJourney,
+      browserMode: input.browserMode ?? "headless",
       status: "running",
       continueOnBlocked: input.continueOnBlocked,
       allowCreateTestData: Boolean(input.allowCreateTestData),
@@ -1032,6 +1035,7 @@ export class RequirementSuiteRunService {
       provider: previous.provider,
       sessionId: previous.sessionId,
       actorJourney: previous.actorJourney,
+      browserMode: previous.browserMode ?? "headless",
       status: "running",
       continueOnBlocked: previous.continueOnBlocked,
       allowCreateTestData: previous.allowCreateTestData,

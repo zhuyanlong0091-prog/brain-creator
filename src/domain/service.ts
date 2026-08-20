@@ -188,6 +188,7 @@ type CreateCaseSuiteInput = {
   totalCases: number;
   selectedCaseNos: string[];
   continueOnBlocked?: boolean;
+  browserMode?: CaseSuite["browserMode"];
   status?: CaseSuite["status"];
 };
 
@@ -315,6 +316,7 @@ export class BrainCreatorService {
       totalCases: input.totalCases,
       selectedCaseNos: input.selectedCaseNos,
       continueOnBlocked: input.continueOnBlocked ?? false,
+      browserMode: input.browserMode ?? "headless",
       createdAt: now,
       updatedAt: now
     };

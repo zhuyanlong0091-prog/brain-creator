@@ -518,6 +518,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       provider: z.string().optional(),
       sessionId: z.string().optional(),
       evidenceMode: z.enum(["strict", "compatibility"]).optional(),
+      browserMode: z.enum(["headless", "observe"]).optional(),
       observationMode: z.enum(["summary", "step-by-step"]).default("summary"),
       responseMode: z.enum(["summary", "full"]).default("summary")
     })

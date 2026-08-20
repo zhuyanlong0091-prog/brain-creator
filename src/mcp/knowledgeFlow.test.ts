@@ -2704,6 +2704,7 @@ describe("Brain Creator requirement-first facade", () => {
     expect(status.summary.activeRun).toEqual(expect.objectContaining({
       runId: run.id,
       status: "running",
+      browserMode: "headless",
       progress: expect.objectContaining({ sequence: 1, status: "started" }),
       possiblyStalled: false
     }));

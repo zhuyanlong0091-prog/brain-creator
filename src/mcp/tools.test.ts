@@ -211,6 +211,18 @@ describe("BRAIN_CREATOR_TOOLS", () => {
         mode: "requirement-suite"
       }).observationMode
     ).toBe("summary");
+    expect(
+      BRAIN_CREATOR_TOOLS.find((tool) => tool.name === "bc_run")?.inputSchema.safeParse({
+        mode: "requirement-suite",
+        browserMode: "observe"
+      }).success
+    ).toBe(true);
+    expect(
+      BRAIN_CREATOR_TOOLS.find((tool) => tool.name === "bc_run")?.inputSchema.safeParse({
+        mode: "requirement-suite",
+        browserMode: "debug"
+      }).success
+    ).toBe(false);
     expect(prepare?.inputSchema.parse({ action: "approve-baseline" }).responseMode).toBe("summary");
     expect(review?.inputSchema.parse({ target: "test-intent" }).responseMode).toBe("summary");
   });
