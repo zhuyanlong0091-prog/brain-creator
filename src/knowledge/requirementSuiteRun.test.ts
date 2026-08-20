@@ -6,6 +6,20 @@ import type { ExecutionPlan } from "../domain/types.js";
 import { RequirementSuiteRunService } from "./requirementSuiteRun.js";
 
 describe("RequirementSuiteRunService", () => {
+  it("persists the selected browser observation mode", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new RequirementSuiteRunService(repository);
+
+    const run = service.create({
+      knowledgeProjectId: "knowledge-browser-mode",
+      systemId: "system-browser-mode",
+      cases: [{ executableCaseId: "case-browser-mode", title: "Observe case" }],
+      continueOnBlocked: false,
+      browserMode: "observe"
+    });
+
+    expect(run.browserMode).toBe("observe");
+  });
   it("creates one idempotent run for the same unfinished plan set", () => {
     const fixture = suiteFixture();
 

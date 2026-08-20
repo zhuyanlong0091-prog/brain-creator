@@ -11,11 +11,13 @@ import {
   normalizeReporterExitCode,
   parsePlaywrightJsonReport
 } from "../execution/playwrightReporter.js";
+import { playwrightTestArgs } from "../execution/browserObservation.js";
 import { decryptSecrets } from "../shared/crypto.js";
 import { redactSensitiveText, scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
 import type {
   AgentRun,
   AuthProfile,
+  BrowserExecutionMode,
   BusinessRule,
   ChainRun,
   Gap,
@@ -160,6 +162,7 @@ type RunChainInput = {
   structuredReporter?: boolean;
   actorJourney?: Array<{ role: string; authProfile: AuthProfile }>;
   requiredStepIds?: string[];
+  browserMode?: BrowserExecutionMode;
 };
 
 export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
@@ -379,8 +382,10 @@ export async function runChain(input: RunChainInput) {
         return { exitCode: 1, stdout: "", stderr: instrumentationCheck.reason };
       }
     }
-    const args = ["playwright", "test", testRunPath, "--workers=1"];
-    if (structuredReporterEnabled) args.push("--reporter=json", "--trace=on");
+    const args = playwrightTestArgs(testRunPath, {
+      browserMode: input.browserMode,
+      structuredReporter: structuredReporterEnabled
+    });
     const actorRoleEvidencePath =
       input.actorJourney && input.actorJourney.length > 1
         ? join(input.workDir, ".brain-creator", "runs", input.testCase.id, "actor-journey.jsonl")

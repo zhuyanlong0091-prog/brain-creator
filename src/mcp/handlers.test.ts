@@ -4666,6 +4666,7 @@ describe("handleBrainCreatorTool", () => {
       expect(status.userSummary.activeSuite).toEqual({
         suiteId: firstRun.suite.id,
         status: "waiting-for-agent",
+        browserMode: "headless",
         totalCases: 2,
         attempted: 1,
         passed: 0,

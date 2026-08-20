@@ -44,6 +44,10 @@ import {
 import { FeishuOpenApiAdapter } from "../knowledge/feishuAdapter.js";
 import { writeArtifactManifest } from "../storage/artifactArchive.js";
 import { writeStaticSuiteExecutionReport } from "../execution/staticSuiteReport.js";
+import {
+  browserObservationCapability,
+  playwrightTestArgs
+} from "../execution/browserObservation.js";
 import { normalizeHostSkillAnalysis } from "../knowledge/policies.js";
 import { buildContextPack } from "../knowledge/retriever.js";
 import { reconcileRequirementCoverage } from "../knowledge/requirementReconciliation.js";
@@ -96,6 +100,7 @@ import type {
   AgentTask,
   AuthCheckpoint,
   AuthProfile,
+  BrowserExecutionMode,
   BugReport,
   CaseSuiteRun,
   CaseSuite,
@@ -1509,6 +1514,9 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     systemId
   });
   const activeDocumentSuite = unfinishedSuites.at(-1);
+  const activeDocumentSuiteAsset = activeDocumentSuite
+    ? context.service.getCaseSuite(activeDocumentSuite.suiteId)
+    : undefined;
   const pendingAgentTasks = context.service
     .listAgentTasks(systemId)
     .filter((task) => task.status === "pending");
@@ -1536,6 +1544,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     ? {
         suiteId: activeDocumentSuite.suiteId,
         status: activeDocumentSuite.status,
+        browserMode: activeDocumentSuiteAsset?.browserMode ?? "headless",
         totalCases: activeDocumentSuite.totalCases,
         attempted: activeDocumentSuite.attemptedCaseNos.length,
         passed: activeDocumentSuite.passedCaseNos.length,
@@ -1763,6 +1772,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
   if (!source) {
     throw new Error("source is required unless resume is true and an unfinished suite exists");
   }
+  const requestedBrowserMode = browserModeArg(input);
   const parsed = await parseCaseSource(source);
   const filters = caseSourceFilters(input);
   const selectedCases = filterDocumentCases(parsed.cases, filters);
@@ -1785,8 +1795,12 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       summary: previewSummary(parsed, selectedCases),
       selection: selectionSummary(parsed.cases, selectedCases, filters),
       executionPolicy: {
-        continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked")
+        continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked"),
+        browserMode: requestedBrowserMode ?? "headless"
       },
+      browserObservation: browserObservationCapability(
+        requestedBrowserMode ?? "headless"
+      ),
       bridge,
       requiresConfirmation: true,
       nextAction: "Ask the user to confirm before running the full suite."
@@ -1893,6 +1907,18 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
   }
 
   const requestedSuiteId = optionalStringArg(input, "suiteId") ?? resumeTarget?.suiteId;
+  const requestedBrowserCapability = browserObservationCapability(
+    requestedBrowserMode ?? "headless"
+  );
+  if (!requestedSuiteId && !requestedBrowserCapability.available) {
+    return {
+      mode: "case-source-suite",
+      status: "blocked",
+      source: caseSource,
+      browserObservation: requestedBrowserCapability,
+      nextAction: requestedBrowserCapability.reason
+    };
+  }
   const suite = requestedSuiteId
     ? existingCaseSuite(context, requestedSuiteId, systemId, caseSource.id)
     : context.service.createCaseSuite({
@@ -1901,8 +1927,24 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         totalCases: selectedCases.length,
         selectedCaseNos: selectedCases.map((documentCase) => documentCase.caseNo),
         continueOnBlocked: optionalBooleanArg(input, "continueOnBlocked"),
+        browserMode: requestedBrowserMode ?? "headless",
         status: "approved"
       });
+  const suiteBrowserMode = suite.browserMode ?? "headless";
+  if (requestedBrowserMode && requestedBrowserMode !== suiteBrowserMode) {
+    throw new Error("Document case suite cannot change its browser mode");
+  }
+  const browserCapability = browserObservationCapability(suiteBrowserMode);
+  if (!browserCapability.available) {
+    return {
+      mode: "case-source-suite",
+      status: "blocked",
+      source: caseSource,
+      suite,
+      browserObservation: browserCapability,
+      nextAction: browserCapability.reason
+    };
+  }
   if (optionalBooleanArg(input, "continueOnBlocked") && suite.continueOnBlocked !== true) {
     context.service.enableCaseSuiteContinueOnBlocked(suite.id);
   }
@@ -1971,6 +2013,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       suiteId: suite.id,
       documentCase,
       maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
+      browserMode: suiteBrowserMode,
       createBugOnFailure: true
     });
     if (result.taskPackage) {
@@ -2000,6 +2043,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       suiteId: suite.id,
       documentCase,
       maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
+      browserMode: suiteBrowserMode,
       createBugOnFailure: true
     });
     caseResults.push(result.caseResult);
@@ -2084,6 +2128,7 @@ async function executeDocumentCase(
     suiteId?: string;
     documentCase: DocumentCase;
     maxHealAttempts?: number;
+    browserMode?: BrowserExecutionMode;
     createBugOnFailure?: boolean;
     regressionBug?: BugReport;
     remainingBugIds?: string[];
@@ -2125,6 +2170,7 @@ async function executeDocumentCase(
     const result = await runApprovedChain(context, {
       caseId: testCase.id,
       maxHealAttempts: input.maxHealAttempts,
+      browserMode: input.browserMode,
       suiteContext: input.suiteId
         ? {
             suiteId: input.suiteId,
@@ -2364,6 +2410,16 @@ async function executeDocumentCase(
 
 async function runBugRegression(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const systemId = stringArg(input, "systemId");
+  const browserMode = browserModeArg(input) ?? "headless";
+  const browserCapability = browserObservationCapability(browserMode);
+  if (!browserCapability.available) {
+    return {
+      mode: "bug-regression",
+      status: "blocked",
+      browserObservation: browserCapability,
+      nextAction: browserCapability.reason
+    };
+  }
   const requestedBugIds = stringArrayArg(input, "bugIds");
   const filters = bugRegressionFilters(input);
   const candidates = context.service
@@ -2408,6 +2464,7 @@ async function runBugRegression(context: BrainCreatorMcpContext, input: Record<s
         sourceId: source.id,
         documentCase,
         maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
+        browserMode,
         createBugOnFailure: false,
         regressionBug: { ...bug, status: previousStatus },
         remainingBugIds: candidates
@@ -2953,6 +3010,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     optionalStringArg(input, "systemId") ?? project.systemIds[0];
   const authProfileId = optionalStringArg(input, "authProfileId");
   const actorJourney = actorJourneyArg(input);
+  const requestedBrowserMode = browserModeArg(input);
   const requestedRepeatCount = optionalNumberArg(input, "repeatCount");
   const repeatCount = Math.max(1, requestedRepeatCount ?? 1);
   const stabilityPolicy = stabilityPolicyArg(input) ?? (repeatCount > 1
@@ -2985,6 +3043,9 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
           ? "Each iteration uses an isolated RequirementSuiteRun and is aggregated in coverage review."
           : "Single execution; do not infer stability from one green run."
       },
+      browserObservation: browserObservationCapability(
+        requestedBrowserMode ?? "headless"
+      ),
       requiresConfirmation: true,
       nextAction:
         project.systemIds.length === 0
@@ -3037,6 +3098,20 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     ) {
       throw new Error("Requirement suite run cannot change its actor journey");
     }
+    const activeBrowserMode = activeRequirementSuiteRun.browserMode ?? "headless";
+    if (requestedBrowserMode && requestedBrowserMode !== activeBrowserMode) {
+      throw new Error("Requirement suite run cannot change its browser mode");
+    }
+    const activeBrowserCapability = browserObservationCapability(activeBrowserMode);
+    if (!activeBrowserCapability.available) {
+      return {
+        mode: "requirement-suite",
+        status: "blocked",
+        browserObservation: activeBrowserCapability,
+        requirementSuiteRun: activeRequirementSuiteRun,
+        nextAction: activeBrowserCapability.reason
+      };
+    }
     if (
       requestedRepeatCount !== undefined &&
       requestedRepeatCount !== (activeRequirementSuiteRun.stabilityTarget ?? 1)
@@ -3083,6 +3158,16 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
   const systemId = selectedSystemId;
   if (!systemId || !project.systemIds.includes(systemId)) {
     throw new Error("Requirement suite must use a system bound to the knowledge project");
+  }
+  const browserMode = requestedBrowserMode ?? "headless";
+  const browserCapability = browserObservationCapability(browserMode);
+  if (!browserCapability.available) {
+    return {
+      mode: "requirement-suite",
+      status: "blocked",
+      browserObservation: browserCapability,
+      nextAction: browserCapability.reason
+    };
   }
   const blockingKnowledgeGaps = context.repository.gaps.filter(
     (gap) =>
@@ -3169,6 +3254,7 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     provider: optionalStringArg(input, "provider"),
     sessionId: optionalStringArg(input, "sessionId"),
     actorJourney,
+    browserMode,
     requirementSetIds: stringArrayArg(input, "requirementSetIds"),
     cases: candidates.map((candidate) => ({
       executableCaseId: candidate.id,
@@ -3778,7 +3864,8 @@ async function executeRequirementSuiteCase(
       requirementSuiteRunId: requirementSuiteRun.id,
       executionEvidenceId: executionEvidence.id,
       contextPackPath,
-      knowledgeContext
+      knowledgeContext,
+      browserMode: requirementSuiteRun.browserMode ?? "headless"
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -4447,6 +4534,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         ? {
             runId: activeRequirementSuiteRun.id,
             status: activeRequirementSuiteRun.status,
+            browserMode: activeRequirementSuiteRun.browserMode ?? "headless",
             currentExecutableCaseId: activeRequirementSuiteRun.currentExecutableCaseId,
             progress: runLedgerEntries.some(
               (entry) => entry.requirementSuiteRunId === activeRequirementSuiteRun.id
@@ -5047,6 +5135,11 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     ? assertExecutionPlanIsCurrent(context, executionPlanId)
     : undefined;
   const structuredReporter = resolveStructuredReporterMode(context, input);
+  const browserMode = browserModeArg(input) ?? "headless";
+  const browserCapability = browserObservationCapability(browserMode);
+  if (!browserCapability.available) {
+    throw new Error(browserCapability.reason);
+  }
   const bridgeCheck = await preflightAgentBridge(context.agentBridge);
   if (!bridgeCheck.ok) {
     throw new Error(`Agent bridge unavailable: ${bridgeCheck.error}`);
@@ -5137,7 +5230,8 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
         requiredStepIds: executionPlan?.steps
           .filter((step) => step.action !== "api")
           .map((step) => step.id),
-        actorJourneyRoles: actorJourneyProfiles?.map((actor) => actor.role)
+        actorJourneyRoles: actorJourneyProfiles?.map((actor) => actor.role),
+        browserMode
       },
       suiteContext: suiteContextArg(input),
       regressionContext: regressionContextArg(input)
@@ -5165,7 +5259,8 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
     actorJourney: actorJourneyProfiles,
     requiredStepIds: executionPlan?.steps
       .filter((step) => step.action !== "api")
-      .map((step) => step.id)
+      .map((step) => step.id),
+    browserMode
   });
   context.service.recordAgentRun(result.generateRun);
   for (const healerRun of result.healerRuns) {
@@ -5731,7 +5826,13 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
   const testResult =
     result.agentRun.status === "succeeded" &&
     (result.task.agent === "generator" || result.task.agent === "healer")
-      ? await runSubmittedTest(context, chainContext.testPath, result.task.systemId, result.task.id)
+      ? await runSubmittedTest(
+          context,
+          chainContext.testPath,
+          result.task.systemId,
+          result.task.id,
+          chainContext.browserMode
+        )
       : undefined;
   const healAttempts = chainContext.healAttempts ?? 0;
   const maxHealAttempts = chainContext.maxHealAttempts ?? 1;
@@ -6175,7 +6276,8 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     const next = await runBugRegression(context, {
       systemId: result.task.systemId,
       bugIds: regression.remainingBugIds,
-      maxHealAttempts: regression.maxHealAttempts
+      maxHealAttempts: regression.maxHealAttempts,
+      browserMode: chainContext.browserMode
     });
     return {
       ...next,
@@ -6373,14 +6475,18 @@ async function runSubmittedTest(
   context: BrainCreatorMcpContext,
   testPath: string,
   systemId: string,
-  runId = "host-agent"
+  runId = "host-agent",
+  browserMode: BrowserExecutionMode = "headless"
 ) {
   const runner = context.runner ?? spawnCommand;
   const testRunPath = relative(context.workDir, testPath).replace(/\\/g, "/");
   try {
     const rawResult = await runner(
       "npx",
-      ["playwright", "test", testRunPath, "--workers=1", "--reporter=json", "--trace=on"],
+      playwrightTestArgs(testRunPath, {
+        browserMode,
+        structuredReporter: true
+      }),
       {
       cwd: context.workDir
       }
@@ -6944,6 +7050,7 @@ function selectionSummary(
 function caseSuiteProgress(context: BrainCreatorMcpContext, suite: CaseSuite) {
   const snapshot = caseSuiteExecutionSnapshot(context, suite);
   return {
+    browserMode: suite.browserMode ?? "headless",
     selected: suite.selectedCaseNos.length,
     alreadyPassed: snapshot.passedCaseNos.length,
     attempted: snapshot.attemptedCaseNos.length,
@@ -7046,6 +7153,7 @@ async function prepareNextHostAgentSuiteTask(
     suiteId: suite.id,
     documentCase,
     maxHealAttempts,
+    browserMode: suite.browserMode ?? "headless",
     createBugOnFailure: true
   });
   if (!result.taskPackage) {
@@ -7281,6 +7389,7 @@ function statusUserSummary(state: {
   activeSuite?: {
     suiteId: string;
     status: string;
+    browserMode?: BrowserExecutionMode;
     totalCases: number;
     attempted: number;
     passed: number;
@@ -8605,6 +8714,15 @@ function runModeArg(input: Record<string, unknown>, key: string) {
     | "case-source-suite"
     | "bug-regression"
     | "requirement-suite";
+}
+
+function browserModeArg(input: Record<string, unknown>): BrowserExecutionMode | undefined {
+  const value = optionalStringArg(input, "browserMode");
+  if (value === undefined) return undefined;
+  if (value !== "headless" && value !== "observe") {
+    throw new Error("browserMode must be headless or observe");
+  }
+  return value;
 }
 
 function suiteActionArg(input: Record<string, unknown>) {

@@ -448,6 +448,7 @@ export type AgentTask = {
     requirementSuiteRunId?: string;
     requiredStepIds?: string[];
     actorJourneyRoles?: string[];
+    browserMode?: BrowserExecutionMode;
   };
   suiteContext?: {
     suiteId: string;
@@ -546,6 +547,7 @@ export type CaseSuite = {
   totalCases: number;
   selectedCaseNos: string[];
   continueOnBlocked?: boolean;
+  browserMode?: BrowserExecutionMode;
   createdAt: string;
   updatedAt: string;
 };
@@ -817,6 +819,8 @@ export type KnowledgeEdge = {
   sourceRefs: string[];
   createdAt: string;
 };
+
+export type BrowserExecutionMode = "headless" | "observe";
 
 export type ProcessModelStatus = "draft" | "confirmed" | "conflicted";
 
@@ -1376,6 +1380,7 @@ export type RequirementSuiteRun = {
   provider?: string;
   sessionId?: string;
   actorJourney?: ActorJourneyConfig[];
+  browserMode?: BrowserExecutionMode;
   status:
     | "running"
     | "waiting-for-test-data"

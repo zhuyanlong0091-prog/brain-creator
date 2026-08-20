@@ -61,7 +61,7 @@ production acceptance conditions are closed.
 | F5 | Multiple requirements could contaminate assets | partial | PR A/PR B/PR C | System-owned shards now isolate page/evidence/knowledge observations and indexes carry requirement ownership; execution ContextPack retrieval filters both `systemId` and `requirementSetId`; mixed requirement suites now use an explicit `multi-requirement` artifact segment, preserve all requirement revision IDs in the manifest/source refs, and list them in the static report; complete same-system multi-requirement Eval/report reconciliation remains |
 | G1 | Facade responses consumed excessive context | partial | PR A/PR C/PR E | `responseMode=summary` and explicit paging now cover CompileRun plus requirement, TestIntent, ExecutableCase, ExecutionPlan, SuiteRun, Ledger, exploration, and evidence reviews; `observationMode=summary|step-by-step` keeps routine progress bounded while allowing explicit detail, and step mode caps one notification replay to the latest 50 events; broader nested suite payloads still need additional domain-specific summary contracts |
 | G2 | Documentation and runtime behavior diverged | partial | every PR | Package Skill, English docs, and Chinese docs must be checked in the same PR |
-| G3 | Internal concepts dominated the user experience | deferred | post-2.2 | Natural-language role-oriented review remains a later UX pass |
+| G3 | Internal concepts dominated the user experience | partial | observation-mode follow-up/post-2.2 | Users can now ask to execute with a visible browser without knowing Playwright flags; `browserMode=observe` is persisted, shown in status/report, and fails explicitly when no desktop exists, while broader natural-language role-oriented review remains |
 | G4 | Error and time presentation was not localized | partial | PR A/PR C | New errors are bilingual and static reports are searchable; static suite reports now format created/updated timestamps using the owning system locale with an `en-US` fallback and render readable Chinese chrome without rewriting evidence/bug text, while common runtime failures expose bilingual recovery messages; the complete error catalog remains |
 
 ## Stage totals
@@ -69,9 +69,9 @@ production acceptance conditions are closed.
 | Status | Count |
 |---|---:|
 | resolved | 16 |
-| partial | 23 |
+| partial | 24 |
 | open | 0 |
-| deferred | 2 |
+| deferred | 1 |
 | total | 41 |
 
 This register closes only through its stated acceptance checks. A passing feature test does not close broader evidence, security, or reliability work assigned to a later PR.

@@ -74,6 +74,7 @@ describe("static suite execution report", () => {
     expect(html).toContain("Orders &lt;suite&gt;");
     expect(html).toContain("strong");
     expect(html).toContain("Assurance: <strong>strong 1</strong> | limited 0 | none 0");
+    expect(html).toContain("Browser mode: observe");
     expect(html).toContain("Runtime impact: console errors 1 | network failures 1");
     expect(html).toContain("1 step(s)");
     expect(html).toContain("Console errors");
@@ -198,6 +199,7 @@ function run(): RequirementSuiteRun {
     id: "suite-1",
     knowledgeProjectId: "project-1",
     systemId: "system-1",
+    browserMode: "observe",
     status: "completed",
     continueOnBlocked: false,
     allowCreateTestData: false,

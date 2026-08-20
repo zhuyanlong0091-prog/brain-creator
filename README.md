@@ -71,6 +71,8 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 
 执行过程不再是黑盒。支持 MCP Progress Notification 的宿主会收到阶段/步骤进度；无论宿主是否支持通知，Brain Creator 都会把带序号的事件写入 Run Ledger。`bc_status` 可恢复当前用例、步骤、页面、耗时、等待原因和 `possiblyStalled` 告警。每条用例结束后都会增量更新离线 `suite-report.html`，其中保留验证强度、步骤证据、截图、trace、Bug 和 Gap。
 
+需要现场旁观时，可以要求 Agent “用 Brain Creator 以可见浏览器执行”，对应 `bc_run browserMode=observe`。Brain Creator 会使用 Playwright headed 模式并保持单 Worker；`bc_status` 和离线报告会记录该模式。CI、Windows 服务会话或没有 `DISPLAY/WAYLAND_DISPLAY` 的 Linux 环境会明确阻止观察模式，不会静默改成无头。默认 `browserMode=headless` 仍适合 CI 和无人值守运行。浏览器窗口仅用于观察，最终可信结论仍来自结构化 Reporter、AssertionContract、截图和 trace。
+
 ### 常用任务
 
 | 你要完成的事 | 对 Agent 说 |
@@ -169,6 +171,8 @@ Brain Creator enforces these boundaries:
 - Only a verified product mismatch becomes a Bug. Automation, auth, environment, network, and test-data failures become typed Gaps.
 
 Execution is observable rather than opaque. Hosts that support MCP Progress Notification receive stage or step updates. The ordered Run Ledger remains the durable source of truth for every host, and `bc_status` restores the current case, step, page, elapsed time, wait reason, and `possiblyStalled` warning. Brain Creator rewrites the offline `suite-report.html` after each completed case with assurance, step evidence, screenshots, traces, Bugs, and Gaps.
+
+When an operator wants to watch the live interaction, ask the Agent to run Brain Creator with a visible browser, which maps to `bc_run browserMode=observe`. Brain Creator uses Playwright headed mode with one worker and records the mode in `bc_status` and the offline report. CI, Windows service sessions, and Linux sessions without `DISPLAY/WAYLAND_DISPLAY` are rejected explicitly instead of silently falling back to headless. `browserMode=headless` remains the default for CI and unattended runs. The visible window is an observation aid; structured Reporter output, AssertionContracts, screenshots, and traces remain the execution evidence.
 
 ### Common tasks
 

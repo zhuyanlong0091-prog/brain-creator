@@ -156,6 +156,8 @@ Requirement and Document Suites share `bc_review target=run-ledger`. Use `knowle
 
 Use `observationMode=summary` for normal `bc_run` calls. Use `step-by-step` only when the user asks to watch detailed execution. MCP Progress Notifications are best-effort; always treat the ordered Run Ledger as the recovery source. Report the current case, step, page, elapsed time, wait reason, and `possiblyStalled` warning from `bc_status`. A stalled warning is not a failed assertion. Point the user to the incrementally updated offline Suite report for assurance, screenshots, traces, Bugs, and Gaps.
 
+`observationMode` controls progress detail. When the user explicitly asks to watch the live browser, pass `browserMode=observe` to both preview and confirmed `bc_run`; otherwise keep the default `headless`. Do not switch a running Suite's browser mode. If observe mode reports no interactive desktop, explain the capability blocker instead of silently falling back. A visible browser is an observation aid, not execution evidence.
+
 ## System
 
 - Use `bc_list_systems` only in full-profile discovery or debugging.
