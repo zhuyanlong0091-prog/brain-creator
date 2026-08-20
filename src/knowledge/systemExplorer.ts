@@ -120,7 +120,7 @@ const DEFAULT_BUDGET: SystemExplorationBudget = {
 };
 
 const INTERACTIVE_ELEMENT_SELECTOR =
-  'button, input, select, textarea, a[href], [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="radio"]';
+  'button, input, select, textarea, a[href], [role="tab"], [role="button"], [role="link"], [role="textbox"], [role="combobox"], [role="checkbox"], [role="radio"]';
 const MAX_RENDER_WAIT_MS = 5_000;
 
 export class SystemExplorationCoordinator {
@@ -799,7 +799,7 @@ async function probeSafeInteractions(input: {
       const request = route.request();
       const method = request.method().toUpperCase();
       const requestUrl = request.url();
-      const unsafeMethod = !["GET", "HEAD", "OPTIONS"].includes(method);
+      const unsafeMethod = !isReadOnlyRequest(method, requestUrl);
       const guardedRequest =
         request.isNavigationRequest() ||
         request.resourceType() === "xhr" ||
@@ -1707,12 +1707,15 @@ async function capturePage(
         const testId = html.getAttribute("data-testid");
         const idValue = html.id;
         const nameValue = html.getAttribute("name");
+        const ariaControls = html.getAttribute("aria-controls");
         const selector = testId
           ? `[data-testid=${JSON.stringify(testId)}]`
           : idValue
             ? `[id=${JSON.stringify(idValue)}]`
             : nameValue
               ? `${tag}[name=${JSON.stringify(nameValue)}]`
+              : ariaControls
+                ? `[aria-controls=${JSON.stringify(ariaControls)}]`
               : `${tag}:nth-of-type(${position + 1})`;
         return { name, role, text, selector };
       })
@@ -1819,6 +1822,8 @@ async function capturePage(
               ? `[id=${JSON.stringify(html.id)}]`
               : html.getAttribute("name")
                 ? `${tag}[name=${JSON.stringify(html.getAttribute("name"))}]`
+                : html.getAttribute("aria-controls")
+                  ? `[aria-controls=${JSON.stringify(html.getAttribute("aria-controls"))}]`
                 : `${tag}:nth-of-type(${position + 1})`;
           const role = html.getAttribute("role") || (tag === "select" ? "combobox" : tag === "button" ? "button" : "textbox");
           return { name, role, text, selector };
@@ -2083,6 +2088,14 @@ export function isReadOnlyNavigationUrl(candidate: string) {
         )
     );
   return !unsafeAction;
+}
+
+function isReadOnlyRequest(method: string, candidate: string) {
+  if (["GET", "HEAD", "OPTIONS"].includes(method)) return true;
+  if (method !== "POST") return false;
+  const url = safeUrl(candidate);
+  if (!url) return false;
+  return /(?:^|\/)(?:list|query|search|detail|permissions)(?:\/|$)/i.test(url.pathname);
 }
 
 function uniquePages(pages: SystemExplorationPage[]) {
