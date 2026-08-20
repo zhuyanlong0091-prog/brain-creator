@@ -147,7 +147,7 @@ bc_configure target=runtime operation=update bridgeProvider=codex bridgeCommand=
 bc_configure target=runtime operation=reload-config
 ```
 
-The runtime file stores only executable settings and `env:`/`file:` references. Environment variables have highest priority. Brain Creator validates and preflights a candidate before persisting or activating it; a failed reload keeps the previous configuration. This command is a controlled recovery/configuration path, not permission to edit the store or runtime file manually.
+The runtime file stores only executable settings and `env:`/`file:` references. Environment variables have highest priority. Brain Creator validates and preflights a candidate before persisting or activating it, then rebuilds the built-in OAuth/CAS/SAML Provider Registry and configured Feishu reader; a failed reload keeps the previous configuration. This command is a controlled recovery/configuration path, not permission to edit the store or runtime file manually.
 
 ## Error contract
 

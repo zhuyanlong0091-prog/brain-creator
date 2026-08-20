@@ -140,7 +140,7 @@ bc_configure target=runtime operation=update bridgeProvider=codex bridgeCommand=
 bc_configure target=runtime operation=reload-config
 ```
 
-运行时文件只保存命令、超时和 `env:`/`file:` 引用，环境变量拥有最高优先级。Brain Creator 会先校验并预检候选配置，成功后才持久化和激活；预检失败会保留旧配置。该命令是受控恢复/配置入口，不代表允许手工修改存储或运行时文件。
+运行时文件只保存命令、超时和 `env:`/`file:` 引用，环境变量拥有最高优先级。Brain Creator 会先校验并预检候选配置，成功后重建内置 OAuth/CAS/SAML Provider Registry 和飞书读取器，再持久化和激活；预检失败会保留旧配置。该命令是受控恢复/配置入口，不代表允许手工修改存储或运行时文件。
 
 ## 错误契约
 

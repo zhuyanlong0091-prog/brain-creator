@@ -23,7 +23,8 @@ describe("runtime configuration facade", () => {
 
       expect(result).toEqual(expect.objectContaining({
         status: "config-reloaded",
-        connectorStatus: "host-agent-fallback"
+        connectorStatus: "host-agent-fallback",
+        registeredAuthProviders: expect.arrayContaining(["oauth", "cas", "saml"])
       }));
       expect(context.runtimeConfiguration?.bridgeProvider).toBe("disabled");
       expect(await readFile(context.runtimeConfigurationPath, "utf8")).toContain("env:BRAIN_CREATOR_FEISHU_APP_SECRET");
