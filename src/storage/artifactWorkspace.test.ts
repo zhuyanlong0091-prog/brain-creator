@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -12,8 +12,9 @@ import {
 
 describe("artifact workspace", () => {
   it("owns every artifact category by system, requirement revision, and suite", () => {
+    const workDir = resolve("workspace");
     const layout = resolveArtifactRunLayout({
-      workDir: "C:\\workspace",
+      workDir,
       systemKey: "HR System",
       requirementKey: "Intern Headcount",
       requirementVersion: 2,
@@ -22,7 +23,7 @@ describe("artifact workspace", () => {
 
     expect(layout.root).toBe(
       join(
-        "C:\\workspace",
+        workDir,
         ".brain-creator",
         "artifacts",
         "hr-system",
