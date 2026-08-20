@@ -28,6 +28,48 @@ afterEach(async () => {
 });
 
 describe("System exploration coordinator", () => {
+  it("waits for delayed SPA controls before capturing page evidence", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`
+        <div id="app-root"></div>
+        <script>
+          setTimeout(() => {
+            document.querySelector('#app-root').innerHTML = '<button id="delayed-control">Delayed control</button>';
+          }, 900);
+        </script>
+      `);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}/`;
+
+    try {
+      const fixture = await createLocalFixture(baseUrl);
+      const result = await new SystemExplorationCoordinator({
+        repository: fixture.repository,
+        service: fixture.domainService,
+        knowledgeService: fixture.knowledgeService,
+        workDir: fixture.workDir,
+        explorer: new PlaywrightSystemExplorer()
+      }).explore({
+        knowledgeProjectId: fixture.projectId,
+        systemId: fixture.systemId,
+        budget: { maxPages: 1, maxDepth: 0, maxDurationMs: 10_000 }
+      });
+
+      expect(result.exploration.status).toBe("completed");
+      expect(result.exploration.gapIds).toEqual([]);
+      expect(result.brain.pages[0]?.locators).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "Delayed control" })])
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  }, 30_000);
+
   it("keeps popup interaction selectors scoped to the captured popup", () => {
     const locator = { first: () => "popup-locator" };
     const page = {
