@@ -179,4 +179,106 @@ describe("RunLedgerService", () => {
     expect(entry.message).not.toContain("ledger-token-123");
     expect(repository.runLedgerEntries[0]).toEqual(entry);
   });
+
+  it("projects ledger entries into ordered, redacted execution progress", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.requirementSuiteRuns.push({
+      id: "suite-orders",
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      status: "waiting-for-agent",
+      continueOnBlocked: false,
+      allowCreateTestData: false,
+      automaticTestData: false,
+      total: 1,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: [{
+        executableCaseId: "case-1",
+        title: "Approve order",
+        order: 1,
+        status: "waiting-for-agent",
+        gapIds: [],
+        attempts: []
+      }],
+      createdAt: "2026-08-19T00:00:00.000Z",
+      updatedAt: "2026-08-19T00:00:01.000Z"
+    });
+    const times = [
+      "2026-08-19T00:00:00.000Z",
+      "2026-08-19T00:00:01.000Z"
+    ];
+    const ledger = new RunLedgerService(
+      repository,
+      () => times.shift()!,
+      () => Date.parse("2026-08-19T00:00:30.000Z")
+    );
+    ledger.append({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      requirementSuiteRunId: "suite-orders",
+      executableCaseId: "case-1",
+      event: "case-started",
+      scope: "case",
+      stage: "suite",
+      toStatus: "running"
+    });
+    ledger.appendProgress({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      requirementSuiteRunId: "suite-orders",
+      executableCaseId: "case-1",
+      stage: "execution",
+      status: "waiting",
+      stepId: "step-1",
+      stepTitle: "Wait for approval",
+      pageUrl: "https://orders.example.test/approve?token=secret-value",
+      waitReason: "Waiting for approver"
+    });
+
+    const progress = ledger.progress("suite-orders");
+    expect(progress.events).toEqual([
+      expect.objectContaining({ sequence: 1, status: "started", caseTitle: "Approve order" }),
+      expect.objectContaining({
+        sequence: 2,
+        status: "waiting",
+        stepId: "step-1",
+        stepTitle: "Wait for approval",
+        pageUrl: "https://orders.example.test/approve?token=%5BREDACTED%5D",
+        waitReason: "Waiting for approver"
+      })
+    ]);
+    expect(progress.current).toEqual(expect.objectContaining({ sequence: 2 }));
+    expect(progress.possiblyStalled).toBe(false);
+  });
+
+  it("marks stale active progress but never terminal progress as stalled", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const ledger = new RunLedgerService(
+      repository,
+      () => "2026-08-19T00:00:00.000Z",
+      () => Date.parse("2026-08-19T00:05:00.000Z")
+    );
+    ledger.appendProgress({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      requirementSuiteRunId: "suite-running",
+      stage: "execution",
+      status: "running",
+      stepTitle: "Submit order"
+    });
+    ledger.appendProgress({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      requirementSuiteRunId: "suite-complete",
+      stage: "suite",
+      status: "passed"
+    });
+
+    expect(ledger.progress("suite-running", { stalledAfterMs: 120_000 }).possiblyStalled).toBe(true);
+    expect(ledger.progress("suite-complete", { stalledAfterMs: 120_000 }).possiblyStalled).toBe(false);
+  });
 });

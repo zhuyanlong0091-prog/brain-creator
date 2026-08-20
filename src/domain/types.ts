@@ -1503,6 +1503,7 @@ export type ExecutionStepEvidence = {
   actual?: string;
   assertionStatus: "pending" | "passed" | "failed" | "blocked";
   screenshotPath?: string;
+  pageUrl?: string;
   evidenceRefs?: string[];
   traceRefs?: string[];
   sourceRefs: string[];
@@ -1576,6 +1577,7 @@ export type StructuredReporterStep = {
   title: string;
   status: "passed" | "failed" | "skipped" | "unknown";
   durationMs?: number;
+  pageUrl?: string;
   evidenceRefs: string[];
   traceRefs?: string[];
   consoleErrors?: string[];
@@ -1712,6 +1714,7 @@ export type RunLedgerEntry = {
     | "role-switched"
     | "case-skipped"
     | "schedule-claimed"
+    | "progress"
     | "suite-cancelled"
     | "suite-completed";
   scope: "suite" | "case";
@@ -1730,6 +1733,16 @@ export type RunLedgerEntry = {
   provider?: string;
   sessionId?: string;
   traceId?: string;
+  sequence?: number;
+  caseTitle?: string;
+  stepId?: string;
+  stepTitle?: string;
+  progressStatus?: ExecutionProgressStatus;
+  pageUrl?: string;
+  elapsedMs?: number;
+  screenshotPath?: string;
+  assertionSummary?: string;
+  waitReason?: string;
   currentStep?: string;
   message?: string;
   references?: {
@@ -1746,5 +1759,31 @@ export type RunLedgerEntry = {
     bugReportId?: string;
     gapIds?: string[];
   };
+  createdAt: string;
+};
+
+export type ExecutionProgressStatus =
+  | "started"
+  | "running"
+  | "waiting"
+  | "passed"
+  | "failed"
+  | "blocked";
+
+export type ExecutionProgressEvent = {
+  sequence: number;
+  runId: string;
+  caseId?: string;
+  caseTitle?: string;
+  stage: RunLedgerEntry["stage"];
+  stepId?: string;
+  stepTitle?: string;
+  status: ExecutionProgressStatus;
+  pageUrl?: string;
+  elapsedMs: number;
+  screenshotPath?: string;
+  assertionSummary?: string;
+  waitReason?: string;
+  traceId: string;
   createdAt: string;
 };

@@ -4675,6 +4675,10 @@ describe("handleBrainCreatorTool", () => {
         pending: 0,
         nextCaseNo: "TC-002",
         currentStage: "generator",
+        currentCaseTitle: nextCase.task.suiteContext.title,
+        elapsedMs: expect.any(Number),
+        lastUpdatedAt: expect.any(String),
+        possiblyStalled: false,
         latestEvent: "agent-task-requested",
         traceId: expect.any(String),
         activeTask: {

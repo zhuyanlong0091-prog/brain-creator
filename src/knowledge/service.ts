@@ -1558,6 +1558,7 @@ export class KnowledgeService {
       );
       step.screenshotPath = screenshot;
       const reporterStep = reporterSteps?.find((reported) => reported.id === step.stepId);
+      if (reporterStep?.pageUrl) step.pageUrl = redact(reporterStep.pageUrl);
       const assertion = step.action === "assert"
         ? evidence.reporterResult?.assertions.find((item) => item.stepId === step.stepId) ??
           (unboundAssertions.length === assertionSteps.length

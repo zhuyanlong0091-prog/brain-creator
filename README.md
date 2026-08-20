@@ -69,6 +69,8 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 - 知识按 `knowledgeProjectId` 隔离，运行资产按 `systemId` 隔离。
 - 产品不符合预期才是 Bug；自动化、鉴权、环境、网络和测试数据问题归入对应 Gap。
 
+执行过程不再是黑盒。支持 MCP Progress Notification 的宿主会收到阶段/步骤进度；无论宿主是否支持通知，Brain Creator 都会把带序号的事件写入 Run Ledger。`bc_status` 可恢复当前用例、步骤、页面、耗时、等待原因和 `possiblyStalled` 告警。每条用例结束后都会增量更新离线 `suite-report.html`，其中保留验证强度、步骤证据、截图、trace、Bug 和 Gap。
+
 ### 常用任务
 
 | 你要完成的事 | 对 Agent 说 |
@@ -165,6 +167,8 @@ Brain Creator enforces these boundaries:
 - Requirement expectations, system observations, and execution results remain separate.
 - Knowledge is isolated by `knowledgeProjectId`; runtime assets are isolated by `systemId`.
 - Only a verified product mismatch becomes a Bug. Automation, auth, environment, network, and test-data failures become typed Gaps.
+
+Execution is observable rather than opaque. Hosts that support MCP Progress Notification receive stage or step updates. The ordered Run Ledger remains the durable source of truth for every host, and `bc_status` restores the current case, step, page, elapsed time, wait reason, and `possiblyStalled` warning. Brain Creator rewrites the offline `suite-report.html` after each completed case with assurance, step evidence, screenshots, traces, Bugs, and Gaps.
 
 ### Common tasks
 

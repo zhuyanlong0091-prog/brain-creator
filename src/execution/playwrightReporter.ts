@@ -140,6 +140,7 @@ function collectResultSteps(result: Record<string, unknown>, output: NonNullable
         title,
         status: normalizeStepStatus(step.error ? "failed" : result.status),
         durationMs: typeof step.duration === "number" ? step.duration : undefined,
+        ...(runtime.pageUrl ? { pageUrl: runtime.pageUrl } : {}),
         evidenceRefs: attachments
           .filter((attachment): attachment is Record<string, unknown> => Boolean(attachment && typeof attachment === "object"))
           .map((attachment) => attachment.path ?? attachment.name)
@@ -173,16 +174,25 @@ function traceRefsFromAttachments(value: unknown) {
 }
 
 function runtimeImpactFromAttachments(attachments: unknown[]) {
-  const output = { consoleErrors: [] as string[], networkFailures: [] as string[] };
+  const output = {
+    consoleErrors: [] as string[],
+    networkFailures: [] as string[],
+    pageUrl: undefined as string | undefined
+  };
   for (const attachment of attachments) {
     if (!attachment || typeof attachment !== "object") continue;
     const item = attachment as Record<string, unknown>;
     const name = typeof item.name === "string" ? item.name : "";
     if (!name.startsWith("brain-creator-runtime-") || typeof item.body !== "string") continue;
     try {
-      const value = JSON.parse(item.body) as { consoleErrors?: unknown; networkFailures?: unknown };
+      const value = JSON.parse(item.body) as {
+        consoleErrors?: unknown;
+        networkFailures?: unknown;
+        pageUrl?: unknown;
+      };
       if (Array.isArray(value.consoleErrors)) output.consoleErrors.push(...value.consoleErrors.filter((item): item is string => typeof item === "string"));
       if (Array.isArray(value.networkFailures)) output.networkFailures.push(...value.networkFailures.filter((item): item is string => typeof item === "string"));
+      if (typeof value.pageUrl === "string") output.pageUrl = sanitizePageUrl(value.pageUrl);
     } catch {
       continue;
     }
@@ -190,6 +200,20 @@ function runtimeImpactFromAttachments(attachments: unknown[]) {
   output.consoleErrors = [...new Set(output.consoleErrors)];
   output.networkFailures = [...new Set(output.networkFailures)];
   return output;
+}
+
+function sanitizePageUrl(value: string) {
+  try {
+    const url = new URL(value);
+    for (const key of [...url.searchParams.keys()]) {
+      url.searchParams.set(key, "[REDACTED]");
+    }
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return value;
+  }
 }
 
 function normalizeStepStatus(value: unknown): NonNullable<StructuredReporterResult["steps"]>[number]["status"] {

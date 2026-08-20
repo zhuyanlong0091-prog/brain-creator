@@ -99,7 +99,8 @@ describe("Playwright JSON reporter", () => {
               name: "brain-creator-runtime-step-save",
               body: JSON.stringify({
                 consoleErrors: ["TypeError: redacted"],
-                networkFailures: ["GET https://example.test/api/records"]
+                networkFailures: ["GET https://example.test/api/records"],
+                pageUrl: "https://example.test/orders?token=secret"
               })
             }],
             steps: [{
@@ -108,7 +109,8 @@ describe("Playwright JSON reporter", () => {
                 name: "brain-creator-runtime-step-save",
                 body: JSON.stringify({
                   consoleErrors: ["TypeError: redacted"],
-                  networkFailures: ["GET https://example.test/api/records"]
+                  networkFailures: ["GET https://example.test/api/records"],
+                  pageUrl: "https://example.test/orders?token=secret"
                 })
               }]
             }]
@@ -122,7 +124,8 @@ describe("Playwright JSON reporter", () => {
     expect(result.attachments).toContain("brain-creator-runtime-step-save");
     expect(result.steps?.[0]).toEqual(expect.objectContaining({
       consoleErrors: ["TypeError: redacted"],
-      networkFailures: ["GET https://example.test/api/records"]
+      networkFailures: ["GET https://example.test/api/records"],
+      pageUrl: "https://example.test/orders?token=%5BREDACTED%5D"
     }));
   });
 

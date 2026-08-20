@@ -100,6 +100,37 @@ describe("BRAIN_CREATOR_TOOLS", () => {
     expect(registered).toEqual(BRAIN_CREATOR_TOOLS.map((tool) => tool.name));
   });
 
+  it("forwards MCP request progress metadata to the tool handler", async () => {
+    let registeredHandler:
+      | ((input: Record<string, unknown>, extra: Record<string, unknown>) => Promise<unknown>)
+      | undefined;
+    const fakeServer = {
+      registerTool(
+        name: string,
+        _config: Record<string, unknown>,
+        handler: (input: Record<string, unknown>, extra: Record<string, unknown>) => Promise<unknown>
+      ) {
+        if (name === "bc_run") registeredHandler = handler;
+      }
+    } as any;
+    const calls: unknown[] = [];
+    registerBrainCreatorTools(fakeServer, async (_name, _input, request) => {
+      calls.push(request);
+      return { content: [{ type: "text", text: "{}" }] };
+    }, "facade");
+
+    const sendNotification = async () => undefined;
+    await registeredHandler?.(
+      { mode: "requirement-suite" },
+      { _meta: { progressToken: "progress-1" }, sendNotification }
+    );
+
+    expect(calls).toEqual([{
+      progressToken: "progress-1",
+      sendNotification
+    }]);
+  });
+
   it("exposes the controlled facade operations without adding more tools", () => {
     const prepare = BRAIN_CREATOR_TOOLS.find((tool) => tool.name === "bc_prepare");
     const configure = BRAIN_CREATOR_TOOLS.find((tool) => tool.name === "bc_configure");
@@ -175,6 +206,11 @@ describe("BRAIN_CREATOR_TOOLS", () => {
         limit: 25
       }).success
     ).toBe(true);
+    expect(
+      BRAIN_CREATOR_TOOLS.find((tool) => tool.name === "bc_run")?.inputSchema.parse({
+        mode: "requirement-suite"
+      }).observationMode
+    ).toBe("summary");
     expect(prepare?.inputSchema.parse({ action: "approve-baseline" }).responseMode).toBe("summary");
     expect(review?.inputSchema.parse({ target: "test-intent" }).responseMode).toBe("summary");
   });

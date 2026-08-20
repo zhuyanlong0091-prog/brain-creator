@@ -122,7 +122,10 @@ import type {
   SystemProfile,
   StabilityPolicy
 } from "../domain/types.js";
-import type { BrainCreatorToolName } from "./tools.js";
+import type {
+  BrainCreatorToolName,
+  BrainCreatorToolRequest
+} from "./tools.js";
 
 export type BrainCreatorMcpContext = {
   repository: InMemoryBrainCreatorRepository;
@@ -278,7 +281,8 @@ export function createBrainCreatorMcpContext(
 export async function handleBrainCreatorTool(
   context: BrainCreatorMcpContext,
   name: BrainCreatorToolName,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  request?: BrainCreatorToolRequest
 ): Promise<CallToolResult> {
   try {
     switch (name) {
@@ -291,7 +295,10 @@ export async function handleBrainCreatorTool(
       case "bc_status":
         return facadeTextResult(await statusFacade(context, input), input);
       case "bc_run":
-        return facadeTextResult(await runFacade(context, input), input);
+        return facadeTextResult(
+          await runWithProgress(context, input, request),
+          input
+        );
       case "bc_review":
         return facadeTextResult(await reviewFacade(context, input), input);
       case "bc_configure":
@@ -438,7 +445,9 @@ export async function handleBrainCreatorTool(
       case "bc_prepare_agent_task":
         return textResult(await prepareAgentTask(context, input));
       case "bc_submit_agent_output":
-        return textResult(await submitAgentOutput(context, input));
+        return textResult(
+          await submitAgentOutputWithProgress(context, input, request)
+        );
       case "bc_list_agent_runs":
         return textResult(context.service.listAgentRuns(stringArg(input, "systemId")));
       case "bc_run_chain":
@@ -495,8 +504,124 @@ export async function handleBrainCreatorTool(
         throw new Error(`Unknown Brain Creator tool: ${name}`);
     }
   } catch (error) {
+    await notifyMcpProgress(request, {
+      progress: 1,
+      total: 1,
+      message: "Brain Creator failed. Inspect the error envelope and trace ID."
+    });
     return envelopeResult(errorEnvelope(error), true);
   }
+}
+
+async function runWithProgress(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>,
+  request?: BrainCreatorToolRequest
+) {
+  await notifyMcpProgress(request, {
+    progress: 0,
+    total: 1,
+    message: "Brain Creator started the requested run."
+  });
+  const result = await runFacade(context, input);
+  await publishResultProgress(context, result, input, request);
+  return result;
+}
+
+async function submitAgentOutputWithProgress(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>,
+  request?: BrainCreatorToolRequest
+) {
+  await notifyMcpProgress(request, {
+    progress: 0,
+    total: 1,
+    message: "Brain Creator is validating the submitted Agent output."
+  });
+  const result = await submitAgentOutput(context, input);
+  await publishResultProgress(context, result, input, request);
+  return result;
+}
+
+async function publishResultProgress(
+  context: BrainCreatorMcpContext,
+  result: Record<string, unknown>,
+  input: Record<string, unknown>,
+  request?: BrainCreatorToolRequest
+) {
+  const runId = findNestedString(result, "requirementSuiteRunId") ??
+    findNestedString(result, "suiteId") ??
+    findNestedString(result, "id", "requirementSuiteRun");
+  if (!runId) {
+    await notifyMcpProgress(request, {
+      progress: 1,
+      total: 1,
+      message: "Brain Creator completed the requested operation."
+    });
+    return;
+  }
+  let progress;
+  try {
+    progress = context.runLedger.progress(runId);
+  } catch {
+    await notifyMcpProgress(request, {
+      progress: 1,
+      total: 1,
+      message: `Brain Creator updated run ${runId}.`
+    });
+    return;
+  }
+  const events = input.observationMode === "step-by-step"
+    ? progress.events.slice(-50)
+    : progress.current
+      ? [progress.current]
+      : [];
+  for (const event of events) {
+    await notifyMcpProgress(request, {
+      progress: event.sequence,
+      message: [
+        event.caseTitle,
+        event.stepTitle,
+        event.status
+      ].filter(Boolean).join(" | ")
+    });
+  }
+}
+
+async function notifyMcpProgress(
+  request: BrainCreatorToolRequest | undefined,
+  params: { progress: number; total?: number; message?: string }
+) {
+  if (request?.progressToken === undefined || !request.sendNotification) return;
+  try {
+    await request.sendNotification({
+      method: "notifications/progress",
+      params: {
+        progressToken: request.progressToken,
+        ...params
+      }
+    });
+  } catch {
+    // Progress transport is best-effort; the durable Run Ledger remains authoritative.
+  }
+}
+
+function findNestedString(
+  value: unknown,
+  key: string,
+  parentKey?: string,
+  currentKey?: string,
+  depth = 0
+): string | undefined {
+  if (!value || typeof value !== "object" || depth > 5) return undefined;
+  for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) {
+    if (childKey === key && typeof child === "string" && (!parentKey || currentKey === parentKey)) {
+      return child;
+    }
+    const nested = findNestedString(child, key, parentKey, childKey, depth + 1);
+    if (nested) return nested;
+  }
+  return undefined;
 }
 
 async function commandFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
@@ -1423,6 +1548,12 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
           ? {
               currentStage: activeDocumentLedgerSummary.currentStage,
               currentStep: activeDocumentLedgerSummary.currentStep,
+              currentCaseTitle: activeDocumentLedgerSummary.currentCaseTitle,
+              currentPageUrl: activeDocumentLedgerSummary.currentPageUrl,
+              elapsedMs: activeDocumentLedgerSummary.elapsedMs,
+              lastUpdatedAt: activeDocumentLedgerSummary.updatedAt,
+              waitReason: activeDocumentLedgerSummary.waitReason,
+              possiblyStalled: activeDocumentLedgerSummary.possiblyStalled,
               latestEvent: activeDocumentLedgerSummary.latestEvent,
               traceId: activeDocumentLedgerSummary.traceId
             }
@@ -3967,12 +4098,6 @@ async function finalizeRequirementSuiteCase(
   };
 }
 
-function isTerminalRequirementSuiteStatus(
-  status: RequirementSuiteRun["status"]
-) {
-  return status === "completed" || status === "failed" || status === "cancelled";
-}
-
 function formatRequirementGeneratorContext(
   executionPlan: ExecutionPlan,
   contextPack: ReturnType<typeof buildContextPack>,
@@ -4093,7 +4218,7 @@ async function completeRequirementEvidence(
         ? "Playwright structured reporter passed."
         : "Playwright exited successfully, but structured reporter evidence was unavailable."
       : output || chainRun.gaps.map((gap) => gap.reason).join("; ") || "Execution failed.";
-  return context.knowledgeService.completeExecutionEvidence(evidenceId, {
+  const completed = await context.knowledgeService.completeExecutionEvidence(evidenceId, {
     status,
     chainRunId: chainRun.id,
     actualResult,
@@ -4106,6 +4231,46 @@ async function completeRequirementEvidence(
     actorRoleEvidencePath: testResult?.actorRoleEvidencePath,
     evidenceRootDir: context.workDir
   });
+  recordExecutionEvidenceProgress(context, completed);
+  return completed;
+}
+
+function recordExecutionEvidenceProgress(
+  context: BrainCreatorMcpContext,
+  evidence: ExecutionEvidence
+) {
+  const run = context.repository.requirementSuiteRuns.find((candidate) =>
+    candidate.caseRuns.some((caseRun) =>
+      caseRun.executableCaseId === evidence.executableCaseId &&
+      caseRun.executionEvidenceId === evidence.id
+    )
+  );
+  if (!run) return;
+  for (const step of evidence.steps) {
+    context.runLedger.appendProgress({
+      knowledgeProjectId: run.knowledgeProjectId,
+      systemId: run.systemId,
+      requirementSuiteRunId: run.id,
+      executableCaseId: evidence.executableCaseId,
+      stage: "execution",
+      status:
+        step.assertionStatus === "passed"
+          ? "passed"
+          : step.assertionStatus === "failed"
+            ? "failed"
+            : step.assertionStatus === "blocked"
+              ? "blocked"
+              : "running",
+      stepId: step.stepId,
+      stepTitle: step.instruction,
+      pageUrl: step.pageUrl,
+      screenshotPath: step.screenshotPath,
+      assertionSummary: [
+        step.expected ? `expected=${step.expected}` : undefined,
+        step.actual ? `actual=${step.actual}` : undefined
+      ].filter(Boolean).join("; ") || undefined
+    });
+  }
 }
 
 function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
@@ -4270,6 +4435,32 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     }
   }
   return {
+    summary: {
+      knowledgeProjectId: project.id,
+      projectName: project.name,
+      nextAction,
+      openGaps: gaps.length,
+      latestCompileRunId: projectCompileRuns.at(-1)?.id,
+      activeExplorationTaskId: pendingExplorationTasks.at(-1)?.id,
+      activeExplorationPlanId: activeExplorationPlan?.id,
+      activeRun: activeRequirementSuiteRun
+        ? {
+            runId: activeRequirementSuiteRun.id,
+            status: activeRequirementSuiteRun.status,
+            currentExecutableCaseId: activeRequirementSuiteRun.currentExecutableCaseId,
+            progress: runLedgerEntries.some(
+              (entry) => entry.requirementSuiteRunId === activeRequirementSuiteRun.id
+            )
+              ? context.runLedger.summary(activeRequirementSuiteRun.id).currentProgress
+              : undefined,
+            possiblyStalled: runLedgerEntries.some(
+              (entry) => entry.requirementSuiteRunId === activeRequirementSuiteRun.id
+            )
+              ? context.runLedger.summary(activeRequirementSuiteRun.id).possiblyStalled
+              : false
+          }
+        : undefined
+    },
     knowledge: {
       project,
       sources: { total: sources.length, recent: sources.slice(-5) },
@@ -5524,6 +5715,18 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
   const { chainContext } = result.task;
   if (!chainContext) {
     return result;
+  }
+  if (chainContext.requirementSuiteRunId && chainContext.executableCaseId) {
+    context.runLedger.appendProgress({
+      knowledgeProjectId: chainContext.knowledgeProjectId,
+      systemId: result.task.systemId,
+      requirementSuiteRunId: chainContext.requirementSuiteRunId,
+      executableCaseId: chainContext.executableCaseId,
+      stage: "execution",
+      status: "running",
+      stepTitle: "Run generated Playwright test",
+      assertionSummary: "Waiting for structured Playwright evidence"
+    });
   }
   const testResult =
     result.agentRun.status === "succeeded" &&
@@ -7088,6 +7291,12 @@ function statusUserSummary(state: {
     nextCaseNo?: string;
     currentStage?: string;
     currentStep?: string;
+    currentCaseTitle?: string;
+    currentPageUrl?: string;
+    elapsedMs?: number;
+    lastUpdatedAt?: string;
+    waitReason?: string;
+    possiblyStalled?: boolean;
     latestEvent?: string;
     traceId?: string;
     activeTask?: { taskId: string; caseNo: string; title: string };
@@ -7139,6 +7348,21 @@ function statusMarkdown(summary: ReturnType<typeof statusUserSummary>) {
             : []),
           ...(summary.activeSuite.currentStep
             ? [`- Active suite step: ${summary.activeSuite.currentStep}`]
+            : []),
+          ...(summary.activeSuite.currentCaseTitle
+            ? [`- Active suite case: ${summary.activeSuite.currentCaseTitle}`]
+            : []),
+          ...(summary.activeSuite.currentPageUrl
+            ? [`- Active suite page: ${summary.activeSuite.currentPageUrl}`]
+            : []),
+          ...(summary.activeSuite.elapsedMs !== undefined
+            ? [`- Active suite elapsed: ${summary.activeSuite.elapsedMs} ms`]
+            : []),
+          ...(summary.activeSuite.waitReason
+            ? [`- Active suite waiting: ${summary.activeSuite.waitReason}`]
+            : []),
+          ...(summary.activeSuite.possiblyStalled
+            ? ["- Active suite warning: possibly stalled"]
             : []),
           ...(summary.activeSuite.latestEvent
             ? [`- Active suite event: ${summary.activeSuite.latestEvent}`]
@@ -8193,8 +8417,6 @@ async function archiveRequirementSuiteRun(
   context: BrainCreatorMcpContext,
   run: RequirementSuiteRun
 ) {
-  const shouldArchive = isTerminalRequirementSuiteStatus(run.status) || run.status === "blocked";
-  if (!shouldArchive) return undefined;
   const executableCaseIds = new Set(run.caseRuns.map((item) => item.executableCaseId));
   const executableCases = run.caseRuns
     .map((item) => context.repository.executableCases.find((candidate) => candidate.id === item.executableCaseId))
@@ -8247,7 +8469,8 @@ async function archiveRequirementSuiteRun(
       .map((bug) => ({ id: bug.id, status: bug.status, caseNo: bug.caseNo, actualResult: bug.actualResult })),
     gaps: context.repository.gaps
       .filter((gap) => gap.projectId === run.systemId && (gap.sourceId === run.id || executableCaseIds.has(gap.sourceId)))
-      .map((gap) => ({ id: gap.id, status: gap.status, caseNo: gap.sourceId, reason: gap.reason }))
+      .map((gap) => ({ id: gap.id, status: gap.status, caseNo: gap.sourceId, reason: gap.reason })),
+    progress: context.runLedger.progress(run.id)
   });
   run.reportPath = reportPath;
   const artifactManifest = await writeArtifactManifest({

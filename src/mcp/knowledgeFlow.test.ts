@@ -2639,6 +2639,76 @@ describe("Brain Creator requirement-first facade", () => {
     ]);
   });
 
+  it("emits MCP progress notifications while keeping the ledger authoritative", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Observable Knowledge",
+      key: "observable-knowledge",
+      defaultLocale: "en-US"
+    });
+    const run = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: "system-observable",
+      cases: [{ executableCaseId: "case-observable", title: "Observable case" }],
+      continueOnBlocked: false
+    });
+    const notifications: Array<Record<string, unknown>> = [];
+
+    await handleBrainCreatorTool(
+      context,
+      "bc_run",
+      {
+        mode: "requirement-suite",
+        knowledgeProjectId: project.id,
+        suiteId: run.id,
+        suiteAction: "cancel",
+        confirm: false,
+        observationMode: "summary",
+        responseMode: "full"
+      },
+      {
+        progressToken: "observable-progress",
+        sendNotification: async (notification) => {
+          notifications.push(notification as unknown as Record<string, unknown>);
+        }
+      }
+    );
+
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        method: "notifications/progress",
+        params: expect.objectContaining({
+          progressToken: "observable-progress",
+          progress: 0
+        })
+      }),
+      expect.objectContaining({
+        method: "notifications/progress",
+        params: expect.objectContaining({
+          progressToken: "observable-progress",
+          progress: 1
+        })
+      })
+    ]);
+    expect(context.runLedger.progress(run.id).current).toEqual(
+      expect.objectContaining({ caseTitle: undefined, status: "started" })
+    );
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: project.id,
+      responseMode: "summary"
+    }));
+    expect(status.summary.activeRun).toEqual(expect.objectContaining({
+      runId: run.id,
+      status: "running",
+      progress: expect.objectContaining({ sequence: 1, status: "started" }),
+      possiblyStalled: false
+    }));
+  });
+
   it("controls a due stability run through the facade lease actions", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
