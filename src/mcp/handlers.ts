@@ -247,6 +247,15 @@ export function createBrainCreatorMcpContext(
   const configuredAuthProviders = new Set(
     (input.authRefreshAdapters ?? []).map((adapter) => adapter.provider)
   );
+  const authRegistryManaged = !input.authRefreshRegistry;
+  const createRuntimeAuthRefreshRegistry = () =>
+    createDefaultAuthRefreshRegistry(input.authStateRefresher, [
+      ...(input.authRefreshAdapters ?? []),
+      ...createStandardAuthProviderAdapters().filter(
+        (adapter) => !configuredAuthProviders.has(adapter.provider)
+      ),
+      ...genericAuthRefreshAdapters
+    ]);
   const knowledgeService = new KnowledgeService(
     repository,
     input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir),
@@ -296,15 +305,7 @@ export function createBrainCreatorMcpContext(
     authStateVerifier: input.authStateVerifier ?? verifyStoredBrowserAuth,
     authStateMaterializer,
     authStateRefresher: input.authStateRefresher,
-    authRefreshRegistry:
-      input.authRefreshRegistry ??
-      createDefaultAuthRefreshRegistry(input.authStateRefresher, [
-        ...(input.authRefreshAdapters ?? []),
-        ...createStandardAuthProviderAdapters().filter(
-          (adapter) => !configuredAuthProviders.has(adapter.provider)
-        ),
-        ...genericAuthRefreshAdapters
-      ]),
+    authRefreshRegistry: input.authRefreshRegistry ?? createRuntimeAuthRefreshRegistry(),
     authVerificationCache: new Map(),
     feishuReader: input.feishuReader ?? configuredFeishuReader(initialRuntimeEnvironment),
     runtimeConfiguration: initialRuntimeConfiguration,
@@ -317,6 +318,9 @@ export function createBrainCreatorMcpContext(
       const candidateBridge = runtimeManaged
         ? createConfiguredAgentBridge({ env: candidateEnvironment })
         : context.agentBridge;
+      const candidateAuthRefreshRegistry = authRegistryManaged
+        ? createRuntimeAuthRefreshRegistry()
+        : context.authRefreshRegistry;
       if (runtimeManaged && configuration?.bridgeProvider !== "disabled") {
         const bridgeCheck = await preflightAgentBridge(candidateBridge);
         if (!bridgeCheck.ok) {
@@ -337,10 +341,12 @@ export function createBrainCreatorMcpContext(
         context.agentBridge = candidateBridge;
         context.feishuReader = configuredFeishuReader(candidateEnvironment);
       }
+      if (authRegistryManaged) context.authRefreshRegistry = candidateAuthRefreshRegistry;
       context.runtimeConfiguration = configuration;
       return {
         ...(configuration ? { configuration } : {}),
         ...(candidateBridge?.provider ? { bridgeProvider: candidateBridge.provider } : {}),
+        registeredAuthProviders: candidateAuthRefreshRegistry.providers(),
         connectorStatus: context.feishuReader ? "feishu-configured" : "host-agent-fallback",
         path: resolveRuntimeConfigurationPath(workDir)
       };
