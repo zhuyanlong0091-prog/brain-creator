@@ -455,7 +455,7 @@ function matchesForbidden(value: string, forbidden: string[]) {
 }
 
 function isSafeExplorationEnvironment(environment: string) {
-  return /^(?:test|testing|qa|staging|stage|uat|dev|development|sandbox|local|测试|预发|开发)$/i
+  return /^(?:test\d*|testing|qa\d*|staging|stage|uat|dev\d*|development|sandbox|local|测试|预发|开发)$/i
     .test(environment.trim());
 }
 

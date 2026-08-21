@@ -561,9 +561,13 @@ export function bindStepsToSystemBrain(
   }
 
   const bound = steps.map((step) => {
-    const stepPage = step.pageModelId
+    const pinnedPage = step.pageModelId
       ? brain.pages.find((candidate) => candidate.pageModelId === step.pageModelId)
       : page;
+    const stepPage =
+      pinnedPage && hasLocatorEvidence(step, pinnedPage.locators)
+        ? pinnedPage
+        : findFallbackPage(step, brain.pages, contextQuery) ?? pinnedPage;
     if (!stepPage) {
       missingEvidence.push({
         stepId: step.id,
@@ -667,7 +671,7 @@ function selectLocator(
       ? /button|link|menuitem/i
       : step.action === "fill"
         ? /textbox|input|searchbox/i
-        : /combobox|select|listbox|radio|checkbox/i;
+        : /combobox|select|listbox|radio|checkbox|textbox|input|searchbox/i;
   const roleMatches = locators.filter((locator) => preferredRoles.test(locator.role));
   const candidates = roleMatches;
   const query = `${contextQuery} ${step.instruction} ${step.targetSemantic}`.toLowerCase();
@@ -676,6 +680,9 @@ function selectLocator(
       locator,
       score:
         tokenOverlap(query, `${locator.name} ${locator.text}`.toLowerCase()) +
+        (normalizeSemantic(locator.name) === normalizeSemantic(step.targetSemantic)
+          ? 6
+          : 0) +
         (/new|create|add|\u65b0\u5efa|\u521b\u5efa/.test(query) &&
         /new|create|add|\u65b0\u5efa|\u521b\u5efa/i.test(`${locator.name} ${locator.text}`)
           ? 5
@@ -687,6 +694,54 @@ function selectLocator(
         right.locator.confidence - left.locator.confidence
     );
   return scored[0]?.score > 0 ? scored[0].locator : undefined;
+}
+
+function hasLocatorEvidence(step: ExecutableCaseStep, locators: LocatorPoint[]) {
+  return step.action === "navigate" || Boolean(selectLocator(step, locators));
+}
+
+function findFallbackPage(
+  step: ExecutableCaseStep,
+  pages: SystemBrainPage[],
+  contextQuery: string
+) {
+  if (step.action === "navigate") return undefined;
+  const candidates = pages
+    .map((candidate) => ({
+      page: candidate,
+      locator: selectLocator(step, candidate.locators, contextQuery),
+      score: tokenOverlap(
+        `${contextQuery} ${step.instruction} ${step.targetSemantic}`.toLowerCase(),
+        `${candidate.name} ${candidate.locators
+          .map((locator) => `${locator.name} ${locator.text}`)
+          .join(" ")}`.toLowerCase()
+      ) * 2
+    }))
+    .filter((candidate) => candidate.locator);
+  if (candidates.length === 0) return undefined;
+  const best = candidates.filter(
+    (candidate) =>
+      normalizeSemantic(candidate.locator?.name ?? "") ===
+      normalizeSemantic(step.targetSemantic)
+  );
+  if (best.length === 1) return best[0].page;
+  if (candidates.length === 1) return candidates[0].page;
+  const query = `${contextQuery} ${step.instruction} ${step.targetSemantic}`;
+  const ranked = [...candidates]
+    .map((candidate) => ({
+      ...candidate,
+      score:
+        candidate.score +
+        (/offer/i.test(query) && /offer/i.test(`${candidate.page.name} ${candidate.locator?.name}`)
+          ? 6
+          : 0) +
+        (/new|create|add|\u65b0\u5efa|\u521b\u5efa/i.test(query) &&
+        /new|create|add|\u65b0\u5efa|\u521b\u5efa/i.test(candidate.locator?.name ?? "")
+          ? 5
+          : 0)
+    }))
+    .sort((left, right) => right.score - left.score);
+  return ranked[0].score > (ranked[1]?.score ?? 0) ? ranked[0].page : undefined;
 }
 
 function matchingStateTransitions(

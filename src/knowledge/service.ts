@@ -2732,6 +2732,7 @@ function executableCaseCompileKey(
   return createHash("sha256")
     .update(
       JSON.stringify({
+        compilerVersion: 2,
         testIntentId: intent.id,
         systemId: systemId ?? null,
         requirementHash: requirementSet.contentHash,

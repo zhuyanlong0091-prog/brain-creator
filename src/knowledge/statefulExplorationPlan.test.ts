@@ -37,6 +37,32 @@ describe("StatefulExplorationPlanService", () => {
     expect(plan.status).toBe("approved");
   });
 
+  it("accepts numbered test environments such as test5", () => {
+    const fixture = createFixture();
+    fixture.repository.systemProfiles[0].environment = "test5";
+    fixture.repository.authProfiles[0].env = "test5";
+    const plan = fixture.service.create({
+      explorationTaskIds: ["exploration-task-1"],
+      actorJourney: [{ role: "requester", authProfileId: "auth-requester" }],
+      allowedRoutes: ["https://orders.example.test/orders"],
+      allowedActions: [{
+        name: "Submit order",
+        route: "https://orders.example.test/orders",
+        role: "requester",
+        write: true,
+        sourceRefs: ["source:submit"]
+      }],
+      cleanupPolicy: "retain-with-label"
+    });
+
+    expect(() => fixture.service.approve({
+      planId: plan.id,
+      note: "Approved for the numbered test environment.",
+      approvedBy: "qa@example.test"
+    })).not.toThrow();
+    expect(plan.status).toBe("approved");
+  });
+
   it("rejects production, cross-allowlist, unverified-role, and destructive plans", () => {
     const fixture = createFixture();
     const outside = fixture.service.create({

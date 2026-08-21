@@ -127,13 +127,32 @@ function clauseSteps(intent: TestIntent, sourceRefs: string[]): ExecutableCaseSt
     steps.push(step(steps.length + 1, "fill", "Fill the requirement-defined fields", "business form", sourceRefs, "source"));
   }
   if (/\b(select|choose)\b|\u9009\u62e9/i.test(content)) {
-    steps.push(step(steps.length + 1, "select", "Select the requirement-defined option", "conditional selector", sourceRefs, "source"));
+    const selectionTarget = extractSelectionTarget(content);
+    steps.push(
+      step(
+        steps.length + 1,
+        "select",
+        selectionTarget
+          ? `Select ${selectionTarget}`
+          : "Select the requirement-defined option",
+        selectionTarget || "conditional selector",
+        sourceRefs,
+        "source"
+      )
+    );
   }
   steps.push({
     ...step(steps.length + 1, "assert", "Verify the approved requirement outcome", "requirement outcome", sourceRefs, "source"),
     expected: intent.expectedResults[0] || intent.objective
   });
   return steps;
+}
+
+function extractSelectionTarget(content: string) {
+  const match = content.match(
+    /(?:选择|选取|choose|select)\s*([^，,。.;；\s后若时则]{2,24})/i
+  );
+  return match?.[1]?.trim() || undefined;
 }
 
 function step(

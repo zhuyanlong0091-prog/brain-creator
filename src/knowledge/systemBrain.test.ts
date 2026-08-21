@@ -11,6 +11,7 @@ import type {
 } from "../domain/types.js";
 import { KnowledgeService } from "./service.js";
 import {
+  bindStepsToSystemBrain,
   scorePageCandidates,
   type SystemBrain,
   type SystemBrainPage
@@ -123,6 +124,62 @@ describe("System Brain", () => {
         ["Recruiting Shortcut", "Create From Shortcut"]
       ])
     );
+  });
+
+  it("falls back to another observed page when a pinned page lacks a step locator", () => {
+    const result = bindStepsToSystemBrain(
+      [
+        {
+          id: "step-create",
+          order: 1,
+          action: "click",
+          instruction: "Start the create action",
+          targetSemantic: "new record action",
+          pageModelId: "page-form",
+          sourceRefs: ["requirement:offer"],
+          origin: "source"
+        },
+        {
+          id: "step-select",
+          order: 2,
+          action: "select",
+          instruction: "Select 招聘需求",
+          targetSemantic: "招聘需求",
+          pageModelId: "page-form",
+          sourceRefs: ["requirement:offer"],
+          origin: "source"
+        }
+      ],
+      {
+        ...workflowBrain([]),
+        pages: [
+          page("page-recruiting", "Recruiting Requests", "/recruiting", [
+            locator("locator-create-request", "新建需求", "button")
+          ]),
+          page("page-list", "Offer List", "/offer", [
+            locator("locator-create-intern-offer", "新建实习生 Offer 申请", "menuitem")
+          ]),
+          page("page-form", "Offer Form", "/offer/new", [
+            locator("locator-demand", "招聘需求", "textbox")
+          ])
+        ]
+      },
+      "Offer"
+    );
+
+    expect(result.missingEvidence).toEqual([]);
+    expect(result.steps).toEqual([
+      expect.objectContaining({
+        id: "step-create",
+        pageModelId: "page-list",
+        locatorPointId: "locator-create-intern-offer"
+      }),
+      expect.objectContaining({
+        id: "step-select",
+        pageModelId: "page-form",
+        locatorPointId: "locator-demand"
+      })
+    ]);
   });
 
   it("treats parallel controls between the same pages as distinct paths", () => {

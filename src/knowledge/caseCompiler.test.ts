@@ -47,6 +47,29 @@ describe("Agent executable case compiler", () => {
     expect(result.steps.some((step) => step.targetSemantic === "new record action")).toBe(false);
   });
 
+  it("keeps the named selection target for conditional form steps", () => {
+    const result = compileIntentSemanticSteps({
+      intent: intent({
+        title: "Create intern offer",
+        objective: "选择招聘需求后展示占编字段",
+        expectedResults: ["占编字段按需求状态展示"]
+      }),
+      workflowModels: [],
+      stateMachineModels: [],
+      additionalSourceRefs: []
+    });
+
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "select",
+          targetSemantic: "招聘需求",
+          instruction: "Select 招聘需求"
+        })
+      ])
+    );
+  });
+
   it("compiles a workflow edge and keeps every step traceable", () => {
     const model = workflowModel();
     const result = compileIntentSemanticSteps({
