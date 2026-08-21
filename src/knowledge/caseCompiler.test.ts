@@ -70,6 +70,28 @@ describe("Agent executable case compiler", () => {
     );
   });
 
+  it("compiles occupied and non-occupied branches into a visibility assertion", () => {
+    const result = compileIntentSemanticSteps({
+      intent: intent({
+        title: "Create intern offer",
+        objective: "选择招聘需求，若是否占编=是时，展示需求部门、需求职位、编制编码；是否占编=否时，隐藏编制编码",
+        expectedResults: ["选择招聘需求后，按是否占编规则展示或隐藏编制字段"]
+      }),
+      workflowModels: [],
+      stateMachineModels: [],
+      additionalSourceRefs: []
+    });
+    const assertion = result.steps.find((step) => step.action === "assert");
+
+    expect(assertion).toEqual(expect.objectContaining({
+      assertion: expect.objectContaining({
+        type: "visibility",
+        expected: "当是否占编=是时，应显示：需求部门、需求职位、编制编码；当是否占编=否时，应隐藏：编制编码"
+      })
+    }));
+    expect(assertion?.expected).not.toContain("<");
+  });
+
   it("compiles a workflow edge and keeps every step traceable", () => {
     const model = workflowModel();
     const result = compileIntentSemanticSteps({

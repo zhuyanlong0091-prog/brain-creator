@@ -10,12 +10,12 @@ import type {
 
 export const REQUIREMENT_ANALYSIS_POLICY = {
   id: "brain-creator.requirement-analysis",
-  version: "2.1.0"
+  version: "2.1.1"
 } as const;
 
 export const TEST_DESIGN_POLICY = {
   id: "brain-creator.test-design",
-  version: "2.1.0"
+  version: "2.1.1"
 } as const;
 
 export type RequirementClause = {
@@ -134,6 +134,19 @@ export function analyzeRequirement(input: {
     contradictions: findContradictions(clauses),
     missingBranches: findMissingBranches(clauses)
   };
+}
+
+export function normalizeRequirementText(value: string) {
+  return decodeHtmlEntities(
+    value
+      .replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/?(h[1-6]|p|div|li|tr|th|td)[^>]*>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n\s*\n+/g, "\n")
+      .trim()
+  );
 }
 
 export function designTests(input: {
@@ -373,7 +386,7 @@ function splitRequirementClauses(
   return values.map((text, index): RequirementClause => ({
     id: `${requirementSetId}:clause-${index + 1}`,
     index: index + 1,
-    text,
+    text: normalizeRequirementText(text),
     sourceRef: `${sourceRef}#clause-${index + 1}`,
     module: inferClauseModule(text, module),
     nodeTypes: classifyClause(text)
@@ -528,7 +541,7 @@ function normalizeHostClauses(
       if (typeof clause.text !== "string" || typeof clause.sourceRef !== "string") {
         throw new Error(`Host Skill clauses[${index}] requires text and sourceRef`);
       }
-      const text = clause.text;
+      const text = normalizeRequirementText(clause.text);
       const sourceRef = clause.sourceRef;
       return {
         id: typeof clause.id === "string" ? clause.id : `${requirementSetId}:clause-${index + 1}`,
@@ -609,4 +622,16 @@ function matches(content: string, pattern: RegExp) {
 
 function stringList(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16)));
 }

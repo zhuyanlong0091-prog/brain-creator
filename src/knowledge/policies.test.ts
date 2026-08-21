@@ -53,6 +53,20 @@ describe("built-in knowledge policies", () => {
     expect(evaluatePolicyOutput(analysis).verdict).toBe("pass");
   });
 
+  it("normalizes HTML requirement fragments before generating intents", () => {
+    const analysis = analyzeRequirement({
+      requirementSetId: "requirement_html",
+      title: "实习生 Offer",
+      content: "<ul><li>是否占编=是时，展示需求部门、编制编码</li><li>是否占编=否时，隐藏编制编码</li></ul>",
+      sourceRef: "source_html"
+    });
+    const design = designTests({ knowledgeProjectId: "project_1", analysis });
+
+    expect(analysis.clauses.every((clause) => !clause.text.includes("<li"))).toBe(true);
+    expect(design.testIntents.every((intent) => !intent.objective.includes("<"))).toBe(true);
+    expect(design.testIntents.map((intent) => intent.objective).join(" ")).toContain("是否占编=是时");
+  });
+
   it("decomposes a requirement into atomic source-backed clauses and typed nodes", () => {
     const analysis = analyzeRequirement(orderRequirement);
 

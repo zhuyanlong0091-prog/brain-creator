@@ -15,9 +15,9 @@ export function buildAssertionContracts(
     .map((step) => ({
       id: id("assertionContract"),
       stepId: step.id,
-      type: assertionType(step),
-      strength: "strong" as const,
-      expected: step.expected,
+      type: step.assertion?.type ?? assertionType(step),
+      strength: step.assertion?.strength ?? "strong",
+      expected: step.assertion?.expected ?? step.expected,
       requirementRefs: [...new Set([...requirementRefs, ...step.sourceRefs])],
       evidenceRequirements: ["actual-value", "screenshot", "trace"] as const
     }));
