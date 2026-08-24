@@ -29,6 +29,23 @@ describe("assertion assurance", () => {
     ]);
   });
 
+  it("preserves a compiler-provided structured assertion", () => {
+    const contracts = buildAssertionContracts([{
+      ...assertionStep(),
+      assertion: {
+        type: "visibility",
+        strength: "strong",
+        expected: "当是否占编=是时，应显示：编制编码"
+      }
+    }]);
+
+    expect(contracts[0]).toEqual(expect.objectContaining({
+      type: "visibility",
+      strength: "strong",
+      expected: "当是否占编=是时，应显示：编制编码"
+    }));
+  });
+
   it("does not call a reporter-less or partially verified run strong", () => {
     const contracts = buildAssertionContracts([assertionStep()]);
     expect(determineAssuranceLevel(contracts, undefined)).toBe("none");

@@ -225,6 +225,7 @@ export type SystemExplorationInteractionTransition = {
   reacquiredPage?: boolean;
   recovery?: InteractionRecoveryEvidence;
   screenshotPath?: string;
+  evidenceRefs?: string[];
   scenarioId?: string;
 };
 
@@ -1106,6 +1107,11 @@ export type ExecutableCaseStep = {
   targetSemantic: string;
   value?: string;
   expected?: string;
+  assertion?: {
+    type: AssertionContractType;
+    strength?: AssertionStrength;
+    expected?: string;
+  };
   pageModelId?: string;
   locatorPointId?: string;
   dataProfileId?: string;

@@ -1435,6 +1435,15 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       )
     };
   }
+  if (action === "record-interaction-evidence") {
+    const evidence = interactionEvidenceArg(input, "interactionEvidence");
+    return context.systemExploration.recordInteractionEvidence({
+      knowledgeProjectId: stringArg(input, "knowledgeProjectId"),
+      systemId: stringArg(input, "systemId"),
+      pageModelId: stringArg(input, "pageModelId"),
+      ...evidence
+    });
+  }
   if (action === "record-training-evidence") {
     const knowledgeProjectId = stringArg(input, "knowledgeProjectId");
     const systemId = stringArg(input, "systemId");
@@ -3034,6 +3043,15 @@ function isRequirementSuiteCandidate(
   context: BrainCreatorMcpContext,
   executableCase: ExecutableCase
 ) {
+  const openTestDataGap = context.repository.gaps.some(
+    (gap) =>
+      gap.status === "open" &&
+      gap.sourceType === "test-data-plan" &&
+      (executableCase.gapIds.includes(gap.id) ||
+        gap.sourceId === executableCase.id ||
+        gap.sourceId === executableCase.testIntentId)
+  );
+  if (executableCase.status === "ready" && openTestDataGap) return false;
   if (executableCase.status === "ready") return true;
   if (
     executableCase.status === "needs-data" &&
@@ -6672,8 +6690,11 @@ async function runSubmittedTest(
   browserMode: BrowserExecutionMode = "headless"
 ) {
   const runner = context.runner ?? spawnCommand;
-  const testRunPath = relative(context.workDir, testPath).replace(/\\/g, "/");
   const artifactLayout = artifactLayoutFromTestPath(context.workDir, testPath);
+  const testRunPath = relative(
+    artifactLayout?.testsDir ?? context.workDir,
+    testPath
+  ).replace(/\\/g, "/");
   const playwrightConfigPath = artifactLayout
     ? await writeArtifactPlaywrightConfig({ workDir: context.workDir, layout: artifactLayout })
     : undefined;
@@ -9758,6 +9779,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "prepare-execution",
       "record-observation",
       "record-page-evidence",
+      "record-interaction-evidence",
       "record-training-evidence",
       "explore-system",
       "refresh-system-brain"
@@ -9794,6 +9816,7 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "prepare-execution"
     | "record-observation"
     | "record-page-evidence"
+    | "record-interaction-evidence"
     | "record-training-evidence"
     | "explore-system"
     | "refresh-system-brain";
@@ -10045,6 +10068,85 @@ function attachmentAnalysisArg(input: Record<string, unknown>, key: string) {
       };
     }),
     confidence: record.confidence
+  };
+}
+
+function interactionEvidenceArg(input: Record<string, unknown>, key: string) {
+  const value = input[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${key} must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  const state = (stateValue: unknown, stateKey: string) => {
+    if (!stateValue || typeof stateValue !== "object" || Array.isArray(stateValue)) {
+      throw new Error(`${key}.${stateKey} must be an object`);
+    }
+    const stateRecord = stateValue as Record<string, unknown>;
+    const controlValues = stateRecord.controlValues;
+    return {
+      id: stringArg(stateRecord, "id"),
+      url: stringArg(stateRecord, "url"),
+      visibleElements: stringArrayArg(stateRecord, "visibleElements"),
+      dialogs: stringArrayArg(stateRecord, "dialogs"),
+      ...(controlValues === undefined
+        ? {}
+        : {
+            controlValues: (controlValues as unknown[]).map((item, index) => {
+              if (!item || typeof item !== "object" || Array.isArray(item)) {
+                throw new Error(`${key}.${stateKey}.controlValues[${index}] must be an object`);
+              }
+              const control = item as Record<string, unknown>;
+              return {
+                name: stringArg(control, "name"),
+                value: stringArg(control, "value")
+              };
+            })
+          })
+    };
+  };
+  const blockedRequests = record.blockedRequests;
+  if (!Array.isArray(blockedRequests)) throw new Error(`${key}.blockedRequests must be an array`);
+  return {
+    pageUrl: stringArg(record, "pageUrl"),
+    targetName: stringArg(record, "targetName"),
+    targetRole: stringArg(record, "targetRole"),
+    targetSelector: stringArg(record, "targetSelector"),
+    targetKind: stringArg(record, "targetKind") as "tab" | "disclosure" | "select",
+    action: stringArg(record, "action") as "click" | "select",
+    inputValue: optionalStringArg(record, "inputValue"),
+    before: state(record.before, "before"),
+    after: state(record.after, "after"),
+    visibleAdded: stringArrayArg(record, "visibleAdded"),
+    visibleRemoved: stringArrayArg(record, "visibleRemoved"),
+    dialogAdded: stringArrayArg(record, "dialogAdded"),
+    dialogRemoved: stringArrayArg(record, "dialogRemoved"),
+    changedControls:
+      record.changedControls === undefined
+        ? undefined
+        : (record.changedControls as unknown[]).map((item, index) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+              throw new Error(`${key}.changedControls[${index}] must be an object`);
+            }
+            const control = item as Record<string, unknown>;
+            return {
+              name: stringArg(control, "name"),
+              before: stringArg(control, "before"),
+              after: stringArg(control, "after")
+            };
+          }),
+    urlChanged: Boolean(record.urlChanged),
+    transitionKind: optionalStringArg(record, "transitionKind") as "navigation" | "state" | undefined,
+    blockedRequests: blockedRequests.map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error(`${key}.blockedRequests[${index}] must be an object`);
+      }
+      const request = item as Record<string, unknown>;
+      return { method: stringArg(request, "method"), url: stringArg(request, "url") };
+    }),
+    status: stringArg(record, "status") as "observed" | "no-change" | "blocked" | "failed",
+    screenshotPath: optionalStringArg(record, "screenshotPath"),
+    evidenceRefs: stringArrayArg(record, "evidenceRefs"),
+    scenarioId: optionalStringArg(record, "scenarioId")
   };
 }
 

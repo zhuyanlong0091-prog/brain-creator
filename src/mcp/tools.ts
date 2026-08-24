@@ -166,6 +166,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "prepare-execution",
         "record-observation",
         "record-page-evidence",
+        "record-interaction-evidence",
         "record-training-evidence",
         "explore-system",
         "refresh-system-brain"
@@ -337,6 +338,43 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
           consoleErrors: z.array(z.string()).default([]),
           networkFailures: z.array(z.string()).default([]),
           issues: z.array(z.string()).default([])
+        })
+        .optional(),
+      interactionEvidence: z
+        .object({
+          pageUrl: z.string().url(),
+          targetName: z.string(),
+          targetRole: z.string(),
+          targetSelector: z.string(),
+          targetKind: z.enum(["tab", "disclosure", "select"]),
+          action: z.enum(["click", "select"]),
+          inputValue: z.string().optional(),
+          before: z.object({
+            id: z.string(),
+            url: z.string().url(),
+            visibleElements: z.array(z.string()),
+            dialogs: z.array(z.string()),
+            controlValues: z.array(z.object({ name: z.string(), value: z.string() })).optional()
+          }),
+          after: z.object({
+            id: z.string(),
+            url: z.string().url(),
+            visibleElements: z.array(z.string()),
+            dialogs: z.array(z.string()),
+            controlValues: z.array(z.object({ name: z.string(), value: z.string() })).optional()
+          }),
+          visibleAdded: z.array(z.string()),
+          visibleRemoved: z.array(z.string()),
+          dialogAdded: z.array(z.string()),
+          dialogRemoved: z.array(z.string()),
+          changedControls: z.array(z.object({ name: z.string(), before: z.string(), after: z.string() })).optional(),
+          urlChanged: z.boolean(),
+          transitionKind: z.enum(["navigation", "state"]).optional(),
+          blockedRequests: z.array(z.object({ method: z.string(), url: z.string().url() })),
+          status: z.enum(["observed", "no-change", "blocked", "failed"]),
+          screenshotPath: z.string().optional(),
+          evidenceRefs: z.array(z.string()).min(1),
+          scenarioId: z.string().optional()
         })
         .optional(),
       trainingEvidence: z

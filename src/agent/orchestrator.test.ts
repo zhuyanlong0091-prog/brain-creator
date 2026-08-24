@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   commandRunnerAgentBridge,
@@ -574,7 +574,7 @@ describe("runChain", () => {
       [
         "playwright",
         "test",
-        relative(workDir, result.testPath).replace(/\\/g, "/"),
+        relative(join(dirname(dirname(result.testPath)), "tests"), result.testPath).replace(/\\/g, "/"),
         "--workers=1",
         "--config",
         relative(workDir, join(result.testPath, "..", "..", "playwright.config.ts")).replace(/\\/g, "/")
@@ -757,9 +757,9 @@ describe("runChain", () => {
 
     expect(commands).toEqual([
       expect.arrayContaining(["playwright", "agent", "generator"]),
-      ["playwright", "test", relative(workDir, result.testPath).replace(/\\/g, "/"), "--workers=1", "--config", relative(workDir, join(result.testPath, "..", "..", "playwright.config.ts")).replace(/\\/g, "/")],
+      ["playwright", "test", relative(join(dirname(dirname(result.testPath)), "tests"), result.testPath).replace(/\\/g, "/"), "--workers=1", "--config", relative(workDir, join(result.testPath, "..", "..", "playwright.config.ts")).replace(/\\/g, "/")],
       expect.arrayContaining(["playwright", "agent", "healer"]),
-      ["playwright", "test", relative(workDir, result.testPath).replace(/\\/g, "/"), "--workers=1", "--config", relative(workDir, join(result.testPath, "..", "..", "playwright.config.ts")).replace(/\\/g, "/")]
+      ["playwright", "test", relative(join(dirname(dirname(result.testPath)), "tests"), result.testPath).replace(/\\/g, "/"), "--workers=1", "--config", relative(workDir, join(result.testPath, "..", "..", "playwright.config.ts")).replace(/\\/g, "/")]
     ]);
     expect(commands[2]).toEqual(
       expect.arrayContaining(["--seed", expect.stringContaining("seed-system_1.fixture.ts")])

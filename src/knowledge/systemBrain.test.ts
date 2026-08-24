@@ -11,6 +11,7 @@ import type {
 } from "../domain/types.js";
 import { KnowledgeService } from "./service.js";
 import {
+  bindStepsToSystemBrain,
   scorePageCandidates,
   type SystemBrain,
   type SystemBrainPage
@@ -123,6 +124,183 @@ describe("System Brain", () => {
         ["Recruiting Shortcut", "Create From Shortcut"]
       ])
     );
+  });
+
+  it("falls back to another observed page when a pinned page lacks a step locator", () => {
+    const result = bindStepsToSystemBrain(
+      [
+        {
+          id: "step-create",
+          order: 1,
+          action: "click",
+          instruction: "Start the create action",
+          targetSemantic: "new record action",
+          pageModelId: "page-form",
+          sourceRefs: ["requirement:offer"],
+          origin: "source"
+        },
+        {
+          id: "step-select",
+          order: 2,
+          action: "select",
+          instruction: "Select 招聘需求",
+          targetSemantic: "招聘需求",
+          pageModelId: "page-form",
+          sourceRefs: ["requirement:offer"],
+          origin: "source"
+        }
+      ],
+      {
+        ...workflowBrain([]),
+        pages: [
+          page("page-recruiting", "Recruiting Requests", "/recruiting", [
+            locator("locator-create-request", "新建需求", "button")
+          ]),
+          page("page-list", "Offer List", "/offer", [
+            locator("locator-create-intern-offer", "新建实习生 Offer 申请", "menuitem")
+          ]),
+          page("page-form", "Offer Form", "/offer/new", [
+            locator("locator-demand", "招聘需求", "textbox")
+          ])
+        ]
+      },
+      "Offer"
+    );
+
+    expect(result.missingEvidence).toEqual([]);
+    expect(result.steps).toEqual([
+      expect.objectContaining({
+        id: "step-create",
+        pageModelId: "page-list",
+        locatorPointId: "locator-create-intern-offer"
+      }),
+      expect.objectContaining({
+        id: "step-select",
+        pageModelId: "page-form",
+        locatorPointId: "locator-demand"
+      })
+    ]);
+  });
+
+  it("keeps state-evidence steps on the pinned transition page", () => {
+    const result = bindStepsToSystemBrain(
+      [
+        {
+          id: "step-state-assert",
+          order: 1,
+          action: "assert",
+          instruction: "Verify the occupied state outcome",
+          targetSemantic: "requirement outcome",
+          pageModelId: "page-form",
+          sourceRefs: ["system-interaction:transition-1"],
+          origin: "observed"
+        }
+      ],
+      {
+        ...workflowBrain([]),
+        pages: [
+          page("page-form", "Recruitment Form", "/recruitment/new", []),
+          page("page-list", "Recruitment List", "/recruitment", [
+            locator("locator-result", "requirement outcome", "cell")
+          ])
+        ]
+      },
+      "Recruitment"
+    );
+
+    expect(result.missingEvidence).toEqual([]);
+    expect(result.steps[0]).toEqual(
+      expect.objectContaining({ pageModelId: "page-form" })
+    );
+  });
+
+  it("keeps Offer steps on the Offer page when both pages share recruitment fields", () => {
+    const result = bindStepsToSystemBrain(
+      [
+        {
+          id: "step-offer-create",
+          order: 1,
+          action: "click",
+          instruction: "Start the requirement-defined create action",
+          targetSemantic: "new record action",
+          sourceRefs: ["requirement:offer"],
+          origin: "source"
+        },
+        {
+          id: "step-offer-demand",
+          order: 2,
+          action: "select",
+          instruction: "Select 招聘需求",
+          targetSemantic: "招聘需求",
+          sourceRefs: ["requirement:offer"],
+          origin: "source"
+        }
+      ],
+      {
+        ...workflowBrain([]),
+        pages: [
+          page("page-recruitment", "HRONE - 招聘需求", "/recruitmentPlatform/demands", [
+            locator("locator-new-demand", "新建需求", "button"),
+            locator("locator-occupy", "是否占编", "combobox")
+          ]),
+          page("page-offer", "HRONE - offer管理", "/recruitmentPlatform/offer", [
+            locator("locator-new-offer", "新建Offer", "button"),
+            locator("locator-demand-filter", "招聘需求编码", "combobox")
+          ])
+        ]
+      },
+      "Offer: 新建实习生offer，选择招聘需求并校验字段",
+      "Offer"
+    );
+
+    expect(result.missingEvidence).toEqual([]);
+    expect(result.steps).toEqual([
+      expect.objectContaining({
+        id: "step-offer-create",
+        pageModelId: "page-offer",
+        locatorPointId: "locator-new-offer"
+      }),
+      expect.objectContaining({
+        id: "step-offer-demand",
+        pageModelId: "page-offer",
+        locatorPointId: "locator-demand-filter"
+      })
+    ]);
+  });
+
+  it("blocks an Offer case when only a recruitment page is available", () => {
+    const result = bindStepsToSystemBrain(
+      [
+        {
+          id: "step-offer-create",
+          order: 1,
+          action: "click",
+          instruction: "Start the requirement-defined create action",
+          targetSemantic: "new record action",
+          sourceRefs: ["requirement:offer"],
+          origin: "source"
+        }
+      ],
+      {
+        ...workflowBrain([]),
+        pages: [
+          page("page-recruitment", "HRONE - 招聘需求", "/recruitmentPlatform/demands", [
+            locator("locator-new-demand", "新建需求", "button")
+          ])
+        ]
+      },
+      "Offer: 新建实习生offer",
+      "Offer"
+    );
+
+    expect(result.steps[0].pageModelId).toBeUndefined();
+    expect(result.steps[0].locatorPointId).toBeUndefined();
+    expect(result.missingEvidence).toEqual([
+      expect.objectContaining({
+        stepId: "step-offer-create",
+        reason: expect.stringContaining("no unambiguous page evidence")
+      })
+    ]);
   });
 
   it("treats parallel controls between the same pages as distinct paths", () => {

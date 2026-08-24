@@ -43,6 +43,67 @@ afterEach(async () => {
 });
 
 describe("Brain Creator requirement-first facade", () => {
+  it("does not offer a ready executable case while its intent has an open test-data gap", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Data Gate",
+      key: "data-gate",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Data Gate System",
+      environment: "test",
+      baseUrl: "https://data-gate.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://data-gate.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const now = new Date().toISOString();
+    const executableCase: ExecutableCase = {
+      id: "executable-data-gate",
+      knowledgeProjectId: project.id,
+      requirementSetId: "requirement-data-gate",
+      testIntentId: "intent-data-gate",
+      systemId: system.id,
+      title: "Create a record with an available reference",
+      status: "ready",
+      preconditions: [],
+      steps: [],
+      dataProfileIds: [],
+      gapIds: [],
+      createdAt: now,
+      updatedAt: now
+    };
+    context.repository.executableCases.push(executableCase);
+    context.repository.gaps.push({
+      id: "gap-data-gate",
+      projectId: project.id,
+      sourceType: "test-data-plan",
+      sourceId: executableCase.testIntentId,
+      reason: "No available test reference exists.",
+      severity: "high",
+      owner: "qa",
+      status: "open",
+      createdAt: now,
+      updatedAt: now
+    });
+    context.repository.persist();
+
+    const preview = dataOf(await handleBrainCreatorTool(context, "bc_run", {
+      mode: "requirement-suite",
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      confirm: false
+    }));
+
+    expect(preview.status).toBe("preview");
+    expect(preview.executableCases).toEqual([]);
+  });
+
   it("runs bounded system exploration and exposes its progress through status and review", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
@@ -366,6 +427,99 @@ describe("Brain Creator requirement-first facade", () => {
       }
     });
     expect(prefixAttack.isError).toBe(true);
+  });
+
+  it("accepts visible-browser interaction evidence through the prepare facade", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Interaction Evidence",
+      key: "interaction-evidence",
+      defaultLocale: "en-US"
+    });
+    const system = context.service.createSystemProfile({
+      name: "Order Console",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://orders.example.test"]
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const page = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "record-page-evidence",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        pageEvidence: {
+          title: "Recruitment requirement",
+          finalUrl: "https://orders.example.test/recruitmentRequirement/edit",
+          domText: "Establishment Occupied",
+          screenshotPath: "evidence/before.png",
+          interactiveElements: [
+            {
+              name: "Establishment Occupied",
+              role: "combobox",
+              text: "No",
+              selector: "[name=establishmentOccupied]"
+            }
+          ],
+          consoleErrors: [],
+          networkFailures: [],
+          issues: []
+        }
+      })
+    );
+    const recorded = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare", {
+        action: "record-interaction-evidence",
+        knowledgeProjectId: project.id,
+        systemId: system.id,
+        pageModelId: page.pageModel.id,
+        interactionEvidence: {
+          pageUrl: "https://orders.example.test/recruitmentRequirement/edit",
+          targetName: "Establishment Occupied",
+          targetRole: "combobox",
+          targetSelector: "[name=establishmentOccupied]",
+          targetKind: "select",
+          action: "select",
+          inputValue: "Yes",
+          before: {
+            id: "before",
+            url: "https://orders.example.test/recruitmentRequirement/edit",
+            visibleElements: ["Employee Type"],
+            dialogs: [],
+            controlValues: [{ name: "Establishment Occupied", value: "No" }]
+          },
+          after: {
+            id: "after",
+            url: "https://orders.example.test/recruitmentRequirement/edit",
+            visibleElements: ["Employee Type", "Establishment ABC"],
+            dialogs: [],
+            controlValues: [{ name: "Establishment Occupied", value: "Yes" }]
+          },
+          visibleAdded: ["Establishment ABC"],
+          visibleRemoved: [],
+          dialogAdded: [],
+          dialogRemoved: [],
+          changedControls: [{ name: "Establishment Occupied", before: "No", after: "Yes" }],
+          urlChanged: false,
+          transitionKind: "state",
+          blockedRequests: [],
+          status: "observed",
+          screenshotPath: "evidence/after.png",
+          evidenceRefs: ["page-model:" + page.pageModel.id, "screenshot:before.png", "screenshot:after.png"]
+        }
+      })
+    );
+
+    expect(recorded.exploration.status).toBe("completed");
+    expect(recorded.brain.readiness.stateEvidence).toBe(true);
+    expect(recorded.brain.stateTransitions).toEqual([
+      expect.objectContaining({ targetName: "Establishment Occupied", inputValue: "Yes" })
+    ]);
   });
 
   it("recommends binding, System Brain exploration, evidence compilation, and execution in order", async () => {

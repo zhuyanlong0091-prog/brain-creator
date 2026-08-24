@@ -30,6 +30,7 @@ import {
   analyzeRequirement,
   designTests,
   evaluatePolicyOutput,
+  REQUIREMENT_ANALYSIS_POLICY,
   type RequirementAnalysis
 } from "./policies.js";
 import {
@@ -278,7 +279,11 @@ export class KnowledgeService {
     });
     const analysis = augmentAnalysisWithProcessModels(textAnalysis, proposedModels, attachmentAnalyses);
     const evaluation = evaluatePolicyOutput(analysis);
-    const inputHash = requirementDesignInputHash(requirementSet, attachmentAnalyses);
+    const inputHash = requirementDesignInputHash(
+      requirementSet,
+      attachmentAnalyses,
+      textAnalysis.policyVersion
+    );
     const existingIntents = this.repository.testIntents.filter(
       (item) => item.requirementSetId === requirementSetId
     );
@@ -782,7 +787,12 @@ export class KnowledgeService {
           explorationTaskIds.push(task.id);
           compilationStages.push({ stage: "system-brain", verdict: compileStatus, reason: task.reason, sourceRefs: task.sourceRefs });
         } else {
-          const bound = bindStepsToSystemBrain(statePlanned.steps, brain, contextQuery);
+          const bound = bindStepsToSystemBrain(
+            statePlanned.steps,
+            brain,
+            contextQuery,
+            intent.module
+          );
           steps = bound.steps;
           const reasons = [...new Set(bound.missingEvidence.map((item) => item.reason))];
           if (reasons.length > 0) {
@@ -2560,12 +2570,13 @@ function buildRequirementEvaluationGate(
 
 function requirementDesignInputHash(
   requirementSet: RequirementSet,
-  analyses: AttachmentAnalysis[]
+  analyses: AttachmentAnalysis[],
+  policyVersion: string = REQUIREMENT_ANALYSIS_POLICY.version
 ) {
   return createHash("sha256")
     .update(JSON.stringify({
       contentHash: requirementSet.contentHash,
-      policyVersion: "2.1.0",
+      policyVersion,
       attachments: analyses
         .map((analysis) => ({
           id: analysis.id,
@@ -2732,6 +2743,7 @@ function executableCaseCompileKey(
   return createHash("sha256")
     .update(
       JSON.stringify({
+        compilerVersion: 4,
         testIntentId: intent.id,
         systemId: systemId ?? null,
         requirementHash: requirementSet.contentHash,

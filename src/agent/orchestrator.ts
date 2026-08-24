@@ -340,7 +340,7 @@ export async function runChain(input: RunChainInput) {
     workDir: input.workDir,
     layout
   });
-  const testRunPath = relative(input.workDir, testPath).replace(/\\/g, "/");
+  const testRunPath = relative(layout.testsDir, testPath).replace(/\\/g, "/");
   await mkdir(layout.specsDir, { recursive: true });
   await mkdir(layout.testsDir, { recursive: true });
   await writeFile(

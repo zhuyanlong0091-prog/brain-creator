@@ -312,7 +312,8 @@ export function buildSystemBrain(
               `system-interaction:${transition.id}`,
               `page-model:${transition.pageModelId}`,
               `system-state:${transition.before.id}`,
-              `system-state:${transition.after.id}`
+              `system-state:${transition.after.id}`,
+              ...(transition.evidenceRefs ?? [])
             ]
           })
         )
@@ -524,14 +525,16 @@ export function systemObservationDrafts(brain: SystemBrain): SystemObservationDr
 export function bindStepsToSystemBrain(
   steps: ExecutableCaseStep[],
   brain: SystemBrain,
-  contextQuery = ""
+  contextQuery = "",
+  pageScope = ""
 ): {
   steps: ExecutableCaseStep[];
   missingEvidence: Array<{ stepId: string; action: ExecutableCaseStep["action"]; reason: string }>;
 } {
   const page = selectPage(
     brain.pages,
-    `${contextQuery} ${steps.map((step) => step.instruction).join(" ")}`
+    `${contextQuery} ${steps.map((step) => step.instruction).join(" ")}`,
+    pageScope
   );
   const hasUnpinnedSteps = steps.some((step) => !step.pageModelId);
   const missingEvidence: Array<{
@@ -541,7 +544,7 @@ export function bindStepsToSystemBrain(
   }> = [];
   if (!page && hasUnpinnedSteps) {
     const candidates = scorePageCandidates(
-      brain.pages,
+      pagesForScope(brain.pages, pageScope),
       `${contextQuery} ${steps.map((step) => step.instruction).join(" ")}`
     );
     return {
@@ -561,9 +564,15 @@ export function bindStepsToSystemBrain(
   }
 
   const bound = steps.map((step) => {
-    const stepPage = step.pageModelId
+    const pinnedPage = step.pageModelId
       ? brain.pages.find((candidate) => candidate.pageModelId === step.pageModelId)
       : page;
+    const stepPage =
+      pinnedPage &&
+      (hasLocatorEvidence(step, pinnedPage.locators) ||
+        step.sourceRefs.some((sourceRef) => sourceRef.startsWith("system-interaction:")))
+        ? pinnedPage
+        : findFallbackPage(step, brain.pages, contextQuery, pageScope) ?? pinnedPage;
     if (!stepPage) {
       missingEvidence.push({
         stepId: step.id,
@@ -667,7 +676,7 @@ function selectLocator(
       ? /button|link|menuitem/i
       : step.action === "fill"
         ? /textbox|input|searchbox/i
-        : /combobox|select|listbox|radio|checkbox/i;
+        : /combobox|select|listbox|radio|checkbox|textbox|input|searchbox/i;
   const roleMatches = locators.filter((locator) => preferredRoles.test(locator.role));
   const candidates = roleMatches;
   const query = `${contextQuery} ${step.instruction} ${step.targetSemantic}`.toLowerCase();
@@ -676,6 +685,9 @@ function selectLocator(
       locator,
       score:
         tokenOverlap(query, `${locator.name} ${locator.text}`.toLowerCase()) +
+        (semanticMatches(locator.name, step.targetSemantic)
+          ? 6
+          : 0) +
         (/new|create|add|\u65b0\u5efa|\u521b\u5efa/.test(query) &&
         /new|create|add|\u65b0\u5efa|\u521b\u5efa/i.test(`${locator.name} ${locator.text}`)
           ? 5
@@ -687,6 +699,55 @@ function selectLocator(
         right.locator.confidence - left.locator.confidence
     );
   return scored[0]?.score > 0 ? scored[0].locator : undefined;
+}
+
+function hasLocatorEvidence(step: ExecutableCaseStep, locators: LocatorPoint[]) {
+  return step.action === "navigate" || Boolean(selectLocator(step, locators));
+}
+
+function findFallbackPage(
+  step: ExecutableCaseStep,
+  pages: SystemBrainPage[],
+  contextQuery: string,
+  pageScope = ""
+) {
+  if (step.action === "navigate") return undefined;
+  const scopedPages = pagesForScope(pages, pageScope);
+  const candidates = scopedPages
+    .map((candidate) => ({
+      page: candidate,
+      locator: selectLocator(step, candidate.locators, contextQuery),
+      score: tokenOverlap(
+        `${contextQuery} ${step.instruction} ${step.targetSemantic}`.toLowerCase(),
+        `${candidate.name} ${candidate.locators
+          .map((locator) => `${locator.name} ${locator.text}`)
+          .join(" ")}`.toLowerCase()
+      ) * 2
+    }))
+    .filter((candidate) => candidate.locator);
+  if (candidates.length === 0) return undefined;
+  const best = candidates.filter(
+    (candidate) =>
+      semanticMatches(candidate.locator?.name ?? "", step.targetSemantic)
+  );
+  if (best.length === 1) return best[0].page;
+  if (candidates.length === 1) return candidates[0].page;
+  const query = `${contextQuery} ${step.instruction} ${step.targetSemantic}`;
+  const ranked = [...candidates]
+    .map((candidate) => ({
+      ...candidate,
+      score:
+        candidate.score +
+        (/offer/i.test(query) && /offer/i.test(`${candidate.page.name} ${candidate.locator?.name}`)
+          ? 6
+          : 0) +
+        (/new|create|add|\u65b0\u5efa|\u521b\u5efa/i.test(query) &&
+        /new|create|add|\u65b0\u5efa|\u521b\u5efa/i.test(candidate.locator?.name ?? "")
+          ? 5
+          : 0)
+    }))
+    .sort((left, right) => right.score - left.score);
+  return ranked[0].score > (ranked[1]?.score ?? 0) ? ranked[0].page : undefined;
 }
 
 function matchingStateTransitions(
@@ -712,14 +773,25 @@ function matchingStateTransitions(
   });
 }
 
-function selectPage(pages: SystemBrainPage[], query: string) {
-  if (pages.length <= 1) return pages[0];
-  const scored = scorePageCandidates(pages, query).map((candidate) => ({
-    page: pages.find((page) => page.pageModelId === candidate.pageModelId)!,
+function selectPage(pages: SystemBrainPage[], query: string, pageScope = "") {
+  const scopedPages = pagesForScope(pages, pageScope);
+  if (scopedPages.length === 0) return undefined;
+  if (scopedPages.length === 1) return scopedPages[0];
+  const scored = scorePageCandidates(scopedPages, query).map((candidate) => ({
+    page: scopedPages.find((page) => page.pageModelId === candidate.pageModelId)!,
     score: candidate.score
   }));
   if (scored[0].score === 0 || scored[0].score === scored[1].score) return undefined;
   return scored[0].page;
+}
+
+function pagesForScope(pages: SystemBrainPage[], pageScope: string) {
+  const normalizedScope = normalizeSemantic(pageScope);
+  if (!normalizedScope) return pages;
+  return pages.filter((page) => {
+    const identity = normalizeSemantic(`${page.name} ${page.route}`);
+    return identity.includes(normalizedScope) || normalizedScope.includes(identity);
+  });
 }
 
 export function scorePageCandidates(
@@ -769,6 +841,18 @@ function tokenOverlap(left: string, right: string) {
 
 function normalizeSemantic(value: string) {
   return value.replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function semanticMatches(left: string, right: string) {
+  const normalizedLeft = normalizeSemantic(left);
+  const normalizedRight = normalizeSemantic(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (normalizedLeft === normalizedRight) return true;
+  return (
+    normalizedLeft.length >= 3 &&
+    normalizedRight.length >= 3 &&
+    (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft))
+  );
 }
 
 function actionTrigger(type: string, locatorName: string, inputValue: string) {
