@@ -5,6 +5,11 @@ test-results/
 playwright-report/
 *.tgz
 .brain-creator/
+output/
+outputs/
+artifacts/
+*.trace.zip
+storage-state.json
 .gstack/
 .obsidian/
 .playwright-mcp/
@@ -13,6 +18,8 @@ playwright-report/
 /specs/
 /tests/seed-*.spec.ts
 /tests/generated/case_*.spec.ts
+/tests/generated/probe-*.spec.ts
+/tests/generated/setup-*.spec.ts
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 test_execution_agent_arch.png
