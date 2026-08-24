@@ -4343,7 +4343,7 @@ describe("handleBrainCreatorTool", () => {
           status: "failed",
           stdout: "",
           stderr:
-            "Required test data is unavailable: HC-A-001 is absent, so the expected staffing fields cannot be verified."
+            "Required test data is unavailable: TEST-HEADCOUNT-001 is absent, so the expected staffing fields cannot be verified."
         })
       );
 

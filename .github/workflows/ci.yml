@@ -46,5 +46,8 @@ jobs:
       - name: Verify package contents
         run: npm run verify:package-contents
 
+      - name: Verify repository hygiene
+        run: npm run verify:repository-hygiene
+
       - name: Verify installed package
         run: npm run verify:package-install

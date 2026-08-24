@@ -52,6 +52,7 @@
     "verify:historical-diagnosis-eval": "node --loader ts-node/esm scripts/historicalDiagnosisEval.ts",
     "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts",
     "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
+    "verify:repository-hygiene": "node --loader ts-node/esm scripts/verifyRepositoryHygiene.ts",
     "release:check": "node --loader ts-node/esm scripts/releaseReadiness.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
