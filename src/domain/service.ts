@@ -333,6 +333,30 @@ export class BrainCreatorService {
     return suite;
   }
 
+  cancelCaseSuite(suiteId: string): CaseSuite {
+    const suite = this.getCaseSuite(suiteId);
+    if (suite.status === "completed") {
+      throw new Error("Completed case suite cannot be cancelled");
+    }
+    const now = timestamp();
+    let cancelledTask = false;
+    for (const task of this.repository.agentTasks) {
+      if (task.status === "pending" && task.suiteContext?.suiteId === suiteId) {
+        task.status = "cancelled";
+        task.updatedAt = now;
+        cancelledTask = true;
+      }
+    }
+    if (suite.status === "cancelled") {
+      if (cancelledTask) this.repository.persist();
+      return suite;
+    }
+    suite.status = "cancelled";
+    suite.updatedAt = now;
+    this.repository.persist();
+    return suite;
+  }
+
   enableCaseSuiteContinueOnBlocked(suiteId: string): CaseSuite {
     const suite = this.getCaseSuite(suiteId);
     suite.continueOnBlocked = true;

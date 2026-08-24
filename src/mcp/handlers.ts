@@ -1840,6 +1840,12 @@ async function runFacade(context: BrainCreatorMcpContext, input: Record<string, 
   const resolution = resolveSystemReference(context, input);
   const inputWithSystem = { ...input, systemId: resolution.systemId };
   if (mode === "case-source-suite") {
+    if (suiteActionArg(input) === "cancel") {
+      return {
+        ...(cancelCaseSourceSuite(context, inputWithSystem)),
+        systemResolution: resolution
+      };
+    }
     return {
       ...(await runCaseSourceSuite(context, inputWithSystem)),
       systemResolution: resolution
@@ -1848,6 +1854,34 @@ async function runFacade(context: BrainCreatorMcpContext, input: Record<string, 
   return {
     ...(await runBugRegression(context, inputWithSystem)),
     systemResolution: resolution
+  };
+}
+
+function cancelCaseSourceSuite(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>
+) {
+  const systemId = stringArg(input, "systemId");
+  const resumeTarget = optionalBooleanArg(input, "resume")
+    ? latestUnfinishedCaseSuite(context, systemId)
+    : undefined;
+  const suiteId = optionalStringArg(input, "suiteId") ?? resumeTarget?.suiteId;
+  if (!suiteId) {
+    throw new Error("suiteId is required to cancel a document case suite");
+  }
+  const suite = context.service.getCaseSuite(suiteId);
+  if (suite.systemId !== systemId) {
+    throw new Error("Case suite belongs to another business system");
+  }
+  ensureDocumentSuiteLedger(context, suite);
+  const cancelledSuite = context.service.cancelCaseSuite(suite.id);
+  completeDocumentSuiteLedger(context, cancelledSuite, "cancelled");
+  return {
+    mode: "case-source-suite",
+    status: "cancelled",
+    suite: cancelledSuite,
+    progress: caseSuiteProgress(context, cancelledSuite),
+    nextAction: "Run a new preview and confirm the document suite again."
   };
 }
 

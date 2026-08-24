@@ -3258,6 +3258,91 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.listCaseSuiteRuns(system.id)).toEqual([]);
   });
 
+  it("cancels an existing document suite before auth or bridge checks", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(
+        async () => ({ exitCode: 1, stdout: "", stderr: "bridge unavailable" }),
+        {
+          provider: "disabled",
+          preflight: async () => ({ ok: false, error: "bridge unavailable" })
+        }
+      )
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Legacy Suite System",
+        environment: "test",
+        baseUrl: "https://legacy.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://legacy.example.test"]
+      })
+    );
+    const source = context.service.upsertCaseSource({
+      systemId: system.id,
+      source: "F:\\legacy-cases.xlsx",
+      sourceType: "xlsx",
+      contentHash: "legacy-suite-hash",
+      caseCount: 1,
+      moduleStats: { Recruiting: 1 },
+      priorityStats: { P0: 1 }
+    });
+    const suite = context.service.createCaseSuite({
+      systemId: system.id,
+      sourceId: source.id,
+      totalCases: 1,
+      selectedCaseNos: ["TC-001"],
+      status: "waiting-for-agent"
+    });
+    context.service.createAgentTask({
+      id: "agentTask_legacy_suite",
+      systemId: system.id,
+      agent: "generator",
+      inputSummary: "TC-001 legacy task",
+      args: [],
+      outputPaths: [],
+      promptPath: "F:\\legacy-task\\prompt.md",
+      contextPath: "F:\\legacy-task\\context.json",
+      suiteContext: {
+        suiteId: suite.id,
+        sourceId: source.id,
+        caseNo: "TC-001",
+        title: "Legacy case"
+      }
+    });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        suiteId: suite.id,
+        suiteAction: "cancel",
+        confirm: true
+      })
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        mode: "case-source-suite",
+        status: "cancelled",
+        suite: expect.objectContaining({ id: suite.id, status: "cancelled" })
+      })
+    );
+    expect(context.service.getCaseSuite(suite.id).status).toBe("cancelled");
+    expect(context.service.listAgentTasks(system.id)).toEqual([
+      expect.objectContaining({ id: "agentTask_legacy_suite", status: "cancelled" })
+    ]);
+    expect(context.runLedger.list({ systemId: system.id, caseSuiteId: suite.id }).at(-1)).toEqual(
+      expect.objectContaining({
+        event: "suite-completed",
+        toStatus: "cancelled",
+        outcome: "cancelled"
+      })
+    );
+  });
+
   it("blocks a confirmed document suite while manual authentication is pending", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
