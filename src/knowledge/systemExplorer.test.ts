@@ -28,6 +28,91 @@ afterEach(async () => {
 });
 
 describe("System exploration coordinator", () => {
+  it("records visible-browser interaction evidence as a reusable state transition", async () => {
+    const fixture = await createFixture();
+    const page = fixture.domainService.discoverPageModel({
+      projectId: fixture.systemId,
+      route: "https://orders.example.test/recruitmentRequirement/edit",
+      name: "Recruitment requirement edit",
+      authProfileId: "",
+      domText: "Employee Type Establishment Occupied",
+      captureMode: "manual",
+      targetUrl: "https://orders.example.test/recruitmentRequirement/edit",
+      browserCapture: {
+        title: "Recruitment requirement edit",
+        finalUrl: "https://orders.example.test/recruitmentRequirement/edit",
+        domText: "Employee Type Establishment Occupied",
+        screenshotPath: "evidence/recruitment-before.png",
+        interactiveElements: [
+          {
+            name: "Establishment Occupied",
+            role: "combobox",
+            text: "No",
+            selector: "[name=establishmentOccupied]"
+          }
+        ],
+        consoleErrors: [],
+        networkFailures: [],
+        issues: []
+      }
+    });
+
+    const result = await new SystemExplorationCoordinator({
+      repository: fixture.repository,
+      service: fixture.domainService,
+      knowledgeService: fixture.knowledgeService,
+      workDir: fixture.workDir
+    }).recordInteractionEvidence({
+      knowledgeProjectId: fixture.projectId,
+      systemId: fixture.systemId,
+      pageModelId: page.pageModel.id,
+      pageUrl: page.pageModel.route,
+      targetName: "Establishment Occupied",
+      targetRole: "combobox",
+      targetSelector: "[name=establishmentOccupied]",
+      targetKind: "select",
+      action: "select",
+      inputValue: "Yes",
+      before: {
+        id: "before-state",
+        url: page.pageModel.route,
+        visibleElements: ["Employee Type", "Position"],
+        dialogs: [],
+        controlValues: [{ name: "Establishment Occupied", value: "No" }]
+      },
+      after: {
+        id: "after-state",
+        url: page.pageModel.route,
+        visibleElements: ["Employee Type", "Position", "Establishment ABC", "Establishment Level"],
+        dialogs: [],
+        controlValues: [{ name: "Establishment Occupied", value: "Yes" }]
+      },
+      visibleAdded: ["Establishment ABC", "Establishment Level"],
+      visibleRemoved: [],
+      dialogAdded: [],
+      dialogRemoved: [],
+      changedControls: [{ name: "Establishment Occupied", before: "No", after: "Yes" }],
+      urlChanged: false,
+      transitionKind: "state",
+      blockedRequests: [],
+      status: "observed",
+      screenshotPath: "evidence/recruitment-after.png",
+      evidenceRefs: ["page-model:" + page.pageModel.id, "screenshot:recruitment-before.png", "screenshot:recruitment-after.png"]
+    });
+
+    expect(result.exploration.status).toBe("completed");
+    expect(result.exploration.interactionTransitions).toHaveLength(1);
+    expect(result.brain.stateTransitions).toEqual([
+      expect.objectContaining({
+        targetName: "Establishment Occupied",
+        inputValue: "Yes",
+        transitionKind: "state",
+        visibleAdded: ["Establishment ABC", "Establishment Level"]
+      })
+    ]);
+    expect(result.brain.readiness.stateEvidence).toBe(true);
+  });
+
   it("waits for delayed SPA controls before capturing page evidence", async () => {
     const server = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });

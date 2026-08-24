@@ -121,6 +121,14 @@ export function planStateActions(
   const sourceRefs = [
     ...new Set([...transition.sourceRefs, `locator-point:${locator.id}`])
   ];
+  const pinTransitionContext = (step: ExecutableCaseStep) => {
+    if (step.action !== "navigate" && step.action !== "assert") return step;
+    return {
+      ...step,
+      pageModelId,
+      sourceRefs: [...new Set([...step.sourceRefs, `page-model:${pageModelId}`, ...sourceRefs])]
+    };
+  };
   return {
     verdict: "unique",
     pageModelId,
@@ -132,7 +140,7 @@ export function planStateActions(
       }
     ],
     transitionSourceRefs: sourceRefs,
-    steps: compiled.steps
+    steps: compiled.steps.map(pinTransitionContext)
   };
 }
 

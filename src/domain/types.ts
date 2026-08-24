@@ -225,6 +225,7 @@ export type SystemExplorationInteractionTransition = {
   reacquiredPage?: boolean;
   recovery?: InteractionRecoveryEvidence;
   screenshotPath?: string;
+  evidenceRefs?: string[];
   scenarioId?: string;
 };
 

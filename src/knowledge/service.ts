@@ -787,7 +787,12 @@ export class KnowledgeService {
           explorationTaskIds.push(task.id);
           compilationStages.push({ stage: "system-brain", verdict: compileStatus, reason: task.reason, sourceRefs: task.sourceRefs });
         } else {
-          const bound = bindStepsToSystemBrain(statePlanned.steps, brain, contextQuery);
+          const bound = bindStepsToSystemBrain(
+            statePlanned.steps,
+            brain,
+            contextQuery,
+            intent.module
+          );
           steps = bound.steps;
           const reasons = [...new Set(bound.missingEvidence.map((item) => item.reason))];
           if (reasons.length > 0) {
@@ -2738,7 +2743,7 @@ function executableCaseCompileKey(
   return createHash("sha256")
     .update(
       JSON.stringify({
-        compilerVersion: 2,
+        compilerVersion: 4,
         testIntentId: intent.id,
         systemId: systemId ?? null,
         requirementHash: requirementSet.contentHash,

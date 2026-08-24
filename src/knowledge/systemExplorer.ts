@@ -12,6 +12,7 @@ import type {
   InteractionRecoveryEvidence,
   PageCaptureEvidence,
   SystemExploration,
+  SystemExplorationInteractionTransition,
   SystemExplorationBudget,
   SystemExplorationNavigationEdge,
   SystemInteractionState
@@ -57,6 +58,7 @@ export type SystemInteractionEvidence = {
   reacquiredPage?: boolean;
   recovery?: InteractionRecoveryEvidence;
   screenshotPath?: string;
+  evidenceRefs?: string[];
   scenarioId?: string;
 };
 
@@ -110,6 +112,36 @@ type ExploreInput = {
   interactionMode?: "off" | "safe";
   scenario?: Omit<ExplorationScenario, "id"> & { id?: string };
   budget?: Partial<SystemExplorationBudget>;
+};
+
+export type RecordInteractionEvidenceInput = {
+  knowledgeProjectId: string;
+  systemId: string;
+  pageModelId: string;
+  pageUrl: string;
+  targetName: string;
+  targetRole: string;
+  targetSelector: string;
+  targetKind: "tab" | "disclosure" | "select";
+  action: "click" | "select";
+  inputValue?: string;
+  before: SystemInteractionState;
+  after: SystemInteractionState;
+  visibleAdded: string[];
+  visibleRemoved: string[];
+  dialogAdded: string[];
+  dialogRemoved: string[];
+  changedControls?: Array<{ name: string; before: string; after: string }>;
+  urlChanged: boolean;
+  transitionKind?: "navigation" | "state";
+  blockedRequests: Array<{ method: string; url: string }>;
+  status: "observed" | "no-change" | "blocked" | "failed";
+  surface?: InteractionSurfaceRef;
+  reacquiredPage?: boolean;
+  recovery?: InteractionRecoveryEvidence;
+  screenshotPath?: string;
+  evidenceRefs: string[];
+  scenarioId?: string;
 };
 
 const DEFAULT_BUDGET: SystemExplorationBudget = {
@@ -287,6 +319,7 @@ export class SystemExplorationCoordinator {
           reacquiredPage: transition.reacquiredPage,
           recovery: transition.recovery,
           screenshotPath: transition.screenshotPath,
+          evidenceRefs: transition.evidenceRefs,
           scenarioId: transition.scenarioId
         }));
       });
@@ -384,6 +417,95 @@ export class SystemExplorationCoordinator {
         brain: knowledgeService.getSystemBrain(project.id, system.id)
       };
     }
+  }
+
+  async recordInteractionEvidence(input: RecordInteractionEvidenceInput) {
+    const { repository, knowledgeService, workDir } = this.input;
+    const project = repository.knowledgeProjects.find(
+      (candidate) => candidate.id === input.knowledgeProjectId
+    );
+    if (!project || !project.systemIds.includes(input.systemId)) {
+      throw new Error("Business system must be bound to the selected knowledge project");
+    }
+    const page = repository.pageModels.find(
+      (candidate) => candidate.id === input.pageModelId && candidate.projectId === input.systemId
+    );
+    if (!page) throw new Error("Interaction evidence page does not belong to the selected business system");
+    if (canonicalUrl(page.route) !== canonicalUrl(input.pageUrl)) {
+      throw new Error("Interaction evidence URL does not match the selected page model");
+    }
+    const evidenceRefs = uniqueSorted(input.evidenceRefs.filter((value) => value.trim().length > 0));
+    if (evidenceRefs.length === 0) throw new Error("Interaction evidence requires source references");
+    if (input.action === "select" && !input.inputValue?.trim()) {
+      throw new Error("Select interaction evidence requires an input value");
+    }
+    const explorationId = id("exploration");
+    const transitionId = id("systemInteraction");
+    const now = new Date().toISOString();
+    const transition: SystemExplorationInteractionTransition = {
+      id: transitionId,
+      pageModelId: page.id,
+      pageUrl: canonicalUrl(input.pageUrl),
+      targetName: input.targetName,
+      targetRole: input.targetRole,
+      targetSelector: input.targetSelector,
+      targetKind: input.targetKind,
+      surface: input.surface,
+      action: input.action,
+      inputValue: input.inputValue,
+      before: input.before,
+      after: input.after,
+      visibleAdded: input.visibleAdded,
+      visibleRemoved: input.visibleRemoved,
+      dialogAdded: input.dialogAdded,
+      dialogRemoved: input.dialogRemoved,
+      changedControls: input.changedControls,
+      urlChanged: input.urlChanged,
+      transitionKind: input.transitionKind,
+      blockedRequests: input.blockedRequests,
+      status: input.status,
+      reacquiredPage: input.reacquiredPage,
+      recovery: input.recovery,
+      screenshotPath: input.screenshotPath,
+      evidenceRefs,
+      scenarioId: input.scenarioId
+    };
+    const exploration: SystemExploration = {
+      id: explorationId,
+      knowledgeProjectId: input.knowledgeProjectId,
+      systemId: input.systemId,
+      startUrl: canonicalUrl(input.pageUrl),
+      status: input.status === "observed" ? "completed" : "partial",
+      interactionMode: "safe",
+      budget: {
+        maxPages: 1,
+        maxDepth: 0,
+        maxDurationMs: 1,
+        maxInteractionsPerPage: 1
+      },
+      pageModelIds: [page.id],
+      navigationEdges: input.urlChanged
+        ? [{
+            fromUrl: canonicalUrl(input.before.url),
+            toUrl: canonicalUrl(input.after.url),
+            text: input.targetName,
+            fromPageModelId: page.id
+          }]
+        : [],
+      interactionTransitions: [transition],
+      warnings: [],
+      gapIds: [],
+      artifactDir: join(workDir, ".brain-creator", "system-explorations", explorationId),
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now
+    };
+    repository.systemExplorations.push(exploration);
+    repository.persist();
+    return {
+      exploration,
+      brain: await knowledgeService.refreshSystemBrain(input.knowledgeProjectId, input.systemId)
+    };
   }
 
   list(knowledgeProjectId: string, systemId?: string) {

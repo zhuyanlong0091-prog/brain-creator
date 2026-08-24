@@ -334,6 +334,11 @@ describe("State action planner", () => {
         })
       ])
     );
+    expect(
+      unique.executableCase.steps
+        .filter((step) => step.action === "navigate" || step.action === "assert")
+        .every((step) => step.pageModelId === "page-settings")
+    ).toBe(true);
 
     repository.systemExplorations[0].interactionTransitions.push({
       ...repository.systemExplorations[0].interactionTransitions[0],
