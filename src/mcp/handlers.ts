@@ -2087,9 +2087,12 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     });
   }
   const alreadyPassed = passedCaseNosForSuite(context, systemId, suite.id);
+  const alreadyBlocked = blockedCaseNosForSuite(context, systemId, suite.id);
   const casesToRun = parsed.cases.filter(
     (documentCase) =>
-      suite.selectedCaseNos.includes(documentCase.caseNo) && !alreadyPassed.has(documentCase.caseNo)
+      suite.selectedCaseNos.includes(documentCase.caseNo) &&
+      !alreadyPassed.has(documentCase.caseNo) &&
+      !(suite.continueOnBlocked === true && alreadyBlocked.has(documentCase.caseNo))
   );
   if (context.agentBridge?.provider === "host-agent") {
     const pendingTask = context.service
@@ -7595,6 +7598,18 @@ function passedCaseNosForSuite(context: BrainCreatorMcpContext, systemId: string
     }
   }
   return passed;
+}
+
+function blockedCaseNosForSuite(context: BrainCreatorMcpContext, systemId: string, suiteId: string) {
+  const blocked = new Set<string>();
+  for (const run of context.service.listCaseSuiteRuns(systemId).filter((item) => item.suiteId === suiteId)) {
+    for (const result of run.caseResults) {
+      if (result.status === "blocked") {
+        blocked.add(result.caseNo);
+      }
+    }
+  }
+  return blocked;
 }
 
 function attemptedCaseNosForSuite(

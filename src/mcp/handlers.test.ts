@@ -4744,6 +4744,21 @@ describe("handleBrainCreatorTool", () => {
         expect.objectContaining({ status: "blocked", blocked: 1 }),
         expect.objectContaining({ status: "completed", passed: 1 })
       ]);
+
+      const resumedAfterCompletedCase = dataOf(
+        await handleBrainCreatorTool(context, "bc_run", {
+          mode: "case-source-suite",
+          systemId: system.id,
+          source,
+          suiteId: firstRun.suite.id,
+          resume: true,
+          confirm: true,
+          continueOnBlocked: true
+        })
+      );
+      expect(resumedAfterCompletedCase).toEqual(
+        expect.objectContaining({ status: "completed" })
+      );
     } finally {
       restoreEnv("BRAIN_CREATOR_AGENT_PROVIDER", previousProvider);
     }
