@@ -1895,6 +1895,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     throw new Error("source is required unless resume is true and an unfinished suite exists");
   }
   const requestedBrowserMode = browserModeArg(input);
+  const requestedAuthProfileId = optionalStringArg(input, "authProfileId");
   const parsed = await parseCaseSource(source);
   const filters = caseSourceFilters(input);
   const selectedCases = filterDocumentCases(parsed.cases, filters);
@@ -1956,7 +1957,13 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     return { mode: "case-source-suite", status: "blocked", source: caseSource, gap, bridge };
   }
 
-  const awaitingAuthCheckpoints = context.service.listAuthCheckpoints(systemId, "awaiting-user");
+  const selectedAuthProfile = requestedAuthProfileId
+    ? findAuthProfileById(context, systemId, requestedAuthProfileId)
+    : findAuthProfile(context, systemId);
+
+  const awaitingAuthCheckpoints = context.service
+    .listAuthCheckpoints(systemId, "awaiting-user")
+    .filter((checkpoint) => checkpoint.authProfileId === selectedAuthProfile.id);
   if (awaitingAuthCheckpoints.length > 0) {
     const gap = context.service.reportGap({
       projectId: systemId,
@@ -1976,12 +1983,11 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     };
   }
 
-  const authState = await verifyCaseSourceSuiteAuthState(context, systemId);
+  const authState = await verifyCaseSourceSuiteAuthState(context, systemId, selectedAuthProfile);
   if (authState?.status === "expired") {
-    const authProfile = findAuthProfile(context, systemId);
     const authCheckpoint = context.service.createAuthCheckpoint({
       systemId,
-      authProfileId: authProfile.id,
+      authProfileId: selectedAuthProfile.id,
       reason: authState.reason ?? "Stored browser authentication has expired.",
       resumeInstruction:
         "Complete login in an isolated browser, save refreshed storage state, verify it in a fresh context, then resume the suite."
@@ -8363,11 +8369,11 @@ async function artifactSummary(context: BrainCreatorMcpContext, artifact: TestAr
 
 async function verifyCaseSourceSuiteAuthState(
   context: BrainCreatorMcpContext,
-  systemId: string
+  systemId: string,
+  profile = findAuthProfile(context, systemId)
 ): Promise<(AuthStateVerification & {
   authRefresh?: { attempted: boolean; provider?: string; status?: string; reason?: string };
 }) | undefined> {
-  const profile = findAuthProfile(context, systemId);
   const system = context.repository.systemProfiles.find((item) => item.id === systemId);
   if (!system) {
     throw new Error("Business system not found");

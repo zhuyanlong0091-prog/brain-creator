@@ -3400,6 +3400,76 @@ describe("handleBrainCreatorTool", () => {
     expect(context.service.listCaseSuiteRuns(system.id)).toEqual([]);
   });
 
+  it("ignores checkpoints belonging to superseded auth profiles when a verified profile is selected", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir,
+      agentBridge: Object.assign(
+        async () => ({ exitCode: 1, stdout: "", stderr: "bridge unavailable" }),
+        {
+          provider: "disabled",
+          preflight: async () => ({ ok: false, error: "bridge unavailable" })
+        }
+      )
+    });
+    const source = join(workDir, "cases.xlsx");
+    await writeFile(source, createXlsxFixture());
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Protected HRMS",
+        environment: "test",
+        baseUrl: "https://hrms.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://hrms.example.test"]
+      })
+    );
+    const supersededAuth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "qa",
+        loginMethod: "script",
+        secrets: {}
+      })
+    );
+    await handleBrainCreatorTool(context, "bc_create_auth_checkpoint", {
+      systemId: system.id,
+      authProfileId: supersededAuth.id,
+      reason: "Old browser session expired",
+      resumeInstruction: "Refresh the old browser session"
+    });
+    const selectedAuth = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_auth", {
+        projectId: system.id,
+        env: "test",
+        role: "approver",
+        loginMethod: "script",
+        secrets: {}
+      })
+    );
+    context.service.verifyAuthProfile(selectedAuth.id, {
+      targetUrl: system.baseUrl,
+      finalUrl: system.baseUrl,
+      title: "HRMS"
+    });
+
+    const result = dataOf(
+      await handleBrainCreatorTool(context, "bc_run", {
+        mode: "case-source-suite",
+        systemId: system.id,
+        authProfileId: selectedAuth.id,
+        source,
+        confirm: true
+      })
+    );
+
+    expect(result.status).toBe("blocked");
+    expect(result.gap.reason).toContain("Agent bridge unavailable");
+    expect(result.gap.reason).not.toContain("Manual authentication checkpoint");
+    expect(context.service.listCaseSuiteRuns(system.id)).toEqual([]);
+  });
+
   it("creates an auth checkpoint before generation when stored browser auth has expired", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
