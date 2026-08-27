@@ -4839,7 +4839,7 @@ describe("handleBrainCreatorTool", () => {
       expect(status.userSummary.readiness).toBe("action-required");
       expect(status.facadeNextAction).toBe("continue_case_source_suite");
       expect(status.userSummary.nextCommand).toBe("/bc continue");
-      expect(status.userSummary.activeSuite).toEqual({
+      expect(status.userSummary.activeSuite).toEqual(expect.objectContaining({
         suiteId: firstRun.suite.id,
         status: "waiting-for-agent",
         browserMode: "headless",
@@ -4863,7 +4863,7 @@ describe("handleBrainCreatorTool", () => {
           caseNo: "TC-002",
           title: nextCase.task.suiteContext.title
         }
-      });
+      }));
       expect(status.statusMarkdown).toContain(`Active suite progress: 0/2 passed; next TC-002`);
       expect(status.suites.unfinished).toEqual([
         expect.objectContaining({

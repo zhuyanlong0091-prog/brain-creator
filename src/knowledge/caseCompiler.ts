@@ -158,12 +158,17 @@ function clauseSteps(intent: TestIntent, sourceRefs: string[]): ExecutableCaseSt
 
 function deriveAssertion(content: string): ExecutableCaseStep["assertion"] {
   const normalized = normalizeRequirementText(content);
-  const branches = [...normalized.matchAll(/是否占编\s*[=:：]\s*(是|否)[^；。;]*?(展示|显示|隐藏)([^；。;]+)/g)]
+  const branches = [...normalized.matchAll(
+    /(?:当|若)?\s*([^；。;]+?)\s*(?:时|then)\s*[,，、:]?\s*(?:应|should)?\s*(显示|展示|隐藏|可编辑|不可编辑|出现|消失)\s*[:：]?\s*([^；。;]+)/giu
+  )]
     .map((match) => {
+      const condition = match[1]
+        .replace(/^.*(?:当|若)\s*/u, "")
+        .trim();
       const fields = normalizeFieldList(match[3]);
       if (!fields.length) return undefined;
-      const visibility = match[2] === "隐藏" ? "隐藏" : "显示";
-      return `当是否占编=${match[1]}时，应${visibility}：${fields.join("、")}`;
+      const visibility = /隐藏|不可编辑|消失/u.test(match[2]) ? match[2] : "显示";
+      return `当${condition}时，应${visibility}：${fields.join("、")}`;
     })
     .filter((value): value is string => Boolean(value));
 

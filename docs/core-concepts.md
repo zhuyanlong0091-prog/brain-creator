@@ -15,6 +15,24 @@ Source -> Requirement Brain -> Test Design -> Approval
 
 The Agent handles conversation and host capabilities. Brain Creator supplies persistent domain models, deterministic gates, execution orchestration, and evidence contracts.
 
+## Five Brains And The Harness
+
+The five Brains are logical boundaries inside one package, not five services:
+
+- `Requirement Brain`: expected behavior, source clauses, rules, workflows, and coverage.
+- `System Brain`: observed pages, locators, navigation, state transitions, and API evidence.
+- `Testcase Brain`: reviewable intents and evidence-bound executable cases.
+- `Testdata Brain`: business entities, reusable data recipes, leases, dependencies, and cleanup.
+- `Testexecution Brain`: execution plans, assertions, evidence, diagnosis, and regression history.
+
+The shared semantic spine connects these boundaries. For example, requirement terms such as `新增` and observed terms such as `新建` can resolve to the same `action:create` concept. A value such as `employee:testperson001` is a business entity reference that can be produced by one case and consumed by a later edit case.
+
+The Harness Runtime controls the lifecycle around every Agent task: context preparation, approval, execution, Eval, retry/healing budget, and terminal state. Agent output does not write domain assets until it passes the relevant structured gate. The current implementation exposes task state and events through `bc_status`; low-level orchestration remains compatible while it is gradually moved behind this lifecycle.
+
+### Unified Harness Output And Gates
+
+Planner, Generator, and Healer use versioned structured outputs. Scenarios, steps, assertions, and repairs must carry source references; Generator and Healer stay inside their declared file boundary, and Healer cannot remove assertions. A non-`pass` Planner Eval stops downstream test-asset writes. A business assertion failure in an execution chain still flows through Reporter and Bug/Gap diagnosis.
+
 ## Requirement Brain
 
 Requirement Brain answers: **What should the business system do, and where did that expectation come from?**
@@ -46,6 +64,14 @@ It derives a system-isolated view from:
 
 Requirement expectations and observed behavior are separate layers. A mismatch is retained as a conflict until execution evidence determines whether it is a product Bug, an outdated requirement, or an unresolved Gap.
 
+### Snapshots And Diff
+
+Each refreshed System Brain can produce a candidate snapshot. Snapshot asset identity is based on route, semantic role, and normalized meaning rather than random PageModel IDs. Use `bc_review` with `target=system-brain` and `view=history` or `view=diff` to inspect versions.
+
+Locator selector changes are recorded as `locator-changed` and can be auto-accepted when the semantic target is stable. Workflow, state-transition, and API behavior changes are recorded as `behavior-changed`, require review, and mark affected compilation for re-evaluation. A missing asset is never treated as deletion from one observation; it is a reviewable removal candidate.
+
+After a confirmed snapshot reports a behavioral change, TestIntents and ExecutableCases that reference that System Brain are marked `stale` with the ChangeSet, reason, and timestamp. Resolving test data cannot make a stale case look ready; confirm the new snapshot first, then incrementally recompile affected intents. Use `bc_review target=system-brain view=diff` for the change and `bc_status` for stale counts and recovery details.
+
 ## Case Compiler
 
 The compiler converts an approved `TestIntent` into an `ExecutableCase` for one bound `systemId`.
@@ -59,6 +85,8 @@ This rule prevents an Agent from silently inventing the kind of hidden action a 
 `TestDataProfile` describes what data is needed. `TestDataPlan` orders dependencies and chooses among fixed, generated, unique, existing-reference, runtime-captured, and secret-reference strategies.
 
 `TestDataLease` records what was reused or created, its evidence, and its cleanup state. Reuse is the default. Creating data requires explicit authorization and a cleanup policy.
+
+Testdata Brain also maintains a business-entity dependency graph. Entities can move through `lookup`, `create`, `transition`, `verify`, and `cleanup` Provider operations; a later case consumes the same entity reference instead of relying on execution order or copied strings. Review it with `bc_review target=testdata systemId=<system-id>`.
 
 Secrets remain references. They must not be copied into prompts, generated tests, logs, reports, or package artifacts.
 
@@ -84,6 +112,8 @@ Use a `Gap` when Brain Creator cannot make a trustworthy conclusion. Common cate
 - missing requirement evidence.
 
 Every blocked terminal state must remain explainable through a Gap or checkpoint.
+
+Recovery state comes from the persisted Run Ledger rather than the host Agent's last message. `bc_status` can report the current case, step, page, sequence, wait reason, `possiblyStalled`, and next action even when the host does not support progress notifications.
 
 ## Facade And Internal Tools
 

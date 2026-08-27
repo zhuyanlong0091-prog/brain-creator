@@ -566,10 +566,10 @@ export class TestDataProviderService {
 
   private refreshCaseStatus(executableCase: ExecutableCase, now: string) {
     if (executableCase.dataPlan?.verdict !== "ready") return;
-    executableCase.status = executableCaseCompileStatus(
-      this.repository,
-      executableCase
-    );
+    const wasStale = executableCase.status === "stale";
+    executableCase.status = wasStale
+      ? "stale"
+      : executableCaseCompileStatus(this.repository, executableCase);
     executableCase.updatedAt = now;
     const intent = this.repository.testIntents.find(
       (item) => item.id === executableCase.testIntentId

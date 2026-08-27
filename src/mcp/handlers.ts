@@ -6,7 +6,8 @@ import { formatScenariosAsMarkdown, parseSpecMarkdown } from "../agent/caseForma
 import {
   InMemoryBrainCreatorRepository,
   JsonFileBrainCreatorRepository,
-  ShardedFileBrainCreatorRepository
+  ShardedFileBrainCreatorRepository,
+  SHARDED_REPOSITORY_SCHEMA_VERSION
 } from "../domain/repository.js";
 import { generateSeedFile } from "../agent/seedGenerator.js";
 import { buildAgentPrompt } from "../agent/promptBuilder.js";
@@ -84,6 +85,10 @@ import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js"
 import { RunLedgerService } from "../knowledge/runLedger.js";
 import { ExecutionDiagnosisService } from "../knowledge/executionDiagnosis.js";
 import {
+  classifyEvidenceFailure,
+  recoverExecutionState
+} from "../knowledge/executionRecovery.js";
+import {
   classifyExecutionFailure as classifyFailure
 } from "../knowledge/failureClassifier.js";
 import {
@@ -100,6 +105,12 @@ import {
   type CommandResult,
   type CommandRunner
 } from "../agent/orchestrator.js";
+import { runInHarness } from "../agent/harnessAdapter.js";
+import { plannerOutputFromResult } from "../brain/harnessSchema.js";
+import { HarnessRuntime } from "../brain/harness.js";
+import { SemanticSpineService } from "../brain/semanticSpine.js";
+import { SystemBrainSnapshotService } from "../brain/systemSnapshot.js";
+import { InMemoryTestDataProvider, TestDataBrainService } from "../brain/testdata.js";
 import {
   normalizeReporterExitCode,
   parsePlaywrightJsonReport
@@ -153,12 +164,16 @@ export type BrainCreatorMcpContext = {
   service: BrainCreatorService;
   knowledgeService: KnowledgeService;
   testDataProvider: TestDataProviderService;
+  testDataBrain: TestDataBrainService;
   executionPreflight: ExecutionPreflightService;
   requirementSuiteRuns: RequirementSuiteRunService;
   runLedger: RunLedgerService;
   executionDiagnosis: ExecutionDiagnosisService;
   systemExploration: SystemExplorationCoordinator;
   statefulExplorationPlans: StatefulExplorationPlanService;
+  harness: HarnessRuntime;
+  semanticSpine: SemanticSpineService;
+  systemBrainSnapshots: SystemBrainSnapshotService;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
@@ -243,6 +258,9 @@ export function createBrainCreatorMcpContext(
         input.storeDirPath ?? resolveBrainCreatorStoreDir(workDir),
         resolveBrainCreatorDataFile(workDir)
       );
+  const harness = new HarnessRuntime(repository);
+  const semanticSpine = new SemanticSpineService(repository);
+  const systemBrainSnapshots = new SystemBrainSnapshotService(repository);
   const service = new BrainCreatorService(repository);
   const configuredAuthProviders = new Set(
     (input.authRefreshAdapters ?? []).map((adapter) => adapter.provider)
@@ -259,13 +277,18 @@ export function createBrainCreatorMcpContext(
   const knowledgeService = new KnowledgeService(
     repository,
     input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir),
-    workDir
+    workDir,
+    systemBrainSnapshots,
+    semanticSpine
   );
   const testDataProvider = new TestDataProviderService(
     repository,
     knowledgeService,
     join(workDir, ".brain-creator")
   );
+  const testDataBrain = new TestDataBrainService(repository, [
+    new InMemoryTestDataProvider("local-fixture-provider")
+  ]);
   const executionPreflight = new ExecutionPreflightService(repository);
   const runLedger = new RunLedgerService(repository);
   const executionDiagnosis = new ExecutionDiagnosisService(repository);
@@ -279,6 +302,7 @@ export function createBrainCreatorMcpContext(
     service,
     knowledgeService,
     testDataProvider,
+    testDataBrain,
     executionPreflight,
     requirementSuiteRuns,
     runLedger,
@@ -294,6 +318,9 @@ export function createBrainCreatorMcpContext(
       repository,
       knowledgeService
     ),
+    harness,
+    semanticSpine,
+    systemBrainSnapshots,
     workDir,
     agentBridge:
       input.agentBridge ??
@@ -1482,6 +1509,29 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       stringArg(input, "systemId")
     );
   }
+  if (action === "confirm-system-snapshot") {
+    if (!optionalBooleanArg(input, "confirm")) {
+      const snapshotId = stringArg(input, "systemBrainSnapshotId");
+      const snapshot = context.repository.systemBrainSnapshots.find(
+        (item) => item.id === snapshotId
+      );
+      if (!snapshot) throw new Error("System Brain snapshot not found");
+      return {
+        status: "preview",
+        snapshot,
+        requiresConfirmation: true,
+        nextAction: "Confirm this System Brain snapshot before using it as a compilation baseline."
+      };
+    }
+    return {
+      status: "confirmed",
+      snapshot: context.systemBrainSnapshots.confirm(
+        stringArg(input, "systemBrainSnapshotId"),
+        optionalStringArg(input, "confirmedBy") ?? "agent-user"
+      ),
+      nextAction: "Recompile cases affected by the confirmed System Brain snapshot."
+    };
+  }
   const selectedIntentIds = stringArrayArg(input, "testIntentIds");
   const selectedModules = stringArrayArg(input, "modules");
   const requirementSetId = optionalStringArg(input, "requirementSetId");
@@ -1611,6 +1661,9 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     )
       ? context.runLedger.summary(activeDocumentSuite.suiteId)
       : undefined;
+  const activeDocumentExecutionRecovery = activeDocumentLedgerSummary
+    ? recoverExecutionState(context.repository, activeDocumentSuite!.suiteId)
+    : undefined;
   const nextAction = facadeNextAction({
     bridgeOk: snapshot.bridge.ok,
     awaitingAuthCheckpoints: awaitingAuthCheckpoints.length,
@@ -1645,7 +1698,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
               waitReason: activeDocumentLedgerSummary.waitReason,
               possiblyStalled: activeDocumentLedgerSummary.possiblyStalled,
               latestEvent: activeDocumentLedgerSummary.latestEvent,
-              traceId: activeDocumentLedgerSummary.traceId
+              traceId: activeDocumentLedgerSummary.traceId,
+              executionRecovery: activeDocumentExecutionRecovery
             }
           : {}),
         activeTask: activeDocumentSuite.activeTask
@@ -1692,6 +1746,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       total: documentRunLedgerEntries.length,
       activeSummary:
         activeDocumentLedgerSummary,
+      recovery: activeDocumentExecutionRecovery,
       recent: documentRunLedgerEntries.slice(-20),
       recentTruncated: documentRunLedgerEntries.length > 20
     },
@@ -1733,6 +1788,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       connectorStatus: context.feishuReader ? "feishu-configured" : "host-agent-fallback",
       reloadOperation: "bc_configure target=runtime operation=reload-config"
     },
+    brainRuntime: brainRuntimeStatus(context, systemId),
     requirementSuiteRuns: {
       total: requirementSuiteRuns.length,
       byStatus: countBy(requirementSuiteRuns, (run) => run.status),
@@ -1749,6 +1805,75 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       unfinishedSuites: unfinishedSuites.length
     }),
     toolGuidance: statusToolGuidance(nextAction)
+  };
+}
+
+function brainRuntimeStatus(context: BrainCreatorMcpContext, systemId?: string) {
+  const tasks = context.repository.brainTasks.filter(
+    (task) => !systemId || task.systemId === systemId
+  );
+  const taskIds = new Set(tasks.map((task) => task.id));
+  const sessions = context.repository.brainSessions.filter(
+    (session) => !systemId || session.currentSystemId === systemId
+  );
+  const events = context.repository.brainEvents.filter(
+    (event) => !systemId || (event.taskId ? taskIds.has(event.taskId) : false)
+  );
+  const concepts = context.repository.semanticConcepts.filter(
+    (concept) => !systemId || concept.systemId === systemId
+  );
+  const entities = context.repository.businessEntityInstances.filter(
+    (entity) => !systemId || entity.systemId === systemId
+  );
+  const snapshots = context.repository.systemBrainSnapshots.filter(
+    (snapshot) => !systemId || snapshot.systemId === systemId
+  );
+  return {
+    tasks: {
+      total: tasks.length,
+      active: tasks.filter((task) => ["pending", "running"].includes(task.status)),
+      byState: countBy(tasks, (task) => task.state)
+    },
+    sessions: {
+      total: sessions.length,
+      active: sessions.filter((session) => Boolean(session.activeTaskId))
+    },
+    events: {
+      total: events.length,
+      recent: events.slice(-20)
+    },
+    semanticSpine: {
+      concepts: concepts.length,
+      aliases: context.repository.semanticAliases.filter((alias) =>
+        concepts.some((concept) => concept.id === alias.conceptId)
+      ).length,
+      relations: context.repository.semanticRelations.filter((relation) =>
+        concepts.some((concept) => concept.id === relation.fromConceptId || concept.id === relation.toConceptId)
+      ).length,
+      businessEntities: entities.length
+    },
+    testdataBrain: systemId
+      ? {
+          entities: context.testDataBrain.graph(systemId).entities.length,
+          dependencies: context.testDataBrain.graph(systemId).dependencies.length
+        }
+      : {
+          entities: context.repository.businessEntityInstances.length,
+          dependencies: context.repository.testDataDependencies.length
+        },
+    staleArtifacts: {
+      intents: context.repository.testIntents.filter((intent) => intent.status === "stale").length,
+      executableCases: context.repository.executableCases.filter(
+        (executableCase) => (!systemId || executableCase.systemId === systemId) && executableCase.status === "stale"
+      ).length
+    },
+    systemBrainSnapshots: {
+      total: snapshots.length,
+      confirmed: snapshots.filter((snapshot) => snapshot.status === "confirmed").length,
+      candidate: snapshots.filter((snapshot) => snapshot.status === "candidate").length,
+      latest: snapshots
+        .sort((left, right) => right.revision - left.revision || right.createdAt.localeCompare(left.createdAt))[0]
+    }
   };
 }
 
@@ -2875,7 +3000,7 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
     }
     if (operation === "rebuild-index") {
       if (!(context.repository instanceof ShardedFileBrainCreatorRepository)) {
-        throw new Error("Index rebuild requires the schema 17 sharded repository");
+        throw new Error(`Index rebuild requires the schema ${SHARDED_REPOSITORY_SCHEMA_VERSION} sharded repository`);
       }
       return {
         status: "index-rebuilt",
@@ -4113,6 +4238,14 @@ async function executeRequirementSuiteCase(
           result.chainRun.gaps.map((gap) => gap.reason).join("; ")
         ].find((value): value is string => Boolean(value?.trim()))
       : undefined;
+  const requirementTestResult = "testResult" in result ? result.testResult : undefined;
+  const requirementFailureClassification = requirementFailure
+    ? classifyEvidenceFailure({
+        stderr: requirementTestResult?.stderr,
+        stdout: requirementTestResult?.stdout,
+        reporter: requirementTestResult?.structuredReporter
+      })
+    : undefined;
   const diagnosis =
     "chainRun" in result && result.chainRun?.status === "failed"
       ? context.executionDiagnosis.create({
@@ -4125,6 +4258,9 @@ async function executeRequirementSuiteCase(
           testCaseId: testCase.id,
           status: "failed",
           failureReason: requirementFailure,
+          failureType: requirementFailureClassification?.type,
+          consoleErrors: requirementTestResult?.structuredReporter?.consoleErrors,
+          networkFailures: requirementTestResult?.structuredReporter?.networkFailures,
           sourceType: "requirement-suite-run",
           healAttempts:
             "healerRuns" in result && Array.isArray(result.healerRuns)
@@ -4590,6 +4726,15 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         item.status === "blocked"
     )
     .at(-1);
+  const activeRequirementRunHasLedger = Boolean(
+    activeRequirementSuiteRun &&
+      runLedgerEntries.some(
+        (entry) => entry.requirementSuiteRunId === activeRequirementSuiteRun.id
+      )
+  );
+  const activeRequirementExecutionRecovery = activeRequirementRunHasLedger
+    ? recoverExecutionState(context.repository, activeRequirementSuiteRun!.id)
+    : undefined;
   const testDataTasks = context.repository.testDataTasks.filter(
     (item) => item.knowledgeProjectId === projectId
   );
@@ -4715,7 +4860,8 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
               (entry) => entry.requirementSuiteRunId === activeRequirementSuiteRun.id
             )
               ? context.runLedger.summary(activeRequirementSuiteRun.id).possiblyStalled
-              : false
+              : false,
+            executionRecovery: activeRequirementExecutionRecovery
           }
         : undefined
     },
@@ -4832,7 +4978,11 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         recent: explorations.slice(-5)
       },
       systemBrains,
-      openGaps: gaps
+      openGaps: gaps,
+      brainRuntime: brainRuntimeStatus(
+        context,
+        project.systemIds.length === 1 ? project.systemIds[0] : undefined
+      )
     },
     connectors: connectorStatus(context, projectId),
     latestCompileRunId: projectCompileRuns.at(-1)?.id,
@@ -5078,11 +5228,58 @@ function knowledgeReview(
       accuracy: context.knowledgeService.requirementEvalAccuracy(projectId, idValue)
     };
   }
-  if (target === "system-brain") {
-    if (!idValue) throw new Error("systemId is required to review System Brain");
+  if (target === "testdata") {
+    const requestedSystemId = optionalStringArg(input, "systemId");
+    if (requestedSystemId && !project.systemIds.includes(requestedSystemId)) {
+      throw new Error("Requested test data system is not bound to the knowledge project");
+    }
+    const systemIds = requestedSystemId ? [requestedSystemId] : project.systemIds;
+    const systems = systemIds.map((systemId) => {
+      const graph = context.testDataBrain.graph(systemId);
+      return {
+        systemId,
+        entities: graph.entities,
+        dependencies: graph.dependencies
+      };
+    });
     return {
       project,
-      brain: context.knowledgeService.getSystemBrain(projectId, idValue)
+      systems,
+      totals: {
+        entities: systems.reduce((total, item) => total + item.entities.length, 0),
+        dependencies: systems.reduce((total, item) => total + item.dependencies.length, 0)
+      }
+    };
+  }
+  if (target === "system-brain") {
+    if (!idValue) throw new Error("systemId is required to review System Brain");
+    const view = optionalStringArg(input, "view") ?? "current";
+    const snapshots = context.systemBrainSnapshots.history(idValue);
+    if (view === "history") {
+      return {
+        project,
+        systemId: idValue,
+        snapshots
+      };
+    }
+    if (view === "diff") {
+      const fromSnapshotId = stringArg(input, "fromSnapshotId");
+      const toSnapshotId = stringArg(input, "toSnapshotId");
+      return {
+        project,
+        systemId: idValue,
+        diff: context.systemBrainSnapshots.diff(idValue, fromSnapshotId, toSnapshotId)
+      };
+    }
+    return {
+      project,
+      brain: context.knowledgeService.getSystemBrain(projectId, idValue),
+      snapshot:
+        context.systemBrainSnapshots.latest(idValue) ??
+        context.systemBrainSnapshots.latest(idValue, "candidate"),
+      latestChangeSet: context.repository.systemBrainChangeSets
+        .filter((changeSet) => changeSet.systemId === idValue)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
     };
   }
   if (target === "system-exploration") {
@@ -5286,16 +5483,48 @@ async function generatePlan(context: BrainCreatorMcpContext, input: Record<strin
       specPath
     };
   }
-  const result = await generatePlanDraft({
-    workDir: context.workDir,
-    system,
-    authProfile,
-    requirement,
-    glossaryTerms: context.service.listGlossaryTerms({ projectId: systemId, query: "" }),
-    businessRules: context.service.listBusinessRules(systemId),
-    specPath,
-    agentBridge: context.agentBridge
+  const harnessResult = await runInHarness({
+    runtime: context.harness,
+    approved: true,
+    agent: "planner",
+    enforceEvaluation: true,
+    task: {
+      brain: "requirement",
+      operation: "generate-plan",
+      inputSummary: requirement,
+      systemId,
+      policy: {
+        allowWrites: true,
+        allowedFiles: [specPath],
+        requireApproval: false
+      }
+    },
+    execute: () => generatePlanDraft({
+      workDir: context.workDir,
+      system,
+      authProfile,
+      requirement,
+      glossaryTerms: context.service.listGlossaryTerms({ projectId: systemId, query: "" }),
+      businessRules: context.service.listBusinessRules(systemId),
+      specPath,
+      agentBridge: context.agentBridge
+    }),
+    structuredOutput: (result) => plannerOutputFromResult({
+      status: result.agentRun.status === "succeeded" ? "succeeded" : "failed",
+      scenarios: result.scenarios,
+      sourceRefs: [`agent-run:${result.agentRun.id}`, `system:${systemId}`],
+      gaps: result.agentRun.error ? [result.agentRun.error] : []
+    }),
+    evaluate: (result) => ({
+      verdict: result.agentRun.status === "succeeded" ? "pass" : "blocked",
+      score: result.agentRun.status === "succeeded" ? 1 : 0,
+      reasons: result.agentRun.error ? [result.agentRun.error] : [],
+      affectedAssetIds: [result.agentRun.id],
+      evidenceRefs: result.agentRun.outputPaths.map((path) => `artifact:${path}`),
+      nextActions: result.agentRun.status === "succeeded" ? [] : ["review-agent-run"]
+    })
   });
+  const result = harnessResult.result;
   context.service.recordAgentRun(result.agentRun);
   const testCase = context.service.createTestCase({
     systemId,
@@ -5433,24 +5662,91 @@ async function runApprovedChain(context: BrainCreatorMcpContext, input: Record<s
       testPath
     };
   }
-  const result = await runChain({
-    workDir: context.workDir,
-    system,
-    authProfile,
-    testCase,
-    agentBridge: context.agentBridge,
-    runner: context.runner,
-    structuredReporter,
-    maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
-    knowledgeContext: optionalStringArg(input, "knowledgeContext"),
-    actorJourney: actorJourneyProfiles,
-    requiredStepIds: executionPlan?.steps
-      .filter((step) => step.action !== "api")
-      .map((step) => step.id),
-    browserMode,
-    artifactLayout: artifactScope.layout,
-    caseNo: artifactScope.caseNo
+  const harnessResult = await runInHarness({
+    runtime: context.harness,
+    approved: true,
+    task: {
+      brain: "testexecution",
+      operation: "run-approved-chain",
+      inputSummary: testCase.requirement,
+      systemId: testCase.systemId,
+      requirementSetId: optionalStringArg(input, "requirementSetId"),
+      policy: {
+        allowWrites: true,
+        requireApproval: false,
+        allowedUrls: [system.baseUrl]
+      },
+      budget: {
+        maxHealAttempts: optionalNumberArg(input, "maxHealAttempts") ?? 1
+      }
+    },
+    execute: () => runChain({
+      workDir: context.workDir,
+      system,
+      authProfile,
+      testCase,
+      agentBridge: context.agentBridge,
+      runner: context.runner,
+      structuredReporter,
+      maxHealAttempts: optionalNumberArg(input, "maxHealAttempts"),
+      knowledgeContext: optionalStringArg(input, "knowledgeContext"),
+      actorJourney: actorJourneyProfiles,
+      requiredStepIds: executionPlan?.steps
+        .filter((step) => step.action !== "api")
+        .map((step) => step.id),
+      browserMode,
+      artifactLayout: artifactScope.layout,
+      caseNo: artifactScope.caseNo
+    }),
+    structuredOutputs: (result) => [
+      {
+        agent: "generator" as const,
+        output: {
+          version: 1,
+          agent: "generator" as const,
+          status: result.generateRun.status === "succeeded" ? "generated" as const : "blocked" as const,
+          testPath: result.testPath,
+          steps: testCase.scenarios.flatMap((scenario) => scenario.steps.map((step, index) => ({
+            id: `${scenario.id}-step-${index + 1}`,
+            sourceRefs: [`test-case:${testCase.id}`]
+          }))),
+          assertions: testCase.scenarios.flatMap((scenario) => scenario.steps
+            .filter((step) => step.action === "assert")
+            .map((step, index) => ({
+              id: `${scenario.id}-assertion-${index + 1}`,
+              sourceRefs: [`test-case:${testCase.id}`]
+            }))),
+          sourceRefs: [`test-case:${testCase.id}`, `agent-run:${result.generateRun.id}`]
+        }
+      },
+      ...result.healerRuns.map((healerRun) => ({
+        agent: "healer" as const,
+        output: {
+          version: 1,
+          agent: "healer" as const,
+          status: healerRun.status === "succeeded" ? "healed" as const : "unresolved" as const,
+          targetTestPath: result.testPath,
+          changedFiles: [result.testPath],
+          removedAssertionIds: [],
+          failureRefs: [`agent-run:${healerRun.id}`],
+          sourceRefs: [`agent-run:${healerRun.id}`, `chain-run:${result.chainRun.id}`],
+          notes: healerRun.error
+        }
+      }))
+    ],
+    evaluate: (result) => ({
+      verdict: result.chainRun.status === "succeeded" ? "pass" : result.chainRun.gaps.length > 0 ? "blocked" : "needs-review",
+      score: result.chainRun.status === "succeeded" ? 1 : 0,
+      reasons: result.chainRun.gaps.map((gap) => gap.reason),
+      affectedAssetIds: [result.chainRun.id],
+      evidenceRefs: [
+        `chain-run:${result.chainRun.id}`,
+        ...result.chainRun.gaps.map((gap) => `gap:${gap.id}`)
+      ],
+      nextActions: result.chainRun.status === "succeeded" ? [] : ["review-chain-run"]
+    })
   });
+  const result = harnessResult.result;
   context.service.recordAgentRun(result.generateRun);
   for (const healerRun of result.healerRuns) {
     context.service.recordAgentRun(healerRun);
@@ -5797,18 +6093,45 @@ async function runSingleAgent(context: BrainCreatorMcpContext, input: Record<str
   if (!system) {
     throw new Error("Business system not found");
   }
-  const agentRun = await runAgent({
-    systemId,
-    agent: agentArg(input, "agent"),
-    inputSummary: stringArg(input, "inputSummary"),
-    args: stringArrayArg(input, "args"),
-    outputPaths: stringArrayArg(input, "outputPaths"),
-    cwd: context.workDir,
-    timeoutMs: optionalNumberArg(input, "timeoutMs"),
-    agentBridge: context.agentBridge
+  const agent = agentArg(input, "agent");
+  const inputSummary = stringArg(input, "inputSummary");
+  const outputPaths = stringArrayArg(input, "outputPaths");
+  const harnessResult = await runInHarness({
+    runtime: context.harness,
+    approved: true,
+    task: {
+      brain: agent === "planner" ? "requirement" : agent === "generator" ? "testcase" : "testexecution",
+      operation: `run-${agent}`,
+      inputSummary,
+      systemId,
+      provider: context.agentBridge?.provider,
+      policy: {
+        allowWrites: outputPaths.length > 0,
+        allowedFiles: outputPaths,
+        requireApproval: false
+      }
+    },
+    execute: () => runAgent({
+      systemId,
+      agent,
+      inputSummary,
+      args: stringArrayArg(input, "args"),
+      outputPaths,
+      cwd: context.workDir,
+      timeoutMs: optionalNumberArg(input, "timeoutMs"),
+      agentBridge: context.agentBridge
+    }),
+    evaluate: (result) => ({
+      verdict: result.status === "succeeded" ? "pass" : "blocked",
+      score: result.status === "succeeded" ? 1 : 0,
+      reasons: result.error ? [result.error] : [],
+      affectedAssetIds: result.outputPaths,
+      evidenceRefs: result.outputPaths.map((path) => `artifact:${path}`),
+      nextActions: result.status === "succeeded" ? [] : ["review-agent-run"]
+    })
   });
-  context.service.recordAgentRun(agentRun);
-  return agentRun;
+  context.service.recordAgentRun(harnessResult.result);
+  return harnessResult.result;
 }
 
 async function prepareAgentTask(
@@ -6181,6 +6504,13 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     status === "failed"
       ? hostAgentFailureReason(result.task.agent, result.agentRun.error, testResult)
       : undefined;
+  const failureClassification = status === "failed"
+    ? classifyEvidenceFailure({
+        stderr: testResult?.stderr,
+        stdout: testResult?.stdout,
+        reporter: testResult?.structuredReporter
+      })
+    : undefined;
   const chainRunId = id("chain");
   const artifactPaths = [
     chainContext.specPath,
@@ -6212,6 +6542,9 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
           testCaseId: chainContext.testCaseId,
           status: "failed",
           failureReason,
+          failureType: failureClassification?.type,
+          consoleErrors: testResult?.structuredReporter?.consoleErrors,
+          networkFailures: testResult?.structuredReporter?.networkFailures,
           sourceType:
             result.task.agent === "healer"
               ? "host-agent-healer"
@@ -9199,7 +9532,8 @@ type KnowledgeReviewTarget =
   | "run-ledger"
   | "execution-diagnosis"
   | "evidence"
-  | "compile-run";
+  | "compile-run"
+  | "testdata";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
@@ -9224,7 +9558,8 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "run-ledger",
       "execution-diagnosis",
       "evidence",
-      "compile-run"
+      "compile-run",
+      "testdata"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
@@ -9306,7 +9641,8 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "run-ledger",
     "execution-diagnosis",
     "evidence",
-    "compile-run"
+    "compile-run",
+    "testdata"
   ].includes(value);
 }
 
@@ -9837,7 +10173,8 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "record-interaction-evidence",
       "record-training-evidence",
       "explore-system",
-      "refresh-system-brain"
+      "refresh-system-brain",
+      "confirm-system-snapshot"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
@@ -9874,7 +10211,8 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "record-interaction-evidence"
     | "record-training-evidence"
     | "explore-system"
-    | "refresh-system-brain";
+    | "refresh-system-brain"
+    | "confirm-system-snapshot";
 }
 
 function diagnosisAssetTypeArg(

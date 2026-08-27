@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("ShardedFileBrainCreatorRepository", () => {
-  it("writes schema 17 shards, required ownership directories, and rebuildable indexes", async () => {
+  it("writes schema 19 shards, required ownership directories, and rebuildable indexes", async () => {
     const root = await tempDir();
     const storeDir = join(root, ".brain-creator", "store");
     const legacyPath = join(root, ".brain-creator", "local-assets.json");
@@ -48,7 +48,7 @@ describe("ShardedFileBrainCreatorRepository", () => {
     repository.persist();
 
     const manifest = JSON.parse(await readFile(join(storeDir, "manifest.json"), "utf8"));
-    expect(manifest).toEqual(expect.objectContaining({ schemaVersion: 17, format: "sharded" }));
+    expect(manifest).toEqual(expect.objectContaining({ schemaVersion: 19, format: "sharded" }));
     expect(manifest.collections).toContain("systemProfiles");
     expect(manifest.collections).toContain("attachmentAnalyses");
     expect(existsSync(join(storeDir, "collections", "systemProfiles.json"))).toBe(true);
@@ -56,7 +56,7 @@ describe("ShardedFileBrainCreatorRepository", () => {
     expect(existsSync(join(storeDir, "indexes", "asset-index.json"))).toBe(true);
 
     const restored = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
-    expect(restored.schemaVersion).toBe(17);
+    expect(restored.schemaVersion).toBe(19);
     expect(restored.systemProfiles).toEqual([expect.objectContaining({ id: system.id })]);
     expect(restored.attachmentAnalyses).toEqual([expect.objectContaining({ id: "analysis-1" })]);
 
@@ -91,7 +91,7 @@ describe("ShardedFileBrainCreatorRepository", () => {
 
     const repository = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
 
-    expect(repository.schemaVersion).toBe(17);
+    expect(repository.schemaVersion).toBe(19);
     expect(repository.systemProfiles).toEqual([expect.objectContaining({ id: "system-legacy" })]);
     expect(existsSync(join(storeDir, "manifest.json"))).toBe(true);
     const backups = (await readdir(join(root, ".brain-creator"))).filter((name) =>

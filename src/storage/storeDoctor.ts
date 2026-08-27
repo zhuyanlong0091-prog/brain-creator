@@ -41,7 +41,7 @@ export function inspectStoreHealth(input: {
       temporaryFiles,
       message: legacyPresent
         ? "A legacy local-assets.json is present and will be migrated on the next Brain Creator start."
-        : "The schema 17 store has not been initialized yet.",
+        : `The schema ${SHARDED_REPOSITORY_SCHEMA_VERSION} store has not been initialized yet.`,
       remediation: "Start Brain Creator once to initialize or migrate the local store."
     };
   }
@@ -111,8 +111,8 @@ export function inspectStoreHealth(input: {
     legacyPresent,
     temporaryFiles,
     message: legacyPresent
-      ? "Schema 17 store is healthy, but the legacy source file remains as a migration backup."
-      : "Schema 17 sharded store, manifest, and index are healthy.",
+      ? `Schema ${SHARDED_REPOSITORY_SCHEMA_VERSION} store is healthy, but the legacy source file remains as a migration backup.`
+      : `Schema ${SHARDED_REPOSITORY_SCHEMA_VERSION} sharded store, manifest, and index are healthy.`,
     remediation: legacyPresent ? "Keep the legacy file until the migration is accepted, then archive it separately." : undefined
   };
 }

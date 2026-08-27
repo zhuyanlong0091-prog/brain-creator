@@ -24,6 +24,7 @@ type CreateExecutionDiagnosisInput = {
   testCaseId: string;
   status: "passed" | "failed" | "blocked";
   failureReason?: string;
+  failureType?: ExecutionFailureType;
   sourceType?: string;
   consoleErrors?: string[];
   networkFailures?: string[];
@@ -78,7 +79,7 @@ export class ExecutionDiagnosisService {
     const failureType =
       input.status === "passed"
         ? undefined
-        : classifyExecutionFailure(failureText, input.sourceType);
+        : input.failureType ?? classifyExecutionFailure(failureText, input.sourceType);
     const exhausted = attempted >= max;
     const evidenceAssurance = input.evidenceAssurance ??
       (input.executionEvidenceId
