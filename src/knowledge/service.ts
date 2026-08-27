@@ -68,12 +68,16 @@ import {
   executableCaseCompileStatus,
   validateStepProvenance
 } from "./caseCompiler.js";
+import { canonicalActionLabel, type SystemBrainSnapshotService } from "../brain/systemSnapshot.js";
+import type { SemanticSpineService } from "../brain/semanticSpine.js";
 
 export class KnowledgeService {
   constructor(
     private readonly repository: InMemoryBrainCreatorRepository,
     private readonly knowledgeDir: string,
-    private readonly sourceBaseDir = process.cwd()
+    private readonly sourceBaseDir = process.cwd(),
+    private readonly systemBrainSnapshots?: SystemBrainSnapshotService,
+    private readonly semanticSpine?: SemanticSpineService
   ) {}
 
   async createProject(input: { name: string; key: string; defaultLocale: string }) {
@@ -658,10 +662,11 @@ export class KnowledgeService {
     );
     const existing = this.repository.executableCases.find(
       (item) =>
-        item.testIntentId === intent.id &&
+      item.testIntentId === intent.id &&
         item.systemId === systemId &&
         item.compileKey === compileKey &&
         item.status !== "superseded" &&
+        item.status !== "stale" &&
         item.status !== "needs-exploration" &&
         item.status !== "ambiguous"
     );
@@ -924,6 +929,7 @@ export class KnowledgeService {
       dataPlan: dataPlanned.plan,
       coverageDimensions: intent.coverageDimensions,
       dataProfileIds: dataProfiles.map((profile) => profile.id),
+      systemBrainSnapshotId: systemId ? this.systemBrainSnapshots?.latest(systemId)?.id : undefined,
       explorationTaskIds,
       compilationStages,
       gapIds: gaps.map((gap) => gap.id),
@@ -1220,6 +1226,7 @@ export class KnowledgeService {
       executableCase.steps,
       input.resolutions
     );
+    const wasStale = executableCase.status === "stale";
     executableCase.dataPlan = resolved.plan;
     executableCase.steps = resolved.steps;
     const resolvedGaps = this.repository.gaps.filter(
@@ -1234,7 +1241,9 @@ export class KnowledgeService {
         gap.status = "resolved";
         gap.updatedAt = now;
       }
-      executableCase.status = executableCaseCompileStatus(this.repository, executableCase);
+      executableCase.status = wasStale
+        ? "stale"
+        : executableCaseCompileStatus(this.repository, executableCase);
       executableCase.updatedAt = now;
       const intent = this.getTestIntent(executableCase.testIntentId);
       intent.status = executableCase.status === "ready" ? "compiled" : executableCase.status;
@@ -1256,7 +1265,10 @@ export class KnowledgeService {
       executableCase.dataPlan,
       timestamp()
     );
-    executableCase.status = executableCaseCompileStatus(this.repository, executableCase);
+    const wasStale = executableCase.status === "stale";
+    executableCase.status = wasStale
+      ? "stale"
+      : executableCaseCompileStatus(this.repository, executableCase);
     executableCase.updatedAt = timestamp();
     const intent = this.getTestIntent(executableCase.testIntentId);
     intent.status = executableCase.status === "ready" ? "compiled" : executableCase.status;
@@ -1843,10 +1855,123 @@ export class KnowledgeService {
     }
     this.repository.persist();
     const brain = buildSystemBrain(this.repository, projectId, systemId);
+    this.indexSystemBrainSemantics(brain, projectId, systemId);
+    const snapshotResult = this.systemBrainSnapshots?.capture({
+      knowledgeProjectId: projectId,
+      systemId,
+      brain,
+      explorationIds: brain.navigationEdges.map((edge) => edge.explorationId)
+    });
+    if (snapshotResult?.changeSet) {
+      this.markSystemBrainImpacts(systemId, snapshotResult.changeSet.id, snapshotResult.changeSet.changes);
+    }
     await this.writeProjectIndex(project);
     await this.writeSystemKnowledge(project, systemId);
     await this.writeSystemBrain(project, brain);
     return brain;
+  }
+
+  private markSystemBrainImpacts(
+    systemId: string,
+    changeSetId: string,
+    changes: Array<{
+      impact: "none" | "recompile" | "blocked";
+      sourceRefs: string[];
+      kind: string;
+      reasons: string[];
+    }>
+  ) {
+    const actionable = changes.filter((change) => change.impact !== "none");
+    if (actionable.length === 0) return;
+    const changedRefs = new Set(actionable.flatMap((change) => change.sourceRefs));
+    const now = timestamp();
+    const affectedCases = this.repository.executableCases.filter((executableCase) => {
+      if (executableCase.systemId !== systemId || executableCase.status === "superseded") return false;
+      const caseRefs = [
+        ...executableCase.steps.flatMap((step) => step.sourceRefs),
+        ...(executableCase.pathPlan?.navigationSourceRefs ?? []),
+        ...(executableCase.pathPlan?.candidatePaths.flatMap((path) => path.sourceRefs) ?? []),
+        ...(executableCase.statePlan?.transitionSourceRefs ?? []),
+        ...(executableCase.statePlan?.candidates.flatMap((candidate) => candidate.sourceRefs) ?? [])
+      ];
+      const directMatch = caseRefs.some((ref) => changedRefs.has(ref));
+      const behaviorChange = actionable.some((change) =>
+        change.kind === "transition" || change.kind === "workflow" || change.kind === "api-flow"
+      );
+      const unscopedBehaviorChange = behaviorChange && actionable.some(
+        (change) =>
+          (change.kind === "transition" || change.kind === "workflow" || change.kind === "api-flow") &&
+          change.sourceRefs.length === 0
+      );
+      return directMatch || unscopedBehaviorChange;
+    });
+    for (const executableCase of affectedCases) {
+      executableCase.status = "stale";
+      executableCase.staleAt = now;
+      executableCase.staleByChangeSetId = changeSetId;
+      executableCase.staleReason = actionable
+        .map((change) => change.reasons[0])
+        .filter(Boolean)
+        .join("; ") || "System Brain evidence changed";
+      executableCase.updatedAt = now;
+      const intent = this.repository.testIntents.find((candidate) => candidate.id === executableCase.testIntentId);
+      if (intent && intent.status !== "stale") {
+        intent.status = "stale";
+        intent.updatedAt = now;
+      }
+    }
+    if (affectedCases.length > 0) this.repository.persist();
+  }
+
+  private indexSystemBrainSemantics(brain: SystemBrain, knowledgeProjectId: string, systemId: string) {
+    if (!this.semanticSpine) return;
+    for (const page of brain.pages) {
+      const pageConcept = this.semanticSpine.upsertConcept({
+        identityKey: `page:${page.route}`,
+        kind: "module",
+        canonicalName: page.name,
+        aliases: [page.route],
+        knowledgeProjectId,
+        systemId,
+        sourceRefs: page.sourceRefs,
+        confidence: page.probeIssueCount > 0 ? 0.7 : 0.95
+      });
+      for (const locator of page.locators) {
+        const label = locator.name || locator.text || locator.role;
+        this.semanticSpine.upsertConcept({
+          identityKey: `locator:${page.route}:${locator.role}:${canonicalActionLabel(label)}`,
+          kind: "object",
+          canonicalName: canonicalActionLabel(label),
+          aliases: [label, locator.text, locator.role].filter(Boolean),
+          knowledgeProjectId,
+          systemId,
+          sourceRefs: [...page.sourceRefs, `locator-point:${locator.id}`],
+          confidence: locator.confidence
+        });
+      }
+      for (const transition of brain.stateTransitions.filter(
+        (candidate) => candidate.pageModelId === page.pageModelId
+      )) {
+        const action = canonicalActionLabel(transition.targetName);
+        const actionConcept = this.semanticSpine.upsertConcept({
+          identityKey: `action:${page.route}:${action}`,
+          kind: "action",
+          canonicalName: action,
+          aliases: [transition.targetName],
+          knowledgeProjectId,
+          systemId,
+          sourceRefs: transition.sourceRefs,
+          confidence: 0.95
+        });
+        this.semanticSpine.linkConcepts({
+          fromConceptId: pageConcept.id,
+          toConceptId: actionConcept.id,
+          relation: "supports-action",
+          sourceRefs: transition.sourceRefs,
+          confidence: 0.9
+        });
+      }
+    }
   }
 
   private getProject(projectId: string) {

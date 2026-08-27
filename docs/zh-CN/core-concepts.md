@@ -15,6 +15,24 @@ Brain Creator 不是通用浏览器宏录制器，也不是 Web UI。它是在 C
 
 Agent 负责对话和宿主能力。Brain Creator 提供持久化领域模型、确定性门禁、执行编排和证据契约。
 
+## 五个 Brain 与 Harness
+
+五个 Brain 是同一个 TypeScript 包内的逻辑边界，不拆成五个服务：
+
+- `Requirement Brain`：需求预期、来源条款、规则、流程和覆盖。
+- `System Brain`：真实系统的页面、定位点、导航、状态转换和接口证据。
+- `Testcase Brain`：可审核的测试意图和绑定证据的可执行用例。
+- `Testdata Brain`：业务实体、数据配方、租约、依赖和清理。
+- `Testexecution Brain`：执行计划、断言、证据、诊断和回归历史。
+
+共享语义主干负责连接这些边界。例如，需求中的“新增”和系统中的“新建”可以解析为同一个 `action:create` 概念；`employee:testperson001` 是可被后续编辑用例消费的业务实体引用。
+
+Harness Runtime 管理每次 Agent 任务的上下文、审批、执行、Eval、重试预算和终态。Agent 输出必须先通过结构化门禁才能写入领域资产。当前可以通过 `bc_status` 查看任务状态和事件，底层编排接口仍保持兼容。
+
+### Harness 统一输出与门禁
+
+Planner、Generator、Healer 使用版本化结构化输出。每个场景、步骤、断言和修复都必须带来源引用；Generator/Healer 只能在声明的文件边界内工作，Healer 不得删除断言。Planner 的非 `pass` Eval 会阻止后续测试资产写入；执行链的业务断言失败仍会进入 Reporter、Bug/Gap 和诊断流程。
+
 ## Requirement Brain
 
 Requirement Brain 回答：**业务系统应该做什么，这个预期来自哪里？**
@@ -46,6 +64,14 @@ System Brain 回答：**选定的真实系统当前如何工作？**
 
 需求预期与系统观察是不同层。发现差异后保持 conflict，直到执行证据能够判断它是产品 Bug、过期需求还是未解决 Gap。
 
+### 快照与差异
+
+每次刷新 System Brain 都可以生成候选快照。快照使用路由、语义角色和归一化含义确定身份，不使用随机 PageModel ID。通过 `bc_review target=system-brain view=history` 查看历史，通过 `view=diff` 查看两个版本的差异。
+
+只有定位器选择器变化且语义目标和角色保持不变时，才记为 `locator-changed` 并可自动接受。流程、状态转换或接口行为变化会记为 `behavior-changed`，需要复核并重新评估受影响用例。单次未观察到资产不能直接判定系统删除。
+
+确认快照发生行为变化后，引用该 System Brain 的 TestIntent 和 ExecutableCase 会标记为 `stale`，并记录 ChangeSet、原因和时间。测试数据补齐不会把 stale 用例伪装成 ready；需要先确认新快照，再增量重编译受影响意图。`bc_review target=system-brain view=diff` 可查看差异，`bc_status` 可查看 stale 数量和运行恢复信息。
+
 ## Case Compiler
 
 编译器将已批准 `TestIntent` 转换为某个绑定 `systemId` 下的 `ExecutableCase`。
@@ -59,6 +85,8 @@ System Brain 回答：**选定的真实系统当前如何工作？**
 `TestDataProfile` 描述所需数据。`TestDataPlan` 排列依赖关系，并从固定值、生成值、唯一值、已有引用、运行时捕获和 secret 引用中选择策略。
 
 `TestDataLease` 记录复用或创建的数据、证据和清理状态。默认复用；创建数据需要显式授权和清理策略。
+
+Testdata Brain 还维护业务实体依赖图。实体可通过 `lookup`、`create`、`transition`、`verify` 和 `cleanup` Provider 生命周期化管理；后续用例引用同一实体，而不是依赖执行顺序猜测。已绑定知识项目可使用 `bc_review target=testdata systemId=<system-id>` 查看实体和依赖边。
 
 secret 只保留引用，不得写入 prompt、生成测试、日志、报告或 npm 包。
 
@@ -84,6 +112,8 @@ Brain Creator 无法得出可信结论时创建 `Gap`。常见类型包括：
 - 缺少需求证据。
 
 每个 blocked 终态必须能够通过 Gap 或 checkpoint 解释。
+
+执行恢复信息来自持久化 Run Ledger，而不是宿主 Agent 的最后一句话。`bc_status` 会返回当前用例、步骤、页面、序号、等待原因、`possiblyStalled` 和下一步动作；没有进度通知能力的宿主也可以通过该账本恢复。
 
 ## Facade 与内部工具
 

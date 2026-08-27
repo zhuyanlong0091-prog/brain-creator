@@ -261,6 +261,31 @@ describe("TestDataProviderService", () => {
     );
   });
 
+  it("keeps a case stale after its data is resolved", async () => {
+    const fixture = await providerFixture();
+    fixture.executableCase.status = "stale";
+    fixture.executableCase.staleReason = "System Brain transition changed";
+    fixture.executableCase.staleByChangeSetId = "change-set-1";
+    fixture.repository.testIntents[0].status = "stale";
+
+    const prepared = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true
+    });
+    const result = fixture.provider.submit({
+      taskId: prepared.task!.id,
+      status: "succeeded",
+      decision: "reuse",
+      reference: "customer:stale-case",
+      sourceRefs: ["api:customers/stale-case"]
+    });
+
+    expect(result.executableCase.status).toBe("stale");
+    expect(fixture.repository.testIntents[0].status).toBe("stale");
+  });
+
   it("requires cleanup policy and evidence for created data", async () => {
     const fixture = await providerFixture({ cleanup: "none" });
     await expect(

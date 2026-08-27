@@ -169,9 +169,11 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "record-interaction-evidence",
         "record-training-evidence",
         "explore-system",
-        "refresh-system-brain"
+        "refresh-system-brain",
+        "confirm-system-snapshot"
       ]),
       knowledgeProjectId: z.string().optional(),
+      systemBrainSnapshotId: z.string().optional(),
       requirementSetId: z.string().optional(),
       requirementSourceId: z.string().optional(),
       attachmentId: z.string().optional(),
@@ -587,13 +589,17 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "run-ledger",
         "execution-diagnosis",
         "evidence",
-        "compile-run"
+        "compile-run",
+        "testdata"
       ]),
       knowledgeProjectId: z.string().optional(),
       requirementSetId: z.string().optional(),
       systemId: z.string().optional(),
       systemName: z.string().optional(),
       environment: z.string().optional(),
+      view: z.enum(["current", "history", "diff"]).default("current"),
+      fromSnapshotId: z.string().optional(),
+      toSnapshotId: z.string().optional(),
       status: z.string().optional(),
       id: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),

@@ -7,8 +7,11 @@ export default defineConfig({
     exclude: [
       "**/node_modules/**",
       "**/.git/**",
+      "**/.worktrees/**",
       "**/.brain-creator-test/**",
       "**/.brain-creator/**",
+      "**/output/**",
+      "**/outputs/**",
       "tests/e2e/**",
       "tests/generated/**",
       "tests/seed-*.spec.ts"

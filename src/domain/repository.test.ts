@@ -196,7 +196,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(16);
+    expect(second.schemaVersion).toBe(19);
     expect(second.systemExplorations).toEqual([
       expect.objectContaining({ id: "exploration_1", status: "completed" })
     ]);
@@ -363,7 +363,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const second = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(second.schemaVersion).toBe(16);
+    expect(second.schemaVersion).toBe(19);
     expect(second.testDataTasks).toEqual([
       expect.objectContaining({ id: "testDataTask_1", status: "submitted" })
     ]);
@@ -464,7 +464,7 @@ describe("JsonFileBrainCreatorRepository", () => {
 
     const repository = new JsonFileBrainCreatorRepository(filePath);
 
-    expect(repository.schemaVersion).toBe(16);
+    expect(repository.schemaVersion).toBe(19);
     expect(repository.requirementSuiteRuns[0]).toEqual(
       expect.objectContaining({
         id: "legacy-suite",
@@ -475,6 +475,77 @@ describe("JsonFileBrainCreatorRepository", () => {
     );
     expect(repository.requirementSuiteRuns[0].caseRuns[0].attempts).toEqual([]);
     expect(repository.executionDiagnoses[0].gapIds).toEqual([]);
+  });
+
+  it("restores Harness state, semantic entities, and System Brain snapshots", async () => {
+    const filePath = join(await tempDir(), "assets.json");
+    const first = new JsonFileBrainCreatorRepository(filePath);
+    first.brainTasks.push({
+      id: "brain-task-1",
+      brain: "testexecution",
+      operation: "run-case",
+      systemId: "system-1",
+      state: "completed",
+      status: "succeeded",
+      inputSummary: "Run order case",
+      inputRefs: ["case:order-1"],
+      outputRefs: ["evidence:evidence-1"],
+      policy: {
+        allowedFiles: [],
+        allowedUrls: [],
+        allowedActions: [],
+        forbiddenActions: [],
+        allowWrites: false,
+        requireApproval: true
+      },
+      budget: {
+        maxAgentCalls: 5,
+        maxHealAttempts: 2,
+        maxWrites: 20,
+        maxDurationMs: 300000,
+        maxContextChars: 50000
+      },
+      agentCalls: 1,
+      healAttempts: 0,
+      writeCount: 0,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:01:00.000Z"
+    });
+    first.semanticConcepts.push({
+      id: "semantic-create",
+      identityKey: "order.create",
+      kind: "action",
+      canonicalName: "create",
+      aliases: ["新增", "新建"],
+      systemId: "system-1",
+      sourceRefs: ["requirement:order-1"],
+      confidence: 1,
+      status: "confirmed",
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:00:00.000Z"
+    });
+    first.systemBrainSnapshots.push({
+      id: "snapshot-1",
+      knowledgeProjectId: "knowledge-1",
+      systemId: "system-1",
+      revision: 1,
+      explorationIds: ["exploration-1"],
+      status: "confirmed",
+      assets: [],
+      contentHash: "hash-1",
+      createdAt: "2026-08-27T00:00:00.000Z",
+      confirmedAt: "2026-08-27T00:01:00.000Z",
+      confirmedBy: "tester"
+    });
+    first.persist();
+
+    const second = new JsonFileBrainCreatorRepository(filePath);
+
+    expect(second.brainTasks).toEqual([expect.objectContaining({ id: "brain-task-1", state: "completed" })]);
+    expect(second.semanticConcepts).toEqual([expect.objectContaining({ id: "semantic-create" })]);
+    expect(second.systemBrainSnapshots).toEqual([
+      expect.objectContaining({ id: "snapshot-1", status: "confirmed" })
+    ]);
   });
 });
 

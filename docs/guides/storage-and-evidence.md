@@ -1,10 +1,10 @@
 # Storage and evidence
 
-Brain Creator uses a local file repository. The default runtime store is `.brain-creator/store/`, a schema 17 sharded directory. The older `.brain-creator/local-assets.json` file remains a migration source and compatibility format; it is not the default write target for a new MCP context.
+Brain Creator uses a local file repository. The default runtime store is `.brain-creator/store/`, a schema 19 sharded directory. The older `.brain-creator/local-assets.json` file remains a migration source and compatibility format; it is not the default write target for a new MCP context.
 
 ## Migration
 
-On first startup, Brain Creator checks for `local-assets.json` when the schema 17 manifest is absent. It validates the JSON, creates a timestamped `local-assets.json.backup-*` file, writes the sharded store through temporary files and atomic renames, and then validates the new manifest. A failed migration does not delete the legacy source.
+On first startup, Brain Creator checks for `local-assets.json` when the schema 19 manifest is absent. It validates the JSON, creates a timestamped `local-assets.json.backup-*` file, writes the sharded store through temporary files and atomic renames, and then validates the new manifest. A failed migration does not delete the legacy source.
 
 The main paths are:
 
@@ -16,6 +16,8 @@ The main paths are:
   systems/<system-id>/assets.json
   knowledge/<knowledge-project-id>/requirements/<requirement-id>.json
   runs/<suite-run-id>/ledger.jsonl
+  collections/systemBrainSnapshots.json
+  collections/systemBrainChangeSets.json
   indexes/asset-index.json
 ```
 

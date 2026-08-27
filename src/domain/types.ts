@@ -940,6 +940,7 @@ export type TestIntent = {
     | "draft"
     | "approved"
     | "compiled"
+    | "stale"
     | "needs-exploration"
     | "needs-data"
     | "ambiguous"
@@ -1478,6 +1479,7 @@ export type ExecutableCase = {
   title: string;
   status:
     | "ready"
+    | "stale"
     | "needs-exploration"
     | "needs-data"
     | "ambiguous"
@@ -1485,6 +1487,10 @@ export type ExecutableCase = {
     | "executed"
     | "superseded";
   compileKey?: string;
+  systemBrainSnapshotId?: string;
+  staleReason?: string;
+  staleAt?: string;
+  staleByChangeSetId?: string;
   supersededById?: string;
   preconditions: string[];
   steps: ExecutableCaseStep[];

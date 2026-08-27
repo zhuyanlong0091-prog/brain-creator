@@ -55,16 +55,39 @@ import type {
   TestCase,
   TrainingSession
 } from "./types.js";
+import type {
+  BrainEvent,
+  BrainSession,
+  BrainTask,
+  BusinessEntityInstance,
+  SemanticAlias,
+  SemanticConcept,
+  SemanticRelation,
+  SystemBrainChangeSet,
+  SystemBrainSnapshot,
+  TestDataDependency
+} from "../brain/types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 16;
-export const SHARDED_REPOSITORY_SCHEMA_VERSION = 17;
-const OPTIONAL_SCHEMA_17_COLLECTIONS = new Set([
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 19;
+export const SHARDED_REPOSITORY_SCHEMA_VERSION = 19;
+const LEGACY_SHARDED_REPOSITORY_SCHEMA_VERSIONS = new Set([17, 18]);
+const OPTIONAL_SCHEMA_19_COLLECTIONS = new Set([
   "attachmentAnalyses",
   "workflowModels",
   "stateMachineModels",
   "requirementCoverageProfiles",
   "explorationTasks",
-  "explorationPlans"
+  "explorationPlans",
+  "brainTasks",
+  "brainSessions",
+  "brainEvents",
+  "semanticConcepts",
+  "semanticAliases",
+  "semanticRelations",
+  "businessEntityInstances",
+  "testDataDependencies",
+  "systemBrainSnapshots",
+  "systemBrainChangeSets"
 ]);
 
 export function shardedRepositoryCollectionKeys() {
@@ -119,6 +142,16 @@ export class InMemoryBrainCreatorRepository {
   explorationTasks: ExplorationTask[] = [];
   explorationPlans: ExplorationPlan[] = [];
   pageBindingDecisions: PageBindingDecision[] = [];
+  brainTasks: BrainTask[] = [];
+  brainSessions: BrainSession[] = [];
+  brainEvents: BrainEvent[] = [];
+  semanticConcepts: SemanticConcept[] = [];
+  semanticAliases: SemanticAlias[] = [];
+  semanticRelations: SemanticRelation[] = [];
+  businessEntityInstances: BusinessEntityInstance[] = [];
+  testDataDependencies: TestDataDependency[] = [];
+  systemBrainSnapshots: SystemBrainSnapshot[] = [];
+  systemBrainChangeSets: SystemBrainChangeSet[] = [];
 
   persist() {
     return;
@@ -175,6 +208,16 @@ export class InMemoryBrainCreatorRepository {
     this.explorationTasks = [];
     this.explorationPlans = [];
     this.pageBindingDecisions = [];
+    this.brainTasks = [];
+    this.brainSessions = [];
+    this.brainEvents = [];
+    this.semanticConcepts = [];
+    this.semanticAliases = [];
+    this.semanticRelations = [];
+    this.businessEntityInstances = [];
+    this.testDataDependencies = [];
+    this.systemBrainSnapshots = [];
+    this.systemBrainChangeSets = [];
     this.persist();
   }
 }
@@ -228,6 +271,16 @@ export type RepositorySnapshot = Pick<
   | "explorationTasks"
   | "explorationPlans"
   | "pageBindingDecisions"
+  | "brainTasks"
+  | "brainSessions"
+  | "brainEvents"
+  | "semanticConcepts"
+  | "semanticAliases"
+  | "semanticRelations"
+  | "businessEntityInstances"
+  | "testDataDependencies"
+  | "systemBrainSnapshots"
+  | "systemBrainChangeSets"
 >;
 
 export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorRepository {
@@ -316,14 +369,20 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
   private restoreShardedOrMigrate() {
     if (existsSync(this.manifestPath)) {
       const manifest = JSON.parse(readFileSync(this.manifestPath, "utf8")) as Record<string, unknown>;
-      if (manifest.format !== "sharded" || manifest.schemaVersion !== SHARDED_REPOSITORY_SCHEMA_VERSION) {
+      if (
+        manifest.format !== "sharded" ||
+        ![
+          ...LEGACY_SHARDED_REPOSITORY_SCHEMA_VERSIONS,
+          SHARDED_REPOSITORY_SCHEMA_VERSION
+        ].includes(manifest.schemaVersion as number)
+      ) {
         throw new Error("Brain Creator sharded store manifest is invalid");
       }
       const rawCollections = manifest.collections;
       const collections = Array.isArray(rawCollections) ? rawCollections : [];
       const expectedCollections = collectionKeys();
       const requiredCollections = expectedCollections.filter(
-        (key) => !OPTIONAL_SCHEMA_17_COLLECTIONS.has(key)
+        (key) => !OPTIONAL_SCHEMA_19_COLLECTIONS.has(key)
       );
       if (
         !Array.isArray(rawCollections) ||
@@ -339,6 +398,9 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
       const snapshot = readShardedSnapshot(this.collectionsDir);
       applyRepositorySnapshot(this, snapshot);
       this.schemaVersion = SHARDED_REPOSITORY_SCHEMA_VERSION;
+      if (manifest.schemaVersion !== SHARDED_REPOSITORY_SCHEMA_VERSION) {
+        this.persist();
+      }
       return;
     }
     if (existsSync(this.legacyFilePath)) {
@@ -452,7 +514,17 @@ function snapshotRepository(
     compileRuns: repository.compileRuns,
     explorationTasks: repository.explorationTasks,
     explorationPlans: repository.explorationPlans,
-    pageBindingDecisions: repository.pageBindingDecisions
+    pageBindingDecisions: repository.pageBindingDecisions,
+    brainTasks: repository.brainTasks,
+    brainSessions: repository.brainSessions,
+    brainEvents: repository.brainEvents,
+    semanticConcepts: repository.semanticConcepts,
+    semanticAliases: repository.semanticAliases,
+    semanticRelations: repository.semanticRelations,
+    businessEntityInstances: repository.businessEntityInstances,
+    testDataDependencies: repository.testDataDependencies,
+    systemBrainSnapshots: repository.systemBrainSnapshots,
+    systemBrainChangeSets: repository.systemBrainChangeSets
   };
 }
 
@@ -564,6 +636,16 @@ function applyRepositorySnapshot(
     repository.explorationTasks = snapshot.explorationTasks ?? [];
     repository.explorationPlans = snapshot.explorationPlans ?? [];
     repository.pageBindingDecisions = snapshot.pageBindingDecisions ?? [];
+    repository.brainTasks = snapshot.brainTasks ?? [];
+    repository.brainSessions = snapshot.brainSessions ?? [];
+    repository.brainEvents = snapshot.brainEvents ?? [];
+    repository.semanticConcepts = snapshot.semanticConcepts ?? [];
+    repository.semanticAliases = snapshot.semanticAliases ?? [];
+    repository.semanticRelations = snapshot.semanticRelations ?? [];
+    repository.businessEntityInstances = snapshot.businessEntityInstances ?? [];
+    repository.testDataDependencies = snapshot.testDataDependencies ?? [];
+    repository.systemBrainSnapshots = snapshot.systemBrainSnapshots ?? [];
+    repository.systemBrainChangeSets = snapshot.systemBrainChangeSets ?? [];
 }
 
 function collectionKeys(): Array<Exclude<keyof RepositorySnapshot, "schemaVersion">> {
@@ -577,7 +659,10 @@ function collectionKeys(): Array<Exclude<keyof RepositorySnapshot, "schemaVersio
     "knowledgeEdges", "testIntents", "testDataProfiles", "testDataTasks", "testDataLeases",
     "executableCases", "executionPlans", "requirementSuiteRuns", "executionEvidence",
     "executionDiagnoses", "executionDiagnosisReviews", "runLedgerEntries", "compileRuns",
-    "explorationTasks", "explorationPlans", "pageBindingDecisions"
+    "explorationTasks", "explorationPlans", "pageBindingDecisions", "brainTasks", "brainSessions",
+    "brainEvents", "semanticConcepts", "semanticAliases", "semanticRelations", "businessEntityInstances",
+    "testDataDependencies",
+    "systemBrainSnapshots", "systemBrainChangeSets"
   ];
 }
 
@@ -592,7 +677,7 @@ function readShardedSnapshot(collectionsDir: string): Partial<RepositorySnapshot
   for (const key of collectionKeys()) {
     const filePath = join(collectionsDir, `${key}.json`);
     if (!existsSync(filePath)) {
-      if (OPTIONAL_SCHEMA_17_COLLECTIONS.has(key)) {
+      if (OPTIONAL_SCHEMA_19_COLLECTIONS.has(key)) {
         snapshot[key] = [];
         continue;
       }
@@ -697,7 +782,39 @@ function systemAssets(repository: InMemoryBrainCreatorRepository, systemId: stri
     compileRuns: repository.compileRuns.filter((item) => item.systemId === systemId),
     explorationTasks: repository.explorationTasks.filter((item) => item.systemId === systemId),
     explorationPlans: repository.explorationPlans.filter((item) => item.systemId === systemId),
-    pageBindingDecisions: repository.pageBindingDecisions.filter((item) => item.systemId === systemId)
+    pageBindingDecisions: repository.pageBindingDecisions.filter((item) => item.systemId === systemId),
+    brainTasks: repository.brainTasks.filter((item) => item.systemId === systemId),
+    brainSessions: repository.brainSessions.filter((item) => item.currentSystemId === systemId),
+    brainEvents: repository.brainEvents.filter((item) => {
+      const task = repository.brainTasks.find((candidate) => candidate.id === item.taskId);
+      return task?.systemId === systemId;
+    }),
+    semanticConcepts: repository.semanticConcepts.filter((item) => item.systemId === systemId),
+    semanticAliases: repository.semanticAliases.filter((item) =>
+      repository.semanticConcepts.some(
+        (concept) => concept.id === item.conceptId && concept.systemId === systemId
+      )
+    ),
+    semanticRelations: repository.semanticRelations.filter((item) => {
+      const conceptIds = new Set(
+        repository.semanticConcepts
+          .filter((concept) => concept.systemId === systemId)
+          .map((concept) => concept.id)
+      );
+      return conceptIds.has(item.fromConceptId) && conceptIds.has(item.toConceptId);
+    }),
+    businessEntityInstances: repository.businessEntityInstances.filter(
+      (item) => item.systemId === systemId
+    ),
+    testDataDependencies: repository.testDataDependencies.filter(
+      (item) => item.systemId === systemId
+    ),
+    systemBrainSnapshots: repository.systemBrainSnapshots.filter(
+      (item) => item.systemId === systemId
+    ),
+    systemBrainChangeSets: repository.systemBrainChangeSets.filter(
+      (item) => item.systemId === systemId
+    )
   };
 }
 
@@ -731,7 +848,13 @@ function buildAssetIndex(repository: InMemoryBrainCreatorRepository) {
     ...repository.testIntents.map((item) => ({ id: item.id, type: "test-intent", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
     ...repository.executableCases.map((item) => ({ id: item.id, type: "executable-case", systemId: item.systemId, requirementSetId: item.requirementSetId, testIntentId: item.testIntentId, label: item.title })),
     ...repository.executionEvidence.map((item) => ({ id: item.id, type: "execution-evidence", systemId: item.systemId, executableCaseId: item.executableCaseId, requirementSetId: executableCaseById.get(item.executableCaseId)?.requirementSetId, label: item.id })),
-    ...repository.gaps.map((item) => ({ id: item.id, type: "gap", systemId: item.projectId, label: item.reason }))
+    ...repository.gaps.map((item) => ({ id: item.id, type: "gap", systemId: item.projectId, label: item.reason })),
+    ...repository.brainTasks.map((item) => ({ id: item.id, type: "brain-task", systemId: item.systemId, label: item.operation })),
+    ...repository.semanticConcepts.map((item) => ({ id: item.id, type: "semantic-concept", systemId: item.systemId, label: item.canonicalName })),
+    ...repository.businessEntityInstances.map((item) => ({ id: item.id, type: "business-entity", systemId: item.systemId, label: item.entityKey })),
+    ...repository.testDataDependencies.map((item) => ({ id: item.id, type: "test-data-dependency", systemId: item.systemId, label: `${item.fromReference} -> ${item.toReference}` })),
+    ...repository.systemBrainSnapshots.map((item) => ({ id: item.id, type: "system-brain-snapshot", systemId: item.systemId, label: `revision ${item.revision}` })),
+    ...repository.systemBrainChangeSets.map((item) => ({ id: item.id, type: "system-brain-change-set", systemId: item.systemId, label: item.status }))
   ];
 }
 

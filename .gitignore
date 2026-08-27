@@ -10,6 +10,8 @@ outputs/
 artifacts/
 *.trace.zip
 storage-state.json
+.worktrees/
+.worktree-*/
 .gstack/
 .obsidian/
 .playwright-mcp/
@@ -20,6 +22,9 @@ storage-state.json
 /tests/generated/case_*.spec.ts
 /tests/generated/probe-*.spec.ts
 /tests/generated/setup-*.spec.ts
+/tests/generated/seed.spec.ts
+output/
+outputs/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 test_execution_agent_arch.png
