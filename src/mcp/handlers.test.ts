@@ -10,6 +10,11 @@ import {
   handleBrainCreatorTool,
   summarizeStabilityRuns
 } from "./handlers.js";
+import type {
+  TestDataProvider,
+  TestDataProviderRequest,
+  TestDataProviderResult
+} from "../brain/testdata.js";
 
 const tempDirs: string[] = [];
 
@@ -122,6 +127,58 @@ describe("handleBrainCreatorTool", () => {
       restoreEnv("BRAIN_CREATOR_WORKSPACE", previousWorkspace);
       restoreEnv("BRAIN_CREATOR_DATA_FILE", previousDataFile);
     }
+  });
+
+  it("accepts a system-specific Testdata provider for real CRUD and lifecycle operations", async () => {
+    const calls: string[] = [];
+    const result = (status: TestDataProviderResult["status"]): TestDataProviderResult => ({
+      status,
+      reference: "order:external-001",
+      values: { state: status },
+      sourceRefs: ["provider:external"]
+    });
+    const provider: TestDataProvider = {
+      name: "external-order-system",
+      supports: (input: TestDataProviderRequest) => input.systemId === "system-external",
+      lookup: async () => { calls.push("lookup"); return result("found"); },
+      create: async () => { calls.push("create"); return result("created"); },
+      transition: async () => { calls.push("transition"); return result("transitioned"); },
+      verify: async () => { calls.push("verify"); return result("verified"); },
+      cleanup: async () => { calls.push("cleanup"); return result("cleaned"); }
+    };
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(await tempDir(), "assets.json"),
+      testDataProviders: [provider]
+    });
+
+    const created = await context.testDataBrain.create({
+      systemId: "system-external",
+      entityType: "order",
+      key: "external-001",
+      sourceRefs: ["case:order"]
+    });
+    await context.testDataBrain.transition({
+      systemId: "system-external",
+      reference: created.reference,
+      transition: "approved",
+      sourceRefs: ["workflow:approval"]
+    });
+    await context.testDataBrain.verify({
+      systemId: "system-external",
+      reference: created.reference,
+      expected: { state: "verified" },
+      sourceRefs: ["assertion:approved"]
+    });
+    await context.testDataBrain.cleanup({
+      systemId: "system-external",
+      reference: created.reference,
+      sourceRefs: ["cleanup:order"]
+    });
+
+    expect(calls).toEqual(["create", "transition", "verify", "cleanup"]);
+    expect(context.testDataBrain.graph("system-external").entities).toEqual([
+      expect.objectContaining({ entityKey: "order:external-001", status: "released" })
+    ]);
   });
 
   it("creates systems, auth, rules, and searchable assets through MCP results", async () => {

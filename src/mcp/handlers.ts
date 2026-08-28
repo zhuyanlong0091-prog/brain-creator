@@ -114,7 +114,11 @@ import { HarnessRuntime } from "../brain/harness.js";
 import type { BrainEvalResult } from "../brain/types.js";
 import { SemanticSpineService } from "../brain/semanticSpine.js";
 import { SystemBrainSnapshotService } from "../brain/systemSnapshot.js";
-import { InMemoryTestDataProvider, TestDataBrainService } from "../brain/testdata.js";
+import {
+  InMemoryTestDataProvider,
+  TestDataBrainService,
+  type TestDataProvider
+} from "../brain/testdata.js";
 import {
   normalizeReporterExitCode,
   parsePlaywrightJsonReport
@@ -218,6 +222,7 @@ type CreateContextInput = {
   authStateRefresher?: AuthStateRefresher;
   authRefreshRegistry?: AuthStateRefreshRegistry;
   authRefreshAdapters?: AuthRefreshAdapter[];
+  testDataProviders?: TestDataProvider[];
   knowledgeDir?: string;
   feishuReader?: RequirementSourceReader;
   systemExplorer?: SystemExplorer;
@@ -286,6 +291,7 @@ export function createBrainCreatorMcpContext(
     semanticSpine
   );
   const testDataBrain = new TestDataBrainService(repository, [
+    ...(input.testDataProviders ?? []),
     new InMemoryTestDataProvider("local-fixture-provider")
   ]);
   const testDataProvider = new TestDataProviderService(
