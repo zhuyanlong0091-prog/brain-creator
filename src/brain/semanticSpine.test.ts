@@ -30,6 +30,69 @@ describe("SemanticSpineService", () => {
     expect(repository.semanticConcepts).toHaveLength(1);
   });
 
+  it("maps requirement action synonyms to a system action concept", () => {
+    const repository = store();
+    const spine = new SemanticSpineService(repository);
+    const systemAction = spine.upsertConcept({
+      identityKey: "action:recruitment-demand:create",
+      kind: "action",
+      canonicalName: "create",
+      aliases: ["新建"],
+      knowledgeProjectId: "knowledge-hr",
+      systemId: "system-hr",
+      sourceRefs: ["system:page:recruitment"],
+      status: "confirmed"
+    });
+
+    expect(spine.resolve("新增", {
+      knowledgeProjectId: "knowledge-hr",
+      systemId: "system-hr"
+    })?.id).toBe(systemAction.id);
+    expect(spine.resolve("创建", {
+      knowledgeProjectId: "knowledge-hr",
+      systemId: "system-hr"
+    })?.canonicalName).toBe("create");
+  });
+
+  it("links requirement actions to the unique system action evidence", () => {
+    const repository = store();
+    const spine = new SemanticSpineService(repository);
+    const requirementAction = spine.upsertConcept({
+      identityKey: "requirement:requirement-1:action:create",
+      kind: "action",
+      canonicalName: "create",
+      aliases: ["新增"],
+      knowledgeProjectId: "knowledge-hr",
+      requirementSetId: "requirement-1",
+      sourceRefs: ["requirement:clause-1"],
+      status: "confirmed"
+    });
+    const systemAction = spine.upsertConcept({
+      identityKey: "action:recruitment:create",
+      kind: "action",
+      canonicalName: "create",
+      aliases: ["新建"],
+      knowledgeProjectId: "knowledge-hr",
+      systemId: "system-hr",
+      sourceRefs: ["system:transition-1"],
+      status: "confirmed"
+    });
+
+    const relations = spine.linkRequirementActionsToSystem({
+      knowledgeProjectId: "knowledge-hr",
+      systemId: "system-hr"
+    });
+
+    expect(relations).toEqual([
+      expect.objectContaining({
+        fromConceptId: requirementAction.id,
+        toConceptId: systemAction.id,
+        relation: "maps-to-system-action",
+        status: "confirmed"
+      })
+    ]);
+  });
+
   it("reuses the same business entity instance across dependent cases", () => {
     const repository = store();
     const spine = new SemanticSpineService(repository);

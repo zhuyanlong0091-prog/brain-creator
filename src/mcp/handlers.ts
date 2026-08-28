@@ -285,14 +285,15 @@ export function createBrainCreatorMcpContext(
     systemBrainSnapshots,
     semanticSpine
   );
-  const testDataProvider = new TestDataProviderService(
-    repository,
-    knowledgeService,
-    join(workDir, ".brain-creator")
-  );
   const testDataBrain = new TestDataBrainService(repository, [
     new InMemoryTestDataProvider("local-fixture-provider")
   ]);
+  const testDataProvider = new TestDataProviderService(
+    repository,
+    knowledgeService,
+    join(workDir, ".brain-creator"),
+    testDataBrain
+  );
   const executionPreflight = new ExecutionPreflightService(repository);
   const runLedger = new RunLedgerService(repository);
   const executionDiagnosis = new ExecutionDiagnosisService(repository);

@@ -94,7 +94,7 @@ Agent 默认使用高阶 Facade 工具。只有调试、审计或兼容旧流程
 - **源码开发**：克隆本仓库，运行 `npm install`、`npm test` 和 `npm run build`。
 - **全局 CLI**：可运行 `npm install -g brain-creator`，但项目本地安装更容易固定版本。
 
-CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin`、`export`、`artifacts` 和 `mcp`。使用 `brain-creator config` 查看脱敏配置；旧版独立命令仍兼容，可用 `brain-creator help legacy` 查看。
+CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin`、`export`、`artifacts`、`runner` 和 `mcp`。使用 `brain-creator config` 查看脱敏配置；使用 `brain-creator runner run --owner ci` 执行已批准且到期的稳定性套件；旧版独立命令仍兼容，可用 `brain-creator help legacy` 查看。
 
 默认运行数据使用 `.brain-creator/store/` 下的 schema 19 分片仓库。首次启动会检测旧的 `.brain-creator/local-assets.json`，创建时间戳备份后迁移；`BRAIN_CREATOR_STORE_DIR` 可指定分片仓库位置。
 
@@ -206,7 +206,7 @@ The trusted control plane removes manual runtime-store edits: auth can be create
 - **Source checkout:** clone this repository, then run `npm install`, `npm test`, and `npm run build`.
 - **Global CLI:** `npm install -g brain-creator` is supported, but a project-local install pins the version.
 
-The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, `export`, `artifacts`, and `mcp`. Compatibility executables remain available under `brain-creator help legacy`.
+The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, `export`, `artifacts`, `runner`, and `mcp`. Use `brain-creator runner run --owner ci` to claim and continue due, approved stability suites. Compatibility executables remain available under `brain-creator help legacy`.
 
 Runtime state is stored by default in the schema 19 sharded repository under `.brain-creator/store/`. On first startup Brain Creator detects `.brain-creator/local-assets.json`, creates a timestamped backup, and migrates it. Set `BRAIN_CREATOR_STORE_DIR` to choose another shard directory.
 

@@ -8,6 +8,7 @@ import type {
   TestDataLease,
   TestDataTask
 } from "../domain/types.js";
+import type { TestDataBrainService } from "../brain/testdata.js";
 import { id } from "../shared/id.js";
 import type { KnowledgeService } from "./service.js";
 import { executableCaseCompileStatus } from "./caseCompiler.js";
@@ -60,7 +61,8 @@ export class TestDataProviderService {
   constructor(
     private readonly repository: InMemoryBrainCreatorRepository,
     private readonly knowledgeService: KnowledgeService,
-    private readonly runtimeDir: string
+    private readonly runtimeDir: string,
+    private readonly testDataBrain?: TestDataBrainService
   ) {}
 
   async prepare(input: PrepareInput): Promise<TestDataPrepareResult> {
@@ -208,6 +210,11 @@ export class TestDataProviderService {
       lease.updatedAt = now;
       lease.sourceRefs = unique([...lease.sourceRefs, ...sourceRefs]);
       this.completeTask(task, sourceRefs, now);
+      this.testDataBrain?.releaseExternal({
+        systemId: task.systemId,
+        reference: lease.reference,
+        sourceRefs
+      });
       this.resolveCleanupGaps(lease.id, now);
       this.repository.persist();
       return { task, executableCase, lease };
@@ -238,6 +245,7 @@ export class TestDataProviderService {
     const now = timestamp();
     this.resolveProviderGaps(task, now);
     this.refreshCaseStatus(resolved.executableCase, now);
+    this.assertDependencyLeases(resolved.executableCase, task);
     const lease = this.createOrReuseLease({
       task,
       decision: input.decision,
@@ -246,6 +254,7 @@ export class TestDataProviderService {
       sourceRefs,
       now
     });
+    this.recordExternalData(resolved.executableCase, task, lease, sourceRefs);
     task.leaseId = lease.id;
     this.completeTask(task, sourceRefs, now);
     this.repository.persist();
@@ -477,6 +486,64 @@ export class TestDataProviderService {
     );
   }
 
+  private recordExternalData(
+    executableCase: ExecutableCase,
+    task: TestDataTask,
+    lease: TestDataLease,
+    sourceRefs: string[]
+  ) {
+    if (!this.testDataBrain) return;
+    this.testDataBrain.recordExternal({
+      knowledgeProjectId: task.knowledgeProjectId,
+      systemId: task.systemId,
+      entityType: entityTypeFromReference(lease.reference) ?? task.field,
+      reference: lease.reference,
+      sourceRefs: [...task.sourceRefs, ...sourceRefs]
+    });
+    const operation = executableCase.dataPlan?.operations.find(
+      (candidate) => candidate.profileId === task.profileId
+    );
+    for (const dependencyProfileId of operation?.dependsOnProfileIds ?? []) {
+      const dependencyLease = this.findDependencyLease(task, dependencyProfileId);
+      if (!dependencyLease) {
+        throw new Error(
+          `Test data dependency lease is missing for profile ${dependencyProfileId}`
+        );
+      }
+      this.testDataBrain.linkDependency({
+        systemId: task.systemId,
+        fromReference: lease.reference,
+        toReference: dependencyLease.reference,
+        relation: "requires",
+        sourceRefs: [...task.sourceRefs, ...sourceRefs]
+      });
+    }
+  }
+
+  private assertDependencyLeases(executableCase: ExecutableCase, task: TestDataTask) {
+    const operation = executableCase.dataPlan?.operations.find(
+      (candidate) => candidate.profileId === task.profileId
+    );
+    for (const dependencyProfileId of operation?.dependsOnProfileIds ?? []) {
+      if (!this.findDependencyLease(task, dependencyProfileId)) {
+        throw new Error(
+          `Test data dependency lease is missing for profile ${dependencyProfileId}`
+        );
+      }
+    }
+  }
+
+  private findDependencyLease(task: TestDataTask, dependencyProfileId: string) {
+    return this.repository.testDataLeases.find(
+      (candidate) =>
+        candidate.knowledgeProjectId === task.knowledgeProjectId &&
+        candidate.systemId === task.systemId &&
+        candidate.executableCaseId === task.executableCaseId &&
+        candidate.profileId === dependencyProfileId &&
+        candidate.status === "active"
+    );
+  }
+
   private releaseReusableLeasesAfterExecution(executableCase: ExecutableCase) {
     if (!this.hasTerminalEvidence(executableCase.id)) return;
     const now = timestamp();
@@ -606,6 +673,11 @@ export class TestDataProviderService {
     executableCase.updatedAt = now;
     return gap;
   }
+}
+
+function entityTypeFromReference(reference: string) {
+  const [prefix] = reference.split(":", 1);
+  return prefix?.trim() || undefined;
 }
 
 function cleanSourceRefs(sourceRefs: string[]) {

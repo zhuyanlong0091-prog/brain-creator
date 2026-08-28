@@ -12,6 +12,10 @@ import type {
   SystemProfile,
   TestIntent
 } from "../domain/types.js";
+import {
+  InMemoryTestDataProvider,
+  TestDataBrainService
+} from "../brain/testdata.js";
 import { KnowledgeService } from "./service.js";
 import { TestDataProviderService } from "./testDataProvider.js";
 
@@ -555,6 +559,126 @@ describe("TestDataProviderService", () => {
       })
     ).rejects.toThrow("system");
   });
+
+  it("records host-created entities and explicit profile dependencies", async () => {
+    const fixture = await providerFixture();
+    fixture.executableCase.dataPlan = {
+      verdict: "blocked",
+      reasons: ["Test data requires host resolution"],
+      operations: [
+        {
+          profileId: "profile-employee",
+          field: "Employee",
+          strategy: "existing-reference",
+          decision: "create",
+          status: "needs-resolution",
+          dependsOnProfileIds: [],
+          cleanup: "delete-created",
+          constraints: [],
+          sourceRefs: ["case:employee"]
+        },
+        {
+          profileId: "profile-offer",
+          field: "Offer",
+          strategy: "existing-reference",
+          decision: "create",
+          status: "needs-resolution",
+          dependsOnProfileIds: ["profile-employee"],
+          cleanup: "delete-created",
+          constraints: [],
+          sourceRefs: ["case:offer"]
+        }
+      ],
+      dependencyOrder: ["profile-employee", "profile-offer"],
+      requiresConfirmation: false,
+      requiresCleanup: true,
+      sourceRefs: ["case:data"]
+    };
+
+    const first = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true,
+      allowCreate: true
+    });
+    const employee = fixture.provider.submit({
+      taskId: first.task!.id,
+      status: "succeeded",
+      decision: "create",
+      reference: "employee:001",
+      sourceRefs: ["evidence:employee-created"]
+    });
+    expect(employee.lease?.reference).toBe("employee:001");
+
+    const second = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true,
+      allowCreate: true
+    });
+    fixture.provider.submit({
+      taskId: second.task!.id,
+      status: "succeeded",
+      decision: "create",
+      reference: "offer:001",
+      sourceRefs: ["evidence:offer-created"]
+    });
+
+    expect(fixture.testDataBrain.graph(fixture.system.id)).toEqual(expect.objectContaining({
+      entities: expect.arrayContaining([
+        expect.objectContaining({ entityKey: "employee:001", status: "active" }),
+        expect.objectContaining({ entityKey: "offer:001", status: "active" })
+      ]),
+      dependencies: [expect.objectContaining({
+        fromReference: "offer:001",
+        toReference: "employee:001",
+        relation: "requires"
+      })]
+    }));
+  });
+
+  it("does not leave an entity or lease when a required dependency is missing", async () => {
+    const fixture = await providerFixture();
+    fixture.executableCase.dataPlan = {
+      verdict: "blocked",
+      reasons: ["Test data requires host resolution"],
+      operations: [{
+        profileId: "profile-offer",
+        field: "Offer",
+        strategy: "existing-reference",
+        decision: "create",
+        status: "needs-resolution",
+        dependsOnProfileIds: ["profile-employee"],
+        cleanup: "delete-created",
+        constraints: [],
+        sourceRefs: ["case:offer"]
+      }],
+      dependencyOrder: ["profile-employee", "profile-offer"],
+      requiresConfirmation: false,
+      requiresCleanup: true,
+      sourceRefs: ["case:data"]
+    };
+
+    const prepared = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true,
+      allowCreate: true
+    });
+
+    expect(() => fixture.provider.submit({
+      taskId: prepared.task!.id,
+      status: "succeeded",
+      decision: "create",
+      reference: "offer:missing-parent",
+      sourceRefs: ["evidence:offer-created"]
+    })).toThrow("dependency lease");
+    expect(fixture.repository.testDataLeases).toHaveLength(0);
+    expect(fixture.testDataBrain.graph(fixture.system.id).entities).toHaveLength(0);
+  });
 });
 
 async function providerFixture(input: { cleanup?: "none" | "delete-created" | "restore" } = {}) {
@@ -660,12 +784,16 @@ async function providerFixture(input: { cleanup?: "none" | "delete-created" | "r
   repository.gaps.push(gap);
   repository.executableCases.push(executableCase);
   const knowledgeService = new KnowledgeService(repository, join(root, "knowledge"));
+  const testDataBrain = new TestDataBrainService(repository, [
+    new InMemoryTestDataProvider("fixture-provider", system.id)
+  ]);
   const provider = new TestDataProviderService(
     repository,
     knowledgeService,
-    join(root, "runtime")
+    join(root, "runtime"),
+    testDataBrain
   );
-  return { repository, project, system, intent, executableCase, provider };
+  return { repository, project, system, intent, executableCase, provider, testDataBrain };
 }
 
 async function tempDir() {

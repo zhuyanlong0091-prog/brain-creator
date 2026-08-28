@@ -4,6 +4,7 @@ import { id } from "../shared/id.js";
 
 export type TestDataProviderRequest = {
   systemId: string;
+  knowledgeProjectId?: string;
   entityType?: string;
   key?: string;
   reference?: string;
@@ -93,6 +94,41 @@ export class TestDataBrainService {
     return result;
   }
 
+  /** Record a data result produced by a host agent or an external system adapter. */
+  recordExternal(input: {
+    knowledgeProjectId?: string;
+    systemId: string;
+    entityType?: string;
+    reference: string;
+    values?: Record<string, string | number | boolean | null>;
+    sourceRefs?: string[];
+  }) {
+    const sourceRefs = input.sourceRefs ?? [];
+    return this.upsertEntity(
+      { ...input, sourceRefs },
+      {
+        status: "found",
+        reference: input.reference,
+        values: input.values,
+        sourceRefs
+      }
+    );
+  }
+
+  releaseExternal(input: { systemId: string; reference: string; sourceRefs?: string[] }) {
+    const entity = this.repository.businessEntityInstances.find(
+      (item) => item.systemId === input.systemId && item.entityKey === input.reference
+    );
+    if (!entity) return undefined;
+    const now = new Date().toISOString();
+    entity.status = "released";
+    entity.releasedAt = now;
+    entity.updatedAt = now;
+    entity.sourceRefs = [...new Set([...entity.sourceRefs, ...(input.sourceRefs ?? [])])];
+    this.repository.persist();
+    return entity;
+  }
+
   linkDependency(input: Omit<TestDataDependency, "id" | "createdAt">) {
     if (!sameSystemReference(input.systemId, input.fromReference) || !sameSystemReference(input.systemId, input.toReference)) {
       throw new Error("Test data dependencies must stay within the same system");
@@ -141,6 +177,7 @@ export class TestDataBrainService {
       updatedAt: now
     };
     entity.values = { ...entity.values, ...(result.values ?? input.values ?? {}) };
+    entity.knowledgeProjectId = input.knowledgeProjectId ?? entity.knowledgeProjectId;
     entity.sourceRefs = [...new Set([...entity.sourceRefs, ...input.sourceRefs, ...result.sourceRefs])];
     entity.status = "active";
     entity.updatedAt = now;

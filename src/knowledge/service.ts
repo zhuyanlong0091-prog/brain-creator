@@ -69,7 +69,11 @@ import {
   validateStepProvenance
 } from "./caseCompiler.js";
 import { canonicalActionLabel, type SystemBrainSnapshotService } from "../brain/systemSnapshot.js";
-import type { SemanticSpineService } from "../brain/semanticSpine.js";
+import {
+  canonicalSemanticAction,
+  extractSemanticActionTerms,
+  type SemanticSpineService
+} from "../brain/semanticSpine.js";
 
 export class KnowledgeService {
   constructor(
@@ -282,6 +286,7 @@ export class KnowledgeService {
       analyses: attachmentAnalyses
     });
     const analysis = augmentAnalysisWithProcessModels(textAnalysis, proposedModels, attachmentAnalyses);
+    this.indexRequirementSemantics(requirementSet.knowledgeProjectId, analysis);
     const evaluation = evaluatePolicyOutput(analysis);
     const inputHash = requirementDesignInputHash(
       requirementSet,
@@ -644,6 +649,7 @@ export class KnowledgeService {
       intent.status = "approved";
       intent.updatedAt = requirementSet.updatedAt;
     }
+    this.semanticSpine?.confirmRequirementActions(requirementSet.id);
     this.repository.persist();
     return requirementSet;
   }
@@ -1856,6 +1862,10 @@ export class KnowledgeService {
     this.repository.persist();
     const brain = buildSystemBrain(this.repository, projectId, systemId);
     this.indexSystemBrainSemantics(brain, projectId, systemId);
+    this.semanticSpine?.linkRequirementActionsToSystem({
+      knowledgeProjectId: projectId,
+      systemId
+    });
     const snapshotResult = this.systemBrainSnapshots?.capture({
       knowledgeProjectId: projectId,
       systemId,
@@ -1969,6 +1979,28 @@ export class KnowledgeService {
           relation: "supports-action",
           sourceRefs: transition.sourceRefs,
           confidence: 0.9
+        });
+      }
+    }
+  }
+
+  private indexRequirementSemantics(
+    knowledgeProjectId: string,
+    analysis: RequirementAnalysis
+  ) {
+    if (!this.semanticSpine) return;
+    for (const clause of analysis.clauses) {
+      for (const term of extractSemanticActionTerms(clause.text)) {
+        this.semanticSpine.upsertConcept({
+          identityKey: `requirement:${analysis.requirementSetId}:action:${canonicalSemanticAction(term)}`,
+          kind: "action",
+          canonicalName: canonicalSemanticAction(term),
+          aliases: [term],
+          knowledgeProjectId,
+          requirementSetId: analysis.requirementSetId,
+          sourceRefs: [clause.sourceRef],
+          confidence: 0.9,
+          status: "draft"
         });
       }
     }

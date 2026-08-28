@@ -151,8 +151,7 @@ export class SemanticSpineService {
     const candidates = this.store.semanticConcepts.filter(
       (concept) =>
         matchesScope(concept, scope) &&
-        (normalizeSemanticTerm(concept.canonicalName) === normalized ||
-          concept.aliases.some((alias) => normalizeSemanticTerm(alias) === normalized))
+        matchesConceptQuery(concept, normalized)
     );
     if (candidates.length === 1) return candidates[0];
     const aliases = this.store.semanticAliases.filter(
@@ -161,8 +160,62 @@ export class SemanticSpineService {
     const aliasConcepts = aliases
       .map((alias) => this.store.semanticConcepts.find((concept) => concept.id === alias.conceptId))
       .filter((concept): concept is SemanticConcept => Boolean(concept))
-      .filter((concept) => matchesScope(concept, scope));
+      .filter((concept) => matchesScope(concept, scope) && matchesConceptQuery(concept, normalized));
     return aliasConcepts.length === 1 ? aliasConcepts[0] : undefined;
+  }
+
+  linkRequirementActionsToSystem(input: {
+    knowledgeProjectId: string;
+    systemId: string;
+  }) {
+    const requirementActions = this.store.semanticConcepts.filter(
+      (concept) =>
+        concept.kind === "action" &&
+        concept.knowledgeProjectId === input.knowledgeProjectId &&
+        concept.systemId === undefined
+    );
+    const systemActions = this.store.semanticConcepts.filter(
+      (concept) =>
+        concept.kind === "action" &&
+        concept.knowledgeProjectId === input.knowledgeProjectId &&
+        concept.systemId === input.systemId
+    );
+    const relations: SemanticRelation[] = [];
+    for (const requirementAction of requirementActions) {
+      const candidates = systemActions.filter((systemAction) =>
+        equivalentActionConcepts(requirementAction, systemAction)
+      );
+      if (candidates.length !== 1) continue;
+      const systemAction = candidates[0];
+      relations.push(this.linkConcepts({
+        fromConceptId: requirementAction.id,
+        toConceptId: systemAction.id,
+        relation: "maps-to-system-action",
+        sourceRefs: unique([...requirementAction.sourceRefs, ...systemAction.sourceRefs]),
+        confidence: Math.min(requirementAction.confidence, systemAction.confidence),
+        status: requirementAction.status === "confirmed" && systemAction.status === "confirmed"
+          ? "confirmed"
+          : "draft"
+      }));
+    }
+    return relations;
+  }
+
+  confirmRequirementActions(requirementSetId: string) {
+    const now = new Date().toISOString();
+    const concepts = this.store.semanticConcepts.filter(
+      (concept) => concept.kind === "action" && concept.requirementSetId === requirementSetId
+    );
+    for (const concept of concepts) {
+      concept.status = "confirmed";
+      concept.updatedAt = now;
+      for (const alias of this.store.semanticAliases.filter((item) => item.conceptId === concept.id)) {
+        alias.status = "confirmed";
+        alias.updatedAt = now;
+      }
+    }
+    if (concepts.length > 0) this.store.persist();
+    return concepts;
   }
 
   upsertEntity(input: {
@@ -209,6 +262,59 @@ export function normalizeSemanticTerm(value: string) {
     .trim()
     .toLocaleLowerCase()
     .replace(/[\s\-_./:：，,。；;()[\]{}]+/gu, "");
+}
+
+export function canonicalSemanticAction(value: string) {
+  return canonicalActionTerm(value);
+}
+
+export function extractSemanticActionTerms(value: string) {
+  const matches = value.match(/新增|新建|创建|添加|建立|编辑|修改|更新|删除|移除|查询|搜索|查找|提交|保存|审批|通过|拒绝|驳回|关闭|create|add|edit|update|delete|search|submit|save|approve|reject|close/giu) ?? [];
+  return unique(matches);
+}
+
+function matchesConceptQuery(concept: SemanticConcept, normalizedQuery: string) {
+  const values = [concept.canonicalName, ...concept.aliases];
+  return values.some((value) => {
+    const normalized = normalizeSemanticTerm(value);
+    if (normalized === normalizedQuery) return true;
+    return concept.kind === "action" && canonicalActionTerm(value) === canonicalActionTerm(normalizedQuery);
+  });
+}
+
+function equivalentActionConcepts(left: SemanticConcept, right: SemanticConcept) {
+  const leftValues = [left.canonicalName, ...left.aliases];
+  const rightValues = [right.canonicalName, ...right.aliases];
+  return leftValues.some((leftValue) =>
+    rightValues.some((rightValue) => canonicalActionTerm(leftValue) === canonicalActionTerm(rightValue))
+  );
+}
+
+function canonicalActionTerm(value: string) {
+  const normalized = normalizeSemanticTerm(value);
+  const replacements: Array<[string, string]> = [
+    ["新增", "create"],
+    ["新建", "create"],
+    ["创建", "create"],
+    ["添加", "create"],
+    ["建立", "create"],
+    ["编辑", "edit"],
+    ["修改", "edit"],
+    ["更新", "edit"],
+    ["删除", "delete"],
+    ["移除", "delete"],
+    ["提交", "submit"],
+    ["保存", "save"],
+    ["审批", "approve"],
+    ["通过", "approve"],
+    ["拒绝", "reject"],
+    ["驳回", "reject"],
+    ["关闭", "close"]
+  ];
+  return replacements.reduce(
+    (result, [source, target]) => result.replaceAll(source, target),
+    normalized
+  );
 }
 
 function semanticId(input: Pick<UpsertSemanticConceptInput, "identityKey" | "kind" | "knowledgeProjectId" | "systemId" | "requirementSetId">) {

@@ -9,6 +9,8 @@ import {
   type BrainCreatorAgentProvider
 } from "./writeMcpConfig.js";
 import { startBrainCreatorServer } from "../mcp/server.js";
+import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "../mcp/handlers.js";
+import { runScheduledSuites } from "../runner/runner.js";
 import { exportCaseSuiteArchive } from "../storage/artifactArchive.js";
 import {
   applyArtifactMigration,
@@ -45,6 +47,7 @@ export type BrainCreatorCliDependencies = {
   migrateArtifacts: typeof migrateArtifactsFromWorkspace;
   rollbackArtifactMigration: typeof rollbackArtifactMigrationFromWorkspace;
   retainArtifacts: typeof retainArtifactsFromWorkspace;
+  runRunner: typeof runRunnerFromWorkspace;
 };
 
 const defaultDependencies: BrainCreatorCliDependencies = {
@@ -58,7 +61,8 @@ const defaultDependencies: BrainCreatorCliDependencies = {
   exportSuite: exportSuiteFromWorkspace,
   migrateArtifacts: migrateArtifactsFromWorkspace,
   rollbackArtifactMigration: rollbackArtifactMigrationFromWorkspace,
-  retainArtifacts: retainArtifactsFromWorkspace
+  retainArtifacts: retainArtifactsFromWorkspace,
+  runRunner: runRunnerFromWorkspace
 };
 
 const help = `Brain Creator ${BRAIN_CREATOR_VERSION}
@@ -73,6 +77,7 @@ Usage:
   brain-creator artifacts migrate [--target <path>] [--confirm]
   brain-creator artifacts rollback --migration <id> --confirm [--target <path>]
   brain-creator artifacts retention --older-than-days <days> [--system <id>] [--confirm]
+  brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--max-runs <n>] [--max-cases <n>]
   brain-creator mcp
   brain-creator --version
 
@@ -95,6 +100,7 @@ const commandHelp: Record<string, string> = {
   plugin: `Usage: brain-creator plugin install [--target <path>] [--package-root <path>] [--json]\n\nInstalls the Codex plugin and configures host-agent execution.`,
   export: `Usage: brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>] [--json]\n\nExports a portable Suite archive with evidence manifest and hashes.`,
   artifacts: `Usage:\n  brain-creator artifacts migrate [--target <path>] [--confirm]\n  brain-creator artifacts rollback --migration <id> --confirm [--target <path>]\n  brain-creator artifacts retention --older-than-days <days> [--system <id>] [--target <path>] [--confirm]\n\nMigration and retention are dry-run by default. Mutations require --confirm.`,
+  runner: `Usage: brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--max-runs <n>] [--max-cases <n>] [--target <path>] [--json]\n\nClaims due stability suites, continues approved cases through the existing Runner/Facade path, and releases the lease when execution must wait.`,
   mcp: `Usage: brain-creator mcp\n\nStarts the Brain Creator MCP server over stdio.`
 };
 
@@ -150,6 +156,9 @@ export async function runBrainCreatorCli(
     }
     if (command === "artifacts") {
       return await runArtifacts(commandArgs, json, io, dependencies);
+    }
+    if (command === "runner") {
+      return await runRunner(commandArgs, json, io, dependencies);
     }
     if (command === "migrate" && commandArgs[0] === "artifacts") {
       return await runArtifacts(["migrate", ...commandArgs.slice(1)], json, io, dependencies);
@@ -371,6 +380,43 @@ async function runArtifacts(
   throw new Error("Unknown artifacts command. Use migrate, rollback, or retention");
 }
 
+async function runRunner(
+  args: string[],
+  json: boolean,
+  io: CliIo,
+  dependencies: BrainCreatorCliDependencies
+) {
+  if (args[0] !== "run") {
+    throw new Error("Unknown runner command. Use: brain-creator runner run");
+  }
+  const actionArgs = args.slice(1);
+  assertAllowedArgs(
+    actionArgs,
+    ["--target", "--project", "--system", "--owner", "--max-runs", "--max-cases"],
+    []
+  );
+  const owner = optionValue(actionArgs, "--owner");
+  if (!owner) throw new Error("--owner requires a value");
+  const maxRuns = positiveIntegerOption(actionArgs, "--max-runs");
+  const maxCasesPerRun = positiveIntegerOption(actionArgs, "--max-cases");
+  const result = await dependencies.runRunner({
+    targetDir: optionValue(actionArgs, "--target"),
+    knowledgeProjectId: optionValue(actionArgs, "--project"),
+    systemId: optionValue(actionArgs, "--system"),
+    owner,
+    maxRuns,
+    maxCasesPerRun
+  });
+  writeSuccess(
+    io,
+    json,
+    "runner run",
+    result,
+    `Brain Creator Runner: ${result.status}; processed ${result.processedRuns} suite(s).`
+  );
+  return result.status === "failed" ? 1 : 0;
+}
+
 async function exportSuiteFromWorkspace(input: {
   suiteRunId: string;
   targetDir?: string;
@@ -441,6 +487,48 @@ async function retainArtifactsFromWorkspace(input: {
   return applyArtifactRetention({ workDir: workspace, plan, confirm: true });
 }
 
+async function runRunnerFromWorkspace(input: {
+  targetDir?: string;
+  knowledgeProjectId?: string;
+  systemId?: string;
+  owner: string;
+  maxRuns?: number;
+  maxCasesPerRun?: number;
+}) {
+  const workspace = resolveBrainCreatorWorkspace(input.targetDir ?? process.cwd(), process.env);
+  const context = createBrainCreatorMcpContext({
+    workDir: workspace,
+    structuredReporter: true
+  });
+  return runScheduledSuites({
+    controller: context.requirementSuiteRuns,
+    owner: input.owner,
+    knowledgeProjectId: input.knowledgeProjectId,
+    systemId: input.systemId,
+    maxRuns: input.maxRuns,
+    maxCasesPerRun: input.maxCasesPerRun,
+    execute: async (runId) => {
+      const run = context.requirementSuiteRuns.get(runId);
+      const response = await handleBrainCreatorTool(context, "bc_run", {
+        mode: "requirement-suite",
+        suiteAction: "continue",
+        suiteId: runId,
+        knowledgeProjectId: run.knowledgeProjectId,
+        systemId: run.systemId,
+        confirm: true,
+        browserMode: run.browserMode ?? "headless"
+      });
+      if (response.isError) {
+        const message = response.content
+          .filter((content): content is { type: "text"; text: string } => content.type === "text")
+          .map((content) => content.text)
+          .join("\n");
+        throw new Error(message || "Runner Facade execution failed");
+      }
+    }
+  });
+}
+
 function workspaceRepository(targetDir?: string) {
   const workspace = resolveBrainCreatorWorkspace(targetDir ?? process.cwd(), process.env);
   const repository = new ShardedFileBrainCreatorRepository(
@@ -458,6 +546,16 @@ function optionValue(args: string[], name: string) {
     throw new Error(`${name} requires a value`);
   }
   return value;
+}
+
+function positiveIntegerOption(args: string[], name: string) {
+  const value = optionValue(args, name);
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
 }
 
 function assertAllowedArgs(args: string[], valueOptions: string[], flags: string[]) {
