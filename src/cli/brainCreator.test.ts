@@ -235,6 +235,35 @@ describe("Brain Creator CLI", () => {
     });
   });
 
+  it("returns a retryable exit code when the Runner is waiting", async () => {
+    const io = createIo();
+    const deps = dependencies({
+      runRunner: vi.fn(async () => ({
+        status: "waiting" as const,
+        owner: "scheduler",
+        processedRuns: 1,
+        runs: []
+      }))
+    });
+
+    expect(
+      await runBrainCreatorCli(
+        ["runner", "run", "--owner", "scheduler", "--lease-ms", "60000"],
+        io,
+        deps
+      )
+    ).toBe(2);
+    expect(deps.runRunner).toHaveBeenCalledWith({
+      targetDir: undefined,
+      knowledgeProjectId: undefined,
+      systemId: undefined,
+      owner: "scheduler",
+      leaseMs: 60000,
+      maxRuns: undefined,
+      maxCasesPerRun: undefined
+    });
+  });
+
   it("exports a Suite archive through the consolidated CLI", async () => {
     const io = createIo();
     const deps = dependencies();

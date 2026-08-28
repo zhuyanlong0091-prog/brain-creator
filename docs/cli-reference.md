@@ -13,7 +13,7 @@ Use the consolidated `brain-creator` command to install, inspect, diagnose, and 
 | `brain-creator plugin install` | Install the Codex plugin and host-agent configuration | `npx brain-creator plugin install` |
 | `brain-creator export` | Export a completed Suite run with its evidence manifest | `npx brain-creator export --suite <id> --output exports/suite.zip` |
 | `brain-creator artifacts` | Preview/apply artifact migration, rollback, or retention | `npx brain-creator artifacts migrate` |
-| `brain-creator runner` | Run due, approved stability suites from a CI or scheduler process | `npx brain-creator runner run --owner ci` |
+| `brain-creator runner` | Run due, approved stability suites from a CI or scheduler process | `npx brain-creator runner run --owner ci --json` |
 | `brain-creator mcp` | Start the MCP server over stdio | `npx brain-creator mcp` |
 | `brain-creator help legacy` | List standalone compatibility executables | `npx brain-creator help legacy` |
 | `brain-creator --version` | Print the installed version | `npx brain-creator --version` |
@@ -117,7 +117,7 @@ npx brain-creator mcp
 ## `brain-creator runner`
 
 ```text
-brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--max-runs <n>] [--max-cases <n>] [--target <path>] [--json]
+brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--lease-ms <n>] [--max-runs <n>] [--max-cases <n>] [--target <path>] [--json]
 ```
 
 Runs due, already approved stability suites through the persisted lease control plane. The Runner does not approve new requirements or change a System Brain baseline. It claims each due run, continues it with the configured provider, and releases the lease with a resumable wait time when the host agent, authentication checkpoint, or environment is unavailable.
@@ -127,6 +127,8 @@ Use `--json` for CI logs and choose a stable `--owner` per scheduler instance. T
 ```bash
 npx brain-creator runner run --owner ci --project knowledge-orders --max-runs 1 --json
 ```
+
+The command is designed for one-shot external schedulers. Exit code `0` means no due run or all claimed runs completed; `1` means a failed, blocked, or partial run; `2` means the run was released because it is waiting for a provider or checkpoint and can be retried later. The persisted lease prevents two scheduler instances from executing the same Suite at the same time.
 
 ## `brain-creator export`
 

@@ -77,7 +77,7 @@ Usage:
   brain-creator artifacts migrate [--target <path>] [--confirm]
   brain-creator artifacts rollback --migration <id> --confirm [--target <path>]
   brain-creator artifacts retention --older-than-days <days> [--system <id>] [--confirm]
-  brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--max-runs <n>] [--max-cases <n>]
+  brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--lease-ms <n>] [--max-runs <n>] [--max-cases <n>]
   brain-creator mcp
   brain-creator --version
 
@@ -100,7 +100,7 @@ const commandHelp: Record<string, string> = {
   plugin: `Usage: brain-creator plugin install [--target <path>] [--package-root <path>] [--json]\n\nInstalls the Codex plugin and configures host-agent execution.`,
   export: `Usage: brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>] [--json]\n\nExports a portable Suite archive with evidence manifest and hashes.`,
   artifacts: `Usage:\n  brain-creator artifacts migrate [--target <path>] [--confirm]\n  brain-creator artifacts rollback --migration <id> --confirm [--target <path>]\n  brain-creator artifacts retention --older-than-days <days> [--system <id>] [--target <path>] [--confirm]\n\nMigration and retention are dry-run by default. Mutations require --confirm.`,
-  runner: `Usage: brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--max-runs <n>] [--max-cases <n>] [--target <path>] [--json]\n\nClaims due stability suites, continues approved cases through the existing Runner/Facade path, and releases the lease when execution must wait.`,
+  runner: `Usage: brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--lease-ms <n>] [--max-runs <n>] [--max-cases <n>] [--target <path>] [--json]\n\nClaims due stability suites, continues approved cases through the existing Runner/Facade path, and releases the lease when execution must wait.`,
   mcp: `Usage: brain-creator mcp\n\nStarts the Brain Creator MCP server over stdio.`
 };
 
@@ -392,11 +392,12 @@ async function runRunner(
   const actionArgs = args.slice(1);
   assertAllowedArgs(
     actionArgs,
-    ["--target", "--project", "--system", "--owner", "--max-runs", "--max-cases"],
+    ["--target", "--project", "--system", "--owner", "--lease-ms", "--max-runs", "--max-cases"],
     []
   );
   const owner = optionValue(actionArgs, "--owner");
   if (!owner) throw new Error("--owner requires a value");
+  const leaseMs = positiveIntegerOption(actionArgs, "--lease-ms");
   const maxRuns = positiveIntegerOption(actionArgs, "--max-runs");
   const maxCasesPerRun = positiveIntegerOption(actionArgs, "--max-cases");
   const result = await dependencies.runRunner({
@@ -404,6 +405,7 @@ async function runRunner(
     knowledgeProjectId: optionValue(actionArgs, "--project"),
     systemId: optionValue(actionArgs, "--system"),
     owner,
+    leaseMs,
     maxRuns,
     maxCasesPerRun
   });
@@ -414,7 +416,7 @@ async function runRunner(
     result,
     `Brain Creator Runner: ${result.status}; processed ${result.processedRuns} suite(s).`
   );
-  return result.status === "failed" ? 1 : 0;
+  return runnerExitCode(result.status);
 }
 
 async function exportSuiteFromWorkspace(input: {
@@ -492,6 +494,7 @@ async function runRunnerFromWorkspace(input: {
   knowledgeProjectId?: string;
   systemId?: string;
   owner: string;
+  leaseMs?: number;
   maxRuns?: number;
   maxCasesPerRun?: number;
 }) {
@@ -506,6 +509,7 @@ async function runRunnerFromWorkspace(input: {
     knowledgeProjectId: input.knowledgeProjectId,
     systemId: input.systemId,
     maxRuns: input.maxRuns,
+    leaseMs: input.leaseMs,
     maxCasesPerRun: input.maxCasesPerRun,
     execute: async (runId) => {
       const run = context.requirementSuiteRuns.get(runId);
@@ -527,6 +531,12 @@ async function runRunnerFromWorkspace(input: {
       }
     }
   });
+}
+
+function runnerExitCode(status: Awaited<ReturnType<typeof runRunnerFromWorkspace>>["status"]) {
+  if (status === "completed" || status === "no-due-runs") return 0;
+  if (status === "waiting") return 2;
+  return 1;
 }
 
 function workspaceRepository(targetDir?: string) {

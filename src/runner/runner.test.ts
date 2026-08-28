@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RequirementSuiteRun } from "../domain/types.js";
+import { InMemoryBrainCreatorRepository } from "../domain/repository.js";
+import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js";
 import { runScheduledSuites } from "./runner.js";
 
 function scheduledRun(): RequirementSuiteRun {
@@ -120,5 +122,55 @@ describe("scheduled Runner", () => {
 
     expect(result).toEqual(expect.objectContaining({ status: "no-due-runs", processedRuns: 0 }));
     expect(controller.claimScheduled).not.toHaveBeenCalled();
+  });
+
+  it("completes twenty stability iterations through the real suite service", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new RequirementSuiteRunService(repository);
+    const first = service.create({
+      knowledgeProjectId: "knowledge-long-run",
+      systemId: "system-orders",
+      cases: [{ executableCaseId: "case-order-approval", title: "Approve order" }],
+      continueOnBlocked: false,
+      stabilityGroupId: "long-run-orders",
+      stabilityIteration: 1,
+      stabilityTarget: 20,
+      stabilityPolicy: {
+        targetIterations: 20,
+        minIterations: 20,
+        minIntervalMs: 0,
+        requireStrongEvidence: false
+      }
+    });
+    let currentRunId = first.id;
+
+    for (let iteration = 1; iteration <= 20; iteration += 1) {
+      const current = service.get(currentRunId);
+      current.stabilitySchedule!.nextRunAt = "2020-01-01T00:00:00.000Z";
+      const result = await runScheduledSuites({
+        controller: service,
+        owner: "github-actions",
+        knowledgeProjectId: "knowledge-long-run",
+        now: new Date("2026-08-28T00:00:00.000Z"),
+        execute: async (runId) => {
+          const started = service.beginNext(runId);
+          service.completeCase(runId, started.caseRun!.executableCaseId, {
+            status: "passed",
+            chainRunId: `chain-${iteration}`,
+            gapIds: []
+          });
+        }
+      });
+
+      expect(result.status).toBe("completed");
+      currentRunId = service.get(currentRunId).stabilityNextRunId ?? currentRunId;
+    }
+
+    const runs = repository.requirementSuiteRuns.filter(
+      (run) => run.stabilityGroupId === "long-run-orders"
+    );
+    expect(runs).toHaveLength(20);
+    expect(runs.every((run) => run.status === "completed")).toBe(true);
+    expect(runs.every((run) => !run.stabilitySchedule?.leaseId)).toBe(true);
   });
 });

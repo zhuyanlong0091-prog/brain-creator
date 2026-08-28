@@ -1,0 +1,56 @@
+name: Brain Creator Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Brain Creator knowledge project id
+        required: true
+        type: string
+      system:
+        description: Brain Creator system id
+        required: true
+        type: string
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-creator-runner
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.BRAIN_CREATOR_RUNNER_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BRAIN_CREATOR_AGENT_PROVIDER: ${{ vars.BRAIN_CREATOR_AGENT_PROVIDER }}
+      BRAIN_CREATOR_AGENT_COMMAND: ${{ secrets.BRAIN_CREATOR_AGENT_COMMAND }}
+      BRAIN_CREATOR_AGENT_ARGS: ${{ secrets.BRAIN_CREATOR_AGENT_ARGS }}
+      BRAIN_CREATOR_AGENT_TIMEOUT_MS: ${{ vars.BRAIN_CREATOR_AGENT_TIMEOUT_MS || '120000' }}
+      BRAIN_CREATOR_KNOWLEDGE_PROJECT_ID: ${{ inputs.project || vars.BRAIN_CREATOR_KNOWLEDGE_PROJECT_ID }}
+      BRAIN_CREATOR_SYSTEM_ID: ${{ inputs.system || vars.BRAIN_CREATOR_SYSTEM_ID }}
+    steps:
+      - name: Checkout test project
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run due Brain Creator suites
+        run: >-
+          npx brain-creator runner run
+          --owner github-actions-${{ github.run_id }}
+          --project "$BRAIN_CREATOR_KNOWLEDGE_PROJECT_ID"
+          --system "$BRAIN_CREATOR_SYSTEM_ID"
+          --lease-ms 300000
+          --max-runs 1
+          --json

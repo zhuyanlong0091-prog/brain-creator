@@ -17,8 +17,25 @@ try {
     }),
     runner: async (command, args) => {
       assert(command === "npx", `Expected Playwright runner command to be npx, got ${command}`);
-      assert(args.join(" ") === `playwright test tests/generated/${testCaseId}.spec.ts`, "Unexpected Playwright args");
-      return { exitCode: 0, stdout: "host-agent smoke playwright passed", stderr: "" };
+      assert(args[0] === "playwright" && args[1] === "test", "Unexpected Playwright command");
+      assert(typeof args[2] === "string" && args[2].endsWith(".spec.ts"), "Unexpected Playwright test path");
+      assert(args.includes("--workers=1"), "Playwright smoke must run with one worker");
+      assert(args.includes("--reporter=json"), "Playwright smoke must request structured reporter output");
+      assert(args.includes("--trace=on"), "Playwright smoke must retain trace evidence");
+      assert(args.includes("--config"), "Playwright smoke must use the artifact config");
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          stats: { duration: 1, expected: 1, unexpected: 0, skipped: 0 },
+          suites: [{
+            specs: [{
+              title: "host-agent checkout smoke",
+              tests: [{ results: [{ status: "passed" }] }]
+            }]
+          }]
+        }),
+        stderr: ""
+      };
     }
   });
 
