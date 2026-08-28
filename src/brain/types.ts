@@ -9,6 +9,7 @@ export type BrainTaskState =
   | "created"
   | "context-ready"
   | "waiting-approval"
+  | "waiting-provider"
   | "executing"
   | "evaluating"
   | "healing"
@@ -48,6 +49,7 @@ export type BrainTask = {
   status: BrainTaskStatus;
   inputSummary: string;
   inputRefs: string[];
+  contextPack?: BrainContextPack;
   outputRefs: string[];
   provider?: string;
   policy: HarnessPolicy;
@@ -181,7 +183,7 @@ export type TestDataDependency = {
 
 export type EvidenceReference = {
   ref: string;
-  kind: "requirement" | "page" | "locator" | "workflow" | "state" | "data" | "execution" | "artifact";
+  kind: "requirement" | "system" | "page" | "locator" | "workflow" | "state" | "data" | "execution" | "artifact";
   label?: string;
 };
 

@@ -467,6 +467,8 @@ export type AgentTask = {
     maxHealAttempts?: number;
   };
   submitTool: "bc_submit_agent_output";
+  harnessTaskId?: string;
+  harnessSessionId?: string;
   createdAt: string;
   updatedAt: string;
   submittedAt?: string;

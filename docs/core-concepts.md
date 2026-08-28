@@ -27,7 +27,7 @@ The five Brains are logical boundaries inside one package, not five services:
 
 The shared semantic spine connects these boundaries. For example, requirement terms such as `新增` and observed terms such as `新建` can resolve to the same `action:create` concept. A value such as `employee:testperson001` is a business entity reference that can be produced by one case and consumed by a later edit case.
 
-The Harness Runtime controls the lifecycle around every Agent task: context preparation, approval, execution, Eval, retry/healing budget, and terminal state. Agent output does not write domain assets until it passes the relevant structured gate. The current implementation exposes task state and events through `bc_status`; low-level orchestration remains compatible while it is gradually moved behind this lifecycle.
+The Harness Runtime controls the lifecycle around every Agent task: context preparation, approval, provider waiting, execution, Eval, retry/healing budget, and terminal state. Agent output does not write domain assets until it passes the relevant structured gate. Host-agent continuations resume the same persisted Brain task instead of creating a second hidden lifecycle. Context budgets and path boundaries are enforced before provider output is accepted. The current implementation exposes task state and events through `bc_status`; low-level orchestration remains compatible while it is gradually moved behind this lifecycle.
 
 ### Unified Harness Output And Gates
 

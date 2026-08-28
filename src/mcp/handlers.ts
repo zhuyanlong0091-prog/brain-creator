@@ -106,8 +106,12 @@ import {
   type CommandRunner
 } from "../agent/orchestrator.js";
 import { runInHarness } from "../agent/harnessAdapter.js";
-import { plannerOutputFromResult } from "../brain/harnessSchema.js";
+import {
+  evaluateStructuredAgentOutput,
+  plannerOutputFromResult
+} from "../brain/harnessSchema.js";
 import { HarnessRuntime } from "../brain/harness.js";
+import type { BrainEvalResult } from "../brain/types.js";
 import { SemanticSpineService } from "../brain/semanticSpine.js";
 import { SystemBrainSnapshotService } from "../brain/systemSnapshot.js";
 import { InMemoryTestDataProvider, TestDataBrainService } from "../brain/testdata.js";
@@ -6155,6 +6159,53 @@ async function prepareAgentTask(
   const chainContext = chainContextArg(input);
   const suiteContext = suiteContextArg(input);
   const regressionContext = regressionContextArg(input);
+  const provider = context.agentBridge?.provider ?? "host-agent";
+  const harnessSession = findOrCreateHostHarnessSession(context, systemId, provider);
+  const harnessTask = context.harness.startDeferredTask({
+    brain: agent === "planner" ? "requirement" : "testexecution",
+    operation: `host-agent-${agent}`,
+    inputSummary,
+    inputRefs: [
+      `system:${systemId}`,
+      ...outputPaths.map((path) => `artifact:${path}`),
+      ...(planContext ? [`requirement:${planContext.requirement}`] : []),
+      ...(chainContext?.testCaseId ? [`test-case:${chainContext.testCaseId}`] : [])
+    ],
+    systemId,
+    sessionId: harnessSession.id,
+    provider,
+    policy: {
+      allowedFiles: outputPaths,
+      allowWrites: true,
+      requireApproval: false
+    },
+    budget: chainContext?.maxHealAttempts === undefined
+      ? undefined
+      : { maxHealAttempts: Math.max(chainContext.maxHealAttempts, 0) },
+    approved: true
+  });
+  const contextContent = JSON.stringify({
+    systemId,
+    agent,
+    inputSummary,
+    outputPaths,
+    planContext,
+    chainContext,
+    suiteContext,
+    regressionContext
+  });
+  context.harness.setContextPack(harnessTask.id, {
+    taskId: harnessTask.id,
+    purpose: agent === "planner" ? "requirement" : "testexecution",
+    summary: inputSummary,
+    references: [
+      { ref: `system:${systemId}`, kind: "system" },
+      ...outputPaths.map((path) => ({ ref: `artifact:${path}`, kind: "artifact" as const }))
+    ],
+    content: contextContent,
+    estimatedChars: contextContent.length,
+    truncated: false
+  });
   const task = context.service.createAgentTask({
     id: taskId,
     systemId,
@@ -6167,7 +6218,9 @@ async function prepareAgentTask(
     planContext,
     chainContext,
     suiteContext,
-    regressionContext
+    regressionContext,
+    harnessTaskId: harnessTask.id,
+    harnessSessionId: harnessSession.id
   });
   await mkdir(taskDir, { recursive: true });
   await writeFile(
@@ -6188,6 +6241,8 @@ async function prepareAgentTask(
     `${JSON.stringify(
       {
         taskId,
+        harnessTaskId: harnessTask.id,
+        harnessSessionId: harnessSession.id,
         systemId,
         system,
         agent,
@@ -6214,6 +6269,142 @@ async function prepareAgentTask(
     outputPaths,
     submitTool: "bc_submit_agent_output",
     nextAction: "The host agent should read the prompt/context, create requested outputs, then call bc_submit_agent_output."
+  };
+}
+
+function findOrCreateHostHarnessSession(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  provider: string
+) {
+  const existing = context.repository.brainSessions.find(
+    (session) =>
+      session.currentSystemId === systemId &&
+      session.provider === provider &&
+      !session.activeTaskId
+  );
+  return existing ?? context.harness.createSession({
+    currentSystemId: systemId,
+    provider
+  });
+}
+
+async function evaluateHostAgentOutput(
+  context: BrainCreatorMcpContext,
+  task: AgentTask,
+  status: "succeeded" | "failed",
+  providerText: string
+): Promise<BrainEvalResult | undefined> {
+  const harnessTask = task.harnessTaskId ? context.harness.getTask(task.harnessTaskId) : undefined;
+  if (!harnessTask) return undefined;
+  const output = await hostAgentStructuredOutput(context, task, status);
+  if (!output) return undefined;
+  return evaluateStructuredAgentOutput(task.agent, output, {
+    allowedFiles: harnessTask.policy.allowedFiles,
+    text: providerText
+  });
+}
+
+async function hostAgentStructuredOutput(
+  _context: BrainCreatorMcpContext,
+  task: AgentTask,
+  status: "succeeded" | "failed"
+) {
+  const sourceRefs = [
+    `agent-task:${task.id}`,
+    ...task.outputPaths.map((path) => `artifact:${path}`)
+  ];
+  if (task.agent === "planner") {
+    if (status !== "succeeded" || !task.planContext) return undefined;
+    const specContent = await readFile(task.planContext.specPath, "utf8").catch(() => undefined);
+    if (!specContent) return undefined;
+    const scenarios = parseSpecMarkdown(specContent);
+    if (scenarios.length === 0) return undefined;
+    return plannerOutputFromResult({
+      status: "succeeded",
+      scenarios,
+      sourceRefs,
+      gaps: []
+    });
+  }
+  if (task.agent === "generator") {
+    const testPath = task.chainContext?.testPath ?? task.outputPaths[0] ?? "";
+    const requiredStepIds = task.chainContext?.requiredStepIds ?? ["generated-test"];
+    return {
+      version: 1 as const,
+      agent: "generator" as const,
+      status: status === "succeeded" ? "generated" as const : "blocked" as const,
+      testPath,
+      steps: requiredStepIds.map((id) => ({ id, sourceRefs })),
+      assertions: [{ id: "generated-assertions", sourceRefs }],
+      sourceRefs
+    };
+  }
+  return {
+    version: 1 as const,
+    agent: "healer" as const,
+    status: status === "succeeded" ? "healed" as const : "unresolved" as const,
+    targetTestPath: task.chainContext?.testPath ?? task.outputPaths[0] ?? "",
+    changedFiles: task.outputPaths,
+    removedAssertionIds: [],
+    failureRefs: [`agent-task:${task.id}`],
+    sourceRefs
+  };
+}
+
+function completeHostHarnessTask(
+  context: BrainCreatorMcpContext,
+  task: AgentTask,
+  evaluation: BrainEvalResult,
+  agentRunId: string,
+  outputPaths: string[]
+) {
+  if (!task.harnessTaskId) return;
+  const harnessTask = context.harness.getTask(task.harnessTaskId);
+  if (!harnessTask || ["completed", "blocked", "failed", "cancelled"].includes(harnessTask.state)) return;
+  context.harness.completeDeferredTask(
+    harnessTask.id,
+    evaluation,
+    [
+      `agent-run:${agentRunId}`,
+      ...outputPaths.map((path) => `artifact:${path}`)
+    ]
+  );
+}
+
+function hostAgentEvaluation(status: "succeeded" | "failed", reason?: string): BrainEvalResult {
+  return status === "succeeded"
+    ? {
+        verdict: "pass",
+        score: 1,
+        reasons: [],
+        affectedAssetIds: [],
+        evidenceRefs: [],
+        nextActions: []
+      }
+    : {
+        verdict: "blocked",
+        score: 0,
+        reasons: [reason ?? "Host agent task failed"],
+        affectedAssetIds: [],
+        evidenceRefs: [],
+        nextActions: ["review-agent-run"]
+      };
+}
+
+function mergeHarnessEvaluations(
+  base: BrainEvalResult,
+  structured: BrainEvalResult | undefined
+): BrainEvalResult {
+  if (!structured || structured.verdict === "pass") return base;
+  if (base.verdict === "blocked") return base;
+  return {
+    verdict: structured.verdict,
+    score: Math.min(base.score, structured.score),
+    reasons: [...new Set([...base.reasons, ...structured.reasons])],
+    affectedAssetIds: [...new Set([...base.affectedAssetIds, ...structured.affectedAssetIds])],
+    evidenceRefs: [...new Set([...base.evidenceRefs, ...structured.evidenceRefs])],
+    nextActions: [...new Set([...base.nextActions, ...structured.nextActions])]
   };
 }
 
@@ -6374,6 +6565,24 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
   );
   const submittedOutputPaths = optionalStringArrayArg(input, "outputPaths");
   assertWorkspaceOutputPaths(context.workDir, submittedOutputPaths);
+  const submittedStatus = agentOutputStatusArg(input, "status");
+  const harnessTask = pendingTask.harnessTaskId
+    ? context.harness.getTask(pendingTask.harnessTaskId)
+    : undefined;
+  const redactedProviderText = [stdout, stderr].filter(Boolean).join("\n");
+  const structuredEvaluation = harnessTask
+    ? await evaluateHostAgentOutput(context, pendingTask, submittedStatus, redactedProviderText)
+    : undefined;
+  if (harnessTask && submittedStatus === "succeeded" && structuredEvaluation?.verdict === "blocked") {
+    context.harness.completeDeferredTask(
+      harnessTask.id,
+      structuredEvaluation,
+      (submittedOutputPaths ?? pendingTask.outputPaths).map((path) => `artifact:${path}`)
+    );
+    throw new Error(
+      `Host agent output failed Harness Eval: ${structuredEvaluation.reasons.join("; ") || "review required"}`
+    );
+  }
   const result = context.service.submitAgentTask({
     taskId,
     status: agentOutputStatusArg(input, "status"),
@@ -6382,10 +6591,30 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     outputPaths: submittedOutputPaths
   });
   if (result.task.planContext) {
+    completeHostHarnessTask(context, result.task, mergeHarnessEvaluations(
+      hostAgentEvaluation(
+        result.agentRun.status === "succeeded" ? "succeeded" : "failed",
+        result.agentRun.error
+      ),
+      structuredEvaluation
+    ), result.agentRun.id, submittedOutputPaths ?? result.task.outputPaths);
     return finalizeHostAgentPlan(context, result);
   }
   const { chainContext } = result.task;
   if (!chainContext) {
+    completeHostHarnessTask(
+      context,
+      result.task,
+      mergeHarnessEvaluations(
+        hostAgentEvaluation(
+          result.agentRun.status === "succeeded" ? "succeeded" : "failed",
+          result.agentRun.error
+        ),
+        structuredEvaluation
+      ),
+      result.agentRun.id,
+      submittedOutputPaths ?? result.task.outputPaths
+    );
     return result;
   }
   if (chainContext.requirementSuiteRunId && chainContext.executableCaseId) {
@@ -6419,6 +6648,23 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     testResult.exitCode !== 0 &&
     healAttempts < maxHealAttempts
   ) {
+    completeHostHarnessTask(
+      context,
+      result.task,
+      mergeHarnessEvaluations(
+        {
+          verdict: "retry",
+          score: 0,
+          reasons: ["Generated test requires a controlled healer retry"],
+          affectedAssetIds: [],
+          evidenceRefs: [],
+          nextActions: ["review-playwright-failure"]
+        },
+        structuredEvaluation
+      ),
+      result.agentRun.id,
+      submittedOutputPaths ?? result.task.outputPaths
+    );
     const chainRun: ChainRun = {
       id: id("chain"),
       systemId: result.task.systemId,
@@ -6504,6 +6750,19 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     status === "failed"
       ? hostAgentFailureReason(result.task.agent, result.agentRun.error, testResult)
       : undefined;
+  completeHostHarnessTask(
+    context,
+    result.task,
+    mergeHarnessEvaluations(
+      hostAgentEvaluation(
+        status,
+        failureReason
+      ),
+      structuredEvaluation
+    ),
+    result.agentRun.id,
+    submittedOutputPaths ?? result.task.outputPaths
+  );
   const failureClassification = status === "failed"
     ? classifyEvidenceFailure({
         stderr: testResult?.stderr,

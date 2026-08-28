@@ -224,6 +224,8 @@ type CreateAgentTaskInput = {
   chainContext?: AgentTask["chainContext"];
   suiteContext?: AgentTask["suiteContext"];
   regressionContext?: AgentTask["regressionContext"];
+  harnessTaskId?: string;
+  harnessSessionId?: string;
 };
 
 type SubmitAgentTaskInput = {
@@ -1153,6 +1155,8 @@ export class BrainCreatorService {
       chainContext: input.chainContext,
       suiteContext: input.suiteContext,
       regressionContext: input.regressionContext,
+      harnessTaskId: input.harnessTaskId,
+      harnessSessionId: input.harnessSessionId,
       submitTool: "bc_submit_agent_output",
       createdAt: now,
       updatedAt: now

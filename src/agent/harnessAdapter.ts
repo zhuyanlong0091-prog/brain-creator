@@ -15,7 +15,7 @@ export async function runInHarness<T>(input: {
   runtime: HarnessRuntime;
   task: CreateBrainTaskInput;
   approved?: boolean;
-  execute: () => Promise<T>;
+  execute: (signal: AbortSignal) => Promise<T>;
   evaluate: (result: T) => BrainEvalResult;
   agent?: StructuredAgentName;
   structuredOutput?: (result: T) => unknown | Promise<unknown>;
@@ -25,18 +25,21 @@ export async function runInHarness<T>(input: {
   }> | Promise<Array<{ agent: StructuredAgentName; output: unknown }>>;
   enforceEvaluation?: boolean;
 }): Promise<HarnessExecutionResult<T>> {
-  const task = input.runtime.createTask(input.task);
-  input.runtime.transition(task.id, "context-ready");
-  if (task.policy.requireApproval && input.approved !== true) {
-    input.runtime.transition(task.id, "waiting-approval", "Harness approval is required before execution");
+  const task = input.runtime.startDeferredTask({
+    ...input.task,
+    approved: input.approved
+  });
+  if (task.state === "waiting-approval") {
     throw new Error(`Harness approval required for task ${task.id}`);
   }
-
-  input.runtime.transition(task.id, "executing");
+  input.runtime.resumeDeferredTask(task.id);
+  const controller = new AbortController();
   try {
-    input.runtime.recordAgentCall(task.id);
-    const result = await withTimeout(input.execute(), task.budget.maxDurationMs);
-    input.runtime.transition(task.id, "evaluating");
+    const result = await withTimeout(
+      input.execute(controller.signal),
+      task.budget.maxDurationMs,
+      () => controller.abort()
+    );
     const baseEvaluation = input.evaluate(result);
     const structuredEvaluations = input.structuredOutputs
       ? await input.structuredOutputs(result)
@@ -54,7 +57,7 @@ export async function runInHarness<T>(input: {
       undefined
     );
     const evaluation = mergeEvaluations(baseEvaluation, structuredEvaluation);
-    input.runtime.applyEval(task.id, evaluation);
+    input.runtime.completeDeferredTask(task.id, evaluation, evaluation.evidenceRefs);
     if (input.enforceEvaluation && evaluation.verdict !== "pass") {
       throw new Error(
         `Harness Eval ${evaluation.verdict} for task ${task.id}: ${evaluation.reasons.join("; ") || "review required"}`
@@ -86,13 +89,16 @@ function passEvaluation(): BrainEvalResult {
   };
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     promise,
     new Promise<T>((_, reject) => {
       timer = setTimeout(
-        () => reject(new Error(`Harness task timed out after ${timeoutMs}ms`)),
+        () => {
+          onTimeout();
+          reject(new Error(`Harness task timed out after ${timeoutMs}ms`));
+        },
         timeoutMs
       );
     })

@@ -8,6 +8,7 @@ import type {
   BrainTaskState,
   BrainTaskStatus,
   BrainName,
+  BrainContextPack,
   HarnessBudget,
   HarnessPolicy
 } from "./types.js";
@@ -29,6 +30,7 @@ export type CreateBrainTaskInput = {
   requirementSetId?: string;
   sessionId?: string;
   provider?: string;
+  contextPack?: BrainContextPack;
   policy?: Partial<HarnessPolicy>;
   budget?: Partial<HarnessBudget>;
 };
@@ -66,8 +68,9 @@ const defaultPolicy: HarnessPolicy = {
 
 const transitions: Record<BrainTaskState, BrainTaskState[]> = {
   created: ["context-ready", "waiting-approval", "blocked", "cancelled"],
-  "context-ready": ["waiting-approval", "executing", "blocked", "cancelled"],
-  "waiting-approval": ["executing", "blocked", "cancelled"],
+  "context-ready": ["waiting-approval", "waiting-provider", "executing", "blocked", "cancelled"],
+  "waiting-approval": ["waiting-provider", "executing", "blocked", "cancelled"],
+  "waiting-provider": ["executing", "blocked", "cancelled"],
   executing: ["evaluating", "healing", "blocked", "failed", "cancelled"],
   evaluating: ["completed", "healing", "waiting-approval", "blocked", "failed"],
   healing: ["executing", "evaluating", "blocked", "failed", "cancelled"],
@@ -112,6 +115,9 @@ export class HarnessRuntime {
       status: "pending",
       inputSummary: input.inputSummary,
       inputRefs: [...(input.inputRefs ?? [])],
+      contextPack: input.contextPack
+        ? { ...input.contextPack, taskId: "" }
+        : undefined,
       outputRefs: [],
       provider: input.provider,
       policy: { ...defaultPolicy, ...(input.policy ?? {}) },
@@ -125,8 +131,71 @@ export class HarnessRuntime {
     if (task.sessionId && !this.store.brainSessions.some((session) => session.id === task.sessionId)) {
       throw new Error(`Brain session not found: ${task.sessionId}`);
     }
+    if (task.contextPack) task.contextPack = { ...task.contextPack, taskId: task.id };
     this.store.brainTasks.push(task);
     this.appendEvent(task, "task-created", "started", "Brain task created", task.inputRefs);
+    this.store.persist();
+    return task;
+  }
+
+  startDeferredTask(input: CreateBrainTaskInput & { approved?: boolean }) {
+    const task = this.createTask(input);
+    this.transition(task.id, "context-ready");
+    if (task.policy.requireApproval && input.approved !== true) {
+      this.transition(task.id, "waiting-approval", "Harness approval is required before provider execution");
+      return task;
+    }
+    this.transition(task.id, "waiting-provider", "Waiting for the declared provider to return output");
+    this.recordAgentCall(task.id);
+    return this.requireTask(task.id);
+  }
+
+  resumeDeferredTask(taskId: string, approved = false) {
+    const task = this.requireTask(taskId);
+    if (task.state === "waiting-approval") {
+      if (!approved) throw new Error(`Harness approval required for task ${task.id}`);
+      this.transition(task.id, "waiting-provider", "Harness approval granted; waiting for provider output");
+      this.recordAgentCall(task.id);
+      return this.requireTask(task.id);
+    }
+    if (task.state !== "waiting-provider") {
+      throw new Error(`Brain task must be waiting-provider before resume; current state is ${task.state}`);
+    }
+    return this.transition(task.id, "executing", "Provider output received; resuming Harness evaluation");
+  }
+
+  completeDeferredTask(taskId: string, evaluation: BrainEvalResult, outputRefs: string[] = []) {
+    const task = this.requireTask(taskId);
+    if (task.state === "waiting-provider") this.resumeDeferredTask(taskId);
+    const current = this.requireTask(taskId);
+    if (current.state !== "executing" && current.state !== "evaluating") {
+      throw new Error(`Brain task must be waiting-provider or executing before completion; current state is ${current.state}`);
+    }
+    if (current.state === "executing") this.transition(taskId, "evaluating");
+    this.setOutputRefs(taskId, outputRefs);
+    return this.applyEval(taskId, evaluation);
+  }
+
+  setOutputRefs(taskId: string, outputRefs: string[]) {
+    const task = this.requireTask(taskId);
+    task.outputRefs = [...new Set(outputRefs)];
+    task.updatedAt = new Date().toISOString();
+    this.store.persist();
+    return task;
+  }
+
+  setContextPack(taskId: string, contextPack: BrainContextPack) {
+    const task = this.requireTask(taskId);
+    if (contextPack.estimatedChars > task.budget.maxContextChars) {
+      const message = `Context pack exceeds Harness context budget (${contextPack.estimatedChars} > ${task.budget.maxContextChars})`;
+      if (!["completed", "blocked", "failed", "cancelled"].includes(task.state)) {
+        task.lastError = message;
+        this.transition(task.id, "blocked", message);
+      }
+      throw new Error(message);
+    }
+    task.contextPack = { ...contextPack, taskId };
+    task.updatedAt = new Date().toISOString();
     this.store.persist();
     return task;
   }
@@ -273,14 +342,14 @@ export function checkHarnessPolicy(policy: HarnessPolicy, request: HarnessPolicy
   }
   if (policy.allowedFiles.length > 0) {
     for (const file of request.files ?? []) {
-      if (!policy.allowedFiles.some((allowed) => file === allowed || file.startsWith(`${allowed}/`))) {
+      if (!policy.allowedFiles.some((allowed) => isFileAllowed(file, allowed))) {
         violations.push(`file is outside the allowlist: ${file}`);
       }
     }
   }
   if (policy.allowedUrls.length > 0) {
     for (const url of request.urls ?? []) {
-      if (!policy.allowedUrls.some((allowed) => url === allowed || url.startsWith(`${allowed}/`))) {
+      if (!policy.allowedUrls.some((allowed) => isUrlAllowed(url, allowed))) {
         violations.push(`URL is outside the allowlist: ${url}`);
       }
     }
@@ -289,7 +358,7 @@ export function checkHarnessPolicy(policy: HarnessPolicy, request: HarnessPolicy
 }
 
 function statusFor(state: BrainTaskState): BrainTaskStatus {
-  if (state === "created" || state === "context-ready" || state === "waiting-approval") return "pending";
+  if (state === "created" || state === "context-ready" || state === "waiting-approval" || state === "waiting-provider") return "pending";
   if (state === "executing" || state === "evaluating" || state === "healing") return "running";
   if (state === "completed") return "succeeded";
   if (state === "cancelled") return "cancelled";
@@ -299,6 +368,38 @@ function statusFor(state: BrainTaskState): BrainTaskStatus {
 function eventStatusFor(state: BrainTaskState): BrainEvent["status"] {
   if (state === "completed") return "passed";
   if (state === "blocked" || state === "failed" || state === "cancelled") return "blocked";
-  if (state === "waiting-approval") return "waiting";
+  if (state === "waiting-approval" || state === "waiting-provider") return "waiting";
   return state === "created" ? "started" : "running";
+}
+
+function isFileAllowed(value: string, allowed: string) {
+  const normalizedValue = normalizeFile(value);
+  const normalizedAllowed = normalizeFile(allowed);
+  if (hasParentTraversal(value) || hasParentTraversal(allowed)) return false;
+  return normalizedValue === normalizedAllowed || normalizedValue.startsWith(`${normalizedAllowed}/`);
+}
+
+function normalizeFile(value: string) {
+  return value
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter((part) => part && part !== ".")
+    .join("/")
+    .replace(/\/$/u, "");
+}
+
+function hasParentTraversal(value: string) {
+  return value.replaceAll("\\", "/").split("/").some((part) => part === "..");
+}
+
+function isUrlAllowed(value: string, allowed: string) {
+  try {
+    const candidate = new URL(value);
+    const boundary = new URL(allowed);
+    if (candidate.origin !== boundary.origin) return false;
+    const boundaryPath = boundary.pathname.replace(/\/$/u, "") || "/";
+    return boundaryPath === "/" || candidate.pathname === boundaryPath || candidate.pathname.startsWith(`${boundaryPath}/`);
+  } catch {
+    return false;
+  }
 }
