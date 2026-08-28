@@ -56,6 +56,12 @@ function dependencies(
       entries: 1,
       bytes: 128
     })),
+    runRunner: vi.fn(async () => ({
+      status: "completed" as const,
+      owner: "ci",
+      processedRuns: 1,
+      runs: []
+    })),
     ...overrides
   };
 }
@@ -85,6 +91,7 @@ describe("Brain Creator CLI", () => {
       expect(output).toContain("brain-creator plugin install");
       expect(output).toContain("brain-creator export");
       expect(output).toContain("brain-creator artifacts");
+      expect(output).toContain("brain-creator runner");
       expect(output).toContain("brain-creator mcp");
       expect(output).not.toContain("brain-creator-install-assets");
       expect(io.stderr).not.toHaveBeenCalled();
@@ -101,7 +108,7 @@ describe("Brain Creator CLI", () => {
     expect(output).toContain("Compatibility aliases");
   });
 
-  it.each(["init", "doctor", "config", "plugin", "export", "artifacts", "mcp"])(
+  it.each(["init", "doctor", "config", "plugin", "export", "artifacts", "runner", "mcp"])(
     "prints focused help for the %s command",
     async (command) => {
       const io = createIo();
@@ -205,6 +212,27 @@ describe("Brain Creator CLI", () => {
       )
     ).toBe(0);
     expect(deps.installCodexPlugin).toHaveBeenCalledWith({ workspaceDir: "C:\\project" });
+  });
+
+  it("runs the scheduled Runner through one CLI command", async () => {
+    const io = createIo();
+    const deps = dependencies();
+
+    expect(
+      await runBrainCreatorCli(
+        ["runner", "run", "--owner", "ci", "--project", "knowledge-1", "--max-runs", "2"],
+        io,
+        deps
+      )
+    ).toBe(0);
+    expect(deps.runRunner).toHaveBeenCalledWith({
+      targetDir: undefined,
+      knowledgeProjectId: "knowledge-1",
+      systemId: undefined,
+      owner: "ci",
+      maxRuns: 2,
+      maxCasesPerRun: undefined
+    });
   });
 
   it("exports a Suite archive through the consolidated CLI", async () => {

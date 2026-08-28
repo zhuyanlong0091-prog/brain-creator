@@ -13,6 +13,7 @@
 | `brain-creator plugin install` | 安装 Codex 插件和 host-agent 配置 | `npx brain-creator plugin install` |
 | `brain-creator export` | 导出带证据 manifest 的已完成 Suite | `npx brain-creator export --suite <id> --output exports/suite.zip` |
 | `brain-creator artifacts` | 预览/执行产物迁移、回滚或清理 | `npx brain-creator artifacts migrate` |
+| `brain-creator runner` | 从 CI 或调度器执行已批准且到期的稳定性套件 | `npx brain-creator runner run --owner ci` |
 | `brain-creator mcp` | 通过 stdio 启动 MCP server | `npx brain-creator mcp` |
 | `brain-creator help legacy` | 列出独立兼容命令 | `npx brain-creator help legacy` |
 | `brain-creator --version` | 输出安装版本 | `npx brain-creator --version` |
@@ -103,6 +104,20 @@ codex plugin list
 ## `brain-creator mcp`
 
 通过 stdio 启动 MCP server。MCP 宿主通常从 `.mcp.json` 启动该命令，除非调试传输启动，否则不要再开一个交互副本。
+
+## `brain-creator runner`
+
+```text
+brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--max-runs <n>] [--max-cases <n>] [--target <path>] [--json]
+```
+
+通过持久化租约控制面执行已到期、已批准的稳定性套件。Runner 不会批准新的需求，也不会修改 System Brain 基线；它会领取到期任务，使用已配置的 provider 继续执行；当宿主 Agent、鉴权检查点或环境不可用时，会释放租约并保存可恢复的等待时间。
+
+在 CI 日志中使用 `--json`，为每个调度器实例设置稳定的 `--owner`。默认仍是单进程、单写入者；`--max-runs` 用于限制单次调用处理的任务数。
+
+```bash
+npx brain-creator runner run --owner ci --project knowledge-orders --max-runs 1 --json
+```
 
 ## `brain-creator export`
 

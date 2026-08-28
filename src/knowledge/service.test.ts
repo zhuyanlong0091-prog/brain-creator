@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryBrainCreatorRepository, JsonFileBrainCreatorRepository } from "../domain/repository.js";
 import type { RequirementContentPackage } from "../domain/types.js";
 import { encryptSecrets } from "../shared/crypto.js";
+import { SemanticSpineService } from "../brain/semanticSpine.js";
 import { KnowledgeService } from "./service.js";
 
 const tempDirs: string[] = [];
@@ -57,6 +58,48 @@ describe("KnowledgeService", () => {
     expect(same.requirementSet.id).toBe(first.requirementSet.id);
     expect(changed.requirementSet.version).toBe(2);
     expect(changed.previousRequirementSetId).toBe(first.requirementSet.id);
+  });
+
+  it("indexes requirement actions for later System Brain binding", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const spine = new SemanticSpineService(repository);
+    const service = new KnowledgeService(
+      repository,
+      knowledgeDir,
+      process.cwd(),
+      undefined,
+      spine
+    );
+    const project = await service.createProject({
+      name: "Recruitment",
+      key: "requirement-semantic-actions",
+      defaultLocale: "zh-CN"
+    });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "semantic-actions",
+        "用户新增招聘需求后提交审批。"
+      )
+    });
+
+    await service.generateTestDesign(ingested.requirementSet.id);
+
+    expect(repository.semanticConcepts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "action",
+        canonicalName: "create",
+        requirementSetId: ingested.requirementSet.id,
+        aliases: expect.arrayContaining(["新增"])
+      }),
+      expect.objectContaining({
+        kind: "action",
+        canonicalName: "submit",
+        requirementSetId: ingested.requirementSet.id,
+        aliases: expect.arrayContaining(["提交"])
+      })
+    ]));
   });
 
   it("keeps parser warnings visible without creating a Gap before attachment processing is attempted", async () => {
