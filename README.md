@@ -69,7 +69,7 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 - 知识按 `knowledgeProjectId` 隔离，运行资产按 `systemId` 隔离。
 - 产品不符合预期才是 Bug；自动化、鉴权、环境、网络和测试数据问题归入对应 Gap。
 
-执行过程不再是黑盒。支持 MCP Progress Notification 的宿主会收到阶段/步骤进度；无论宿主是否支持通知，Brain Creator 都会把带序号的事件写入 Run Ledger。`bc_status` 可恢复当前用例、步骤、页面、耗时、等待原因和 `possiblyStalled` 告警。每条用例结束后都会增量更新离线 `suite-report.html`，其中保留验证强度、步骤证据、截图、trace、Bug 和 Gap。
+执行过程不再是黑盒。支持 MCP Progress Notification 的宿主会收到阶段/步骤进度；无论宿主是否支持通知，Brain Creator 都会把带序号的事件写入 Run Ledger。`bc_status` 可恢复当前用例、步骤、页面、耗时、等待原因和 `possiblyStalled` 告警。每条用例结束后都会增量更新离线 `suite-report.html`，其中保留验证强度、步骤证据、截图、trace、Bug 和 Gap。Planner、Generator 和 Healer 统一经过 Harness Runtime：任务会记录上下文引用、Provider 等待、执行、结构化 Eval 和最终产物引用；超预算、越权、缺证据或删除断言会在下游写入前阻断。
 
 需要现场旁观时，可以要求 Agent “用 Brain Creator 以可见浏览器执行”，对应 `bc_run browserMode=observe`。Brain Creator 会使用 Playwright headed 模式并保持单 Worker；`bc_status` 和离线报告会记录该模式。CI、Windows 服务会话或没有 `DISPLAY/WAYLAND_DISPLAY` 的 Linux 环境会明确阻止观察模式，不会静默改成无头。默认 `browserMode=headless` 仍适合 CI 和无人值守运行。浏览器窗口仅用于观察，最终可信结论仍来自结构化 Reporter、AssertionContract、截图和 trace。
 
@@ -178,6 +178,7 @@ Brain Creator enforces these boundaries:
 - Missing page or workflow evidence creates a resumable ExplorationTask before any Gap. Missing test data enters `needs-data`; Brain Creator does not guess actions or values.
 - Requirement expectations, system observations, and execution results remain separate.
 - Knowledge is isolated by `knowledgeProjectId`; runtime assets are isolated by `systemId`.
+
 - Only a verified product mismatch becomes a Bug. Automation, auth, environment, network, and test-data failures become typed Gaps.
 
 Execution is observable rather than opaque. Hosts that support MCP Progress Notification receive stage or step updates. The ordered Run Ledger remains the durable source of truth for every host, and `bc_status` restores the current case, step, page, elapsed time, wait reason, and `possiblyStalled` warning. Brain Creator rewrites the offline `suite-report.html` after each completed case with assurance, step evidence, screenshots, traces, Bugs, and Gaps.

@@ -1867,9 +1867,19 @@ describe("handleBrainCreatorTool", () => {
         id: expect.stringMatching(/^agentTask_/),
         systemId: system.id,
         agent: "generator",
-        status: "pending"
+        status: "pending",
+        harnessTaskId: expect.stringMatching(/^brainTask_/),
+        harnessSessionId: expect.stringMatching(/^brainSession_/)
       })
     );
+    expect(context.repository.brainTasks).toEqual([
+      expect.objectContaining({
+        id: prepared.task.harnessTaskId,
+        state: "waiting-provider",
+        status: "pending",
+        provider: expect.any(String)
+      })
+    ]);
     expect(await readFile(prepared.promptPath, "utf8")).toContain("Generate checkout test");
     expect(JSON.parse(await readFile(prepared.contextPath, "utf8"))).toEqual(
       expect.objectContaining({
@@ -1890,6 +1900,17 @@ describe("handleBrainCreatorTool", () => {
     );
 
     expect(submitted.task.status).toBe("submitted");
+    expect(context.repository.brainTasks).toEqual([
+      expect.objectContaining({
+        id: prepared.task.harnessTaskId,
+        state: "completed",
+        status: "succeeded",
+        outputRefs: expect.arrayContaining([
+          "artifact:tests/generated/case.spec.ts",
+          expect.stringMatching(/^agent-run:/)
+        ])
+      })
+    ]);
     expect(submitted.agentRun).toEqual(
       expect.objectContaining({
         id: expect.stringMatching(/^agent_/),
@@ -1912,6 +1933,52 @@ describe("handleBrainCreatorTool", () => {
         })
       )
     ).toContain("already submitted");
+  });
+
+  it("closes the unified Harness task when a host-agent task reports failure", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      dataFilePath: join(workDir, "assets.json"),
+      workDir
+    });
+    const system = dataOf(
+      await handleBrainCreatorTool(context, "bc_create_system", {
+        name: "Orders Console",
+        environment: "staging",
+        baseUrl: "https://shop.example.test",
+        defaultLocale: "zh-CN",
+        urlAllowlist: ["https://shop.example.test"]
+      })
+    );
+
+    const prepared = dataOf(
+      await handleBrainCreatorTool(context, "bc_prepare_agent_task", {
+        systemId: system.id,
+        agent: "generator",
+        inputSummary: "Generate checkout test",
+        args: ["--output", "tests/generated/case.spec.ts"],
+        outputPaths: ["tests/generated/case.spec.ts"]
+      })
+    );
+
+    const submitted = dataOf(
+      await handleBrainCreatorTool(context, "bc_submit_agent_output", {
+        taskId: prepared.task.id,
+        status: "failed",
+        stdout: "",
+        stderr: "provider unavailable"
+      })
+    );
+
+    expect(submitted.agentRun.status).toBe("failed");
+    expect(context.repository.brainTasks).toEqual([
+      expect.objectContaining({
+        id: prepared.task.harnessTaskId,
+        state: "blocked",
+        status: "failed",
+        eval: expect.objectContaining({ verdict: "blocked" })
+      })
+    ]);
   });
 
   it("uses a configured Claude subprocess bridge from environment variables", async () => {

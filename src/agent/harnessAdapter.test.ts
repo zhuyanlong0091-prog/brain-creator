@@ -42,10 +42,12 @@ describe("runInHarness", () => {
     expect(repository.brainEvents.map((event) => event.type)).toEqual([
       "task-created",
       "task-context-ready",
+      "task-waiting-provider",
       "task-executing",
       "task-evaluating",
       "task-completed"
     ]);
+    expect(repository.brainTasks[0]?.agentCalls).toBe(1);
   });
 
   it("marks an execution error as failed and preserves the error message", async () => {
@@ -119,6 +121,30 @@ describe("runInHarness", () => {
       evaluate: () => passEval()
     })).rejects.toThrow(/timed out/);
     expect(repository.brainTasks[0]).toEqual(expect.objectContaining({ state: "blocked", status: "failed" }));
+  });
+
+  it("cancels the provider signal when the Harness timeout expires", async () => {
+    const repository = store();
+    const runtime = new HarnessRuntime(repository);
+    let signal: AbortSignal | undefined;
+
+    await expect(runInHarness({
+      runtime,
+      approved: true,
+      task: {
+        brain: "testexecution",
+        operation: "run-cancellable-case",
+        inputSummary: "Cancellable case",
+        budget: { maxDurationMs: 5 }
+      },
+      execute: (providedSignal) => {
+        signal = providedSignal;
+        return new Promise((resolve) => setTimeout(() => resolve("late"), 30));
+      },
+      evaluate: () => passEval()
+    })).rejects.toThrow(/timed out/);
+
+    expect(signal?.aborted).toBe(true);
   });
 
   it("can enforce the Eval gate before the caller writes downstream assets", async () => {
