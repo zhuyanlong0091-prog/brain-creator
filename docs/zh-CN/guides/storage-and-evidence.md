@@ -1,10 +1,10 @@
 # 存储与证据
 
-Brain Creator 使用本地文件仓库。默认运行仓库是 schema 19 分片目录 `.brain-creator/store/`。旧的 `.brain-creator/local-assets.json` 仍作为迁移源和兼容格式保留，但新 MCP 上下文默认不会继续写入这个单文件。
+Brain Creator 使用本地文件仓库。默认运行仓库是 schema 20 分片目录 `.brain-creator/store/`。旧的 `.brain-creator/local-assets.json` 仍作为迁移源和兼容格式保留，但新 MCP 上下文默认不会继续写入这个单文件。
 
 ## 迁移
 
-首次启动且不存在 schema 19 manifest 时，Brain Creator 会检查 `local-assets.json`，先校验 JSON，创建带时间戳的 `local-assets.json.backup-*` 备份，再通过临时文件和原子重命名写入分片仓库，并校验新的 manifest。迁移失败不会删除旧文件。
+首次启动且不存在 schema 20 manifest 时，Brain Creator 会检查 `local-assets.json`，先校验 JSON，创建带时间戳的 `local-assets.json.backup-*` 备份，再通过临时文件和原子重命名写入分片仓库，并校验新的 manifest。已有 schema 19 仓库会在 `store/backups/` 生成独立迁移快照；迁移失败不会删除旧文件，也不会把历史用例自动晋升为可信场景。
 
 主要目录如下：
 

@@ -7,7 +7,11 @@ import type {
   TestIntent,
   WorkflowModel
 } from "../domain/types.js";
-import type { RequirementAnalysis, RequirementClause } from "./policies.js";
+import {
+  REQUIREMENT_ANALYSIS_POLICY,
+  type RequirementAnalysis,
+  type RequirementClause
+} from "./policies.js";
 
 type ProcessModels = {
   workflowModels: WorkflowModel[];
@@ -315,7 +319,21 @@ function processClause(
   module: string,
   nodeTypes: RequirementClause["nodeTypes"]
 ): RequirementClause {
-  return { id: `visual-clause-${index}`, index, text, sourceRef, module, nodeTypes: [...nodeTypes] };
+  return {
+    id: `visual-clause-${index}`,
+    index,
+    text,
+    sourceRef,
+    sourceRefs: [sourceRef],
+    module,
+    kind: nodeTypes.includes("state") ? "state" : nodeTypes.includes("workflow") ? "workflow" : "goal",
+    origin: "derived",
+    confidence: 1,
+    status: "confirmed",
+    policyId: REQUIREMENT_ANALYSIS_POLICY.id,
+    policyVersion: REQUIREMENT_ANALYSIS_POLICY.version,
+    nodeTypes: [...nodeTypes]
+  };
 }
 
 function attachmentEvidenceClauses(analysis: AttachmentAnalysis): Array<{

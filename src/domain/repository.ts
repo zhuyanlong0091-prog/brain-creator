@@ -16,12 +16,14 @@ import type {
   AuthCheckpoint,
   AuthProfile,
   BugReport,
+  BusinessObjectModel,
   BusinessRule,
   CaseSource,
   CaseSuite,
   CaseSuiteRun,
   ChainRun,
   CompileRun,
+  DecisionTableModel,
   Gap,
   GeneratedCase,
   GlossaryTerm,
@@ -60,7 +62,12 @@ import type {
   BrainSession,
   BrainTask,
   BusinessEntityInstance,
+  BusinessScenario,
+  OnboardingPlan,
+  ScenarioAssuranceContract,
+  ScenarioTrustRecord,
   SemanticAlias,
+  SemanticBinding,
   SemanticConcept,
   SemanticRelation,
   SystemBrainChangeSet,
@@ -68,10 +75,10 @@ import type {
   TestDataDependency
 } from "../brain/types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 19;
-export const SHARDED_REPOSITORY_SCHEMA_VERSION = 19;
-const LEGACY_SHARDED_REPOSITORY_SCHEMA_VERSIONS = new Set([17, 18]);
-const OPTIONAL_SCHEMA_19_COLLECTIONS = new Set([
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 20;
+export const SHARDED_REPOSITORY_SCHEMA_VERSION = 20;
+const LEGACY_SHARDED_REPOSITORY_SCHEMA_VERSIONS = new Set([17, 18, 19]);
+const OPTIONAL_LEGACY_COLLECTIONS = new Set([
   "attachmentAnalyses",
   "workflowModels",
   "stateMachineModels",
@@ -87,7 +94,14 @@ const OPTIONAL_SCHEMA_19_COLLECTIONS = new Set([
   "businessEntityInstances",
   "testDataDependencies",
   "systemBrainSnapshots",
-  "systemBrainChangeSets"
+  "systemBrainChangeSets",
+  "businessObjectModels",
+  "decisionTableModels",
+  "semanticBindings",
+  "businessScenarios",
+  "scenarioAssuranceContracts",
+  "scenarioTrustRecords",
+  "onboardingPlans"
 ]);
 
 export function shardedRepositoryCollectionKeys() {
@@ -124,6 +138,8 @@ export class InMemoryBrainCreatorRepository {
   requirementSets: RequirementSet[] = [];
   workflowModels: WorkflowModel[] = [];
   stateMachineModels: StateMachineModel[] = [];
+  businessObjectModels: BusinessObjectModel[] = [];
+  decisionTableModels: DecisionTableModel[] = [];
   requirementCoverageProfiles: RequirementCoverageProfile[] = [];
   knowledgeNodes: KnowledgeNode[] = [];
   knowledgeEdges: KnowledgeEdge[] = [];
@@ -148,6 +164,11 @@ export class InMemoryBrainCreatorRepository {
   semanticConcepts: SemanticConcept[] = [];
   semanticAliases: SemanticAlias[] = [];
   semanticRelations: SemanticRelation[] = [];
+  semanticBindings: SemanticBinding[] = [];
+  businessScenarios: BusinessScenario[] = [];
+  scenarioAssuranceContracts: ScenarioAssuranceContract[] = [];
+  scenarioTrustRecords: ScenarioTrustRecord[] = [];
+  onboardingPlans: OnboardingPlan[] = [];
   businessEntityInstances: BusinessEntityInstance[] = [];
   testDataDependencies: TestDataDependency[] = [];
   systemBrainSnapshots: SystemBrainSnapshot[] = [];
@@ -190,6 +211,8 @@ export class InMemoryBrainCreatorRepository {
     this.requirementSets = [];
     this.workflowModels = [];
     this.stateMachineModels = [];
+    this.businessObjectModels = [];
+    this.decisionTableModels = [];
     this.requirementCoverageProfiles = [];
     this.knowledgeNodes = [];
     this.knowledgeEdges = [];
@@ -214,6 +237,11 @@ export class InMemoryBrainCreatorRepository {
     this.semanticConcepts = [];
     this.semanticAliases = [];
     this.semanticRelations = [];
+    this.semanticBindings = [];
+    this.businessScenarios = [];
+    this.scenarioAssuranceContracts = [];
+    this.scenarioTrustRecords = [];
+    this.onboardingPlans = [];
     this.businessEntityInstances = [];
     this.testDataDependencies = [];
     this.systemBrainSnapshots = [];
@@ -253,6 +281,8 @@ export type RepositorySnapshot = Pick<
   | "requirementSets"
   | "workflowModels"
   | "stateMachineModels"
+  | "businessObjectModels"
+  | "decisionTableModels"
   | "requirementCoverageProfiles"
   | "knowledgeNodes"
   | "knowledgeEdges"
@@ -277,6 +307,11 @@ export type RepositorySnapshot = Pick<
   | "semanticConcepts"
   | "semanticAliases"
   | "semanticRelations"
+  | "semanticBindings"
+  | "businessScenarios"
+  | "scenarioAssuranceContracts"
+  | "scenarioTrustRecords"
+  | "onboardingPlans"
   | "businessEntityInstances"
   | "testDataDependencies"
   | "systemBrainSnapshots"
@@ -381,9 +416,10 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
       const rawCollections = manifest.collections;
       const collections = Array.isArray(rawCollections) ? rawCollections : [];
       const expectedCollections = collectionKeys();
-      const requiredCollections = expectedCollections.filter(
-        (key) => !OPTIONAL_SCHEMA_19_COLLECTIONS.has(key)
-      );
+      const manifestSchemaVersion = manifest.schemaVersion as number;
+      const requiredCollections = manifestSchemaVersion === SHARDED_REPOSITORY_SCHEMA_VERSION
+        ? expectedCollections
+        : expectedCollections.filter((key) => !OPTIONAL_LEGACY_COLLECTIONS.has(key));
       if (
         !Array.isArray(rawCollections) ||
         requiredCollections.some((key) => !collections.includes(key)) ||
@@ -395,11 +431,20 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
       ) {
         throw new Error("Brain Creator sharded store manifest collections are invalid");
       }
-      const snapshot = readShardedSnapshot(this.collectionsDir);
+      const snapshot = readShardedSnapshot(this.collectionsDir, manifestSchemaVersion);
       applyRepositorySnapshot(this, snapshot);
       this.schemaVersion = SHARDED_REPOSITORY_SCHEMA_VERSION;
-      if (manifest.schemaVersion !== SHARDED_REPOSITORY_SCHEMA_VERSION) {
-        this.persist();
+      if (manifestSchemaVersion !== SHARDED_REPOSITORY_SCHEMA_VERSION) {
+        writeAtomicJson(
+          join(this.storeDir, "backups", `schema-${manifestSchemaVersion}-${backupStamp()}.json`),
+          snapshot
+        );
+        try {
+          this.persist();
+        } catch {
+          applyRepositorySnapshot(this, snapshot);
+          this.schemaVersion = manifestSchemaVersion;
+        }
       }
       return;
     }
@@ -497,6 +542,8 @@ function snapshotRepository(
     requirementSets: repository.requirementSets,
     workflowModels: repository.workflowModels,
     stateMachineModels: repository.stateMachineModels,
+    businessObjectModels: repository.businessObjectModels,
+    decisionTableModels: repository.decisionTableModels,
     requirementCoverageProfiles: repository.requirementCoverageProfiles,
     knowledgeNodes: repository.knowledgeNodes,
     knowledgeEdges: repository.knowledgeEdges,
@@ -521,6 +568,11 @@ function snapshotRepository(
     semanticConcepts: repository.semanticConcepts,
     semanticAliases: repository.semanticAliases,
     semanticRelations: repository.semanticRelations,
+    semanticBindings: repository.semanticBindings,
+    businessScenarios: repository.businessScenarios,
+    scenarioAssuranceContracts: repository.scenarioAssuranceContracts,
+    scenarioTrustRecords: repository.scenarioTrustRecords,
+    onboardingPlans: repository.onboardingPlans,
     businessEntityInstances: repository.businessEntityInstances,
     testDataDependencies: repository.testDataDependencies,
     systemBrainSnapshots: repository.systemBrainSnapshots,
@@ -578,6 +630,8 @@ function applyRepositorySnapshot(
     repository.requirementSets = snapshot.requirementSets ?? [];
     repository.workflowModels = snapshot.workflowModels ?? [];
     repository.stateMachineModels = snapshot.stateMachineModels ?? [];
+    repository.businessObjectModels = snapshot.businessObjectModels ?? [];
+    repository.decisionTableModels = snapshot.decisionTableModels ?? [];
     repository.requirementCoverageProfiles = snapshot.requirementCoverageProfiles ?? [];
     repository.knowledgeNodes = snapshot.knowledgeNodes ?? [];
     repository.knowledgeEdges = snapshot.knowledgeEdges ?? [];
@@ -642,6 +696,11 @@ function applyRepositorySnapshot(
     repository.semanticConcepts = snapshot.semanticConcepts ?? [];
     repository.semanticAliases = snapshot.semanticAliases ?? [];
     repository.semanticRelations = snapshot.semanticRelations ?? [];
+    repository.semanticBindings = snapshot.semanticBindings ?? [];
+    repository.businessScenarios = snapshot.businessScenarios ?? [];
+    repository.scenarioAssuranceContracts = snapshot.scenarioAssuranceContracts ?? [];
+    repository.scenarioTrustRecords = snapshot.scenarioTrustRecords ?? [];
+    repository.onboardingPlans = snapshot.onboardingPlans ?? [];
     repository.businessEntityInstances = snapshot.businessEntityInstances ?? [];
     repository.testDataDependencies = snapshot.testDataDependencies ?? [];
     repository.systemBrainSnapshots = snapshot.systemBrainSnapshots ?? [];
@@ -655,12 +714,13 @@ function collectionKeys(): Array<Exclude<keyof RepositorySnapshot, "schemaVersio
     "generatedCases", "gaps", "glossaryTerms", "businessRules", "testCases", "agentRuns",
     "agentTasks", "chainRuns", "caseSources", "caseSuites", "caseSuiteRuns", "bugReports",
     "knowledgeProjects", "requirementSources", "attachmentAnalyses", "requirementSets", "workflowModels",
-    "stateMachineModels", "requirementCoverageProfiles", "knowledgeNodes",
+    "stateMachineModels", "businessObjectModels", "decisionTableModels", "requirementCoverageProfiles", "knowledgeNodes",
     "knowledgeEdges", "testIntents", "testDataProfiles", "testDataTasks", "testDataLeases",
     "executableCases", "executionPlans", "requirementSuiteRuns", "executionEvidence",
     "executionDiagnoses", "executionDiagnosisReviews", "runLedgerEntries", "compileRuns",
     "explorationTasks", "explorationPlans", "pageBindingDecisions", "brainTasks", "brainSessions",
-    "brainEvents", "semanticConcepts", "semanticAliases", "semanticRelations", "businessEntityInstances",
+    "brainEvents", "semanticConcepts", "semanticAliases", "semanticRelations", "semanticBindings",
+    "businessScenarios", "scenarioAssuranceContracts", "scenarioTrustRecords", "onboardingPlans", "businessEntityInstances",
     "testDataDependencies",
     "systemBrainSnapshots", "systemBrainChangeSets"
   ];
@@ -672,12 +732,15 @@ function readRepositorySnapshot(filePath: string): Partial<RepositorySnapshot> {
   return snapshot;
 }
 
-function readShardedSnapshot(collectionsDir: string): Partial<RepositorySnapshot> {
-  const snapshot: Record<string, unknown> = { schemaVersion: SHARDED_REPOSITORY_SCHEMA_VERSION };
+function readShardedSnapshot(
+  collectionsDir: string,
+  schemaVersion = SHARDED_REPOSITORY_SCHEMA_VERSION
+): Partial<RepositorySnapshot> {
+  const snapshot: Record<string, unknown> = { schemaVersion };
   for (const key of collectionKeys()) {
     const filePath = join(collectionsDir, `${key}.json`);
     if (!existsSync(filePath)) {
-      if (OPTIONAL_SCHEMA_19_COLLECTIONS.has(key)) {
+      if (schemaVersion !== SHARDED_REPOSITORY_SCHEMA_VERSION && OPTIONAL_LEGACY_COLLECTIONS.has(key)) {
         snapshot[key] = [];
         continue;
       }
@@ -763,6 +826,8 @@ function systemAssets(repository: InMemoryBrainCreatorRepository, systemId: stri
     requirementSets: repository.requirementSets.filter((item) => requirementSetIds.has(item.id)),
     workflowModels: repository.workflowModels.filter((item) => requirementSetIds.has(item.requirementSetId)),
     stateMachineModels: repository.stateMachineModels.filter((item) => requirementSetIds.has(item.requirementSetId)),
+    businessObjectModels: repository.businessObjectModels.filter((item) => requirementSetIds.has(item.requirementSetId)),
+    decisionTableModels: repository.decisionTableModels.filter((item) => requirementSetIds.has(item.requirementSetId)),
     requirementCoverageProfiles: repository.requirementCoverageProfiles.filter((item) => requirementSetIds.has(item.requirementSetId)),
     knowledgeNodes: repository.knowledgeNodes.filter((item) => visibleKnowledgeNodeIds.has(item.id)),
     knowledgeEdges: repository.knowledgeEdges.filter(
@@ -803,6 +868,21 @@ function systemAssets(repository: InMemoryBrainCreatorRepository, systemId: stri
       );
       return conceptIds.has(item.fromConceptId) && conceptIds.has(item.toConceptId);
     }),
+    semanticBindings: repository.semanticBindings.filter((item) => item.systemId === systemId),
+    businessScenarios: repository.businessScenarios.filter((item) =>
+      knowledgeProjectIds.has(item.knowledgeProjectId)
+    ),
+    scenarioAssuranceContracts: repository.scenarioAssuranceContracts.filter((item) =>
+      repository.businessScenarios.some(
+        (scenario) => scenario.id === item.scenarioId && knowledgeProjectIds.has(scenario.knowledgeProjectId)
+      )
+    ),
+    scenarioTrustRecords: repository.scenarioTrustRecords.filter((item) =>
+      repository.businessScenarios.some(
+        (scenario) => scenario.id === item.scenarioId && knowledgeProjectIds.has(scenario.knowledgeProjectId)
+      )
+    ),
+    onboardingPlans: repository.onboardingPlans.filter((item) => item.systemId === systemId),
     businessEntityInstances: repository.businessEntityInstances.filter(
       (item) => item.systemId === systemId
     ),
@@ -843,6 +923,8 @@ function buildAssetIndex(repository: InMemoryBrainCreatorRepository) {
     ...repository.attachmentAnalyses.map((item) => ({ id: item.id, type: "attachment-analysis", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.kind })),
     ...repository.workflowModels.map((item) => ({ id: item.id, type: "workflow-model", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
     ...repository.stateMachineModels.map((item) => ({ id: item.id, type: "state-machine-model", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
+    ...repository.businessObjectModels.map((item) => ({ id: item.id, type: "business-object-model", requirementSetId: item.requirementSetId, label: item.name })),
+    ...repository.decisionTableModels.map((item) => ({ id: item.id, type: "decision-table-model", requirementSetId: item.requirementSetId, label: item.title })),
     ...repository.explorationTasks.map((item) => ({ id: item.id, type: "exploration-task", systemId: item.systemId, requirementSetId: item.requirementSetId, label: item.reason })),
     ...repository.explorationPlans.map((item) => ({ id: item.id, type: "exploration-plan", systemId: item.systemId, requirementSetId: item.requirementSetId, label: item.status })),
     ...repository.testIntents.map((item) => ({ id: item.id, type: "test-intent", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
@@ -851,6 +933,11 @@ function buildAssetIndex(repository: InMemoryBrainCreatorRepository) {
     ...repository.gaps.map((item) => ({ id: item.id, type: "gap", systemId: item.projectId, label: item.reason })),
     ...repository.brainTasks.map((item) => ({ id: item.id, type: "brain-task", systemId: item.systemId, label: item.operation })),
     ...repository.semanticConcepts.map((item) => ({ id: item.id, type: "semantic-concept", systemId: item.systemId, label: item.canonicalName })),
+    ...repository.semanticBindings.map((item) => ({ id: item.id, type: "semantic-binding", systemId: item.systemId, requirementSetId: item.requirementSetId, label: item.type })),
+    ...repository.businessScenarios.map((item) => ({ id: item.id, type: "business-scenario", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.title })),
+    ...repository.scenarioAssuranceContracts.map((item) => ({ id: item.scenarioId, type: "scenario-assurance", label: item.verdict })),
+    ...repository.scenarioTrustRecords.map((item) => ({ id: item.scenarioId, type: "scenario-trust", label: item.status })),
+    ...repository.onboardingPlans.map((item) => ({ id: item.id, type: "onboarding-plan", systemId: item.systemId, requirementSetId: item.requirementSetId, label: item.status })),
     ...repository.businessEntityInstances.map((item) => ({ id: item.id, type: "business-entity", systemId: item.systemId, label: item.entityKey })),
     ...repository.testDataDependencies.map((item) => ({ id: item.id, type: "test-data-dependency", systemId: item.systemId, label: `${item.fromReference} -> ${item.toReference}` })),
     ...repository.systemBrainSnapshots.map((item) => ({ id: item.id, type: "system-brain-snapshot", systemId: item.systemId, label: `revision ${item.revision}` })),

@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("store doctor", () => {
-  it("reports a healthy schema 19 store", async () => {
+  it("reports a healthy schema 20 store", async () => {
     const root = await tempDir();
     const storeDir = join(root, "store");
     new ShardedFileBrainCreatorRepository(storeDir, join(root, "local-assets.json"));

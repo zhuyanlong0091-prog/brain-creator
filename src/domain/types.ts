@@ -827,17 +827,49 @@ export type BrowserExecutionMode = "headless" | "observe";
 
 export type ProcessModelStatus = "draft" | "confirmed" | "conflicted";
 
+export type BusinessObjectModel = {
+  id: string;
+  requirementSetId: string;
+  semanticConceptId: string;
+  name: string;
+  actors: string[];
+  fields: string[];
+  states: string[];
+  invariants: string[];
+  sourceRefs: string[];
+  status: ProcessModelStatus;
+};
+
+export type DecisionTableModel = {
+  id: string;
+  requirementSetId: string;
+  title: string;
+  conditions: string[];
+  actions: string[];
+  rules: Array<{
+    conditionValues: Record<string, string>;
+    expectedActions: string[];
+    sourceRefs: string[];
+  }>;
+  sourceRefs: string[];
+  status: ProcessModelStatus;
+};
+
 export type WorkflowModel = {
   id: string;
   knowledgeProjectId: string;
   requirementSetId: string;
-  attachmentAnalysisId: string;
+  attachmentAnalysisId?: string;
   title: string;
   actors: string[];
   steps: Array<{
     id: string;
     label: string;
     actor?: string;
+    trigger?: string;
+    preconditions?: string[];
+    businessObject?: string;
+    sideEffects?: string[];
     sourceRefs: string[];
   }>;
   transitions: Array<{
@@ -846,6 +878,10 @@ export type WorkflowModel = {
     to: string;
     condition?: string;
     actor?: string;
+    trigger?: string;
+    preconditions?: string[];
+    businessObject?: string;
+    sideEffects?: string[];
     sourceRefs: string[];
   }>;
   startStepIds: string[];
@@ -861,7 +897,7 @@ export type StateMachineModel = {
   id: string;
   knowledgeProjectId: string;
   requirementSetId: string;
-  attachmentAnalysisId: string;
+  attachmentAnalysisId?: string;
   title: string;
   states: Array<{
     id: string;
@@ -876,6 +912,10 @@ export type StateMachineModel = {
     to: string;
     trigger?: string;
     actor?: string;
+    preconditions?: string[];
+    businessObject?: string;
+    sideEffects?: string[];
+    validity?: "legal" | "forbidden" | "unknown";
     sourceRefs: string[];
   }>;
   sourceRefs: string[];

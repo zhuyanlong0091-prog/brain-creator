@@ -162,7 +162,7 @@ brain-creator artifacts retention --older-than-days <days> [--system <id>] [--ta
 | `BRAIN_CREATOR_AGENT_PROVIDER` | Agent 执行方式 | `host-agent` |
 | `BRAIN_CREATOR_AGENT_TIMEOUT_MS` | Agent 调用超时 | `120000` |
 | `BRAIN_CREATOR_KNOWLEDGE_DIR` | 外部知识目录 | `<absolute-knowledge-path>` |
-| `BRAIN_CREATOR_STORE_DIR` | schema 19 分片运行仓库 | `<workspace>/.brain-creator/store` |
+| `BRAIN_CREATOR_STORE_DIR` | schema 20 分片运行仓库 | `<workspace>/.brain-creator/store` |
 | `BRAIN_CREATOR_FEISHU_APP_ID` | 飞书 OpenAPI app ID | 环境 secret 引用 |
 | `BRAIN_CREATOR_FEISHU_APP_SECRET` | 飞书 OpenAPI app secret | 环境 secret 引用 |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE` | 显式浏览器可执行文件 | 本机 Chrome/Edge 路径 |
