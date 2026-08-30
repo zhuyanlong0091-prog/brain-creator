@@ -157,6 +157,117 @@ export type SemanticRelation = {
   updatedAt: string;
 };
 
+export type SemanticBinding = {
+  id: string;
+  requirementSetId: string;
+  systemId: string;
+  expectedSemanticId: string;
+  observedSemanticId?: string;
+  type: "exact" | "alias" | "step-expansion" | "conditional" | "missing" | "conflict";
+  conditions: {
+    role?: string;
+    state?: string;
+    dataRefs?: string[];
+  };
+  confidence: number;
+  status: "candidate" | "confirmed" | "conflicted" | "stale";
+  evidenceRefs: string[];
+  confirmedBy?: string;
+};
+
+export type BusinessScenarioFamily =
+  | "main-flow"
+  | "branch"
+  | "state-transition"
+  | "invalid-transition"
+  | "cross-role"
+  | "exception"
+  | "compensation"
+  | "data"
+  | "integration";
+
+export type BusinessScenario = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  title: string;
+  objective: string;
+  family: BusinessScenarioFamily;
+  actors: string[];
+  preconditions: string[];
+  workflowRefs: string[];
+  stateTransitionRefs: string[];
+  decisionRuleRefs: string[];
+  testDataNeeds: string[];
+  expectedBusinessOutcomes: string[];
+  sourceRefs: string[];
+  risk: "low" | "medium" | "high" | "critical";
+  status: "draft" | "approved" | "stale" | "blocked";
+};
+
+export type ScenarioTrustStatus =
+  | "generated"
+  | "grounded"
+  | "bound"
+  | "verified"
+  | "trusted"
+  | "quarantined";
+
+export type ScenarioAssuranceContract = {
+  scenarioId: string;
+  requirementRefs: string[];
+  workflowRefs: string[];
+  stateTransitionRefs: string[];
+  decisionRuleRefs: string[];
+  systemBinding: "unique" | "ambiguous" | "missing";
+  testDataReadiness: "ready" | "creatable" | "blocked";
+  oracleStrength: "strong" | "limited" | "none";
+  unsupportedInferences: string[];
+  risk: BusinessScenario["risk"];
+  independence: "deterministic" | "isolated-single-provider" | "cross-provider" | "human-confirmed";
+  verdict: "pass" | "needs-review" | "blocked";
+  evidenceRefs: string[];
+};
+
+export type ScenarioTrustRecord = {
+  scenarioId: string;
+  status: ScenarioTrustStatus;
+  strongRunCount: number;
+  lastRequirementHash: string;
+  lastSystemSnapshotHash?: string;
+  lastDataPlanHash?: string;
+  downgradeReason?: string;
+  updatedAt: string;
+};
+
+export type OnboardingPlan = {
+  id: string;
+  knowledgeProjectId: string;
+  requirementSetId: string;
+  systemId: string;
+  requirementSummary: string;
+  baselineAssetIds: string[];
+  explorationPlanId: string;
+  unresolvedQuestions: string[];
+  allowedRoutes: string[];
+  allowedActions: string[];
+  forbiddenActions: string[];
+  maxWrites: number;
+  maxDurationMs: number;
+  cleanupPolicy: "delete" | "close" | "retain-with-label";
+  status: "draft" | "approved" | "completed" | "blocked";
+  approvedBy?: string;
+  approvedAt?: string;
+};
+
+export type EvaluationProviderDescriptor = {
+  provider: "host-agent" | "claude" | "codex";
+  modelFamily: "claude" | "openai" | "unknown";
+  available: boolean;
+  enabled: boolean;
+  role: "primary" | "evaluator";
+};
+
 export type BusinessEntityInstance = {
   id: string;
   entityKey: string;

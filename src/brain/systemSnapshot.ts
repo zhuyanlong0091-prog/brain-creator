@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type { SystemBrain } from "../knowledge/systemBrain.js";
 import { id } from "../shared/id.js";
-import { normalizeSemanticTerm } from "./semanticSpine.js";
+import { canonicalActionAlias, normalizeSemanticTerm } from "./semanticSpine.js";
 import type {
   SystemBrainChange,
   SystemBrainChangeSet,
@@ -405,12 +405,7 @@ export function diffSystemBrainSnapshots(
 }
 
 export function canonicalActionLabel(value: string) {
-  const normalized = normalizeSemanticTerm(value);
-  return normalized
-    .replace(/新增|新建|创建|添加|建立/gu, "create")
-    .replace(/编辑|修改|更新/gu, "edit")
-    .replace(/删除|移除/gu, "delete")
-    .replace(/查询|搜索|查找/gu, "search");
+  return canonicalActionAlias(value);
 }
 
 function normalizeRoute(value: string) {

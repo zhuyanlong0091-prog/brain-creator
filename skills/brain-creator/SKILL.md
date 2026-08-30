@@ -19,6 +19,14 @@ The recommended entrypoint is a requirement document or link. Existing Excel/Mar
 - Never echo passwords, tokens, cookies, storage state, Feishu secrets, or verification codes.
 - Do not retry a cancelled or denied facade call through an equivalent fine-grained tool.
 
+## L3 Trust Foundation
+
+Repository schema 20 persists the vocabulary for later L3 behavior: BusinessObjectModel, DecisionTableModel, SemanticBinding, BusinessScenario, ScenarioAssuranceContract, ScenarioTrustRecord, and OnboardingPlan. Persistence is not approval. Do not infer, announce, or write `verified` or `trusted` from a legacy ExecutableCase, a single Playwright pass, an LLM confidence value, or a semantic alias.
+
+The built-in Alias Policy is domain-neutral and auditable. A term match such as `新增`/`新建`/`create` is only a candidate semantic relationship. Conditional behavior and multi-step expansion still require Requirement sources, System evidence, and the corresponding assurance gates. Until the later Facade phases are implemented, continue using the existing baseline and ExplorationPlan approval flow; do not invent `approve-onboarding-plan` or scenario-trust calls that the current server does not expose.
+
+In a source checkout, `npm run verify:autonomy-baseline` reports measured deterministic capabilities and explicitly lists unmeasured scenario and mutation capabilities. Never summarize a `not-measured` metric as a pass.
+
 ## Facade-First Tool Policy
 
 New installations use `BRAIN_CREATOR_TOOL_PROFILE=facade`. Prefer these high-level tools:

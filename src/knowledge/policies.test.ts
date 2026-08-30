@@ -77,6 +77,16 @@ describe("built-in knowledge policies", () => {
       "source_1#clause-3",
       "source_1#clause-4"
     ]);
+    expect(analysis.clauses).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceRefs: ["source_1#clause-1"],
+        origin: "explicit",
+        confidence: 1,
+        status: "draft",
+        policyId: "brain-creator.requirement-analysis",
+        policyVersion: "2.2.0"
+      })
+    ]));
     expect(analysis.nodes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: "workflow", sourceRefs: ["source_1#clause-1"] }),

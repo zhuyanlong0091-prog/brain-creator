@@ -27,6 +27,10 @@ Agent 负责对话和宿主能力。Brain Creator 提供持久化领域模型、
 
 共享语义主干负责连接这些边界。例如，需求中的“新增”和系统中的“新建”可以解析为同一个 `action:create` 概念；`employee:testperson001` 是可被后续编辑用例消费的业务实体引用。
 
+schema 20 建立了 L3 所需的持久化词汇：`BusinessObjectModel`、`DecisionTableModel`、`SemanticBinding`、`BusinessScenario`、`ScenarioAssuranceContract`、`ScenarioTrustRecord` 和 `OnboardingPlan`。这些集合只是后续能力的基础，不代表场景生成或自主晋升已经完成。旧版可执行用例不会在迁移时直接获得 `verified` 或 `trusted`。
+
+内置动作别名策略是通用且可审计的，可以归一化“新增”“新建”和 `create` 等词。仅有文案别名不能证明两个业务动作等价；条件映射和多步骤展开仍必须经过系统证据与后续可信门禁。
+
 Harness Runtime 管理每次 Agent 任务的上下文、审批、执行、Eval、重试预算和终态。Agent 输出必须先通过结构化门禁才能写入领域资产。当前可以通过 `bc_status` 查看任务状态和事件，底层编排接口仍保持兼容。
 
 ### Harness 统一输出与门禁
@@ -143,6 +147,10 @@ Planner、Generator 和 Healer 可以通过以下方式运行：
 ## 存储
 
 Brain Creator 采用本地优先策略。运行状态和证据默认写入 `.brain-creator/`，需求知识默认写入 `.brain-creator/knowledge`。
+
+当前分片仓库版本为 schema 20。schema 19 仓库会在迁移前生成备份；如果写锁导致迁移无法完成，Brain Creator 会继续保留 schema 19 快照，不会部分宣称升级成功。
+
+源码工作区可运行 `npm run verify:autonomy-baseline` 输出确定性的 L3 基线。报告会区分“已测量”和“尚未测量”；BusinessScenario 或 Mutation 指标尚未建设时会明确列为能力缺口，而不是记为通过。
 
 可用 `BRAIN_CREATOR_KNOWLEDGE_DIR` 指向外部 Obsidian 兼容目录。运行数据、鉴权状态、prompt、trace 和生成测试不得提交到 Git。
 

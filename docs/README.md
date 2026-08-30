@@ -50,7 +50,7 @@ Start with [Troubleshooting](troubleshooting.md). Then use Brain Creator review 
 - [Core concepts](core-concepts.md): the mental model and lifecycle.
 - [Agent usage guide](agent-usage.md): detailed Facade behavior and approval rules.
 - [Trusted control plane](guides/trusted-control-plane.md): safe state changes and bounded Facade responses.
-- [Storage and evidence](guides/storage-and-evidence.md): schema 19 migration, shard layout, doctor checks, manifests, and Suite exports.
+- [Storage and evidence](guides/storage-and-evidence.md): schema 20 migration, shard layout, doctor checks, manifests, and Suite exports.
 - [Session resume workflow](e2e-session-resume-workflow.md): restoring state in a new Agent session.
 - [v2 low-level quickstart](v2-quickstart.md): compatibility reference for internal `bc_*` tools.
 

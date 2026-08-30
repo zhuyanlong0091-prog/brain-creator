@@ -27,6 +27,10 @@ The five Brains are logical boundaries inside one package, not five services:
 
 The shared semantic spine connects these boundaries. For example, requirement terms such as `新增` and observed terms such as `新建` can resolve to the same `action:create` concept. A value such as `employee:testperson001` is a business entity reference that can be produced by one case and consumed by a later edit case.
 
+Schema 20 establishes the persistent vocabulary for L3 work: `BusinessObjectModel`, `DecisionTableModel`, `SemanticBinding`, `BusinessScenario`, `ScenarioAssuranceContract`, `ScenarioTrustRecord`, and `OnboardingPlan`. These collections are foundations, not a claim that scenario generation or autonomous promotion is already complete. Legacy executable cases are never migrated directly to `verified` or `trusted`.
+
+The built-in action alias policy is domain-neutral and auditable. It can normalize terms such as `新增`, `新建`, and `create`, but a text alias alone does not prove that two business operations are equivalent. Conditional and multi-step bindings require system evidence and later assurance gates.
+
 The Harness Runtime controls the lifecycle around every Agent task: context preparation, approval, provider waiting, execution, Eval, retry/healing budget, and terminal state. Agent output does not write domain assets until it passes the relevant structured gate. Host-agent continuations resume the same persisted Brain task instead of creating a second hidden lifecycle. Context budgets and path boundaries are enforced before provider output is accepted. The current implementation exposes task state and events through `bc_status`; low-level orchestration remains compatible while it is gradually moved behind this lifecycle.
 
 ### Unified Harness Output And Gates
@@ -143,6 +147,10 @@ Run `brain-creator doctor` before a confirmed workflow to see which provider is 
 ## Storage
 
 Brain Creator is local-first. Runtime state and evidence default to `.brain-creator/`; generated requirement knowledge defaults to `.brain-creator/knowledge`.
+
+The current sharded repository schema is 20. A schema 19 store is backed up before migration; if the writer lock prevents migration, Brain Creator retains the schema 19 snapshot instead of partially claiming the upgrade.
+
+Run `npm run verify:autonomy-baseline` from a source checkout to print the deterministic L3 baseline. The report distinguishes measured controls from capabilities that are not measured yet; a missing BusinessScenario or Mutation metric is reported as an open capability gap, not as a pass.
 
 You can set `BRAIN_CREATOR_KNOWLEDGE_DIR` to an external Obsidian-compatible directory. Runtime data, auth state, prompts, traces, and generated tests must remain uncommitted.
 

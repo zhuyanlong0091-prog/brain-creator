@@ -17,6 +17,27 @@ export type SemanticSpineStore = {
   persist(): void;
 };
 
+export const BUILTIN_SEMANTIC_ALIAS_POLICY = [
+  { id: "action:create", canonical: "create", aliases: ["新增", "新建", "创建", "添加", "建立", "create", "add"] },
+  { id: "action:edit", canonical: "edit", aliases: ["编辑", "修改", "更新", "edit", "update"] },
+  { id: "action:delete", canonical: "delete", aliases: ["删除", "移除", "delete", "remove"] },
+  { id: "action:search", canonical: "search", aliases: ["查询", "搜索", "查找", "search", "find"] },
+  { id: "action:submit", canonical: "submit", aliases: ["提交", "submit"] },
+  { id: "action:save", canonical: "save", aliases: ["保存", "save"] },
+  { id: "action:approve", canonical: "approve", aliases: ["审批", "通过", "approve"] },
+  { id: "action:reject", canonical: "reject", aliases: ["拒绝", "驳回", "reject"] },
+  { id: "action:close", canonical: "close", aliases: ["关闭", "close"] }
+] as const;
+
+const ACTION_ALIAS_PATTERN = new RegExp(
+  BUILTIN_SEMANTIC_ALIAS_POLICY
+    .flatMap((entry) => entry.aliases)
+    .sort((left, right) => right.length - left.length)
+    .map((alias) => /^[a-z]+$/iu.test(alias) ? `\\b${escapeRegExp(alias)}\\b` : escapeRegExp(alias))
+    .join("|"),
+  "giu"
+);
+
 export type UpsertSemanticConceptInput = {
   identityKey: string;
   kind: SemanticConceptKind;
@@ -265,11 +286,11 @@ export function normalizeSemanticTerm(value: string) {
 }
 
 export function canonicalSemanticAction(value: string) {
-  return canonicalActionTerm(value);
+  return canonicalActionAlias(value);
 }
 
 export function extractSemanticActionTerms(value: string) {
-  const matches = value.match(/新增|新建|创建|添加|建立|编辑|修改|更新|删除|移除|查询|搜索|查找|提交|保存|审批|通过|拒绝|驳回|关闭|create|add|edit|update|delete|search|submit|save|approve|reject|close/giu) ?? [];
+  const matches = value.match(ACTION_ALIAS_PATTERN) ?? [];
   return unique(matches);
 }
 
@@ -278,7 +299,7 @@ function matchesConceptQuery(concept: SemanticConcept, normalizedQuery: string) 
   return values.some((value) => {
     const normalized = normalizeSemanticTerm(value);
     if (normalized === normalizedQuery) return true;
-    return concept.kind === "action" && canonicalActionTerm(value) === canonicalActionTerm(normalizedQuery);
+    return concept.kind === "action" && canonicalActionAlias(value) === canonicalActionAlias(normalizedQuery);
   });
 }
 
@@ -286,35 +307,28 @@ function equivalentActionConcepts(left: SemanticConcept, right: SemanticConcept)
   const leftValues = [left.canonicalName, ...left.aliases];
   const rightValues = [right.canonicalName, ...right.aliases];
   return leftValues.some((leftValue) =>
-    rightValues.some((rightValue) => canonicalActionTerm(leftValue) === canonicalActionTerm(rightValue))
+    rightValues.some((rightValue) => canonicalActionAlias(leftValue) === canonicalActionAlias(rightValue))
   );
 }
 
-function canonicalActionTerm(value: string) {
-  const normalized = normalizeSemanticTerm(value);
-  const replacements: Array<[string, string]> = [
-    ["新增", "create"],
-    ["新建", "create"],
-    ["创建", "create"],
-    ["添加", "create"],
-    ["建立", "create"],
-    ["编辑", "edit"],
-    ["修改", "edit"],
-    ["更新", "edit"],
-    ["删除", "delete"],
-    ["移除", "delete"],
-    ["提交", "submit"],
-    ["保存", "save"],
-    ["审批", "approve"],
-    ["通过", "approve"],
-    ["拒绝", "reject"],
-    ["驳回", "reject"],
-    ["关闭", "close"]
-  ];
-  return replacements.reduce(
-    (result, [source, target]) => result.replaceAll(source, target),
+export function canonicalActionAlias(value: string) {
+  const prepared = value.normalize("NFKC").trim().toLocaleLowerCase();
+  const canonicalized = BUILTIN_SEMANTIC_ALIAS_POLICY.reduce((result, entry) =>
+    entry.aliases.reduce(
+      (aliasResult, alias) => /^[a-z]+$/iu.test(alias)
+        ? aliasResult.replace(new RegExp(`\\b${escapeRegExp(alias)}\\b`, "giu"), entry.canonical)
+        : aliasResult.replaceAll(alias, entry.canonical),
+      result
+    ), prepared);
+  const normalized = normalizeSemanticTerm(canonicalized);
+  return BUILTIN_SEMANTIC_ALIAS_POLICY.reduce(
+    (result, entry) => result.replaceAll(`${entry.canonical}${entry.canonical}`, entry.canonical),
     normalized
   );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function semanticId(input: Pick<UpsertSemanticConceptInput, "identityKey" | "kind" | "knowledgeProjectId" | "systemId" | "requirementSetId">) {

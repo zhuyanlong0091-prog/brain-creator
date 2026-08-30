@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { SemanticSpineService } from "./semanticSpine.js";
+import {
+  BUILTIN_SEMANTIC_ALIAS_POLICY,
+  SemanticSpineService,
+  canonicalActionAlias
+} from "./semanticSpine.js";
 
 function store() {
   return {
@@ -12,6 +16,17 @@ function store() {
 }
 
 describe("SemanticSpineService", () => {
+  it("uses an auditable, domain-neutral alias policy", () => {
+    expect(BUILTIN_SEMANTIC_ALIAS_POLICY).toEqual(expect.arrayContaining([
+      expect.objectContaining({ canonical: "create", aliases: expect.arrayContaining(["新增", "新建"]) }),
+      expect.objectContaining({ canonical: "edit", aliases: expect.arrayContaining(["编辑", "修改"]) })
+    ]));
+    expect(canonicalActionAlias("新增需求")).toBe("create需求");
+    expect(canonicalActionAlias("修改订单")).toBe("edit订单");
+    expect(canonicalActionAlias("审批通过")).toBe("approve");
+    expect(canonicalActionAlias("Address details")).toBe("addressdetails");
+  });
+
   it("keeps one semantic action when requirement and system labels differ", () => {
     const repository = store();
     const spine = new SemanticSpineService(repository);

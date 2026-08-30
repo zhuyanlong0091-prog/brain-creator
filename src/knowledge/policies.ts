@@ -10,20 +10,42 @@ import type {
 
 export const REQUIREMENT_ANALYSIS_POLICY = {
   id: "brain-creator.requirement-analysis",
-  version: "2.1.1"
+  version: "2.2.0"
 } as const;
 
 export const TEST_DESIGN_POLICY = {
   id: "brain-creator.test-design",
-  version: "2.1.1"
+  version: "2.2.0"
 } as const;
+
+export type RequirementClauseKind =
+  | "goal"
+  | "actor"
+  | "object"
+  | "action"
+  | "field"
+  | "rule"
+  | "condition"
+  | "workflow"
+  | "state"
+  | "permission"
+  | "integration"
+  | "exception"
+  | "data-constraint";
 
 export type RequirementClause = {
   id: string;
   index: number;
   text: string;
   sourceRef: string;
+  sourceRefs: string[];
   module: string;
+  kind: RequirementClauseKind;
+  origin: "explicit" | "derived";
+  confidence: number;
+  status: "draft" | "confirmed" | "conflicted";
+  policyId: string;
+  policyVersion: string;
   nodeTypes: KnowledgeNodeType[];
 };
 
@@ -383,14 +405,25 @@ function splitRequirementClauses(
     .filter(Boolean);
   const values = parts.length > 0 ? parts : [content.trim()].filter(Boolean);
 
-  return values.map((text, index): RequirementClause => ({
-    id: `${requirementSetId}:clause-${index + 1}`,
-    index: index + 1,
-    text: normalizeRequirementText(text),
-    sourceRef: `${sourceRef}#clause-${index + 1}`,
-    module: inferClauseModule(text, module),
-    nodeTypes: classifyClause(text)
-  }));
+  return values.map((text, index): RequirementClause => {
+    const clauseSourceRef = `${sourceRef}#clause-${index + 1}`;
+    const nodeTypes = classifyClause(text);
+    return {
+      id: `${requirementSetId}:clause-${index + 1}`,
+      index: index + 1,
+      text: normalizeRequirementText(text),
+      sourceRef: clauseSourceRef,
+      sourceRefs: [clauseSourceRef],
+      module: inferClauseModule(text, module),
+      kind: clauseKind(nodeTypes),
+      origin: "explicit",
+      confidence: 1,
+      status: "draft",
+      policyId: REQUIREMENT_ANALYSIS_POLICY.id,
+      policyVersion: REQUIREMENT_ANALYSIS_POLICY.version,
+      nodeTypes
+    };
+  });
 }
 
 function requirementParts(content: string) {
@@ -543,15 +576,23 @@ function normalizeHostClauses(
       }
       const text = normalizeRequirementText(clause.text);
       const sourceRef = clause.sourceRef;
+      const nodeTypes = nodes
+        .filter((node) => node.sourceRefs.includes(sourceRef) && node.type !== "module" && node.type !== "requirement")
+        .map((node) => node.type);
       return {
         id: typeof clause.id === "string" ? clause.id : `${requirementSetId}:clause-${index + 1}`,
         index: index + 1,
         text,
         sourceRef,
+        sourceRefs: stringList(clause.sourceRefs).length > 0 ? stringList(clause.sourceRefs) : [sourceRef],
         module,
-        nodeTypes: nodes
-          .filter((node) => node.sourceRefs.includes(sourceRef) && node.type !== "module" && node.type !== "requirement")
-          .map((node) => node.type)
+        kind: isRequirementClauseKind(clause.kind) ? clause.kind : clauseKind(nodeTypes),
+        origin: clause.origin === "derived" ? "derived" : "explicit",
+        confidence: typeof clause.confidence === "number" ? clampConfidence(clause.confidence) : 1,
+        status: clause.status === "conflicted" ? "conflicted" : clause.status === "confirmed" ? "confirmed" : "draft",
+        policyId: typeof clause.policyId === "string" ? clause.policyId : REQUIREMENT_ANALYSIS_POLICY.id,
+        policyVersion: typeof clause.policyVersion === "string" ? clause.policyVersion : "host-skill",
+        nodeTypes
       };
     });
   }
@@ -559,17 +600,44 @@ function normalizeHostClauses(
   const sourceRefs = [...new Set(nodes.flatMap((node) => node.sourceRefs))];
   return sourceRefs.map((sourceRef, index): RequirementClause => {
     const related = nodes.filter((node) => node.sourceRefs.includes(sourceRef));
+    const nodeTypes = related
+      .filter((node) => node.type !== "module" && node.type !== "requirement")
+      .map((node) => node.type);
     return {
       id: `${requirementSetId}:clause-${index + 1}`,
       index: index + 1,
       text: related[0]?.content ?? sourceRef,
       sourceRef,
+      sourceRefs: [sourceRef],
       module,
-      nodeTypes: related
-        .filter((node) => node.type !== "module" && node.type !== "requirement")
-        .map((node) => node.type)
+      kind: clauseKind(nodeTypes),
+      origin: "explicit",
+      confidence: 1,
+      status: "draft",
+      policyId: REQUIREMENT_ANALYSIS_POLICY.id,
+      policyVersion: "host-skill",
+      nodeTypes
     };
   });
+}
+
+function clauseKind(nodeTypes: KnowledgeNodeType[]): RequirementClauseKind {
+  const priority: RequirementClauseKind[] = [
+    "exception", "permission", "integration", "state", "workflow", "condition",
+    "rule", "data-constraint", "field", "action", "actor", "object", "goal"
+  ];
+  return priority.find((kind) => nodeTypes.includes(kind as KnowledgeNodeType)) ?? "goal";
+}
+
+function isRequirementClauseKind(value: unknown): value is RequirementClauseKind {
+  return typeof value === "string" && [
+    "goal", "actor", "object", "action", "field", "rule", "condition", "workflow",
+    "state", "permission", "integration", "exception", "data-constraint"
+  ].includes(value);
+}
+
+function clampConfidence(value: number) {
+  return Math.max(0, Math.min(1, value));
 }
 
 function inferModule(title: string, content: string) {
