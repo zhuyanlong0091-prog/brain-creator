@@ -31,6 +31,15 @@ Supported inputs include Markdown, TXT, DOCX, PDF, HTTP(S), Obsidian references,
 
 ## 2. Review Analysis And Test Design
 
+Brain Creator performs host-assisted requirement understanding as four independent tasks:
+
+1. Document Mapper identifies goals, scope, modules, actors, business objects, and attachment evidence.
+2. Clause Analyst emits atomic explicit or derived clauses with confidence and exact source references.
+3. Business Modeler builds object lifecycles, workflows, state machines, decision tables, and invariants from text, tables, and confirmed images.
+4. Coverage Critic reads the source and structured outputs in an isolated task. It does not inherit designer conversation and looks for missing main flows, branches, exceptions, actors, end states, contradictions, and unsupported inferences.
+
+Use `bc_prepare action=generate-analysis provider=host-agent`. Execute the returned host task, then submit each JSON result by repeating `generate-analysis` with its `taskId` and `analysisPackage`. After the Critic completes, call `generate-test-design` with the same provider. The Harness uses four normal Agent calls and permits one structured retry. A second schema or Eval failure creates a recoverable Gap. Host Skill output may seed the mapper and clause stages, but modeling and Critic review still run.
+
 Brain Creator should present:
 
 - atomic requirement clauses and source anchors;

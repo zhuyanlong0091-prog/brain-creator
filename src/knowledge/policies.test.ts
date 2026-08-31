@@ -84,7 +84,7 @@ describe("built-in knowledge policies", () => {
         confidence: 1,
         status: "draft",
         policyId: "brain-creator.requirement-analysis",
-        policyVersion: "2.2.0"
+        policyVersion: "2.2.1"
       })
     ]));
     expect(analysis.nodes).toEqual(

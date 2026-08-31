@@ -45,7 +45,7 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 需求中的图片属于正文内容。Brain Creator 会先登记并下载 Markdown、DOCX、PDF、HTTP 或飞书附件，再把受控本地文件交给 Claude Code/Codex 的多模态能力；结构化结果需由用户确认后才能进入需求知识。只有下载或识别重试确实失败后才创建附件 Gap，不能因为“尚未识别”直接跳过流程图或状态机。
 
 已确认的流程图和状态机不会只保留为图片摘要：Brain Creator 会生成可追踪的 `WorkflowModel`、`StateMachineModel` 和五维 `RequirementCoverageProfile`，并为每条状态转换生成正向与必要的负向 TestIntent。关键流程附件未确认、流程/状态覆盖缺失或字段用例挤占流程覆盖时，Requirement Eval 会阻止“需求覆盖完整”的结论。可通过 `bc_review target=coverage` 查看模型、来源边和缺失覆盖。
-
+需求分析现在通过四个隔离的 Requirement Host Harness 阶段完成：文档地图、原子条款、业务对象/流程/状态/决策表建模、独立覆盖 Critic。每个阶段都是可恢复的 `BrainTask`，只读取来源和前序结构化产物；Critic 不继承设计阶段对话。正常分析最多使用 4 次宿主调用，schema 或 Eval 失败只重试 1 次，之后必须形成可恢复 Gap。`RequirementAnalysis.skill` 可以增强前两阶段，但不能跳过业务建模、Critic、来源校验和人工审批。
 完整步骤见[快速开始](docs/getting-started.md)。安装失败时先看[故障排查](docs/troubleshooting.md)。
 
 ### 工作方式
@@ -156,7 +156,7 @@ The first response should contain a requirement summary, source references, open
 Images are requirement content. Brain Creator discovers and downloads Markdown, DOCX, PDF, HTTP, and Feishu attachments, then hands controlled local files to the Claude Code or Codex multimodal host. Structured output remains draft until the user confirms it. An attachment Gap is created only after download or recognition retries actually fail, never merely because an image has not been analyzed yet.
 
 Confirmed flowcharts and state machines are not left as image summaries. Brain Creator materializes traceable `WorkflowModel`, `StateMachineModel`, and five-dimension `RequirementCoverageProfile` assets, then generates positive and required negative TestIntents for state transitions. Requirement Eval blocks any claim of complete coverage while critical process evidence is unconfirmed or workflow/state coverage is missing. Review the models, source edges, and missing coverage with `bc_review target=coverage`.
-
+Requirement analysis now runs through four isolated Requirement Host Harness stages: document mapping, atomic clause analysis, business object/workflow/state/decision modeling, and an independent coverage Critic. Every stage is a resumable `BrainTask` that reads sources and prior structured output only; the Critic does not inherit the designer conversation. A normal analysis uses at most four host calls, allows one schema or Eval retry, and then creates a recoverable Gap. `RequirementAnalysis.skill` may enhance the first stages, but it cannot bypass business modeling, Critic review, source validation, or user approval.
 Continue with the [Quickstart](docs/getting-started.md), or go directly to [Troubleshooting](docs/troubleshooting.md) if setup fails.
 
 ### How it works

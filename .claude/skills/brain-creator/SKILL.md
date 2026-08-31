@@ -53,7 +53,8 @@ Real Playwright execution uses strict structured evidence by default. `evidenceM
 | Analyze a local requirement, DOCX, PDF, or Web page | `bc_configure target=knowledge-project` then `bc_prepare action=ingest-requirement` | Generated knowledge stays draft |
 | Analyze a Feishu Wiki/Doc | `bc_prepare action=ingest-requirement` | Use direct OpenAPI or host content-package fallback |
 | Analyze requirement images | `bc_prepare action=analyze-attachments`, then `submit-attachment-analysis` and confirmed `confirm-attachment-analysis` | Use each controlled `localPath`; discovery alone must not create a Gap |
-| Generate requirement analysis and tests | `bc_prepare action=generate-test-design` | Review coverage, Gaps, and data before approval |
+| Generate requirement analysis | `bc_prepare action=generate-analysis provider=host-agent`, then resubmit each returned `taskId` with schema-valid `analysisPackage` | Four isolated stages; one retry; blocked Critic cannot write domain assets |
+| Generate test design | `bc_prepare action=generate-test-design provider=host-agent` after the Critic completes | Review coverage, Gaps, and data before approval |
 | Confirm Requirement Eval actions | `bc_prepare action=confirm-eval-actions confirm=true` | Present each action and preserve the user's `confirmationNote` |
 | Approve a baseline | `bc_prepare action=approve-baseline confirm=true` | Explicit user confirmation required |
 | Bind a real system | `bc_configure target=system`, then `bc_configure target=system-binding` | Confirm environment and allowlist |
@@ -82,8 +83,8 @@ When the user provides a requirement path or URL:
 1. Find or create a knowledge project with `bc_configure target=knowledge-project`. Do not require a runtime system yet.
 2. Call `bc_prepare action=ingest-requirement` with the source.
 3. If the source has attachments, call `bc_prepare action=analyze-attachments`. Use the host multimodal capability for every returned local path, submit schema-valid visual analysis, present the draft, and confirm it only after explicit user approval. Never create an attachment Gap before download or recognition retries are attempted.
-4. Call `bc_prepare action=generate-test-design` using `provider=builtin` by default.
-5. Present atomic clauses and their source anchors, WorkflowModel/StateMachineModel transitions, five-dimension coverage, unsupported claims, contradictions, missing branches, risks, test techniques, TestIntents, and TestDataProfiles. Re-run test design after confirming visual analysis; its fingerprint must invalidate an earlier field-only draft. Do not collapse the result into one broad requirement summary.
+4. Call `bc_prepare action=generate-analysis provider=host-agent`. Execute the returned Document Mapper, Clause Analyst, Business Modeler, and isolated Coverage Critic tasks in order. Submit each result by repeating `generate-analysis` with the returned `taskId` and a schema-valid `analysisPackage`. The Critic reads source evidence and structured outputs only, never designer conversation. Do not write Requirement domain assets when its verdict is blocked.
+5. After the Critic completes, call `bc_prepare action=generate-test-design provider=host-agent`. Present atomic clauses and their source anchors, BusinessObjectModel/DecisionTableModel assets, WorkflowModel/StateMachineModel transitions, five-dimension coverage, unsupported claims, contradictions, missing branches, risks, test techniques, TestIntents, and TestDataProfiles. Re-run test design after confirming visual analysis; its fingerprint must invalidate an earlier field-only draft. Do not collapse the result into one broad requirement summary.
 6. Present each pending Eval action. For clarification or a missing branch, call `bc_prepare action=confirm-eval-actions confirm=true` with the selected `actionIds` and the user's non-empty `confirmationNote`. Never infer or fabricate that note.
 7. A blocked contradiction cannot be confirmed. Ask the user to revise or refresh the requirement source, then regenerate the design.
 8. Only after the Eval gate passes, call `bc_prepare action=approve-baseline confirm=true`.
@@ -123,7 +124,7 @@ Supported first-party adapters:
 
 For Feishu, prefer direct OpenAPI when both `BRAIN_CREATOR_FEISHU_APP_ID` and `BRAIN_CREATOR_FEISHU_APP_SECRET` are configured. Otherwise use the host lark capability and retry with a `RequirementContentPackage`. Preserve stable block/file tokens, reacquire credentials for each media download, and never persist expiring `authcode` URLs. Unsupported or unreadable content may create a Gap only after the connector and visual-analysis attempts are recorded and exhausted. Never store Feishu credentials in Brain Creator assets.
 
-If `RequirementAnalysis.skill` or `TestCaseDesign.skill` is available and useful, the host may call it and submit normalized output with `provider=host-skill`. Host Skill output must include source references and still pass Brain Creator schema validation, Eval, Gap, and approval gates. Builtin policies must remain fully functional without those Skills.
+If `RequirementAnalysis.skill` or `TestCaseDesign.skill` is available and useful, the host may call it and submit normalized output with `provider=host-skill`. Brain Creator normalizes that output into the mapper and clause stages, then still dispatches independent Business Modeler and Coverage Critic tasks. Host Skill output must include source references and cannot bypass schema validation, Eval, Gap, or approval gates. Builtin policies remain available for compatibility and offline deterministic fallback.
 
 ## Test-Document Compatibility
 

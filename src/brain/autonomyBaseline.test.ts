@@ -14,6 +14,12 @@ describe("AutonomyBaselineReport", () => {
     expect(report.metrics.requirementGolden.total).toBeGreaterThan(1);
     expect(report.metrics.requirementGolden.rate).toBeGreaterThanOrEqual(0);
     expect(report.metrics.processModel.total).toBe(1);
+    expect(report.metrics.requirementHostHarness).toEqual(expect.objectContaining({
+      status: "measured",
+      passed: 5,
+      total: 5,
+      rate: 1
+    }));
     expect(report.metrics.scenarioDefectDetection.status).toBe("not-measured");
     expect(report.metrics.scenarioDefectDetection.rate).toBeNull();
     expect(report.openCapabilityGaps).toEqual(expect.arrayContaining([

@@ -42,14 +42,14 @@ production acceptance conditions are closed.
 | D1e | Gap timing | resolved | PR A | Discovery and parser warnings do not create attachment Gaps; only exhausted download/recognition or unrecoverable auth failures do |
 | D2 | Requirements omitted concrete UI paths | partial | PR C/PR D | Five-stage compilation creates evidence-scoped ExplorationTasks; authorized ExplorationPlans now bind roles, routes, writes, data leases, budgets, cleanup, evidence return, System Brain refresh, and automatic recompilation. A real-system stateful regression is still required before closing this item |
 | D3 | Source fields could not be reconciled to analysis | resolved | PR F | Source ledger reconciles blocks, requirements, nodes, intents, cases, evidence, and attachments |
-| D4 | Eval classification lacked explainable provenance | partial | PR F | Every class stores source passage, reason, policy version, and confirmer; Eval action confirmations now persist `confirmedBy` in the repository and confirmation document, while historical host classifications still need a complete confirmer backfill |
+| D4 | Eval classification lacked explainable provenance | partial | PR F/L3 PR B | Every class stores source passage, reason, policy version, and confirmer; Requirement Host Harness now records four isolated BrainTasks, exact sourceRefs, policy/provider metadata, one retry, and an independent Critic verdict before domain writes. Historical host classifications still need a complete confirmer backfill |
 | D5 | Passing cases lacked replayable trace evidence | partial | PR C/PR D/PR E | Default structured Playwright runs request `--trace=on`; strict mode also blocks missing or empty generated test files before the Runner, JSON reporter files are persisted in redacted form, missing reporter output now fails closed, missing trace paths generate evidence warnings and downgrade assurance, and Healer changes are checked before retry; legacy/custom-runner coverage remains |
 | D6 | Calls lacked operator identity and unique trace IDs | resolved | PR C/PR E | UUID trace IDs and Ledger fields are populated; requirement-suite Facade accepts operator/provider/sessionId, stability runs inherit them, and ordered progress events retain the current case, step, page, elapsed time, wait reason and redacted evidence |
 | D7 | Assertions and runtime evidence were disconnected | partial | PR C/PR E | Structured Reporter joins assertion, step screenshot, and step-level console/network runtime attachments; Suite reports now expose step details and per-case console/network counts; ambiguous top-level traces are no longer copied to every step, and Healer cannot remove required assertions or `bc.step` instrumentation; legacy/custom-runner coverage remains |
 | D8 | Screenshots had no business meaning | partial | PR C | Evidence now carries target semantic, input value, page model, locator point, data profile and source references into the static report with secret redaction; Suite reports expose step-level expected/actual values and screenshot links; structured Reporter actual values now bind to assertion steps by `stepId` with single-assertion compatibility, and local screenshot/trace artifacts are clickable from offline reports; richer visual annotations remain |
 | E1 | Weak checks were reported as full validation | resolved | PR C/PR E | AssertionContract and assuranceLevel prevent reporter-less or partially mapped passes from being strong validation; Requirement Eval separately reports execution passes, strong verification, and limited/unassured passes; execution diagnosis only promotes an assertion mismatch to product Bug when strong Reporter evidence is present |
 | E2 | Unexecuted TestIntents had no explanation | resolved | PR F | Coverage ledger classifies every intent as strong, limited, failed, blocked, not-selected, or superseded; archived static Suite reports render the classification, reason, and requirement references |
-| E3 | Field checks displaced workflow coverage | partial | PR B/PR F | Requirement design now persists five-dimension coverage, generates visual workflow/state transitions, negative state paths, and cross-role Actor Journeys, and blocks missing process coverage; real-system execution evidence for the full golden business flow remains |
+| E3 | Field checks displaced workflow coverage | partial | PR B/PR F/L3 PR B | Requirement design persists five-dimension coverage, generates visual transitions and Actor Journeys, and now accepts source-backed text/table BusinessObject, Workflow, StateMachine, DecisionTable, and invariant models from an isolated Host Harness. Real-system defect-detection evidence for the full golden business flow remains |
 | E4 | Multi-role journeys were not executed | partial | PR F | Actor Journey resolves system-scoped AuthProfiles, generated tests require explicit role usage, and `runAsRole()` now writes runtime JSONL role plus AuthProfile events that the executor verifies for declared roles, profile mapping, unknown roles, and declared order before passing; stability summaries also require the declared role sequence in strong evidence, while real-system cross-role workflow stability remains |
 | E5 | A single green run implied stability | partial | PR F | `bc_run mode=requirement-suite repeatCount` creates isolated linked suite iterations; coverage and `bc_status` now report target, completed iterations, runtime-passed counts and strong-evidence-passed counts, return `insufficient-sample` for a single completed iteration, and refuse `stable` when a completed iteration lacks complete strong evidence; real-system thresholds and long-run scheduling remain |
 | E6 | Created test data was not reliably cleaned | resolved | existing | TestData leases and cleanup states are covered by provider and suite tests |
@@ -75,6 +75,16 @@ production acceptance conditions are closed.
 | total | 41 |
 
 This register closes only through its stated acceptance checks. A passing feature test does not close broader evidence, security, or reliability work assigned to a later PR.
+
+## L3 Requirement Host Harness calibration
+
+The L3 PR B slice adds a recoverable Document Mapper → Clause Analyst →
+Business Modeler → Coverage Critic pipeline on the existing BrainTask runtime.
+The Critic reads source evidence and structured outputs without inheriting the
+designer conversation. Host Skill output can seed mapping and clauses but no
+longer bypasses modeling or Critic review. Structural coverage is measured by
+`verify:autonomy-baseline`; semantic Critic accuracy and mutation/bug detection
+remain explicitly unmeasured until the larger golden corpus is delivered.
 
 ## Latest recalibration after PR #124
 

@@ -31,6 +31,15 @@ Brain Creator 创建或复用 `KnowledgeProject`，记录来源 hash 和版本�
 
 ## 2. 审核分析与测试设计
 
+Brain Creator 将宿主辅助的需求理解拆成四个独立任务：
+
+1. 文档地图：识别目标、范围、模块、角色、业务对象和附件证据。
+2. 条款分析：输出原子化显式/推导条款、置信度和精确来源引用。
+3. 业务建模：从正文、表格和已确认图片建立对象生命周期、流程、状态机、决策表和不变量。
+4. 覆盖 Critic：在隔离任务中只读取来源与结构化产物，不继承设计者对话，检查遗漏主流程、分支、异常、后续角色、终态、矛盾和无依据推导。
+
+使用 `bc_prepare action=generate-analysis provider=host-agent`。宿主执行返回的任务后，以同一 action 携带 `taskId` 和 `analysisPackage` 逐阶段提交 JSON；Critic 完成后再以相同 provider 调用 `generate-test-design`。正常流程使用 4 次 Agent 调用，schema 或 Eval 仅允许重试 1 次，第二次失败必须创建可恢复 Gap。Host Skill 可以增强文档地图和条款分析，但不能跳过业务建模与 Critic。
+
 Brain Creator 应展示：
 
 - 原子需求条款和来源锚点；
