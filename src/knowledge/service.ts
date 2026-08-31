@@ -4,6 +4,8 @@ import { isAbsolute, join } from "node:path";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   AttachmentAnalysis,
+  BusinessObjectModel,
+  DecisionTableModel,
   ExecutableCase,
   ExecutableCaseStep,
   CompileRun,
@@ -25,6 +27,7 @@ import type {
   CoverageDimension,
   AssertionContractType
 } from "../domain/types.js";
+import type { RequirementModelBundle } from "./requirementHarness.js";
 import { id } from "../shared/id.js";
 import {
   analyzeRequirement,
@@ -263,8 +266,9 @@ export class KnowledgeService {
 
   async generateTestDesign(
     requirementSetId: string,
-    provider: "builtin" | "host-skill" = "builtin",
-    analysisOverride?: RequirementAnalysis
+    provider: "builtin" | "host-skill" | "host-agent" = "builtin",
+    analysisOverride?: RequirementAnalysis,
+    modelOverride?: RequirementModelBundle
   ) {
     const requirementSet = this.getRequirementSet(requirementSetId);
     const source = this.getRequirementSource(requirementSet.sourceId);
@@ -280,18 +284,23 @@ export class KnowledgeService {
     const attachmentAnalyses = this.repository.attachmentAnalyses.filter(
       (item) => item.requirementSetId === requirementSetId
     );
-    const proposedModels = buildProcessModels({
-      knowledgeProjectId: requirementSet.knowledgeProjectId,
-      requirementSetId,
-      analyses: attachmentAnalyses
-    });
+    const proposedModels = modelOverride ?? {
+      ...buildProcessModels({
+        knowledgeProjectId: requirementSet.knowledgeProjectId,
+        requirementSetId,
+        analyses: attachmentAnalyses
+      }),
+      businessObjectModels: [] as BusinessObjectModel[],
+      decisionTableModels: [] as DecisionTableModel[]
+    };
     const analysis = augmentAnalysisWithProcessModels(textAnalysis, proposedModels, attachmentAnalyses);
     this.indexRequirementSemantics(requirementSet.knowledgeProjectId, analysis);
     const evaluation = evaluatePolicyOutput(analysis);
     const inputHash = requirementDesignInputHash(
       requirementSet,
       attachmentAnalyses,
-      textAnalysis.policyVersion
+      textAnalysis.policyVersion,
+      requirementModelFingerprint(modelOverride)
     );
     const existingIntents = this.repository.testIntents.filter(
       (item) => item.requirementSetId === requirementSetId
@@ -344,6 +353,12 @@ export class KnowledgeService {
           (item) => item.requirementSetId === requirementSetId
         ),
         stateMachineModels: this.repository.stateMachineModels.filter(
+          (item) => item.requirementSetId === requirementSetId
+        ),
+        businessObjectModels: this.repository.businessObjectModels.filter(
+          (item) => item.requirementSetId === requirementSetId
+        ),
+        decisionTableModels: this.repository.decisionTableModels.filter(
           (item) => item.requirementSetId === requirementSetId
         ),
         coverageProfile: existingCoverageProfile,
@@ -424,6 +439,21 @@ export class KnowledgeService {
     };
     this.repository.workflowModels.push(...proposedModels.workflowModels);
     this.repository.stateMachineModels.push(...proposedModels.stateMachineModels);
+    const businessObjectModels = proposedModels.businessObjectModels.map((model) => ({
+      ...model,
+      semanticConceptId: this.semanticSpine?.upsertConcept({
+        identityKey: `object:${normalizeSemanticIdentity(model.name)}`,
+        kind: "object",
+        canonicalName: model.name,
+        knowledgeProjectId: requirementSet.knowledgeProjectId,
+        requirementSetId,
+        sourceRefs: model.sourceRefs,
+        confidence: 0.9,
+        status: "draft"
+      }).id ?? model.semanticConceptId
+    }));
+    this.repository.businessObjectModels.push(...businessObjectModels);
+    this.repository.decisionTableModels.push(...proposedModels.decisionTableModels);
     this.repository.requirementCoverageProfiles.push(coverageProfile);
     this.repository.testIntents.push(...testIntents);
     this.repository.testDataProfiles.push(...design.dataProfiles);
@@ -468,7 +498,9 @@ export class KnowledgeService {
       requirementSet.evaluationGate,
       coverageProfile,
       proposedModels.workflowModels,
-      proposedModels.stateMachineModels
+      proposedModels.stateMachineModels,
+      businessObjectModels,
+      proposedModels.decisionTableModels
     );
     await this.writeModuleKnowledge(requirementSet, analysis, design.testIntents);
     return {
@@ -480,6 +512,7 @@ export class KnowledgeService {
       gaps,
       impact: this.requirementImpact(requirementSet.id),
       ...proposedModels,
+      businessObjectModels,
       coverageProfile,
       ...design
     };
@@ -2274,7 +2307,9 @@ export class KnowledgeService {
     evaluationGate: RequirementEvaluationGate,
     coverageProfile?: RequirementCoverageProfile,
     workflowModels = this.repository.workflowModels.filter((item) => item.requirementSetId === set.id),
-    stateMachineModels = this.repository.stateMachineModels.filter((item) => item.requirementSetId === set.id)
+    stateMachineModels = this.repository.stateMachineModels.filter((item) => item.requirementSetId === set.id),
+    businessObjectModels = this.repository.businessObjectModels.filter((item) => item.requirementSetId === set.id),
+    decisionTableModels = this.repository.decisionTableModels.filter((item) => item.requirementSetId === set.id)
   ) {
     const project = this.getProject(set.knowledgeProjectId);
     const requirementDir = join(this.knowledgeDir, project.key, "requirements", set.id);
@@ -2329,13 +2364,21 @@ export class KnowledgeService {
           : ["- None"]),
         "",
         "## Process Models",
+        `- Business object models: ${businessObjectModels.length}`,
         `- Workflow models: ${workflowModels.length}`,
         `- State-machine models: ${stateMachineModels.length}`,
+        `- Decision-table models: ${decisionTableModels.length}`,
+        ...businessObjectModels.map(
+          (model) => `- Business object ${model.id}: ${model.name}; actors=${model.actors.join(", ") || "none"}; states=${model.states.join(", ") || "none"}; sources=${model.sourceRefs.join(", ")}`
+        ),
         ...workflowModels.map(
           (model) => `- Workflow ${model.id}: ${model.transitions.length} transitions; actors=${model.actors.join(", ") || "none"}; sources=${model.sourceRefs.join(", ")}`
         ),
         ...stateMachineModels.map(
           (model) => `- State machine ${model.id}: ${model.states.length} states, ${model.transitions.length} transitions; sources=${model.sourceRefs.join(", ")}`
+        ),
+        ...decisionTableModels.map(
+          (model) => `- Decision table ${model.id}: ${model.rules.length} rules; conditions=${model.conditions.join(", ") || "none"}; sources=${model.sourceRefs.join(", ")}`
         ),
         "",
         "## Coverage Dimensions",
@@ -2728,7 +2771,8 @@ function buildRequirementEvaluationGate(
 function requirementDesignInputHash(
   requirementSet: RequirementSet,
   analyses: AttachmentAnalysis[],
-  policyVersion: string = REQUIREMENT_ANALYSIS_POLICY.version
+  policyVersion: string = REQUIREMENT_ANALYSIS_POLICY.version,
+  modelFingerprint?: unknown
 ) {
   return createHash("sha256")
     .update(JSON.stringify({
@@ -2742,7 +2786,8 @@ function requirementDesignInputHash(
           updatedAt: analysis.updatedAt,
           sourceRefs: analysis.sourceRefs
         }))
-        .sort((left, right) => left.id.localeCompare(right.id))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      modelFingerprint
     }))
     .digest("hex");
 }
@@ -2824,6 +2869,12 @@ function clearRequirementDesign(
   repository.stateMachineModels = repository.stateMachineModels.filter(
     (model) => model.requirementSetId !== requirementSetId
   );
+  repository.businessObjectModels = repository.businessObjectModels.filter(
+    (model) => model.requirementSetId !== requirementSetId
+  );
+  repository.decisionTableModels = repository.decisionTableModels.filter(
+    (model) => model.requirementSetId !== requirementSetId
+  );
   repository.requirementCoverageProfiles = repository.requirementCoverageProfiles.filter(
     (profile) => profile.requirementSetId !== requirementSetId
   );
@@ -2836,6 +2887,52 @@ function clearRequirementDesign(
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function requirementModelFingerprint(models?: RequirementModelBundle) {
+  if (!models) return undefined;
+  return {
+    businessObjectModels: models.businessObjectModels.map((model) => ({
+      name: model.name,
+      actors: model.actors,
+      fields: model.fields,
+      states: model.states,
+      invariants: model.invariants,
+      sourceRefs: model.sourceRefs,
+      status: model.status
+    })),
+    workflowModels: models.workflowModels.map((model) => ({
+      title: model.title,
+      actors: model.actors,
+      steps: model.steps,
+      transitions: model.transitions,
+      startStepIds: model.startStepIds,
+      endStepIds: model.endStepIds,
+      sourceRefs: model.sourceRefs,
+      confidence: model.confidence,
+      status: model.status
+    })),
+    stateMachineModels: models.stateMachineModels.map((model) => ({
+      title: model.title,
+      states: model.states,
+      transitions: model.transitions,
+      sourceRefs: model.sourceRefs,
+      confidence: model.confidence,
+      status: model.status
+    })),
+    decisionTableModels: models.decisionTableModels.map((model) => ({
+      title: model.title,
+      conditions: model.conditions,
+      actions: model.actions,
+      rules: model.rules,
+      sourceRefs: model.sourceRefs,
+      status: model.status
+    }))
+  };
+}
+
+function normalizeSemanticIdentity(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-").replace(/^-|-$/g, "") || "unknown";
 }
 
 function normalizeKey(value: string) {

@@ -47,6 +47,7 @@ import {
   resolveBrainCreatorWorkspace
 } from "../shared/workspace.js";
 import { KnowledgeService } from "../knowledge/service.js";
+import { RequirementAnalysisHostHarness } from "../knowledge/requirementHarness.js";
 import {
   resolveRequirementSource,
   type RequirementSourceReader
@@ -171,6 +172,7 @@ export type BrainCreatorMcpContext = {
   repository: InMemoryBrainCreatorRepository;
   service: BrainCreatorService;
   knowledgeService: KnowledgeService;
+  requirementAnalysisHarness: RequirementAnalysisHostHarness;
   testDataProvider: TestDataProviderService;
   testDataBrain: TestDataBrainService;
   executionPreflight: ExecutionPreflightService;
@@ -290,6 +292,11 @@ export function createBrainCreatorMcpContext(
     systemBrainSnapshots,
     semanticSpine
   );
+  const requirementAnalysisHarness = new RequirementAnalysisHostHarness(
+    repository,
+    harness,
+    input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir)
+  );
   const testDataBrain = new TestDataBrainService(repository, [
     ...(input.testDataProviders ?? []),
     new InMemoryTestDataProvider("local-fixture-provider")
@@ -312,6 +319,7 @@ export function createBrainCreatorMcpContext(
     repository,
     service,
     knowledgeService,
+    requirementAnalysisHarness,
     testDataProvider,
     testDataBrain,
     executionPreflight,
@@ -1115,6 +1123,58 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
   }
   if (action === "generate-analysis" || action === "generate-test-design") {
     const provider = policyProviderArg(input, "provider");
+    const requirementSetId = stringArg(input, "requirementSetId");
+    if (provider === "host-agent") {
+      if (action === "generate-analysis") {
+        return input.taskId && input.analysisPackage !== undefined
+          ? context.requirementAnalysisHarness.submit({
+              taskId: stringArg(input, "taskId"),
+              output: input.analysisPackage
+            })
+          : context.requirementAnalysisHarness.start(requirementSetId);
+      }
+      const result = await context.requirementAnalysisHarness.latestCompletedResult(requirementSetId);
+      if (!result) {
+        return {
+          status: "needs-host-analysis",
+          requirementSetId,
+          nextAction: "Run generate-analysis with provider=host-agent before generating test design."
+        };
+      }
+      if (result.evaluation.verdict === "blocked" || result.evaluation.verdict === "retry") {
+        return {
+          status: "blocked",
+          requirementSetId,
+          evaluation: result.evaluation,
+          nextAction: "Resolve the Requirement Host Harness findings before generating test design."
+        };
+      }
+      return context.knowledgeService.generateTestDesign(
+        requirementSetId,
+        provider,
+        result.analysis,
+        result.models
+      );
+    }
+    if (provider === "host-skill" && action === "generate-test-design" && input.analysisPackage === undefined) {
+      const result = await context.requirementAnalysisHarness.latestCompletedResult(requirementSetId);
+      if (result?.analysis.provider === "host-skill") {
+        if (result.evaluation.verdict === "blocked" || result.evaluation.verdict === "retry") {
+          return {
+            status: "blocked",
+            requirementSetId,
+            evaluation: result.evaluation,
+            nextAction: "Resolve the Requirement Host Harness findings before generating test design."
+          };
+        }
+        return context.knowledgeService.generateTestDesign(
+          requirementSetId,
+          provider,
+          result.analysis,
+          result.models
+        );
+      }
+    }
     if (provider === "host-skill" && input.analysisPackage === undefined) {
       return {
         status: "needs-host-skill",
@@ -1125,13 +1185,15 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
           "Run the available host Skill against the requirement source, then retry with analysisPackage."
       };
     }
-    const requirementSetId = stringArg(input, "requirementSetId");
+    if (provider === "host-skill") {
+      return context.requirementAnalysisHarness.startFromHostSkill(
+        normalizeHostSkillAnalysis(input.analysisPackage, requirementSetId)
+      );
+    }
     return context.knowledgeService.generateTestDesign(
       requirementSetId,
       provider,
-      provider === "host-skill"
-        ? normalizeHostSkillAnalysis(input.analysisPackage, requirementSetId)
-        : undefined
+      undefined
     );
   }
   if (action === "confirm-eval-actions") {
@@ -10635,7 +10697,7 @@ function knowledgeNodeTypeArg(input: Record<string, unknown>, key: string): Know
 
 function policyProviderArg(input: Record<string, unknown>, key: string) {
   const value = optionalStringArg(input, key) ?? "builtin";
-  if (value !== "builtin" && value !== "host-skill") throw new Error(`${key} is invalid`);
+  if (value !== "builtin" && value !== "host-skill" && value !== "host-agent") throw new Error(`${key} is invalid`);
   return value;
 }
 

@@ -10,7 +10,7 @@ import type {
 
 export const REQUIREMENT_ANALYSIS_POLICY = {
   id: "brain-creator.requirement-analysis",
-  version: "2.2.0"
+  version: "2.2.1"
 } as const;
 
 export const TEST_DESIGN_POLICY = {
@@ -53,7 +53,7 @@ export type RequirementAnalysis = {
   requirementSetId: string;
   policyId: string;
   policyVersion: string;
-  provider: "builtin" | "host-skill";
+  provider: "builtin" | "host-skill" | "host-agent";
   module: string;
   clauses: RequirementClause[];
   nodes: Array<Omit<KnowledgeNode, "id" | "knowledgeProjectId" | "createdAt" | "updatedAt">>;

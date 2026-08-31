@@ -50,6 +50,8 @@ It contains:
 - `TestIntent`: a reviewable testing objective linked to source clauses.
 - `TestDataProfile`: the data strategy needed to exercise an intent.
 
+Host-assisted analysis is a four-task Harness: Document Mapper, Clause Analyst, Business Modeler, and isolated Coverage Critic. The first three stages turn text, tables, and confirmed visual evidence into source-backed clauses, business objects, workflows, states, decision tables, and invariants. The Critic receives those structures and source evidence but not the designer conversation. A valid structure is not automatically a valid baseline: blocked Critic output cannot write Requirement domain assets, and a second schema failure becomes a recoverable Gap.
+
 Generated knowledge starts as draft. Confirmed knowledge must remain traceable to source references. Contradictions cannot be approved away; the source or baseline must be revised.
 
 ## System Brain

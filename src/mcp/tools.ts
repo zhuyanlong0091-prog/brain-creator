@@ -406,7 +406,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         })
         .optional(),
       source: z.string().optional(),
-      provider: z.enum(["builtin", "host-skill"]).default("builtin"),
+      provider: z.enum(["builtin", "host-skill", "host-agent"]).default("builtin"),
       confirm: z.boolean().default(false),
       allowPrivateNetwork: z.boolean().default(false),
       contentPackage: z
