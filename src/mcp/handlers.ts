@@ -151,6 +151,7 @@ import type {
   DocumentCase,
   ExecutableCase,
   ExecutionEvidence,
+  ExecutionDiagnosis,
   ExecutionDiagnosisVerdict,
   ExecutionPlan,
   ExecutionFailureType,
@@ -1267,6 +1268,27 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       (item) => item.id === scenario.requirementSetId
     );
     if (!requirementSet) throw new Error("Requirement set not found for business scenario");
+    const executionEvidenceId = optionalStringArg(input, "executionEvidenceId");
+    if (executionEvidenceId) {
+      const evidence = context.repository.executionEvidence.find(
+        (item) => item.id === executionEvidenceId && item.systemId === optionalStringArg(input, "systemId")
+      );
+      if (!evidence) throw new Error("Completed execution evidence was not found for this system");
+      const trust = context.knowledgeService.recordScenarioEvidenceRun({
+        scenarioId,
+        evidence,
+        observationMode: optionalStringArg(input, "observationMode") === "observe" ? "observe" : "headless"
+      });
+      if (!trust) throw new Error("Execution evidence could not be uniquely bound to the scenario");
+      return {
+        status: "recorded",
+        trust,
+        nextAction: "Review scenario trust status before enabling unattended execution."
+      };
+    }
+    if (input.runPassed === true || input.strongEvidence === true) {
+      throw new Error("executionEvidenceId is required; trust must be recorded from completed evidence");
+    }
     return {
       status: "recorded",
       trust: context.knowledgeService.recordScenarioStrongRun({
@@ -4599,7 +4621,9 @@ async function executeRequirementSuiteCase(
           "testResult" in result ? result.testResult : undefined,
           [contextPackPath, result.specPath, result.testPath].filter(
             (path): path is string => typeof path === "string"
-          )
+          ),
+          requirementSuiteRun.browserMode === "observe" ? "observe" : "headless",
+          diagnosis
         )
       : executionEvidence;
   if (
@@ -4868,7 +4892,9 @@ async function completeRequirementEvidence(
   evidenceId: string,
   chainRun: ChainRun,
   testResult: CommandResult | undefined,
-  baseArtifactPaths: string[]
+  baseArtifactPaths: string[],
+  observationMode: "observe" | "headless" = "headless",
+  diagnosis?: Pick<ExecutionDiagnosis, "verdict" | "failureType">
 ) {
   const output = [testResult?.stdout, testResult?.stderr].filter(Boolean).join("\n").trim();
   const reporter = testResult?.structuredReporter;
@@ -4909,7 +4935,9 @@ async function completeRequirementEvidence(
     reporterPath: testResult?.reporterPath,
     reporterResult: reporter,
     actorRoleEvidencePath: testResult?.actorRoleEvidencePath,
-    evidenceRootDir: context.workDir
+    evidenceRootDir: context.workDir,
+    observationMode,
+    diagnosis
   });
   recordExecutionEvidenceProgress(context, completed);
   return completed;
@@ -7369,7 +7397,9 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       testResult,
       [chainContext.contextPackPath, chainContext.specPath, chainContext.testPath].filter(
         (path): path is string => typeof path === "string"
-      )
+      ),
+      chainContext.browserMode === "observe" ? "observe" : "headless",
+      terminalDiagnosis
     );
   }
   if (
@@ -9864,6 +9894,7 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
   const contextPackPath = candidate.contextPackPath;
   const requiredStepIds = candidate.requiredStepIds;
   const actorJourneyRoles = candidate.actorJourneyRoles;
+  const browserMode = candidate.browserMode;
   if (typeof testCaseId !== "string" || typeof specPath !== "string" || typeof testPath !== "string") {
     throw new Error("chainContext requires testCaseId, specPath, and testPath");
   }
@@ -9899,6 +9930,9 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
       throw new Error(`chainContext ${name} must be an array of strings when provided`);
     }
   }
+  if (browserMode !== undefined && browserMode !== "headless" && browserMode !== "observe") {
+    throw new Error("chainContext browserMode must be headless or observe");
+  }
   return {
     testCaseId,
     specPath,
@@ -9914,7 +9948,8 @@ function chainContextArg(input: Record<string, unknown>): AgentTask["chainContex
     executionEvidenceId: executionEvidenceId as string | undefined,
     contextPackPath: contextPackPath as string | undefined,
     requiredStepIds: requiredStepIds as string[] | undefined,
-    actorJourneyRoles: actorJourneyRoles as string[] | undefined
+    actorJourneyRoles: actorJourneyRoles as string[] | undefined,
+    browserMode: browserMode as "headless" | "observe" | undefined
   };
 }
 

@@ -1,11 +1,15 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AssuranceLevel, ExecutionEvidence } from "../domain/types.js";
+import type { AssuranceLevel, ExecutionDiagnosis, ExecutionEvidence } from "../domain/types.js";
+import { buildExecutionNarrative, type ExecutionNarrative } from "./executionNarrative.js";
 
 export async function writeStaticExecutionReport(input: {
   outputPath: string;
   title: string;
   evidence: ExecutionEvidence;
+  locale?: string;
+  narrative?: ExecutionNarrative;
+  diagnosis?: Pick<ExecutionDiagnosis, "verdict" | "failureType">;
   bugReports?: Array<{ id: string; status: string; actualResult: string }>;
   gaps?: Array<{ id: string; status: string; reason: string }>;
 }) {
@@ -18,10 +22,19 @@ export async function writeStaticExecutionReport(input: {
 export function renderStaticExecutionReport(input: {
   title: string;
   evidence: ExecutionEvidence;
+  locale?: string;
+  narrative?: ExecutionNarrative;
+  diagnosis?: Pick<ExecutionDiagnosis, "verdict" | "failureType">;
   bugReports?: Array<{ id: string; status: string; actualResult: string }>;
   gaps?: Array<{ id: string; status: string; reason: string }>;
 }) {
   const evidence = input.evidence;
+  const labels = narrativeLabels(input.locale);
+  const narrative = input.narrative ?? buildExecutionNarrative({
+    evidence,
+    locale: input.locale,
+    diagnosis: input.diagnosis
+  });
   const contracts = evidence.assertionContracts ?? [];
   const reporterAssertions = evidence.reporterResult?.assertions ?? [];
   const strong = contracts.filter((contract) => contract.strength === "strong").length;
@@ -40,10 +53,11 @@ export function renderStaticExecutionReport(input: {
     ])
   ].filter(Boolean).join(" ");
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="${labels.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(input.title)}</title>
 <style>body{font:14px system-ui,sans-serif;max-width:1100px;margin:2rem auto;padding:0 1rem;color:#17202a}header{border-bottom:1px solid #ddd;margin-bottom:1rem}input{width:100%;padding:.6rem;margin:1rem 0}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:.5rem;text-align:left;vertical-align:top}.passed{color:#087f5b}.failed{color:#c92a2a}.blocked{color:#a15c00}.muted{color:#667085}</style></head>
 <body data-searchable="${escapeHtml(searchable)}"><header><h1>${escapeHtml(input.title)}</h1><p>Status: <strong class="${evidence.status}">${escapeHtml(evidence.status)}</strong> | Assurance: <strong>${escapeHtml(evidence.assuranceLevel ?? "none")}</strong></p><p>Strong assertions: ${strong} | Limited assertions: ${limited}</p></header>
+<section id="plain-language-summary"><h2>${labels.summary}</h2><dl><dt>${labels.understood}</dt><dd>${escapeHtml(narrative.understood)}</dd><dt>${labels.observed}</dt><dd>${escapeHtml(narrative.observed)}</dd><dt>${labels.data}</dt><dd>${escapeHtml(narrative.data)}</dd><dt>${labels.result}</dt><dd>${escapeHtml(narrative.result)}</dd><dt>${labels.trust}</dt><dd>${escapeHtml(narrative.trust)}</dd>${narrative.waiting ? `<dt>${labels.waiting}</dt><dd>${escapeHtml(narrative.waiting)}</dd>` : ""}</dl></section>
 <label for="search">Search report</label><input id="search" type="search" placeholder="step, assertion, evidence" oninput="filterReport(this.value)">
 <h2>Steps</h2><table id="steps"><thead><tr><th>#</th><th>Action</th><th>Business target</th><th>Instruction</th><th>Input</th><th>Expected</th><th>Actual</th><th>Status</th><th>Page model</th><th>Locator</th><th>Data profile</th><th>Sources</th><th>Screenshot</th><th>Evidence</th><th>Trace</th><th>Console</th><th>Network</th></tr></thead><tbody>${evidence.steps.map((step) => { const runtime = evidence.reporterResult?.steps?.find((item) => item.id === step.stepId); return `<tr class="searchable-row"><td>${step.order}</td><td>${escapeHtml(step.action)}</td><td>${escapeHtml(step.targetSemantic ?? "")}</td><td>${escapeHtml(step.instruction)}</td><td>${escapeHtml(step.value ?? "")}</td><td>${escapeHtml(step.expected ?? "")}</td><td>${escapeHtml(step.actual ?? "")}</td><td class="${step.assertionStatus}">${escapeHtml(step.assertionStatus)}</td><td>${escapeHtml(step.pageModelId ?? "")}</td><td>${escapeHtml(step.locatorPointId ?? "")}</td><td>${escapeHtml(step.dataProfileId ?? "")}</td><td>${escapeHtml((step.sourceRefs ?? []).join(", "))}</td><td>${artifactLink(step.screenshotPath)}</td><td>${escapeHtml((step.evidenceRefs ?? []).join(", "))}</td><td>${artifactLinks(step.traceRefs ?? runtime?.traceRefs ?? [])}</td><td>${escapeHtml((runtime?.consoleErrors ?? []).join("; "))}</td><td>${escapeHtml((runtime?.networkFailures ?? []).join("; "))}</td></tr>`; }).join("")}</tbody></table>
 <h2>Assertions</h2><ul>${contracts.map((contract) => `<li class="searchable-row">${escapeHtml(contract.type)} / ${escapeHtml(contract.strength)} / refs: ${escapeHtml(contract.requirementRefs.join(", "))}</li>`).join("") || "<li class=muted>No assertion contract</li>"}</ul>
@@ -59,6 +73,12 @@ export function renderStaticExecutionReport(input: {
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+}
+
+function narrativeLabels(locale?: string) {
+  return locale?.toLowerCase().startsWith("zh")
+    ? { lang: "zh-CN", summary: "白话摘要", understood: "理解了什么", observed: "观察到什么", data: "使用数据", result: "结果", trust: "为什么可信", waiting: "为什么需要处理" }
+    : { lang: "en", summary: "Plain-language summary", understood: "What was understood", observed: "What was observed", data: "Data used", result: "Result", trust: "Why this result is trusted", waiting: "Why action is waiting" };
 }
 
 function artifactLinks(paths: string[]) {

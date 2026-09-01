@@ -84,9 +84,8 @@ Brain Creator 首次应返回需求摘要、来源引用、待澄清项、覆盖
 | 查看失败 | `用 Brain Creator 复盘最近执行，区分 Bug 和 Gap 并列出证据。` |
 
 Agent 默认使用高阶 Facade 工具。只有调试、审计或兼容旧流程时才需要底层 `bc_*` 工具。完整映射见 [Agent 使用指南](docs/agent-usage.md)。
-
 可信控制面不要求手工修改运行数据：鉴权可通过 Facade 创建、真实浏览器验证和归档；首次系统接入由 OnboardingPlan 将需求基线和受限探索合并为一次审批；需求可按 RequirementSet、TestIntent 子集或模块一次批量编译；编译按需求路径、System Brain、测试数据、步骤来源和最终用例五阶段执行。刷新 System Brain 后可通过 `bc_prepare action=reconcile-system-brain` 查看需求预期与系统观察的语义绑定，行为变化再用 `bc_prepare action=recompile-stale-cases` 增量重编译受影响意图。需要真实写操作或跨角色流转时，底层 ExplorationPlan 继续约束 URL、角色、动作、写次数、时长和清理策略，证据回传会刷新 System Brain 并自动续编。普通调用默认使用 `responseMode=summary`，详细结果通过可分页的 OnboardingPlan、CompileRun 和 ExplorationPlan 复盘。参见 [可信控制面](docs/zh-CN/guides/trusted-control-plane.md)。PR E 增加了业务场景组合与可信门禁：`bc_review target=business-scenario` 查看主流程、分支、状态转换和跨角色场景；绑定系统后用 `bc_prepare action=assess-scenarios` 检查系统绑定、测试数据和预期结果来源。首次强证据观察通过后才可记录 `verified`，连续三次未发生关键变化的强证据通过后才可进入 `trusted`；场景生成成功或单次 Playwright 通过都不会自动晋级。`bc_prepare action=evaluate-mutations` 可评估已记录的 caught/survived/blocked 结果，真实变异生成和历史 Bug 回放仍属于后续能力。
-
+PR G 增加了基于证据的场景可信晋升。完成运行必须具备结构化 Reporter、带来源的断言和步骤、完整的必需覆盖，并且诊断结果为通过。首次强证据运行使用可见浏览器观察；首次无头通过仍停留在 `bound`。需求、System Brain 或测试数据发生变化会重置可信计数。离线报告现在会说明理解了什么、观察到什么、使用了什么数据，并区分“运行成功”和“需求符合性结论”。
 ### 安装模式
 
 - **业务项目安装（推荐）**：`npm install --save-dev brain-creator`，再运行 `brain-creator init`。
@@ -195,9 +194,8 @@ When an operator wants to watch the live interaction, ask the Agent to run Brain
 | Review a failure | `Use Brain Creator to review the latest run, classify Bugs and Gaps, and show evidence.` |
 
 The Agent uses high-level Facade tools by default. Low-level `bc_*` tools are for compatibility, audit, and debugging. See the [Agent usage guide](docs/agent-usage.md) for the mapping.
-
 The trusted control plane removes manual runtime-store edits: auth can be created, browser-verified, and archived through the Facade; first-system onboarding combines Requirement baseline approval and bounded exploration in one OnboardingPlan approval; approved intents can be batch compiled by requirement, explicit IDs, or module. After a System Brain refresh, `bc_prepare action=reconcile-system-brain` exposes the auditable mapping between expected semantics and observed behavior, while `bc_prepare action=recompile-stale-cases` incrementally rebuilds only affected intents after a reviewed behavioral change. Real writes and role transitions remain constrained by the linked ExplorationPlan's URL, role, action, write, time, data, and cleanup policies. Submitted evidence refreshes System Brain and resumes compilation. Normal calls use `responseMode=summary`, with paged OnboardingPlan, CompileRun, and ExplorationPlan review available. See [Trusted control plane](docs/guides/trusted-control-plane.md). PR E adds a domain-neutral BusinessScenario portfolio and assurance gate: review scenario families with `bc_review target=business-scenario`, then run `bc_prepare action=assess-scenarios` after binding a system to check unique system evidence, test-data readiness, and requirement-backed oracles. Only one unchanged strong observed run can promote a scenario to `verified`; three unchanged strong runs are required for `trusted`. Scenario generation and a single green Playwright run never promote trust automatically. `bc_prepare action=evaluate-mutations` evaluates recorded caught/survived/blocked outcomes; mutation generation and historical Bug replay remain follow-up work.
-
+PR G adds evidence-driven scenario trust. A completed run must be backed by a structured Reporter, source-backed assertions and steps, complete required coverage, and a passing diagnosis. The first strong run is observed in a visible browser; a first headless pass remains bound. Requirement, System Brain, or data changes reset the trust counter. Offline reports now explain what was understood, observed, and used, and distinguish execution success from a requirement conformance claim.
 ### Installation modes
 
 - **Business project (recommended):** install `brain-creator` as a development dependency and run `brain-creator init`.

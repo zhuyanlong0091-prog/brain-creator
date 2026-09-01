@@ -244,3 +244,14 @@ Use Brain Creator to execute this test case document and report bugs, gaps, and 
 ```
 
 The Agent should use high-level Facades first, preserve approval boundaries, and return a human-readable summary rather than exposing raw MCP choreography.
+
+Execution trust is evidence-driven. Do not pass a caller-provided `strong`
+label to promote a scenario: completed evidence must include structured
+Reporter output, source-backed assertion contracts, source-backed steps, and
+complete required coverage. The first strong run uses `browserMode=observe`;
+headless first runs remain held at `bound`. Requirement, System Brain, or data
+hash changes reset prior trust, and failed or incomplete evidence quarantines
+the scenario. Use the offline execution report and `bc_status` to explain the
+current step, data references, evidence strength, diagnosis, and next action
+in plain language. A green Playwright process is never equivalent to complete
+requirement conformance.
