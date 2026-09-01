@@ -134,3 +134,22 @@ The remaining production boundary is operational: a real IdP/CAS/SAML tenant,
 its allowed redirect/service URLs, and an external scheduler must be supplied
 by the deployment. These adapters are not treated as proof of a successful
 login until their returned storage state is verified against the target system.
+
+## Current implementation slice: System Brain reconciliation
+
+PR D adds the missing Expected/Observed reconciliation control for the System
+Brain. Approved requirement semantics can now be compared with a selected
+snapshot through `bc_prepare action=reconcile-system-brain`, with persistent
+`SemanticBinding` records for exact, alias, step-expansion, conditional,
+missing, and conflict outcomes. The review surface is
+`bc_review target=semantic-binding`; missing or conflicted bindings cannot be
+confirmed silently.
+
+Behavioral ChangeSets now persist their affected TestIntent and ExecutableCase
+IDs. They propagate stale status through confirmed semantic bindings even when
+an intent has no compiled case yet. `bc_prepare action=recompile-stale-cases`
+requires the target System Brain snapshot to be confirmed and recompiles only
+the affected intents, preserving the previous cases as superseded. This closes
+the PR D control path, but does not claim that full workflow/state semantic
+coverage, scenario assurance, or production-grade System Brain exploration is
+complete; those remain later slices.

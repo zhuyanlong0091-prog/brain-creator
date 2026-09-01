@@ -47,6 +47,8 @@ Brain Creator Skill 默认使用 `summary`。只有查看特定资产或诊断�
 
 每次批量编译都会生成 `CompileRun`，统计 `ready`、`needsExploration`、`needsData`、`blocked`、`ambiguous`、`skipped` 和 `reused`。幂等键由 TestIntent、系统、需求 hash 和当前 System Brain 证据组成。输入未变化时复用已有用例；证据变化时生成新用例，并将旧用例标记为 `superseded`。
 
+刷新 System Brain 后，使用 `bc_prepare action=reconcile-system-brain` 将已批准需求语义与选定系统的观察证据进行对账，再通过 `bc_review target=semantic-binding` 查看绑定结果。别名、多步骤展开和条件映射都保留为可审计候选；冲突和未观察到的内容不会被静默确认。行为 ChangeSet 将意图或用例标记为 stale 后，先确认新快照，再用 `bc_prepare action=recompile-stale-cases` 只重编译受影响的意图。
+
 使用以下调用分页查看详情：
 
 ```json

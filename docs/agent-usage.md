@@ -69,6 +69,8 @@ The exploration creates versioned PageModels, LocatorPoints, ProbeResults, navig
 
 For a conditional state that must be explored, the host may include an approved `explorationScenario` with a role, prerequisite state, reusable `dataRefs`, active current-system `testDataLeaseIds`, and non-secret `selectorValues`. Brain Creator validates the leases before opening a browser, then records the scenario id with each observed transition and System Brain state. If a requested option is unavailable, the probe is blocked rather than choosing a different value. `dataRefs` identify reusable data; they do not create or persist credentials, and data preparation remains a separate test-data step.
 
+After a refresh, reconcile the approved RequirementSet with the candidate System Brain snapshot using `bc_prepare action=reconcile-system-brain`. Review the resulting `SemanticBinding` records with `bc_review target=semantic-binding`; `exact`, `alias`, `step-expansion`, and `conditional` matches are evidence-backed candidates, not silent approvals. Conflicts and missing observations remain visible. If a behavioral ChangeSet marks TestIntents or ExecutableCases stale, confirm the new snapshot first, then call `bc_prepare action=recompile-stale-cases` to rebuild only the affected intents.
+
 ### 6. Compile Executable Cases
 
 The Agent calls `bc_prepare action=compile-cases` with a `requirementSetId`, explicit `testIntentIds`, or one compatible `testIntentId`, plus `systemId` and `responseMode=summary`. Brain Creator creates a bounded CompileRun and compiles unchanged inputs idempotently through requirement-path, System Brain, test-data, provenance, and final-case stages. Review details with `bc_review target=compile-run`, `limit`, and `offset`.

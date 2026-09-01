@@ -76,7 +76,7 @@ Each refreshed System Brain can produce a candidate snapshot. Snapshot asset ide
 
 Locator selector changes are recorded as `locator-changed` and can be auto-accepted when the semantic target is stable. Workflow, state-transition, and API behavior changes are recorded as `behavior-changed`, require review, and mark affected compilation for re-evaluation. A missing asset is never treated as deletion from one observation; it is a reviewable removal candidate.
 
-After a confirmed snapshot reports a behavioral change, TestIntents and ExecutableCases that reference that System Brain are marked `stale` with the ChangeSet, reason, and timestamp. Resolving test data cannot make a stale case look ready; confirm the new snapshot first, then incrementally recompile affected intents. Use `bc_review target=system-brain view=diff` for the change and `bc_status` for stale counts and recovery details.
+After a confirmed snapshot reports a behavioral change, TestIntents and ExecutableCases that reference that System Brain are marked `stale` with the ChangeSet, reason, and timestamp. `bc_prepare action=reconcile-system-brain` compares approved Requirement semantics with observed pages, workflows, state transitions, and integrations; `bc_review target=semantic-binding` exposes exact, alias, step-expansion, conditional, missing, and conflict outcomes. Resolving test data cannot make a stale case look ready; confirm the new snapshot first, then incrementally recompile affected intents with `bc_prepare action=recompile-stale-cases`. Use `bc_review target=system-brain view=diff` for the change and `bc_status` for stale counts and recovery details.
 
 ## Case Compiler
 
