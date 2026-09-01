@@ -1636,6 +1636,13 @@ export type ExecutionEvidence = {
   contextPackPath: string;
   status: "running" | "passed" | "failed" | "blocked";
   assuranceLevel?: AssuranceLevel;
+  scenarioTrust?: {
+    scenarioId: string;
+    decision: "promoted" | "held" | "downgraded";
+    status: "generated" | "grounded" | "bound" | "verified" | "trusted" | "quarantined";
+    strongRunCount: number;
+    reasons: string[];
+  };
   assertionContracts?: AssertionContract[];
   reporterPath?: string;
   reporterResult?: StructuredReporterResult;

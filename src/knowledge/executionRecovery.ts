@@ -59,7 +59,11 @@ export function classifyEvidenceFailure(input: {
   const reason = [input.stderr, input.stdout].filter(Boolean).join("\n");
   const textType = reason ? classifyExecutionFailure(reason) : "unknown_failure";
   if (reporter?.networkFailures.length) {
-    if (textType === "unknown_failure" || textType === "execution_failure") {
+    if (
+      textType === "unknown_failure" ||
+      textType === "execution_failure" ||
+      textType === "assertion_failure"
+    ) {
       return { type: "network_failure", reason: "Structured reporter contains network failures" };
     }
   }

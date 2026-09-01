@@ -90,6 +90,9 @@ describe("static suite execution report", () => {
     expect(html).toContain("Current progress");
     expect(html).toContain("Submit approval");
     expect(html).toContain("orders.example.test/approval");
+    expect(html).toContain("Human-readable summary");
+    expect(html).toContain("A passing execution does not by itself prove complete requirement conformance.");
+    expect(html).toContain("Scenario trust: trusted 0, verified 0, quarantined 0.");
   });
 
   it("keeps blocked and queued cases visible in the same report", () => {

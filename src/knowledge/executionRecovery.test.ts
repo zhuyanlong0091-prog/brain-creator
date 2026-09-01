@@ -82,4 +82,22 @@ describe("execution recovery and failure classification", () => {
       reporter
     }).type).toBe("automation_failure");
   });
+
+  it("prefers structured network evidence when text also contains a generic assertion", () => {
+    expect(classifyEvidenceFailure({
+      stderr: "Expected approval status, but actual value was unavailable",
+      reporter: {
+        status: "failed",
+        total: 1,
+        passed: 0,
+        failed: 1,
+        skipped: 0,
+        durationMs: 1,
+        assertions: [{ id: "assert-1", status: "failed", evidenceRefs: [] }],
+        attachments: [],
+        consoleErrors: [],
+        networkFailures: ["GET /api/approval: ECONNRESET"]
+      }
+    })).toEqual(expect.objectContaining({ type: "network_failure" }));
+  });
 });

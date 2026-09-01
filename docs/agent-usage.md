@@ -266,3 +266,13 @@ npm run verify:host-agent-document-suite
 npm run verify:live-session-resume-workflow
 npm run verify:live-claude-skill-workflow
 ```
+
+## Execution Trust And Recovery
+
+Execution trust comes from completed structured Reporter evidence, source-backed
+assertions and steps, complete coverage, and a passing diagnosis, never from a
+caller-provided label. The first strong run uses `browserMode=observe`; a first
+headless pass remains `bound`, and three unchanged strong runs are required for
+`trusted`. Hash changes reset trust; failures and technical blockers stay
+quarantined or blocked. Use `bc_status` and the offline report to explain the
+current step, data, diagnosis, evidence strength, and next action.

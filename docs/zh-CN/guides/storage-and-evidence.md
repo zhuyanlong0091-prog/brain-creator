@@ -92,6 +92,16 @@ npx brain-creator export --suite <suite-run-id> --output exports/suite.zip
 
 静态 HTML 报告与 Markdown 证据报告一起生成。即使命令退出码为 0，如果没有完成结构化 Reporter 映射，结果仍为 `none`，不能被描述为强需求验证。报告是离线执行产物，不是新的 Brain Creator UI 入口。
 
+完成执行证据后，系统还会自动评估场景可信状态。首次强证据可见观察运行会将
+已绑定场景推进到 `verified`；连续三次需求、System Brain 和数据版本不变的强
+证据通过后才进入 `trusted`。首次无头通过会停留在 `bound`，等待可见观察证据。
+缺少 Reporter、来源引用、必需覆盖或非通过诊断时，不能晋升，并会把原因写入
+证据。需求、System Brain 或数据计划发生变化会清零之前的强运行次数。
+
+报告开头会给出白话摘要：本次理解了什么、观察到什么、用了哪些可复用数据、
+实际结果是什么、失败属于哪一类，以及为什么可以或不可以支持需求符合性判断。
+Suite 报告还会统计可信、已验证和已隔离的场景证据。
+
 ## 鉴权密钥处理
 
 新的鉴权密文使用 `.brain-creator/secret.key` 中的随机本地密钥。可通过 `BRAIN_CREATOR_SECRET_KEY` 使用外部托管密钥，也可通过 `BRAIN_CREATOR_SECRET_KEY_FILE` 指定密钥文件；环境变量优先。已有 `enc:v1` 数据在读取配置时会先解密，再重新加密为 `enc:v2`。生成的 token/cookie seed 只引用 `BRAIN_CREATOR_AUTH_TOKEN` 或 `BRAIN_CREATOR_AUTH_COOKIE`，不会写入凭据值。所有产物阶段都会匹配当前受保护凭据值，以及私钥、JWT、Bearer Token、明文 password/token/cookie 字段等高置信凭据模式。

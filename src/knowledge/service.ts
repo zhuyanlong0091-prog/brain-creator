@@ -27,6 +27,7 @@ import type {
   TestIntent,
   CoverageDimension,
   AssertionContractType,
+  ExecutionDiagnosis,
   WorkflowModel,
   StateMachineModel
 } from "../domain/types.js";
@@ -55,6 +56,7 @@ import {
 } from "./testDataPlanner.js";
 import { planWorkflowPath } from "./workflowPathPlanner.js";
 import { buildAssertionContracts, determineAssuranceLevel, missingAssuranceEvidence } from "../execution/assurance.js";
+import { buildExecutionNarrative } from "../execution/executionNarrative.js";
 import { writeStaticExecutionReport } from "../execution/staticReport.js";
 import { decryptSecrets } from "../shared/crypto.js";
 import {
@@ -95,6 +97,10 @@ import {
   type MutationOutcome,
   type ScenarioTrustUpdate
 } from "../brain/scenarioAssurance.js";
+import {
+  evaluateScenarioExecutionTrust,
+  type ScenarioExecutionTrustResult
+} from "../execution/trustPromotion.js";
 import { buildCaseDependencyGraph } from "./caseDependencyGraph.js";
 import type {
   BusinessScenario,
@@ -1913,6 +1919,8 @@ export class KnowledgeService {
       reporterResult?: ExecutionEvidence["reporterResult"];
       actorRoleEvidencePath?: string;
       evidenceRootDir?: string;
+      observationMode?: "observe" | "headless";
+      diagnosis?: Pick<ExecutionDiagnosis, "verdict" | "failureType">;
     }
   ) {
     const evidence = this.repository.executionEvidence.find((item) => item.id === evidenceId);
@@ -2038,7 +2046,21 @@ export class KnowledgeService {
       }
     }
     evidence.completedAt = timestamp();
-    const reportPath = await this.writeExecutionReport(evidence);
+    const scenarioTrust = this.recordScenarioEvidenceRun({
+      evidence,
+      observationMode: input.observationMode ?? "headless",
+      diagnosis: input.diagnosis
+    });
+    if (scenarioTrust) {
+      evidence.scenarioTrust = {
+        scenarioId: scenarioTrust.record.scenarioId,
+        decision: scenarioTrust.decision,
+        status: scenarioTrust.record.status,
+        strongRunCount: scenarioTrust.record.strongRunCount,
+        reasons: scenarioTrust.reasons
+      };
+    }
+    const reportPath = await this.writeExecutionReport(evidence, input.diagnosis);
     evidence.artifactPaths = [...new Set([...evidence.artifactPaths, reportPath])];
     const htmlReportPath = await writeStaticExecutionReport({
       outputPath: join(
@@ -2050,6 +2072,8 @@ export class KnowledgeService {
       ),
       title: `Execution Evidence ${evidence.id}`,
       evidence,
+      locale: this.repository.systemProfiles.find((system) => system.id === evidence.systemId)?.defaultLocale,
+      diagnosis: input.diagnosis,
       bugReports: this.repository.bugReports
         .filter((bug) => bug.chainRunId === evidence.chainRunId)
         .map((bug) => ({ id: bug.id, status: bug.status, actualResult: bug.actualResult })),
@@ -2066,6 +2090,61 @@ export class KnowledgeService {
     return this.repository.executionEvidence.filter(
       (item) => item.knowledgeProjectId === projectId
     );
+  }
+
+  recordScenarioEvidenceRun(input: {
+    evidence: ExecutionEvidence;
+    observationMode: "observe" | "headless";
+    scenarioId?: string;
+    diagnosis?: Pick<ExecutionDiagnosis, "verdict" | "failureType">;
+  }): ScenarioExecutionTrustResult | undefined {
+    const executableCase = this.repository.executableCases.find(
+      (item) => item.id === input.evidence.executableCaseId
+    );
+    if (!executableCase) return undefined;
+    if (!executableCase.systemId || executableCase.systemId !== input.evidence.systemId) {
+      return undefined;
+    }
+    const candidates = this.repository.businessScenarios.filter(
+      (scenario) =>
+        scenario.knowledgeProjectId === input.evidence.knowledgeProjectId &&
+        scenario.requirementSetId === executableCase.requirementSetId &&
+        (input.scenarioId
+          ? scenario.id === input.scenarioId
+          : scenario.testIntentIds?.includes(executableCase.testIntentId))
+    );
+    // A TestIntent may legitimately be covered by multiple scenario families.
+    // Do not guess which one owns the evidence without an explicit binding.
+    if (candidates.length !== 1) return undefined;
+    const scenario = candidates[0];
+    const record = this.repository.scenarioTrustRecords.find(
+      (item) => item.scenarioId === scenario.id
+    );
+    if (!record) return undefined;
+    const requirementSet = this.repository.requirementSets.find(
+      (item) => item.id === executableCase.requirementSetId
+    );
+    if (!requirementSet) return undefined;
+    const systemSnapshotHash = this.systemBrainSnapshots?.latest(input.evidence.systemId)?.contentHash;
+    const dataPlanHash = executableCase.dataPlan
+      ? createHash("sha256").update(JSON.stringify(executableCase.dataPlan)).digest("hex")
+      : undefined;
+    const result = evaluateScenarioExecutionTrust({
+      record,
+      evidence: input.evidence,
+      observationMode: input.observationMode,
+      requirementHash: requirementSet.contentHash,
+      systemSnapshotHash,
+      dataPlanHash,
+      diagnosis: input.diagnosis,
+      updatedAt: timestamp()
+    });
+    const index = this.repository.scenarioTrustRecords.findIndex(
+      (item) => item.scenarioId === scenario.id
+    );
+    this.repository.scenarioTrustRecords[index] = result.record;
+    this.repository.persist();
+    return result;
   }
 
   requirementEvalAccuracy(projectId: string, requirementSetId?: string) {
@@ -3089,7 +3168,10 @@ export class KnowledgeService {
     );
   }
 
-  private async writeExecutionReport(evidence: ExecutionEvidence) {
+  private async writeExecutionReport(
+    evidence: ExecutionEvidence,
+    diagnosis?: Pick<ExecutionDiagnosis, "verdict" | "failureType">
+  ) {
     const project = this.getProject(evidence.knowledgeProjectId);
     const reportDir = join(
       this.knowledgeDir,
@@ -3099,6 +3181,7 @@ export class KnowledgeService {
     );
     const reportPath = join(reportDir, "summary.md");
     await mkdir(reportDir, { recursive: true });
+    const narrative = buildExecutionNarrative({ evidence, diagnosis });
     await writeFile(
       reportPath,
       [
@@ -3114,6 +3197,14 @@ export class KnowledgeService {
         "# Execution Evidence",
         "",
         `Actual result: ${evidence.actualResult ?? "Pending"}`,
+        "",
+        "## Plain-language summary",
+        `- What was understood: ${narrative.understood}`,
+        `- What was observed: ${narrative.observed}`,
+        `- Data used: ${narrative.data}`,
+        `- Result: ${narrative.result}`,
+        `- Why this result is trusted: ${narrative.trust}`,
+        ...(narrative.waiting ? [`- Why action is waiting: ${narrative.waiting}`] : []),
         "",
         "## Steps",
         ...evidence.steps.map(

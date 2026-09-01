@@ -31,6 +31,10 @@ describe("static execution report", () => {
     expect(html).toContain("requirement:amount");
     expect(html).toContain("bug-1");
     expect(html).toContain("gap-1");
+    expect(html).toContain("What was understood");
+    expect(html).toContain("What was observed");
+    expect(html).toContain("Why this result is trusted");
+    expect(html).toContain("Data used");
   });
 
   it("renders business target and execution bindings for each step", () => {
@@ -54,6 +58,17 @@ describe("static execution report", () => {
     expect(html).toContain("page-order-form");
     expect(html).toContain("locator-total");
     expect(html).toContain("data-order-total");
+  });
+
+  it("shows the persisted failure classification in the plain-language summary", () => {
+    const html = renderStaticExecutionReport({
+      title: "Orders",
+      evidence: { ...evidence(), status: "failed", assuranceLevel: "none" },
+      diagnosis: { verdict: "network_gap", failureType: "network_failure" }
+    });
+
+    expect(html).toContain("network_gap");
+    expect(html).toContain("network_failure");
   });
 
   it("does not turn untrusted artifact protocols into executable links", () => {

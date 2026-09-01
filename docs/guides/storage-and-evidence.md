@@ -94,6 +94,19 @@ Execution evidence now distinguishes process success from requirement assurance.
 
 The static HTML report is written beside the Markdown evidence report. A process that exits with code 0 but has no structured reporter mapping remains `none`; it must not be presented as strong requirement validation. The report is an offline artifact, not a new Brain Creator UI entrypoint.
 
+Completed evidence also evaluates scenario trust. The first strong observed run
+can move a bound scenario to `verified`; three unchanged strong runs are needed
+for `trusted`. A first headless pass is held until observation evidence exists.
+Missing reporter output, source references, required coverage, or a non-passing
+diagnosis prevents promotion and records the reason on the evidence. Requirement,
+System Brain, and data-plan changes reset the prior strong-run count.
+
+The report begins with a plain-language summary of what the run understood,
+what it observed, which reusable data references it used, the actual result,
+failure classification, and why the result is or is not sufficient for a
+conformance claim. The suite report also summarizes trusted, verified, and
+quarantined scenario evidence.
+
 ## Authentication secret handling
 
 New auth ciphertext uses a random local key at `.brain-creator/secret.key`. Set `BRAIN_CREATOR_SECRET_KEY` for an externally managed key, or `BRAIN_CREATOR_SECRET_KEY_FILE` for a managed key file path. The environment variable has priority. Existing `enc:v1` values are decrypted and re-encrypted as `enc:v2` when the profile is read. Generated token/cookie seeds reference `BRAIN_CREATOR_AUTH_TOKEN` or `BRAIN_CREATOR_AUTH_COOKIE`; they never contain the credential value. All artifact stages scan known protected credential values and high-confidence credential patterns such as private keys, JWTs, Bearer tokens, and literal password/token/cookie fields.

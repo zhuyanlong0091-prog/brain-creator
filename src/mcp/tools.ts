@@ -220,6 +220,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       requirementHash: z.string().optional(),
       systemSnapshotHash: z.string().optional(),
       dataPlanHash: z.string().optional(),
+      executionEvidenceId: z.string().optional(),
+      observationMode: z.enum(["observe", "headless"]).optional(),
       runPassed: z.boolean().optional(),
       strongEvidence: z.boolean().optional(),
       mutationThreshold: z.number().min(0).max(1).optional(),

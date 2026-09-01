@@ -182,3 +182,18 @@ npm run verify:codex-native-entry
 npm run verify:host-agent-chain
 npm run verify:host-agent-document-suite
 ```
+
+## 执行可信晋升与复盘
+
+可信晋升只能来自已经完成的执行证据，不能接受调用者直接填写的
+`assuranceLevel=strong`。必须存在结构化 Playwright Reporter、带需求来源的
+断言映射、带来源的步骤证据、完整必需覆盖，并且失败诊断为通过。首次强证据
+运行必须使用 `browserMode=observe`；首次无头运行即使通过，也只保留在
+`bound`，等待一次可见浏览器观察确认。只有连续三次需求、系统和测试数据
+版本未变化的强证据通过，场景才会进入 `trusted`。
+
+需求、System Brain 或测试数据 hash 发生变化时，场景会降回 `bound`，只对受
+影响的场景增量重编译。失败、证据不完整或技术阻塞必须保留为隔离/阻塞结果，
+不能直接记为产品 Bug 或可信回归。使用 `bc_status` 查看当前步骤和恢复状态，
+打开离线报告查看白话说明：理解了什么、观察到什么、使用了哪些数据，以及
+结果为什么可以或不可以支持需求符合性判断。
