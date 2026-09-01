@@ -20,6 +20,7 @@ This documentation is organized by what you are trying to accomplish. Start with
 | Diagnose a setup or execution failure | [Troubleshooting](troubleshooting.md) |
 | Understand recovery, auth refresh, reconciliation, and stability controls | [Reliability controls](quality/reliability-controls.md) |
 | Integrate system-specific test data operations | [Testdata providers](guides/testdata-providers.md) |
+| Understand cross-case data dependencies and compilation | [Testcase and Testdata Brain](guides/testcase-testdata-brain.md) |
 
 ## Choose A Workflow
 
@@ -64,6 +65,7 @@ Start with [Troubleshooting](troubleshooting.md). Then use Brain Creator review 
 - [Real-system regression samples](quality/real-system-regression.md)
 - [Reliability controls](quality/reliability-controls.md)
 - [Testdata providers](guides/testdata-providers.md)
+- [Testcase and Testdata Brain](guides/testcase-testdata-brain.md)
 - [Release notes 2.1.1](release-notes-2.1.1.md)
 - [Release notes 2.0.3](release-notes-2.0.3.md)
 - [Release notes 2.0.2](release-notes-2.0.2.md)

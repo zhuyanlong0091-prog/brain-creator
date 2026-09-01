@@ -628,7 +628,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "semantic-binding",
         "business-scenario",
         "scenario-assurance",
-        "scenario-trust"
+        "scenario-trust",
+        "case-dependency"
       ]),
       knowledgeProjectId: z.string().optional(),
       requirementSetId: z.string().optional(),

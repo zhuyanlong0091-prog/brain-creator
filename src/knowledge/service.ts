@@ -95,6 +95,7 @@ import {
   type MutationOutcome,
   type ScenarioTrustUpdate
 } from "../brain/scenarioAssurance.js";
+import { buildCaseDependencyGraph } from "./caseDependencyGraph.js";
 import type {
   BusinessScenario,
   ScenarioAssuranceContract,
@@ -778,6 +779,19 @@ export class KnowledgeService {
       `requirement-set:${requirementSet.id}`,
       ...confirmedEvalActions.map((action) => `${requirementSet.id}#eval-action-${action.id}`)
     ];
+    const caseDependencyGraph = buildCaseDependencyGraph({
+      requirementSetId: requirementSet.id,
+      systemId,
+      intents: this.repository.testIntents,
+      executableCases: this.repository.executableCases
+    });
+    const currentDependencyIssues = caseDependencyGraph.unresolved.filter(
+      (issue) => issue.testIntentId === intent.id
+    );
+    const requiredEntityReferences = uniqueStrings([
+      ...(intent.producesEntityRefs ?? []),
+      ...(intent.consumesEntityRefs ?? [])
+    ]);
     const semantic = compileIntentSemanticSteps({
       intent,
       workflowModels: this.repository.workflowModels.filter(
@@ -801,6 +815,34 @@ export class KnowledgeService {
     const executableCaseId = id("executableCase");
     let pathPlan: ExecutableCase["pathPlan"];
     let statePlan: ExecutableCase["statePlan"];
+    if (currentDependencyIssues.length > 0) {
+      const dependencyVerdict = currentDependencyIssues.some((issue) => issue.reason === "cycle")
+        ? "blocked"
+        : currentDependencyIssues.some((issue) => issue.reason === "ambiguous-producer")
+          ? "ambiguous"
+          : "needs-data";
+      compileStatus = dependencyVerdict;
+      compilationStages.push({
+        stage: "case-dependency",
+        verdict: dependencyVerdict,
+        reason: currentDependencyIssues
+          .map((issue) => `${issue.entityReference}: ${issue.reason}`)
+          .join("; "),
+        sourceRefs: uniqueStrings(currentDependencyIssues.flatMap((issue) => issue.sourceRefs))
+      });
+    } else {
+      compilationStages.push({
+        stage: "case-dependency",
+        verdict: "ready",
+        reason: requiredEntityReferences.length > 0
+          ? "All declared cross-case entity dependencies have a unique producer"
+          : "No cross-case entity dependency was declared",
+        sourceRefs: uniqueStrings([
+          ...requiredEntityReferences.map((reference) => `entity:${reference}`),
+          ...caseDependencyGraph.sourceRefs
+        ])
+      });
+    }
     if (systemId) {
       const project = this.getProject(requirementSet.knowledgeProjectId);
       if (!project.systemIds.includes(systemId)) {
@@ -943,7 +985,34 @@ export class KnowledgeService {
     );
     const dataPlanned = planTestData(dataProfiles, steps);
     steps = dataPlanned.steps;
-    const structuralDataReasons = dataPlanned.plan.operations
+    const inheritedDependencyEdges = caseDependencyGraph.edges.filter(
+      (edge) => edge.toTestIntentId === intent.id
+    );
+    const inheritedEntityReferences = inheritedDependencyEdges.map(
+      (edge) => edge.entityReference
+    );
+    const plannedDataPlan: ExecutableCase["dataPlan"] = {
+      ...dataPlanned.plan,
+      sourceRefs: uniqueStrings([
+        ...dataPlanned.plan.sourceRefs,
+        ...inheritedDependencyEdges.flatMap((edge) => edge.sourceRefs)
+      ]),
+      ...(inheritedEntityReferences.length > 0
+        ? {
+            entityReferences: uniqueStrings([
+              ...(dataPlanned.plan.entityReferences ?? []),
+              ...inheritedEntityReferences
+            ])
+          }
+        : {})
+    };
+    const plannedEntityReferences = new Set(plannedDataPlan.entityReferences ?? []);
+    const missingEntityReferences = requiredEntityReferences.filter(
+      (reference) =>
+        !plannedEntityReferences.has(reference) &&
+        !inheritedEntityReferences.includes(reference)
+    );
+    const structuralDataReasons = plannedDataPlan.operations
       .filter((operation) => operation.status === "blocked")
       .map((operation) => operation.reason ?? `Test data for ${operation.field} is structurally blocked`);
     const dataNeedsDecision = dataPlanned.plan.operations.some(
@@ -965,21 +1034,29 @@ export class KnowledgeService {
         stage: "test-data",
         verdict: "blocked",
         reason: structuralDataReasons.join("; "),
-        sourceRefs: dataPlanned.plan.sourceRefs
+        sourceRefs: plannedDataPlan.sourceRefs
+      });
+    } else if (missingEntityReferences.length > 0) {
+      if (compileStatus === "ready") compileStatus = "needs-data";
+      compilationStages.push({
+        stage: "test-data",
+        verdict: "needs-data",
+        reason: `Entity references require explicit TestDataProfile bindings: ${missingEntityReferences.join(", ")}`,
+        sourceRefs: missingEntityReferences.map((reference) => `entity:${reference}`)
       });
     } else if (dataNeedsDecision) {
       if (compileStatus === "ready") compileStatus = "needs-data";
       compilationStages.push({
         stage: "test-data",
         verdict: "needs-data",
-        reason: dataPlanned.plan.reasons.join("; ") || "Test data requires confirmation",
-        sourceRefs: dataPlanned.plan.sourceRefs
+        reason: plannedDataPlan.reasons.join("; ") || "Test data requires confirmation",
+        sourceRefs: plannedDataPlan.sourceRefs
       });
     } else {
       compilationStages.push({
         stage: "test-data",
         verdict: "ready",
-        sourceRefs: dataPlanned.plan.sourceRefs
+        sourceRefs: plannedDataPlan.sourceRefs
       });
     }
     const provenance = validateStepProvenance(steps);
@@ -995,13 +1072,27 @@ export class KnowledgeService {
         sourceRefs: uniqueStrings(steps.flatMap((step) => step.sourceRefs))
       });
     }
+    const assertionContracts = buildAssertionContracts(steps, sourceRefs);
+    const assertionContractIssues = steps
+      .filter((step) => step.action === "assert")
+      .filter((step) => {
+        const contract = assertionContracts.find((candidate) => candidate.stepId === step.id);
+        return !contract || contract.requirementRefs.length === 0 || contract.evidenceRequirements.length === 0;
+      })
+      .map((step) => step.id);
+    if (assertionContractIssues.length > 0) {
+      const reason = `Assertions lack an oracle contract: ${assertionContractIssues.join(", ")}`;
+      gaps.push(this.createGap(requirementSet.knowledgeProjectId, requirementSet.id, reason, "case-compiler"));
+      compileStatus = "blocked";
+      compilationStages.push({ stage: "step-provenance", verdict: "blocked", reason, sourceRefs });
+    }
     compilationStages.push({
       stage: "executable-case",
       verdict: compileStatus,
       sourceRefs: uniqueStrings([
         ...semantic.processPathSourceRefs,
         ...steps.flatMap((step) => step.sourceRefs),
-        ...dataPlanned.plan.sourceRefs
+        ...plannedDataPlan.sourceRefs
       ])
     });
     const now = timestamp();
@@ -1018,7 +1109,10 @@ export class KnowledgeService {
       steps,
       pathPlan,
       statePlan,
-      dataPlan: dataPlanned.plan,
+      dataPlan: plannedDataPlan,
+      caseDependencyGraph,
+      assertionContracts,
+      entityReferenceRequirements: requiredEntityReferences,
       coverageDimensions: intent.coverageDimensions,
       dataProfileIds: dataProfiles.map((profile) => profile.id),
       systemBrainSnapshotId: systemId ? this.systemBrainSnapshots?.latest(systemId)?.id : undefined,
@@ -1078,6 +1172,21 @@ export class KnowledgeService {
     if (intents.length === 0) {
       throw new Error("No TestIntent matched the batch compile selection");
     }
+    const dependencyOrder = buildCaseDependencyGraph({
+      requirementSetId: requirementSet.id,
+      systemId: input.systemId,
+      intents: this.repository.testIntents,
+      executableCases: this.repository.executableCases
+    }).dependencyOrder;
+    const dependencyOrderIndex = new Map(
+      dependencyOrder.map((intentId, index) => [intentId, index])
+    );
+    intents.sort(
+      (left, right) =>
+        (dependencyOrderIndex.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+          (dependencyOrderIndex.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
+        left.id.localeCompare(right.id)
+    );
 
     const items: CompileRun["items"] = intents.map((intent) => {
       try {
@@ -1763,6 +1872,7 @@ export class KnowledgeService {
         ...(step.pageModelId === undefined ? {} : { pageModelId: step.pageModelId }),
         ...(step.locatorPointId === undefined ? {} : { locatorPointId: step.locatorPointId }),
         ...(step.dataProfileId === undefined ? {} : { dataProfileId: step.dataProfileId }),
+        ...(step.dataReference === undefined ? {} : { dataReference: step.dataReference }),
         expected: step.expected,
         assertionStatus: "pending",
         evidenceRefs: [],
@@ -3343,11 +3453,33 @@ function executableCaseCompileKey(
   return createHash("sha256")
     .update(
       JSON.stringify({
-        compilerVersion: 4,
+        compilerVersion: 5,
         testIntentId: intent.id,
         systemId: systemId ?? null,
         requirementHash: requirementSet.contentHash,
-        systemEvidence
+        systemEvidence,
+        dependencyIntents: repository.testIntents
+          .filter((candidate) => candidate.requirementSetId === requirementSet.id)
+          .map((candidate) => ({
+            id: candidate.id,
+            producesEntityRefs: candidate.producesEntityRefs ?? [],
+            consumesEntityRefs: candidate.consumesEntityRefs ?? []
+          }))
+          .sort((left, right) => left.id.localeCompare(right.id)),
+        dataProfiles: repository.testDataProfiles
+          .filter(
+            (profile) =>
+              profile.requirementSetId === requirementSet.id &&
+              profile.sourceRefs.some((sourceRef) => intent.requirementRefs.includes(sourceRef))
+          )
+          .map((profile) => ({
+            id: profile.id,
+            entityReference: profile.entityReference,
+            strategy: profile.strategy,
+            seed: profile.seed,
+            dependsOnFields: profile.dependsOnFields ?? []
+          }))
+          .sort((left, right) => left.id.localeCompare(right.id))
       })
     )
     .digest("hex");

@@ -8,6 +8,7 @@ export type TestDataProviderRequest = {
   entityType?: string;
   key?: string;
   reference?: string;
+  entityReference?: string;
   values?: Record<string, string | number | boolean | null>;
   transition?: string;
   expected?: Record<string, string | number | boolean | null>;
@@ -17,6 +18,7 @@ export type TestDataProviderRequest = {
 export type TestDataProviderResult = {
   status: "found" | "created" | "transitioned" | "verified" | "cleaned";
   reference: string;
+  entityReference?: string;
   values?: Record<string, string | number | boolean | null>;
   sourceRefs: string[];
   entityId?: string;
@@ -100,6 +102,7 @@ export class TestDataBrainService {
     systemId: string;
     entityType?: string;
     reference: string;
+    entityReference?: string;
     values?: Record<string, string | number | boolean | null>;
     sourceRefs?: string[];
   }) {
@@ -109,6 +112,7 @@ export class TestDataBrainService {
       {
         status: "found",
         reference: input.reference,
+        entityReference: input.entityReference,
         values: input.values,
         sourceRefs
       }
@@ -177,6 +181,7 @@ export class TestDataBrainService {
       updatedAt: now
     };
     entity.values = { ...entity.values, ...(result.values ?? input.values ?? {}) };
+    entity.entityReference = result.entityReference ?? input.entityReference ?? entity.entityReference;
     entity.knowledgeProjectId = input.knowledgeProjectId ?? entity.knowledgeProjectId;
     entity.sourceRefs = [...new Set([...entity.sourceRefs, ...input.sourceRefs, ...result.sourceRefs])];
     entity.status = "active";
@@ -201,15 +206,15 @@ export class InMemoryTestDataProvider implements TestDataProvider {
     this.calls.push("lookup");
     const reference = input.reference ?? `${input.entityType ?? "record"}:${input.key ?? ""}`;
     const values = this.records.get(reference);
-    return values ? { status: "found" as const, reference, values, sourceRefs: input.sourceRefs } : undefined;
+    return values ? { status: "found" as const, reference, entityReference: input.entityReference, values, sourceRefs: input.sourceRefs } : undefined;
   }
 
   async create(input: TestDataProviderRequest) {
     this.calls.push("create");
-    const reference = input.reference ?? `${input.entityType ?? "record"}:${input.key ?? id("record")}`;
+    const reference = input.reference ?? input.entityReference ?? `${input.entityType ?? "record"}:${input.key ?? id("record")}`;
     const values = input.values ?? {};
     this.records.set(reference, values);
-    return { status: "created" as const, reference, values, sourceRefs: input.sourceRefs };
+    return { status: "created" as const, reference, entityReference: input.entityReference, values, sourceRefs: input.sourceRefs };
   }
 
   async transition(input: TestDataProviderRequest) {

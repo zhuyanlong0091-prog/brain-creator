@@ -107,7 +107,6 @@ npx brain-creator artifacts rollback --migration <migration-id> --confirm
 npx brain-creator artifacts retention --older-than-days 90
 npx brain-creator artifacts retention --older-than-days 90 --confirm
 ```
-
 ### 文档
 
 - [文档站](https://zhuyanlong0091-prog.github.io/brain-creator/zh-CN/)：可搜索的完整中文文档。
@@ -115,6 +114,7 @@ npx brain-creator artifacts retention --older-than-days 90 --confirm
 - [快速开始](docs/getting-started.md)：安装、诊断并完成第一次需求分析。
 - [核心概念](docs/core-concepts.md)：Requirement Brain、System Brain、Case Compiler、Gap 与 Bridge。
 - [从需求到测试](docs/guides/requirement-to-test.md)：完整审批与执行工作流。
+- [测试用例脑与测试数据脑](docs/guides/testcase-testdata-brain.md)：跨用例实体依赖、数据生命周期和断言契约。
 - [可信控制面](docs/zh-CN/guides/trusted-control-plane.md)：鉴权验证、批量编译、页面绑定、Gap 生命周期与摘要响应。
 - [CLI 参考](docs/cli-reference.md)：命令、参数和示例。
 - [MCP 安装](docs/mcp-installation.md)：Claude、Codex、host-agent 和连接配置。
@@ -178,7 +178,6 @@ Brain Creator enforces these boundaries:
 - Missing page or workflow evidence creates a resumable ExplorationTask before any Gap. Missing test data enters `needs-data`; Brain Creator does not guess actions or values.
 - Requirement expectations, system observations, and execution results remain separate.
 - Knowledge is isolated by `knowledgeProjectId`; runtime assets are isolated by `systemId`.
-
 - Only a verified product mismatch becomes a Bug. Automation, auth, environment, network, and test-data failures become typed Gaps.
 
 Execution is observable rather than opaque. Hosts that support MCP Progress Notification receive stage or step updates. The ordered Run Ledger remains the durable source of truth for every host, and `bc_status` restores the current case, step, page, elapsed time, wait reason, and `possiblyStalled` warning. Brain Creator rewrites the offline `suite-report.html` after each completed case with assurance, step evidence, screenshots, traces, Bugs, and Gaps.
@@ -226,6 +225,7 @@ Runtime Bridge, connector, and built-in OAuth/CAS/SAML Provider Registry setting
 
 - [Searchable documentation site](https://zhuyanlong0091-prog.github.io/brain-creator/)
 - [Repository documentation home](docs/README.md)
+- [Testcase and Testdata Brain](docs/guides/testcase-testdata-brain.md)
 - [Quickstart](docs/getting-started.md)
 - [Core concepts](docs/core-concepts.md)
 - [Requirement-to-test guide](docs/guides/requirement-to-test.md)

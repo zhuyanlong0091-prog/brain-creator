@@ -23,6 +23,7 @@ const englishTheme = {
         { text: "Requirement to test", link: "/guides/requirement-to-test" },
         { text: "Trusted control plane", link: "/guides/trusted-control-plane" },
         { text: "Storage and evidence", link: "/guides/storage-and-evidence" },
+        { text: "Testcase and Testdata Brain", link: "/guides/testcase-testdata-brain" },
         { text: "Agent usage", link: "/agent-usage" },
         { text: "Session resume", link: "/e2e-session-resume-workflow" }
       ]
@@ -78,6 +79,7 @@ const chineseTheme = {
         { text: "从需求到测试", link: "/zh-CN/guides/requirement-to-test" },
         { text: "可信控制面", link: "/zh-CN/guides/trusted-control-plane" },
         { text: "存储与证据", link: "/zh-CN/guides/storage-and-evidence" },
+        { text: "测试用例脑与测试数据脑", link: "/zh-CN/guides/testcase-testdata-brain" },
         { text: "Agent 使用", link: "/zh-CN/agent-usage" },
         { text: "恢复新会话", link: "/zh-CN/e2e-session-resume-workflow" }
       ]

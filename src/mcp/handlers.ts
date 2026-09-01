@@ -83,6 +83,7 @@ import {
 import { ExecutionPreflightService } from "../knowledge/executionPreflight.js";
 import { StatefulExplorationPlanService } from "../knowledge/statefulExplorationPlan.js";
 import { OnboardingPlanService } from "../knowledge/onboardingPlan.js";
+import { buildCaseDependencyGraph } from "../knowledge/caseDependencyGraph.js";
 import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js";
 import { RunLedgerService } from "../knowledge/runLedger.js";
 import { ExecutionDiagnosisService } from "../knowledge/executionDiagnosis.js";
@@ -5497,6 +5498,38 @@ function knowledgeReview(
       ...paginateReviewItems(items, input)
     };
   }
+  if (target === "case-dependency") {
+    const requestedSystemId = optionalStringArg(input, "systemId");
+    if (requestedSystemId && !project.systemIds.includes(requestedSystemId)) {
+      throw new Error("Requested dependency graph system is not bound to the knowledge project");
+    }
+    const requirementSets = context.repository.requirementSets.filter(
+      (item) =>
+        item.knowledgeProjectId === projectId &&
+        (!optionalStringArg(input, "requirementSetId") ||
+          item.id === optionalStringArg(input, "requirementSetId")) &&
+        (!idValue || item.id === idValue)
+    );
+    const systemIds: Array<string | undefined> = requestedSystemId
+      ? [requestedSystemId]
+      : project.systemIds.length > 0
+        ? project.systemIds
+        : [undefined];
+    const graphs = requirementSets.flatMap((requirementSet) =>
+      systemIds.map((systemId) =>
+        buildCaseDependencyGraph({
+          requirementSetId: requirementSet.id,
+          ...(systemId ? { systemId } : {}),
+          intents: context.repository.testIntents,
+          executableCases: context.repository.executableCases
+        })
+      )
+    );
+    return {
+      project,
+      ...paginateReviewItems(graphs, input)
+    };
+  }
   if (target === "execution-plan") {
     const items = context.repository.executionPlans.filter(
       (item) =>
@@ -10269,6 +10302,7 @@ type KnowledgeReviewTarget =
   | "evidence"
   | "compile-run"
   | "semantic-binding"
+  | "case-dependency"
   | "testdata"
   | "business-scenario"
   | "scenario-assurance"
@@ -10300,6 +10334,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "evidence",
       "compile-run",
       "semantic-binding",
+      "case-dependency",
       "testdata",
       "business-scenario",
       "scenario-assurance",
@@ -10388,6 +10423,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "evidence",
     "compile-run",
     "semantic-binding",
+    "case-dependency",
     "testdata",
     "business-scenario",
     "scenario-assurance",

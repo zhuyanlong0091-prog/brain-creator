@@ -978,6 +978,10 @@ export type TestIntent = {
   scenarioType?: "positive" | "negative";
   processModelRefs?: string[];
   actorJourney?: string[];
+  /** Stable business entities produced for later cases in the same requirement set. */
+  producesEntityRefs?: string[];
+  /** Stable business entities required by this case; execution order alone is never enough. */
+  consumesEntityRefs?: string[];
   status:
     | "draft"
     | "approved"
@@ -1040,6 +1044,7 @@ export type CompileRun = {
 export type CompilationStageName =
   | "requirement-path"
   | "system-brain"
+  | "case-dependency"
   | "test-data"
   | "step-provenance"
   | "executable-case";
@@ -1137,6 +1142,8 @@ export type TestDataProfile = {
     | "secret-reference";
   constraints: string[];
   seed: string;
+  /** Stable semantic reference such as employee:testperson001. */
+  entityReference?: string;
   dependsOnFields?: string[];
   cleanup?: "none" | "delete-created" | "restore";
   sourceRefs: string[];
@@ -1159,6 +1166,8 @@ export type ExecutableCaseStep = {
   pageModelId?: string;
   locatorPointId?: string;
   dataProfileId?: string;
+  /** Stable entity reference used by the Testdata Brain, separate from a generated field value. */
+  dataReference?: string;
   origin: "source" | "derived" | "observed";
   sourceRefs: string[];
 };
@@ -1209,6 +1218,7 @@ export type ExecutableCaseDataOperation = {
   status: "proposed" | "ready" | "needs-resolution" | "blocked";
   value?: string;
   reference?: string;
+  entityReference?: string;
   lookupQuery?: string;
   secretRef?: string;
   dependsOnProfileIds: string[];
@@ -1227,6 +1237,43 @@ export type ExecutableCaseDataPlan = {
   confirmedAt?: string;
   requiresCleanup: boolean;
   sourceRefs: string[];
+  /** Stable semantic entity references used by this case. */
+  entityReferences?: string[];
+};
+
+export type CaseDependencyNode = {
+  testIntentId: string;
+  executableCaseId?: string;
+  producesEntityRefs: string[];
+  consumesEntityRefs: string[];
+  sourceRefs: string[];
+};
+
+export type CaseDependencyEdge = {
+  id: string;
+  fromTestIntentId: string;
+  toTestIntentId: string;
+  entityReference: string;
+  relation: "requires";
+  sourceRefs: string[];
+};
+
+export type CaseDependencyGraph = {
+  requirementSetId: string;
+  systemId?: string;
+  nodes: CaseDependencyNode[];
+  edges: CaseDependencyEdge[];
+  dependencyOrder: string[];
+  unresolved: Array<{
+    testIntentId: string;
+    entityReference: string;
+    reason: "missing-producer" | "ambiguous-producer" | "cycle";
+    producerTestIntentIds?: string[];
+    sourceRefs: string[];
+  }>;
+  verdict: "ready" | "needs-data" | "ambiguous" | "blocked";
+  sourceRefs: string[];
+  generatedAt: string;
 };
 
 export type TestDataTask = {
@@ -1236,6 +1283,7 @@ export type TestDataTask = {
   executableCaseId: string;
   profileId: string;
   field: string;
+  entityReference?: string;
   action: "lookup-or-create" | "cleanup";
   status: "pending" | "submitted" | "failed" | "cancelled";
   idempotencyKey: string;
@@ -1262,6 +1310,7 @@ export type TestDataLease = {
   taskId: string;
   decision: "reuse" | "create";
   reference: string;
+  entityReference?: string;
   value?: string;
   cleanup: "none" | "delete-created" | "restore";
   status: "active" | "released" | "cleanup-failed";
@@ -1292,6 +1341,7 @@ export type ExecutionPreflightCheck = {
 export type ExecutionDataBinding = {
   profileId: string;
   field: string;
+  entityReference?: string;
   decision: ExecutableCaseDataOperation["decision"];
   value?: string;
   reference?: string;
@@ -1540,6 +1590,9 @@ export type ExecutableCase = {
   pathPlan?: ExecutableCasePathPlan;
   statePlan?: ExecutableCaseStatePlan;
   dataPlan?: ExecutableCaseDataPlan;
+  caseDependencyGraph?: CaseDependencyGraph;
+  assertionContracts?: AssertionContract[];
+  entityReferenceRequirements?: string[];
   coverageDimensions?: CoverageDimension[];
   dataProfileIds: string[];
   explorationTaskIds?: string[];
@@ -1559,6 +1612,8 @@ export type ExecutionStepEvidence = {
   pageModelId?: string;
   locatorPointId?: string;
   dataProfileId?: string;
+  /** Stable business entity reference resolved from an explicit case dependency. */
+  dataReference?: string;
   expected?: string;
   actual?: string;
   assertionStatus: "pending" | "passed" | "failed" | "blocked";

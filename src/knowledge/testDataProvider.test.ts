@@ -50,6 +50,29 @@ describe("TestDataProviderService", () => {
     expect(fixture.repository.testDataTasks).toHaveLength(0);
   });
 
+  it("keeps the semantic entity reference visible while preparing provider work", async () => {
+    const fixture = await providerFixture();
+    fixture.executableCase.dataPlan!.operations[0].entityReference = "customer:active-42";
+
+    const result = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true,
+      allowCreate: true
+    });
+
+    expect(result.operations[0]).toEqual(expect.objectContaining({
+      entityReference: "customer:active-42"
+    }));
+    expect(result.task).toEqual(expect.objectContaining({
+      entityReference: "customer:active-42"
+    }));
+    expect(await readFile(result.task!.contextPath, "utf8")).toContain(
+      "customer:active-42"
+    );
+  });
+
   it("automatically resolves deterministic generated data without touching the target system", async () => {
     const fixture = await providerFixture();
     fixture.executableCase.dataPlan = {
