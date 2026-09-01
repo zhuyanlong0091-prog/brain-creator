@@ -82,6 +82,7 @@ import {
 } from "../knowledge/testDataProvider.js";
 import { ExecutionPreflightService } from "../knowledge/executionPreflight.js";
 import { StatefulExplorationPlanService } from "../knowledge/statefulExplorationPlan.js";
+import { OnboardingPlanService } from "../knowledge/onboardingPlan.js";
 import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js";
 import { RunLedgerService } from "../knowledge/runLedger.js";
 import { ExecutionDiagnosisService } from "../knowledge/executionDiagnosis.js";
@@ -181,6 +182,7 @@ export type BrainCreatorMcpContext = {
   executionDiagnosis: ExecutionDiagnosisService;
   systemExploration: SystemExplorationCoordinator;
   statefulExplorationPlans: StatefulExplorationPlanService;
+  onboardingPlans: OnboardingPlanService;
   harness: HarnessRuntime;
   semanticSpine: SemanticSpineService;
   systemBrainSnapshots: SystemBrainSnapshotService;
@@ -314,6 +316,15 @@ export function createBrainCreatorMcpContext(
     repository,
     runLedger
   );
+  const statefulExplorationPlans = new StatefulExplorationPlanService(
+    repository,
+    knowledgeService
+  );
+  const onboardingPlans = new OnboardingPlanService(
+    repository,
+    knowledgeService,
+    statefulExplorationPlans
+  );
   const runtimeManaged = !input.agentBridge && !input.runner;
   const context: BrainCreatorMcpContext = {
     repository,
@@ -333,10 +344,8 @@ export function createBrainCreatorMcpContext(
       workDir,
       explorer: input.systemExplorer
     }),
-    statefulExplorationPlans: new StatefulExplorationPlanService(
-      repository,
-      knowledgeService
-    ),
+    statefulExplorationPlans,
+    onboardingPlans,
     harness,
     semanticSpine,
     systemBrainSnapshots,
@@ -1283,6 +1292,67 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       note: stringArg(input, "confirmationNote")
     });
   }
+  if (action === "create-onboarding-plan") {
+    const result = context.onboardingPlans.create({
+      requirementSetId: stringArg(input, "requirementSetId"),
+      systemId: stringArg(input, "systemId"),
+      actorJourney: actorJourneyArg(input),
+      allowedRoutes: stringArrayArg(input, "allowedRoutes"),
+      allowedActions:
+        input.explorationPlanActions === undefined
+          ? undefined
+          : explorationPlanActionsArg(input),
+      forbiddenActions: stringArrayArg(input, "forbiddenActions"),
+      cleanupPolicy: explorationCleanupPolicyArg(input, "cleanupPolicy"),
+      maxWrites: optionalNumberArg(input, "maxWrites"),
+      maxDurationMs: optionalNumberArg(input, "maxDurationMs")
+    });
+    return {
+      status: result.onboardingPlan.status,
+      ...result,
+      requiresConfirmation: true,
+      nextAction: "approve-onboarding-plan"
+    };
+  }
+  if (action === "approve-onboarding-plan") {
+    const onboardingPlan = context.onboardingPlans.get(
+      stringArg(input, "onboardingPlanId")
+    );
+    const explorationPlan = context.statefulExplorationPlans.get(
+      onboardingPlan.explorationPlanId
+    );
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        onboardingPlan,
+        explorationPlan,
+        requiresConfirmation: true,
+        nextAction:
+          "Present the requirement baseline, unresolved questions, roles, routes, writes, duration, and cleanup policy before one explicit approval."
+      };
+    }
+    return {
+      status: "approved",
+      ...context.onboardingPlans.approve({
+        onboardingPlanId: onboardingPlan.id,
+        note: stringArg(input, "confirmationNote"),
+        approvedBy: stringArg(input, "confirmedBy")
+      }),
+      nextAction: "start-onboarding-plan"
+    };
+  }
+  if (action === "start-onboarding-plan") {
+    const result = context.onboardingPlans.start(
+      stringArg(input, "onboardingPlanId")
+    );
+    return {
+      ...result,
+      nextAction:
+        result.status === "needs-data"
+          ? "prepare-test-data"
+          : "execute-requirement-directed-exploration"
+    };
+  }
   if (action === "create-exploration-plan") {
     const plan = context.statefulExplorationPlans.create({
       explorationTaskIds: stringArrayArg(input, "explorationTaskIds"),
@@ -1336,12 +1406,14 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
         nextAction: "Confirm cancellation with a reason, or approve the exploration plan."
       };
     }
+    const cancelledPlan = context.statefulExplorationPlans.cancel({
+      planId: plan.id,
+      note: stringArg(input, "confirmationNote")
+    });
     return {
       status: "cancelled",
-      plan: context.statefulExplorationPlans.cancel({
-        planId: plan.id,
-        note: stringArg(input, "confirmationNote")
-      }),
+      plan: cancelledPlan,
+      onboardingPlan: context.onboardingPlans.syncFromExploration(cancelledPlan.id),
       nextAction: "review-compile-run"
     };
   }
@@ -1361,8 +1433,10 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     const result = await context.statefulExplorationPlans.submit(
       explorationResultArg(input)
     );
+    const onboardingPlan = context.onboardingPlans.syncFromExploration(result.plan.id);
     return {
       ...result,
+      onboardingPlan,
       status: result.plan.status,
       nextAction:
         result.plan.status === "completed"
@@ -2866,8 +2940,20 @@ async function runBugRegression(context: BrainCreatorMcpContext, input: Record<s
 }
 
 async function reviewFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
-  const knowledgeProjectId = optionalStringArg(input, "knowledgeProjectId");
+  let knowledgeProjectId = optionalStringArg(input, "knowledgeProjectId");
   const requestedTarget = reviewTargetArg(input, "target");
+  if (!knowledgeProjectId && requestedTarget === "onboarding-plan") {
+    const projectIds = [...new Set(
+      context.onboardingPlans
+        .list({
+          systemId: optionalStringArg(input, "systemId"),
+          requirementSetId: optionalStringArg(input, "requirementSetId")
+        })
+        .filter((item) => !optionalStringArg(input, "id") || item.id === optionalStringArg(input, "id"))
+        .map((item) => item.knowledgeProjectId)
+    )];
+    if (projectIds.length === 1) knowledgeProjectId = projectIds[0];
+  }
   if (knowledgeProjectId && isKnowledgeReviewTarget(requestedTarget)) {
     return knowledgeReview(
       context,
@@ -4764,11 +4850,32 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const activeExplorationPlan = explorationPlans
     .filter((item) => ["draft", "approved", "running"].includes(item.status))
     .at(-1);
+  const onboardingPlans = context.onboardingPlans
+    .list()
+    .filter((item) => item.knowledgeProjectId === projectId);
+  const activeOnboardingPlan = onboardingPlans
+    .filter((item) => ["draft", "approved"].includes(item.status))
+    .at(-1);
+  const activeOnboardingExplorationPlan = activeOnboardingPlan
+    ? explorationPlans.find((item) => item.id === activeOnboardingPlan.explorationPlanId)
+    : undefined;
   const projectCompileRuns = context.repository.compileRuns.filter(
     (item) => item.knowledgeProjectId === projectId
   );
   const blockedDataPlans = executableCases.filter(
     (item) => item.dataPlan?.verdict === "blocked"
+  );
+  const onboardingNeedsData = Boolean(
+    activeOnboardingPlan?.status === "approved" &&
+      activeOnboardingExplorationPlan?.executableCaseIds.some((caseId) => {
+        const executableCase = executableCases.find((item) => item.id === caseId);
+        return executableCase?.status === "needs-data" ||
+          executableCase?.dataPlan?.verdict === "blocked" ||
+          Boolean(
+            executableCase?.dataPlan?.requiresConfirmation &&
+              !executableCase.dataPlan.confirmedAt
+          );
+      })
   );
   const executionEvidence = context.knowledgeService.listExecutionEvidence(projectId);
   const executionPlans = context.repository.executionPlans.filter(
@@ -4875,6 +4982,12 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     nextAction = "continue_requirement_suite";
   } else if (activeExplorationPlan?.status === "running") {
     nextAction = "complete_exploration_plan";
+  } else if (onboardingNeedsData) {
+    nextAction = "prepare_test_data";
+  } else if (activeOnboardingPlan?.status === "approved") {
+    nextAction = "start_onboarding_plan";
+  } else if (activeOnboardingPlan?.status === "draft") {
+    nextAction = "approve_onboarding_plan";
   } else if (activeExplorationPlan?.status === "approved") {
     nextAction = "start_exploration_plan";
   } else if (activeExplorationPlan?.status === "draft") {
@@ -4887,7 +5000,16 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   else if (blockedEvalActions.length > 0) nextAction = "revise_blocked_requirement";
   else if (pendingEvalActions.length > 0) nextAction = "confirm_requirement_eval";
   else if (activeRequirementSets.some((item) => item.status === "draft")) {
-    nextAction = "review_and_approve_baseline";
+    const evaluatedDraft = activeRequirementSets.find(
+      (item) =>
+        item.status === "draft" &&
+        item.evaluationGate &&
+        item.evaluationGate.status !== "blocked" &&
+        item.evaluationGate.actions.every((action) => action.status === "confirmed")
+    );
+    nextAction = evaluatedDraft && project.systemIds.length > 0
+      ? "create_onboarding_plan"
+      : "review_and_approve_baseline";
   } else if (pendingExplorationTasks.length > 0) {
     nextAction = "review_exploration_task";
   } else if (executableCases.some((item) => item.status === "ready")) {
@@ -4918,6 +5040,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       latestCompileRunId: projectCompileRuns.at(-1)?.id,
       activeExplorationTaskId: pendingExplorationTasks.at(-1)?.id,
       activeExplorationPlanId: activeExplorationPlan?.id,
+      activeOnboardingPlanId: activeOnboardingPlan?.id,
       activeRun: activeRequirementSuiteRun
         ? {
             runId: activeRequirementSuiteRun.id,
@@ -4951,6 +5074,12 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         byStatus: countBy(evaluationGates, (item) => item.status),
         pendingActions: pendingEvalActions.length,
         blockedActions: blockedEvalActions.length
+      },
+      onboarding: {
+        total: onboardingPlans.length,
+        byStatus: countBy(onboardingPlans, (item) => item.status),
+        active: activeOnboardingPlan,
+        recent: onboardingPlans.slice(-5)
       },
       nodes: { total: nodes.length, byType: countBy(nodes, (item) => item.type) },
       testIntents: { total: testIntents.length, byStatus: countBy(testIntents, (item) => item.status) },
@@ -5061,6 +5190,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     latestCompileRunId: projectCompileRuns.at(-1)?.id,
     activeExplorationTaskId: pendingExplorationTasks.at(-1)?.id,
     activeExplorationPlanId: activeExplorationPlan?.id,
+    activeOnboardingPlanId: activeOnboardingPlan?.id,
     nextAction
   };
 }
@@ -5359,6 +5489,22 @@ function knowledgeReview(
     const items = context.systemExploration
       .list(projectId)
       .filter((item) => !idValue || item.id === idValue);
+    return {
+      project,
+      ...paginateReviewItems(items, input)
+    };
+  }
+  if (target === "onboarding-plan") {
+    const items = context.onboardingPlans
+      .list({
+        systemId: optionalStringArg(input, "systemId"),
+        requirementSetId: optionalStringArg(input, "requirementSetId")
+      })
+      .filter(
+        (item) =>
+          item.knowledgeProjectId === projectId &&
+          (!idValue || item.id === idValue)
+      );
     return {
       project,
       ...paginateReviewItems(items, input)
@@ -9840,6 +9986,11 @@ function explorationResultArg(input: Record<string, unknown>) {
     pageModelIds: stringArrayArg(record, "pageModelIds"),
     systemExplorationIds: stringArrayArg(record, "systemExplorationIds"),
     trainingSessionIds: stringArrayArg(record, "trainingSessionIds"),
+    taskEvidence: optionalObjectArrayArg(record, "taskEvidence").map((item) => ({
+      taskId: stringArg(item, "taskId"),
+      observedEvidence: stringArrayArg(item, "observedEvidence"),
+      evidenceRefs: stringArrayArg(item, "evidenceRefs")
+    })),
     cleanupStatus: cleanupStatus as "completed" | "not-required" | "failed",
     error: optionalStringArg(record, "error")
   };
@@ -9852,6 +10003,7 @@ type KnowledgeReviewTarget =
   | "requirement-eval-accuracy"
   | "system-brain"
   | "system-exploration"
+  | "onboarding-plan"
   | "exploration-plan"
   | "test-intent"
   | "executable-case"
@@ -9878,6 +10030,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "requirement-eval-accuracy",
       "system-brain",
       "system-exploration",
+      "onboarding-plan",
       "exploration-plan",
       "test-intent",
       "executable-case",
@@ -9961,6 +10114,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "requirement-eval-accuracy",
     "system-brain",
     "system-exploration",
+    "onboarding-plan",
     "exploration-plan",
     "test-intent",
     "executable-case",
@@ -10483,6 +10637,9 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "approve-baseline",
       "compile-cases",
       "confirm-page-binding",
+      "create-onboarding-plan",
+      "approve-onboarding-plan",
+      "start-onboarding-plan",
       "create-exploration-plan",
       "approve-exploration-plan",
       "cancel-exploration-plan",
@@ -10521,6 +10678,9 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "approve-baseline"
     | "compile-cases"
     | "confirm-page-binding"
+    | "create-onboarding-plan"
+    | "approve-onboarding-plan"
+    | "start-onboarding-plan"
     | "create-exploration-plan"
     | "approve-exploration-plan"
     | "cancel-exploration-plan"
@@ -10995,6 +11155,18 @@ function stringArrayArg(input: Record<string, unknown>, key: string): string[] {
 
 function optionalStringArrayArg(input: Record<string, unknown>, key: string): string[] | undefined {
   return Array.isArray(input[key]) ? stringArrayArg(input, key) : undefined;
+}
+
+function optionalObjectArrayArg(input: Record<string, unknown>, key: string) {
+  const value = input[key];
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`${key} must be an array`);
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`${key}[${index}] must be an object`);
+    }
+    return item as Record<string, unknown>;
+  });
 }
 
 function recordArg(input: Record<string, unknown>, key: string): Record<string, string> {

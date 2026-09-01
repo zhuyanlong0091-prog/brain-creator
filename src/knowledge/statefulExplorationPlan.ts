@@ -10,7 +10,7 @@ import { id } from "../shared/id.js";
 import { isAllowedExplorationUrl } from "./systemExplorer.js";
 
 type ExplorationKnowledgePort = {
-  confirmExecutableCaseTestData(executableCaseId: string): unknown;
+  confirmExecutableCaseTestData(executableCaseId: string, options?: { persist?: boolean }): unknown;
   refreshSystemBrain(projectId: string, systemId: string): Promise<unknown>;
   resolveExplorationTask(input: {
     taskId: string;
@@ -31,6 +31,12 @@ type CreateExplorationPlanInput = {
   maxDurationMs?: number;
 };
 
+export type ExplorationTaskEvidence = {
+  taskId: string;
+  observedEvidence: string[];
+  evidenceRefs: string[];
+};
+
 type SubmitExplorationResultInput = {
   planId: string;
   status: "succeeded" | "failed";
@@ -40,6 +46,7 @@ type SubmitExplorationResultInput = {
   pageModelIds: string[];
   systemExplorationIds: string[];
   trainingSessionIds: string[];
+  taskEvidence?: ExplorationTaskEvidence[];
   cleanupStatus: "completed" | "not-required" | "failed";
   error?: string;
 };
@@ -184,9 +191,33 @@ export class StatefulExplorationPlanService {
     return plan;
   }
 
-  approve(input: { planId: string; note: string; approvedBy: string }) {
+  approve(
+    input: { planId: string; note: string; approvedBy: string },
+    options: { persist?: boolean } = {}
+  ) {
     const plan = this.get(input.planId);
     if (plan.status === "approved") return plan;
+    const validated = this.validateApproval(input);
+    const note = validated.note;
+    const approvedBy = validated.approvedBy;
+    for (const caseId of plan.executableCaseIds) {
+      const executableCase = this.repository.executableCases.find((item) => item.id === caseId);
+      if (executableCase?.dataPlan?.requiresConfirmation && !executableCase.dataPlan.confirmedAt) {
+        this.knowledge.confirmExecutableCaseTestData(caseId, { persist: false });
+      }
+    }
+    const now = timestamp();
+    plan.status = "approved";
+    plan.approvalNote = note;
+    plan.approvedBy = approvedBy;
+    plan.approvedAt = now;
+    plan.updatedAt = now;
+    if (options.persist !== false) this.repository.persist();
+    return plan;
+  }
+
+  validateApproval(input: { planId: string; note: string; approvedBy: string }) {
+    const plan = this.get(input.planId);
     if (plan.status !== "draft") throw new Error(`Exploration plan is ${plan.status}`);
     const system = this.repository.systemProfiles.find((item) => item.id === plan.systemId);
     if (!system) throw new Error("Business system not found");
@@ -222,22 +253,11 @@ export class StatefulExplorationPlanService {
         throw new Error(`Exploration action role is not authorized: ${action.role}`);
       }
     }
-    const note = required(input.note, "Exploration approval note");
-    const approvedBy = required(input.approvedBy, "Exploration approver");
-    for (const caseId of plan.executableCaseIds) {
-      const executableCase = this.repository.executableCases.find((item) => item.id === caseId);
-      if (executableCase?.dataPlan?.requiresConfirmation && !executableCase.dataPlan.confirmedAt) {
-        this.knowledge.confirmExecutableCaseTestData(caseId);
-      }
-    }
-    const now = timestamp();
-    plan.status = "approved";
-    plan.approvalNote = note;
-    plan.approvedBy = approvedBy;
-    plan.approvedAt = now;
-    plan.updatedAt = now;
-    this.repository.persist();
-    return plan;
+    return {
+      plan,
+      note: required(input.note, "Exploration approval note"),
+      approvedBy: required(input.approvedBy, "Exploration approver")
+    };
   }
 
   start(planId: string) {
@@ -248,7 +268,10 @@ export class StatefulExplorationPlanService {
     const unresolvedCases = plan.executableCaseIds.filter((caseId) => {
       const executableCase = this.repository.executableCases.find((item) => item.id === caseId);
       return !executableCase || Boolean(
-        executableCase.dataPlan && executableCase.dataPlan.verdict !== "ready"
+        executableCase.dataPlan && (
+          executableCase.dataPlan.verdict === "blocked" ||
+          (executableCase.dataPlan.requiresConfirmation && !executableCase.dataPlan.confirmedAt)
+        )
       );
     });
     if (unresolvedCases.length > 0) {
@@ -310,6 +333,9 @@ export class StatefulExplorationPlanService {
     }
     const evidenceRefs = sourceRefs(input.evidenceRefs, "Exploration result");
     this.validateAssets(plan, input);
+    const taskEvidence = input.status === "succeeded"
+      ? this.validateTaskEvidence(plan, input.taskEvidence, evidenceRefs)
+      : new Map<string, string[]>();
     plan.actionEvidence = input.actionEvidence;
     plan.evidenceRefs = evidenceRefs;
     plan.pageModelIds = unique(input.pageModelIds);
@@ -340,7 +366,7 @@ export class StatefulExplorationPlanService {
           resumed.push(this.knowledge.resolveExplorationTask({
             taskId,
             outcome: "resolved",
-            evidenceRefs
+            evidenceRefs: taskEvidence.get(taskId) ?? evidenceRefs
           }));
         }
       }
@@ -378,7 +404,7 @@ export class StatefulExplorationPlanService {
     if (!action) throw new Error(`Action is not authorized by the exploration plan: ${evidence.actionId}`);
     if (
       action.name !== evidence.action ||
-      action.route !== evidence.route ||
+      !matchesApprovedActionRoute(evidence.route, action.route) ||
       action.role !== evidence.role ||
       !plan.allowedRoutes.some((route) => isAllowedExplorationUrl(evidence.route, [route]))
     ) {
@@ -401,6 +427,52 @@ export class StatefulExplorationPlanService {
       const session = this.repository.trainingSessions.find((item) => item.id === sessionId);
       if (!session || session.projectId !== plan.systemId) throw new Error(`Training evidence is outside the exploration system: ${sessionId}`);
     }
+  }
+
+  private validateTaskEvidence(
+    plan: ExplorationPlan,
+    submitted: ExplorationTaskEvidence[] | undefined,
+    submittedEvidenceRefs: string[]
+  ) {
+    const onboarding = this.repository.onboardingPlans.find(
+      (item) => item.explorationPlanId === plan.id
+    );
+    if (!onboarding) return new Map<string, string[]>();
+    if (!submitted || submitted.length !== plan.explorationTaskIds.length) {
+      throw new Error("Exploration result requires task-specific evidence for every onboarding question");
+    }
+    const allowedTaskIds = new Set(plan.explorationTaskIds);
+    const allowedEvidenceRefs = new Set(submittedEvidenceRefs);
+    const byTask = new Map<string, string[]>();
+    for (const item of submitted) {
+      if (!allowedTaskIds.has(item.taskId) || byTask.has(item.taskId)) {
+        throw new Error(`Exploration task evidence is outside the onboarding plan: ${item.taskId}`);
+      }
+      const task = this.repository.explorationTasks.find((candidate) => candidate.id === item.taskId);
+      if (!task) throw new Error(`Onboarding exploration task not found: ${item.taskId}`);
+      const observed = new Set(
+        item.observedEvidence.map((value) => value.trim().toLocaleLowerCase()).filter(Boolean)
+      );
+      const missing = task.requestedEvidence.filter(
+        (value) => !observed.has(value.trim().toLocaleLowerCase())
+      );
+      if (missing.length > 0) {
+        throw new Error(
+          `Exploration task ${item.taskId} is missing requested evidence: ${missing.join(", ")}`
+        );
+      }
+      const taskRefs = sourceRefs(item.evidenceRefs, `Exploration task ${item.taskId}`);
+      if (taskRefs.some((reference) => !allowedEvidenceRefs.has(reference))) {
+        throw new Error(
+          `Exploration task ${item.taskId} evidence is outside the submitted exploration evidence`
+        );
+      }
+      byTask.set(item.taskId, taskRefs);
+    }
+    if (byTask.size !== plan.explorationTaskIds.length) {
+      throw new Error("Exploration result requires task-specific evidence for every onboarding question");
+    }
+    return byTask;
   }
 
   private validateActorJourneyOrder(
@@ -452,6 +524,23 @@ export class StatefulExplorationPlanService {
 function matchesForbidden(value: string, forbidden: string[]) {
   const normalized = value.toLocaleLowerCase();
   return forbidden.some((item) => normalized.includes(item.trim().toLocaleLowerCase()));
+}
+
+function matchesApprovedActionRoute(candidate: string, approved: string) {
+  if (!isAllowedExplorationUrl(candidate, [approved])) return false;
+  const candidateUrl = new URL(candidate);
+  const approvedUrl = new URL(approved);
+  return normalizedSearch(candidateUrl) === normalizedSearch(approvedUrl) &&
+    candidateUrl.hash === approvedUrl.hash;
+}
+
+function normalizedSearch(url: URL) {
+  return [...url.searchParams.entries()]
+    .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+      leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue)
+    )
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
 }
 
 function isSafeExplorationEnvironment(environment: string) {

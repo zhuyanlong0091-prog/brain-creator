@@ -178,6 +178,18 @@ export class InMemoryBrainCreatorRepository {
     return;
   }
 
+  transaction<T>(action: () => T): T {
+    const before = structuredClone(snapshotRepository(this, this.schemaVersion));
+    try {
+      const result = action();
+      this.persist();
+      return result;
+    } catch (error) {
+      applyRepositorySnapshot(this, before);
+      throw error;
+    }
+  }
+
   reload() {
     return repositoryCounts(this);
   }
@@ -356,6 +368,7 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
   private readonly collectionsDir: string;
   private readonly legacyFilePath: string;
   private readonly lockDir: string;
+  private readonly transactionJournalPath: string;
 
   constructor(
     private readonly storeDir: string,
@@ -366,26 +379,46 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
     this.collectionsDir = join(storeDir, "collections");
     this.legacyFilePath = legacyFilePath;
     this.lockDir = join(storeDir, ".write.lock");
+    this.transactionJournalPath = join(storeDir, ".transaction.json");
+    this.recoverInterruptedTransaction();
     this.restoreShardedOrMigrate();
   }
 
   override persist() {
     this.withLock(() => {
       const snapshot = snapshotRepository(this, SHARDED_REPOSITORY_SCHEMA_VERSION);
-      mkdirSync(this.collectionsDir, { recursive: true });
-      for (const key of collectionKeys()) {
-        writeAtomicJson(join(this.collectionsDir, `${key}.json`), snapshot[key]);
-      }
-      this.writeOwnershipShards(snapshot);
-      writeAtomicJson(join(this.storeDir, "indexes", "asset-index.json"), buildAssetIndex(this));
-      writeAtomicJson(this.manifestPath, {
-        format: "sharded",
-        schemaVersion: SHARDED_REPOSITORY_SCHEMA_VERSION,
-        generatedAt: new Date().toISOString(),
-        collections: collectionKeys(),
-        counts: repositoryCounts(this)
-      });
+      this.writeSnapshot(snapshot);
     });
+  }
+
+  override transaction<T>(action: () => T): T {
+    const before = structuredClone(snapshotRepository(this, this.schemaVersion));
+    try {
+      const result = action();
+      this.withLock(() => {
+        writeAtomicJson(this.transactionJournalPath, {
+          schemaVersion: SHARDED_REPOSITORY_SCHEMA_VERSION,
+          snapshot: before
+        });
+        try {
+          this.writeSnapshot(snapshotRepository(this, SHARDED_REPOSITORY_SCHEMA_VERSION));
+          rmSync(this.transactionJournalPath, { force: true });
+        } catch (error) {
+          applyRepositorySnapshot(this, before);
+          try {
+            this.writeSnapshot(before);
+            rmSync(this.transactionJournalPath, { force: true });
+          } catch {
+            // Keep the journal so the next process can finish the rollback.
+          }
+          throw error;
+        }
+      });
+      return result;
+    } catch (error) {
+      applyRepositorySnapshot(this, before);
+      throw error;
+    }
   }
 
   override reload() {
@@ -461,7 +494,49 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
     this.persist();
   }
 
-  private writeOwnershipShards(snapshot: RepositorySnapshot) {
+  private writeSnapshot(snapshot: RepositorySnapshot) {
+    mkdirSync(this.collectionsDir, { recursive: true });
+    for (const key of collectionKeys()) {
+      writeAtomicJson(join(this.collectionsDir, `${key}.json`), snapshot[key]);
+    }
+    this.writeOwnershipShards();
+    writeAtomicJson(join(this.storeDir, "indexes", "asset-index.json"), buildAssetIndex(this));
+    writeAtomicJson(this.manifestPath, {
+      format: "sharded",
+      schemaVersion: SHARDED_REPOSITORY_SCHEMA_VERSION,
+      generatedAt: new Date().toISOString(),
+      collections: collectionKeys(),
+      counts: repositoryCounts(this)
+    });
+  }
+
+  private recoverInterruptedTransaction() {
+    if (!existsSync(this.transactionJournalPath)) return;
+    if (existsSync(this.lockDir)) {
+      const ownerPath = join(this.lockDir, "owner.json");
+      const owner = existsSync(ownerPath)
+        ? JSON.parse(readFileSync(ownerPath, "utf8")) as { pid?: number }
+        : undefined;
+      if (!owner?.pid || isProcessRunning(owner.pid)) {
+        throw new Error("Brain Creator sharded store transaction is still active");
+      }
+      rmSync(this.lockDir, { recursive: true, force: true });
+    }
+    const journal = JSON.parse(readFileSync(this.transactionJournalPath, "utf8")) as {
+      snapshot?: Partial<RepositorySnapshot>;
+    };
+    if (!journal.snapshot) {
+      throw new Error("Brain Creator sharded store transaction journal is invalid");
+    }
+    applyRepositorySnapshot(this, journal.snapshot);
+    this.schemaVersion = SHARDED_REPOSITORY_SCHEMA_VERSION;
+    this.withLock(() => {
+      this.writeSnapshot(snapshotRepository(this, SHARDED_REPOSITORY_SCHEMA_VERSION));
+      rmSync(this.transactionJournalPath, { force: true });
+    });
+  }
+
+  private writeOwnershipShards() {
     for (const system of this.systemProfiles) {
       const systemDir = join(this.storeDir, "systems", system.id);
       mkdirSync(systemDir, { recursive: true });
@@ -490,7 +565,6 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
       mkdirSync(runDir, { recursive: true });
       writeAtomicText(join(runDir, "ledger.jsonl"), `${lines.join("\n")}\n`);
     }
-    void snapshot;
   }
 
   private withLock(action: () => void) {
@@ -501,6 +575,10 @@ export class ShardedFileBrainCreatorRepository extends InMemoryBrainCreatorRepos
       throw new Error("Brain Creator sharded store is locked by another writer");
     }
     try {
+      writeAtomicJson(join(this.lockDir, "owner.json"), {
+        pid: process.pid,
+        createdAt: new Date().toISOString()
+      });
       action();
     } finally {
       rmSync(this.lockDir, { recursive: true, force: true });
@@ -760,12 +838,25 @@ function writeAtomicJson(filePath: string, value: unknown) {
 function writeAtomicText(filePath: string, value: string) {
   mkdirSync(dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temporaryPath, value, "utf8");
-  renameSync(temporaryPath, filePath);
+  try {
+    writeFileSync(temporaryPath, value, "utf8");
+    renameSync(temporaryPath, filePath);
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
 }
 
 function backupStamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function isProcessRunning(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 function systemAssets(repository: InMemoryBrainCreatorRepository, systemId: string) {

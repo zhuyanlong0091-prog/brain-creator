@@ -161,6 +161,42 @@ describe("BRAIN_CREATOR_TOOLS", () => {
     ).toBe(true);
     expect(
       prepare?.inputSchema.safeParse({
+        action: "create-onboarding-plan",
+        requirementSetId: "requirement-1",
+        systemId: "system-1",
+        actorJourney: [{ role: "requester", authProfileId: "auth-1" }],
+        cleanupPolicy: "delete"
+      }).success
+    ).toBe(true);
+    expect(
+      prepare?.inputSchema.safeParse({
+        action: "submit-exploration-result",
+        explorationPlanId: "exploration-plan-1",
+        explorationResult: {
+          status: "succeeded",
+          durationMs: 1_000,
+          actionEvidence: [{
+            actionId: "action-1",
+            action: "Submit order",
+            route: "https://orders.example.test/orders",
+            role: "requester",
+            sourceRefs: ["evidence:action"]
+          }],
+          evidenceRefs: ["evidence:global"],
+          pageModelIds: [],
+          systemExplorationIds: [],
+          trainingSessionIds: [],
+          taskEvidence: [{
+            taskId: "task-1",
+            observedEvidence: ["before and after state"],
+            evidenceRefs: ["evidence:state"]
+          }],
+          cleanupStatus: "not-required"
+        }
+      }).success
+    ).toBe(true);
+    expect(
+      prepare?.inputSchema.safeParse({
         action: "resolve-gap",
         gapId: "gap-1",
         systemId: "system-1",
@@ -197,6 +233,13 @@ describe("BRAIN_CREATOR_TOOLS", () => {
       configure?.inputSchema.safeParse({
         target: "runtime",
         operation: "reload-store"
+      }).success
+    ).toBe(true);
+    expect(
+      review?.inputSchema.safeParse({
+        target: "onboarding-plan",
+        requirementSetId: "requirement-1",
+        systemId: "system-1"
       }).success
     ).toBe(true);
     expect(

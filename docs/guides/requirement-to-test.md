@@ -57,7 +57,7 @@ Answer clarifying questions with durable business evidence. Clarifications and m
 
 **Verify:** every TestIntent references at least one requirement clause or confirmed attachment edge. Unsupported claims remain visible instead of being treated as facts. `bc_review target=coverage` shows the process models and per-dimension missing references.
 
-## 3. Approve The Baseline
+## 3. Review The Baseline
 
 When the analysis is correct, say:
 
@@ -65,13 +65,13 @@ When the analysis is correct, say:
 确认以上澄清结果，重新运行 Requirement Eval；如果门禁通过，提交需求基线给我最终审批。
 ```
 
-Then approve explicitly:
+Do not approve it separately when this is the first system onboarding. The Agent will include it in the OnboardingPlan approval after the system and roles are ready. Use the following only for the compatibility path that does not onboard a system:
 
 ```text
 批准该需求基线。下一步只绑定和探索系统，不执行测试。
 ```
 
-**Verify:** the baseline status is approved and no confirmable or blocked Eval action remains.
+**Verify:** no confirmable or blocked Eval action remains. The baseline may remain draft until the OnboardingPlan is approved.
 
 ## 4. Create Or Reuse A System
 
@@ -91,15 +91,15 @@ Configure authentication before exploring protected pages. Use Token, Cookie, or
 
 For password, CAPTCHA, recovery, or 2FA flows, Brain Creator creates an AuthCheckpoint and waits while the user or host Agent completes login. Do not send secrets in chat or persist them in generated tests.
 
-Then ask:
+Then ask Brain Creator to prepare one reviewable onboarding boundary:
 
 ```text
-探索当前系统，默认只访问 allowlist 内链接，不提交表单。列出发现的页面、入口、定位点和阻塞项。
+根据已确认需求创建 OnboardingPlan，展示需求摘要、探索问题、角色、路由、写操作、预算和清理策略；我确认前不要执行。
 ```
 
-Exploration defaults to bounded, link-only navigation. Opt in to `interactionMode=safe` only when tab, disclosure, or native-select state evidence is needed. Complex menus and business workflows require host-Agent page or training evidence.
+After one explicit approval, `approve-onboarding-plan` atomically approves the Requirement baseline and linked bounded ExplorationPlan. `start-onboarding-plan` returns requirement-directed questions and any required TestData tasks. Complex menus and business workflows still require host-Agent page, interaction, or training evidence inside the approved boundary.
 
-**Verify:** System Brain contains versioned page, locator, probe, and navigation evidence. Login pages, empty evidence, or unsafe transitions create a Gap.
+**Verify:** `bc_status` shows the active OnboardingPlan and `bc_review target=onboarding-plan` shows its approval boundary. Submitted results produce versioned System Brain page, locator, probe, navigation, state, and side-effect evidence. Login pages, empty evidence, or unsafe transitions create a Gap only after the approved attempts fail.
 
 ## 6. Compile Executable Cases
 

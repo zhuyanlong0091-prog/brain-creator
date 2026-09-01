@@ -1064,6 +1064,7 @@ export type ExplorationTask = {
   query: string;
   candidatePageModelIds: string[];
   requestedEvidence: string[];
+  approvedEvidenceScope?: string[];
   sourceRefs: string[];
   resultSourceRefs: string[];
   idempotencyKey: string;

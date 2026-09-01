@@ -120,6 +120,164 @@ describe("authorized exploration facade", () => {
   });
 });
 
+describe("requirement onboarding facade", () => {
+  it("recommends onboarding for an evaluated draft with a bound system", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    seedOnboarding(context);
+
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: "project-onboarding",
+      responseMode: "full"
+    }));
+
+    expect(status.nextAction).toBe("create_onboarding_plan");
+  });
+
+  it("recommends test-data preparation while approved onboarding waits for data", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    seedOnboarding(context);
+    context.repository.executableCases.push({
+      id: "case-onboarding-needs-data",
+      knowledgeProjectId: "project-onboarding",
+      requirementSetId: "requirement-onboarding",
+      testIntentId: "intent-onboarding",
+      systemId: "system-onboarding",
+      title: "Submit order with prepared data",
+      status: "needs-data",
+      preconditions: [],
+      steps: [],
+      dataPlan: {
+        verdict: "blocked",
+        reasons: ["Select an existing order"],
+        operations: [],
+        dependencyOrder: [],
+        requiresConfirmation: true,
+        requiresCleanup: false,
+        sourceRefs: ["source:onboarding#line:1"]
+      },
+      dataProfileIds: [],
+      explorationTaskIds: [],
+      gapIds: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    const created = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "create-onboarding-plan",
+      requirementSetId: "requirement-onboarding",
+      systemId: "system-onboarding",
+      actorJourney: [{ role: "requester", authProfileId: "auth-onboarding" }],
+      cleanupPolicy: "retain-with-label"
+    }));
+    dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "approve-onboarding-plan",
+      onboardingPlanId: created.onboardingPlan.id,
+      confirmationNote: "Approve bounded onboarding.",
+      confirmedBy: "qa-owner",
+      confirm: true
+    }));
+    const started = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "start-onboarding-plan",
+      onboardingPlanId: created.onboardingPlan.id
+    }));
+    expect(started.status).toBe("needs-data");
+
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: "project-onboarding",
+      responseMode: "full"
+    }));
+
+    expect(status.nextAction).toBe("prepare_test_data");
+  });
+
+  it("creates one reviewable plan and atomically approves the baseline and exploration", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    seedOnboarding(context);
+
+    const created = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "create-onboarding-plan",
+      requirementSetId: "requirement-onboarding",
+      systemId: "system-onboarding",
+      actorJourney: [{ role: "requester", authProfileId: "auth-onboarding" }],
+      cleanupPolicy: "retain-with-label"
+    }));
+    expect(created).toEqual(expect.objectContaining({
+      status: "draft",
+      requiresConfirmation: true,
+      explorationQuestions: expect.arrayContaining([
+        expect.objectContaining({ query: expect.stringContaining("entry") })
+      ])
+    }));
+
+    const preview = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "approve-onboarding-plan",
+      onboardingPlanId: created.onboardingPlan.id,
+      confirm: false
+    }));
+    expect(preview).toEqual(expect.objectContaining({
+      status: "preview",
+      requiresConfirmation: true
+    }));
+    expect(context.repository.requirementSets[0].status).toBe("draft");
+
+    const approved = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "approve-onboarding-plan",
+      onboardingPlanId: created.onboardingPlan.id,
+      confirmationNote: "Approve the baseline and bounded exploration once.",
+      confirmedBy: "qa-owner",
+      confirm: true
+    }));
+    expect(approved).toMatchObject({
+      status: "approved",
+      onboardingPlan: { status: "approved" },
+      requirementSet: { status: "approved" },
+      explorationPlan: { status: "approved" }
+    });
+
+    const started = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "start-onboarding-plan",
+      onboardingPlanId: created.onboardingPlan.id
+    }));
+    expect(started).toMatchObject({
+      status: "needs-agent-execution",
+      workPackage: {
+        requirementQuestions: expect.arrayContaining([
+          expect.objectContaining({ sourceRefs: ["source:onboarding#line:1"] })
+        ])
+      }
+    });
+
+    const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: "project-onboarding",
+      systemId: "system-onboarding",
+      responseMode: "full"
+    }));
+    expect(status.knowledge.onboarding).toEqual(expect.objectContaining({
+      active: expect.objectContaining({ id: created.onboardingPlan.id, status: "approved" })
+    }));
+
+    const review = dataOf(await handleBrainCreatorTool(context, "bc_review", {
+      target: "onboarding-plan",
+      requirementSetId: "requirement-onboarding",
+      systemId: "system-onboarding"
+    }));
+    expect(review.items).toEqual([
+      expect.objectContaining({ id: created.onboardingPlan.id, status: "approved" })
+    ]);
+  });
+});
+
 function seed(context: ReturnType<typeof createBrainCreatorMcpContext>) {
   const now = new Date().toISOString();
   context.repository.systemProfiles.push({
@@ -184,6 +342,127 @@ function seed(context: ReturnType<typeof createBrainCreatorMcpContext>) {
     domSnapshotId: "dom-orders",
     screenshotId: "shot-orders",
     status: "succeeded",
+    createdAt: now,
+    updatedAt: now
+  });
+}
+
+function seedOnboarding(context: ReturnType<typeof createBrainCreatorMcpContext>) {
+  const now = new Date().toISOString();
+  context.repository.systemProfiles.push({
+    id: "system-onboarding",
+    name: "Orders",
+    environment: "test",
+    baseUrl: "https://orders.example.test",
+    defaultLocale: "en-US",
+    urlAllowlist: ["https://orders.example.test"],
+    status: "succeeded",
+    createdAt: now,
+    updatedAt: now
+  });
+  context.repository.knowledgeProjects.push({
+    id: "project-onboarding",
+    key: "orders-onboarding",
+    name: "Orders Knowledge",
+    defaultLocale: "en-US",
+    status: "active",
+    systemIds: ["system-onboarding"],
+    createdAt: now,
+    updatedAt: now
+  });
+  context.repository.requirementSources.push({
+    id: "source-onboarding",
+    knowledgeProjectId: "project-onboarding",
+    source: "requirements/orders.md",
+    sourceType: "local-file",
+    title: "Submit order",
+    contentHash: "onboarding-hash",
+    content: "A requester submits an order.",
+    blocks: [{ type: "paragraph", text: "A requester submits an order." }],
+    attachments: [],
+    warnings: [],
+    accessStatus: "available",
+    revision: 1,
+    latestRequirementSetId: "requirement-onboarding",
+    createdAt: now,
+    updatedAt: now
+  });
+  context.repository.requirementSets.push({
+    id: "requirement-onboarding",
+    knowledgeProjectId: "project-onboarding",
+    sourceId: "source-onboarding",
+    version: 1,
+    title: "Submit order",
+    summary: "A requester submits an order.",
+    contentHash: "onboarding-hash",
+    status: "draft",
+    affectedNodeIds: [],
+    evaluationGate: {
+      policyId: "policy",
+      policyVersion: "1",
+      verdict: "pass",
+      score: 1,
+      coverage: { totalClauses: 1, coveredClauses: 1, coverageRate: 1, uncoveredSourceRefs: [] },
+      status: "passed",
+      actions: [],
+      generatedAt: now
+    },
+    createdAt: now,
+    updatedAt: now
+  });
+  context.repository.testIntents.push({
+    id: "intent-onboarding",
+    knowledgeProjectId: "project-onboarding",
+    requirementSetId: "requirement-onboarding",
+    title: "Submit order",
+    module: "Orders",
+    priority: "P0",
+    objective: "Verify order submission",
+    preconditions: [],
+    expectedResults: ["Order is submitted"],
+    requirementRefs: ["source:onboarding#line:1"],
+    knowledgeNodeRefs: [],
+    techniques: ["scenario"],
+    processModelRefs: ["workflow-onboarding"],
+    status: "draft",
+    createdAt: now,
+    updatedAt: now
+  });
+  context.repository.workflowModels.push({
+    id: "workflow-onboarding",
+    knowledgeProjectId: "project-onboarding",
+    requirementSetId: "requirement-onboarding",
+    title: "Order submission",
+    actors: ["requester"],
+    steps: [
+      { id: "draft", label: "Draft", actor: "requester", sourceRefs: ["source:onboarding#line:1"] },
+      { id: "submitted", label: "Submitted", actor: "requester", sourceRefs: ["source:onboarding#line:1"] }
+    ],
+    transitions: [{
+      id: "submit",
+      from: "draft",
+      to: "submitted",
+      actor: "requester",
+      trigger: "submit",
+      sourceRefs: ["source:onboarding#line:1"]
+    }],
+    startStepIds: ["draft"],
+    endStepIds: ["submitted"],
+    sourceRefs: ["source:onboarding#line:1"],
+    confidence: 1,
+    status: "draft",
+    createdAt: now,
+    updatedAt: now
+  });
+  context.repository.authProfiles.push({
+    id: "auth-onboarding",
+    projectId: "system-onboarding",
+    env: "test",
+    role: "requester",
+    loginMethod: "token",
+    encryptedSecrets: {},
+    status: "succeeded",
+    lastVerifiedAt: now,
     createdAt: now,
     updatedAt: now
   });

@@ -623,7 +623,39 @@ export class KnowledgeService {
     return { requirementSet, evaluationGate, resolvedGapIds };
   }
 
-  approveRequirementSet(requirementSetId: string) {
+  approveRequirementSet(requirementSetId: string, options: { persist?: boolean } = {}) {
+    const requirementSet = this.validateRequirementSetApproval(requirementSetId);
+    requirementSet.status = "approved";
+    requirementSet.approvedAt = timestamp();
+    requirementSet.updatedAt = requirementSet.approvedAt;
+    for (const node of this.repository.knowledgeNodes.filter(
+      (item) => item.requirementSetId === requirementSet.id
+    )) {
+      node.status = "confirmed";
+      node.updatedAt = requirementSet.updatedAt;
+    }
+    if (requirementSet.previousRequirementSetId) {
+      for (const node of this.repository.knowledgeNodes.filter(
+        (item) =>
+          item.requirementSetId === requirementSet.previousRequirementSetId &&
+          requirementSet.affectedNodeIds.includes(item.id)
+      )) {
+        node.status = "deprecated";
+        node.updatedAt = requirementSet.updatedAt;
+      }
+    }
+    for (const intent of this.repository.testIntents.filter(
+      (item) => item.requirementSetId === requirementSet.id
+    )) {
+      intent.status = "approved";
+      intent.updatedAt = requirementSet.updatedAt;
+    }
+    this.semanticSpine?.confirmRequirementActions(requirementSet.id, { persist: false });
+    if (options.persist !== false) this.repository.persist();
+    return requirementSet;
+  }
+
+  validateRequirementSetApproval(requirementSetId: string) {
     const requirementSet = this.getRequirementSet(requirementSetId);
     if (!requirementSet.evaluationGate) {
       throw new Error("Requirement Eval must be generated before approval");
@@ -657,33 +689,6 @@ export class KnowledgeService {
     if (unresolvedConflicts.length > 0) {
       throw new Error("Requirement conflict gaps must be resolved before approval");
     }
-    requirementSet.status = "approved";
-    requirementSet.approvedAt = timestamp();
-    requirementSet.updatedAt = requirementSet.approvedAt;
-    for (const node of this.repository.knowledgeNodes.filter(
-      (item) => item.requirementSetId === requirementSet.id
-    )) {
-      node.status = "confirmed";
-      node.updatedAt = requirementSet.updatedAt;
-    }
-    if (requirementSet.previousRequirementSetId) {
-      for (const node of this.repository.knowledgeNodes.filter(
-        (item) =>
-          item.requirementSetId === requirementSet.previousRequirementSetId &&
-          requirementSet.affectedNodeIds.includes(item.id)
-      )) {
-        node.status = "deprecated";
-        node.updatedAt = requirementSet.updatedAt;
-      }
-    }
-    for (const intent of this.repository.testIntents.filter(
-      (item) => item.requirementSetId === requirementSet.id
-    )) {
-      intent.status = "approved";
-      intent.updatedAt = requirementSet.updatedAt;
-    }
-    this.semanticSpine?.confirmRequirementActions(requirementSet.id);
-    this.repository.persist();
     return requirementSet;
   }
 
@@ -1292,7 +1297,7 @@ export class KnowledgeService {
     return { executableCase, resolvedGaps };
   }
 
-  confirmExecutableCaseTestData(executableCaseId: string) {
+  confirmExecutableCaseTestData(executableCaseId: string, options: { persist?: boolean } = {}) {
     const executableCase = this.repository.executableCases.find(
       (item) => item.id === executableCaseId
     );
@@ -1312,7 +1317,7 @@ export class KnowledgeService {
     const intent = this.getTestIntent(executableCase.testIntentId);
     intent.status = executableCase.status === "ready" ? "compiled" : executableCase.status;
     intent.updatedAt = executableCase.updatedAt;
-    this.repository.persist();
+    if (options.persist !== false) this.repository.persist();
     return executableCase;
   }
 

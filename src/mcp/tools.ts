@@ -135,7 +135,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, confirming Requirement Eval, reviewing or rolling back historical execution diagnoses, approving a baseline, exploring System Brain, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, and confirming immutable execution preflight snapshots.",
+      "Requirement-first facade for ingesting sources, confirming Requirement Eval, atomically approving a baseline with bounded first-system onboarding, reviewing or rolling back historical execution diagnoses, exploring System Brain, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, and confirming immutable execution preflight snapshots.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
@@ -151,6 +151,9 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "approve-baseline",
         "compile-cases",
         "confirm-page-binding",
+        "create-onboarding-plan",
+        "approve-onboarding-plan",
+        "start-onboarding-plan",
         "create-exploration-plan",
         "approve-exploration-plan",
         "cancel-exploration-plan",
@@ -186,6 +189,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       explorationTaskId: z.string().optional(),
       explorationTaskIds: z.array(z.string()).default([]),
       explorationPlanId: z.string().optional(),
+      onboardingPlanId: z.string().optional(),
       allowedRoutes: z.array(z.string().url()).default([]),
       explorationPlanActions: z.array(z.object({
         name: z.string().min(1),
@@ -319,6 +323,11 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         pageModelIds: z.array(z.string()).default([]),
         systemExplorationIds: z.array(z.string()).default([]),
         trainingSessionIds: z.array(z.string()).default([]),
+        taskEvidence: z.array(z.object({
+          taskId: z.string().min(1),
+          observedEvidence: z.array(z.string().min(1)).min(1),
+          evidenceRefs: z.array(z.string().min(1)).min(1)
+        })).optional(),
         cleanupStatus: z.enum(["completed", "not-required", "failed"]),
         error: z.string().optional()
       }).optional(),
@@ -567,7 +576,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_review",
     title: "Brain Creator review",
     description:
-      "Facade review entry for document and requirement suite runs, run-ledger timelines, execution diagnoses, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
+      "Facade review entry for onboarding plans, document and requirement suite runs, run-ledger timelines, execution diagnoses, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
     inputSchema: z.object({
       target: z.enum([
         "suite-run",
@@ -581,6 +590,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "requirement-eval-accuracy",
         "system-brain",
         "system-exploration",
+        "onboarding-plan",
         "exploration-plan",
         "test-intent",
         "executable-case",

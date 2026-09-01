@@ -302,6 +302,224 @@ describe("StatefulExplorationPlanService", () => {
     }));
   });
 
+  it("requires task-specific evidence for every onboarding question", async () => {
+    const fixture = createFixture();
+    fixture.repository.explorationTasks.push({
+      ...fixture.repository.explorationTasks[0],
+      id: "exploration-task-2",
+      requestedEvidence: ["approval result"],
+      idempotencyKey: "task-key-2"
+    });
+    const plan = fixture.service.create({
+      explorationTaskIds: ["exploration-task-1", "exploration-task-2"],
+      actorJourney: [{ role: "requester", authProfileId: "auth-requester" }],
+      allowedRoutes: ["https://orders.example.test/orders"],
+      allowedActions: [{
+        name: "Submit order",
+        route: "https://orders.example.test/orders",
+        role: "requester",
+        write: true,
+        sourceRefs: ["source:submit"]
+      }],
+      cleanupPolicy: "retain-with-label"
+    });
+    fixture.repository.onboardingPlans.push({
+      id: "onboarding-1",
+      knowledgeProjectId: "project-1",
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      requirementSummary: "Order approval",
+      baselineAssetIds: ["intent-1"],
+      explorationPlanId: plan.id,
+      unresolvedQuestions: [],
+      allowedRoutes: plan.allowedRoutes,
+      allowedActions: plan.allowedActions.map((action) => action.name),
+      forbiddenActions: plan.forbiddenActions,
+      maxWrites: plan.maxWrites,
+      maxDurationMs: plan.maxDurationMs,
+      cleanupPolicy: plan.cleanupPolicy,
+      status: "approved"
+    });
+    fixture.service.approve({
+      planId: plan.id,
+      note: "Approve per-question evidence collection",
+      approvedBy: "qa@example.test"
+    });
+    fixture.service.start(plan.id);
+    const result = {
+      planId: plan.id,
+      status: "succeeded" as const,
+      durationMs: 1_000,
+      actionEvidence: [{
+        actionId: plan.allowedActions[0].id,
+        action: "Submit order",
+        route: "https://orders.example.test/orders",
+        role: "requester",
+        sourceRefs: ["evidence:submit"]
+      }],
+      evidenceRefs: ["evidence:global"],
+      pageModelIds: [],
+      systemExplorationIds: [],
+      trainingSessionIds: [],
+      cleanupStatus: "not-required" as const
+    };
+
+    await expect(fixture.service.submit({
+      ...result,
+      taskEvidence: [{
+        taskId: "exploration-task-1",
+        observedEvidence: ["before and after state"],
+        evidenceRefs: ["evidence:state"]
+      }]
+    })).rejects.toThrow("every onboarding question");
+
+    await expect(fixture.service.submit({
+      ...result,
+      evidenceRefs: ["evidence:global", "evidence:state", "evidence:approval"],
+      taskEvidence: [
+        {
+          taskId: "exploration-task-1",
+          observedEvidence: ["before and after state"],
+          evidenceRefs: ["evidence:state"]
+        },
+        {
+          taskId: "exploration-task-2",
+          observedEvidence: ["button text"],
+          evidenceRefs: ["evidence:approval"]
+        }
+      ]
+    })).rejects.toThrow("missing requested evidence");
+
+    await expect(fixture.service.submit({
+      ...result,
+      taskEvidence: [
+        {
+          taskId: "exploration-task-1",
+          observedEvidence: ["before and after state"],
+          evidenceRefs: ["evidence:state"]
+        },
+        {
+          taskId: "exploration-task-2",
+          observedEvidence: ["approval result"],
+          evidenceRefs: ["evidence:approval"]
+        }
+      ]
+    })).rejects.toThrow("outside the submitted exploration evidence");
+
+    const completed = await fixture.service.submit({
+      ...result,
+      evidenceRefs: ["evidence:global", "evidence:state", "evidence:approval"],
+      taskEvidence: [
+        {
+          taskId: "exploration-task-1",
+          observedEvidence: ["before and after state"],
+          evidenceRefs: ["evidence:state"]
+        },
+        {
+          taskId: "exploration-task-2",
+          observedEvidence: ["approval result"],
+          evidenceRefs: ["evidence:approval"]
+        }
+      ]
+    });
+
+    expect(completed.plan.status).toBe("completed");
+    expect(fixture.port.resolveExplorationTask).toHaveBeenCalledWith({
+      taskId: "exploration-task-1",
+      outcome: "resolved",
+      evidenceRefs: ["evidence:state"]
+    });
+    expect(fixture.port.resolveExplorationTask).toHaveBeenCalledWith({
+      taskId: "exploration-task-2",
+      outcome: "resolved",
+      evidenceRefs: ["evidence:approval"]
+    });
+  });
+
+  it("accepts evidence on a child route within the authorized action scope", async () => {
+    const fixture = createFixture();
+    const plan = fixture.service.create({
+      explorationTaskIds: ["exploration-task-1"],
+      actorJourney: [{ role: "requester", authProfileId: "auth-requester" }],
+      allowedRoutes: ["https://orders.example.test"],
+      allowedActions: [{
+        name: "Submit order",
+        route: "https://orders.example.test",
+        role: "requester",
+        write: true,
+        sourceRefs: ["source:submit"]
+      }],
+      cleanupPolicy: "retain-with-label"
+    });
+    fixture.service.approve({
+      planId: plan.id,
+      note: "Approve route scope",
+      approvedBy: "qa@example.test"
+    });
+    fixture.service.start(plan.id);
+
+    const completed = await fixture.service.submit({
+      planId: plan.id,
+      status: "succeeded",
+      durationMs: 1_000,
+      actionEvidence: [{
+        actionId: plan.allowedActions[0].id,
+        action: "Submit order",
+        route: "https://orders.example.test/orders/42",
+        role: "requester",
+        sourceRefs: ["evidence:submit"]
+      }],
+      evidenceRefs: ["evidence:submit"],
+      pageModelIds: [],
+      systemExplorationIds: [],
+      trainingSessionIds: [],
+      cleanupStatus: "not-required"
+    });
+
+    expect(completed.plan.status).toBe("completed");
+  });
+
+  it("rejects evidence that changes an approved action query", async () => {
+    const fixture = createFixture();
+    const plan = fixture.service.create({
+      explorationTaskIds: ["exploration-task-1"],
+      actorJourney: [{ role: "requester", authProfileId: "auth-requester" }],
+      allowedRoutes: ["https://orders.example.test"],
+      allowedActions: [{
+        name: "Preview order",
+        route: "https://orders.example.test/orders?operation=preview",
+        role: "requester",
+        write: false,
+        sourceRefs: ["source:preview"]
+      }],
+      cleanupPolicy: "retain-with-label"
+    });
+    fixture.service.approve({
+      planId: plan.id,
+      note: "Approve preview only",
+      approvedBy: "qa@example.test"
+    });
+    fixture.service.start(plan.id);
+
+    await expect(fixture.service.submit({
+      planId: plan.id,
+      status: "succeeded",
+      durationMs: 1_000,
+      actionEvidence: [{
+        actionId: plan.allowedActions[0].id,
+        action: "Preview order",
+        route: "https://orders.example.test/orders?operation=delete",
+        role: "requester",
+        sourceRefs: ["evidence:unexpected-query"]
+      }],
+      evidenceRefs: ["evidence:unexpected-query"],
+      pageModelIds: [],
+      systemExplorationIds: [],
+      trainingSessionIds: [],
+      cleanupStatus: "not-required"
+    })).rejects.toThrow("does not match the authorized exploration plan");
+  });
+
   it("rejects evidence that switches back to an earlier actor", async () => {
     const fixture = createFixture();
     fixture.repository.authProfiles.push({

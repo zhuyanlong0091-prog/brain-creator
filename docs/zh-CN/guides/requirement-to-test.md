@@ -57,7 +57,7 @@ Brain Creator 应展示：
 
 **验证：** 每个 TestIntent 至少引用一条需求条款或已确认附件边；无依据结论保持可见，不能成为事实。使用 `bc_review target=coverage` 查看流程模型和各维度缺失引用。
 
-## 3. 批准需求基线
+## 3. 评审需求基线
 
 分析正确后发送：
 
@@ -65,13 +65,13 @@ Brain Creator 应展示：
 确认以上澄清结果，重新运行 Requirement Eval；如果门禁通过，提交需求基线给我最终审批。
 ```
 
-然后显式批准：
+首次接入系统时不要单独批准；系统和角色就绪后，由 OnboardingPlan 一次审批包含该需求基线。以下文本只用于不接入系统的兼容流程：
 
 ```text
 批准该需求基线。下一步只绑定和探索系统，不执行测试。
 ```
 
-**验证：** 基线为 approved，且不存在待确认或 blocked Eval action。
+**验证：** 不存在待确认或 blocked Eval action。OnboardingPlan 批准前，基线可以保持 draft。
 
 ## 4. 创建或复用系统
 
@@ -91,15 +91,15 @@ Brain Creator 应展示：
 
 遇到密码、CAPTCHA、恢复问题或 2FA 时，Brain Creator 创建 AuthCheckpoint，等待用户或宿主 Agent 完成登录。不要把 secret 发到对话或生成测试中。
 
-然后发送：
+然后让 Brain Creator 生成一份可评审的接入边界：
 
 ```text
-探索当前系统，默认只访问 allowlist 内链接，不提交表单。列出发现的页面、入口、定位点和阻塞项。
+根据已确认需求创建 OnboardingPlan，展示需求摘要、探索问题、角色、路由、写操作、预算和清理策略；我确认前不要执行。
 ```
 
-探索默认只进行受限链接导航。只有需要 Tab、折叠控件或原生下拉状态证据时，才启用 `interactionMode=safe`。复杂菜单和业务流程需要宿主 Agent 提交页面或训练证据。
+用户一次确认后，`approve-onboarding-plan` 原子批准需求基线和关联的受限 ExplorationPlan。`start-onboarding-plan` 返回需求驱动问题和所需 TestData 任务。复杂菜单和业务流程仍需宿主 Agent 在批准边界内提交页面、交互或训练证据。
 
-**验证：** System Brain 包含版本化页面、定位器、探针和导航证据。登录页、空证据或不安全转换会创建 Gap。
+**验证：** `bc_status` 显示活动 OnboardingPlan，`bc_review target=onboarding-plan` 可查看批准边界。结果提交后，System Brain 包含版本化页面、定位器、探针、导航、状态和副作用证据。登录页、空证据或不安全转换只有在批准的尝试失败后才创建 Gap。
 
 ## 6. 编译可执行用例
 

@@ -100,7 +100,11 @@ A resolved task automatically recompiles its TestIntent. A failed task requires 
 
 ## Authorize stateful exploration
 
-Read-only exploration cannot discover controls that appear only after create, submit, approval, rejection, or close transitions. For those cases, create an `ExplorationPlan` from one or more pending ExplorationTasks. The plan must name the authenticated roles, allowlisted routes, authorized actions, write budget, duration, and cleanup policy.
+For first-time system onboarding, use `bc_prepare action=create-onboarding-plan` after Requirement Eval passes, the system is bound, and every declared role has verified auth. Brain Creator derives concrete questions from confirmed workflows, state machines, decision tables, and TestIntents, then creates the bounded ExplorationPlan behind the OnboardingPlan.
+
+Preview `approve-onboarding-plan`, present the requirement summary, unresolved questions, roles, routes, writes, duration, and cleanup policy, then repeat it with `confirm=true`, `confirmedBy`, and `confirmationNote`. This one operation validates both sides before it atomically approves the RequirementSet and ExplorationPlan. Start it with `start-onboarding-plan`; `bc_status` and `bc_review target=onboarding-plan` recover the active plan. Existing separate baseline and ExplorationPlan approvals remain compatible for follow-up work.
+
+Read-only exploration cannot discover controls that appear only after create, submit, approval, rejection, or close transitions. For later evidence gaps, create an `ExplorationPlan` from one or more pending ExplorationTasks. The plan must name the authenticated roles, allowlisted routes, authorized actions, write budget, duration, and cleanup policy.
 
 Use `bc_prepare action=create-exploration-plan`, preview `approve-exploration-plan`, and confirm it once with a human note and confirmer. Brain Creator rejects production environments, unverified cross-system roles, out-of-scope URLs, destructive actions, and over-budget results. `start-exploration-plan` returns a bounded host-Agent work package; unresolved data returns `needs-data` first.
 

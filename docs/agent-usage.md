@@ -55,7 +55,7 @@ Builtin policies work without external Skills. When `RequirementAnalysis.skill` 
 
 ### 4. Approve The Baseline
 
-The Agent presents every Requirement Eval action. Clarifications and missing branches require an explicit `confirmationNote`; direct contradictions require a source revision. It then calls `bc_prepare action=approve-baseline confirm=true` only after the Eval gate passes.
+The Agent presents every Requirement Eval action. Clarifications and missing branches require an explicit `confirmationNote`; direct contradictions require a source revision. For a first system, the default next step is to bind the system and verified roles, create an OnboardingPlan, and ask for one approval that covers both the Requirement baseline and bounded exploration. `approve-baseline confirm=true` remains the compatibility path when no system onboarding is required.
 
 Seven golden samples cover ordinary clauses, complex Markdown rule tables, cross-module workflows, permission matrices, contradictions, and missing branches. Historical quality can be reviewed with `bc_review target=requirement-eval-accuracy`; technical failures remain inconclusive instead of reducing the requirement score.
 
@@ -77,7 +77,9 @@ Brain Creator selects the target page from semantic and role-compatible evidence
 
 After navigation planning, Brain Creator evaluates generic `SystemBrainStateTransition` evidence and returns `stateActions`/`statePlan`. A single relevant transition may enrich an existing click/select step or insert one observed step before its assertion, including the captured input value and LocatorPoint. Equal transitions, multiple reusable source steps, missing values, or missing locators become `ambiguous` or `needs-exploration`. Only an explicitly failed exploration creates a `system-brain-exploration` Gap. Business examples are validation fixtures only and must never become planner conditionals.
 
-When evidence requires real writes or role transitions, do not misuse `interactionMode=safe`. Create an `ExplorationPlan` for the pending tasks, show its roles, routes, actions, data policy, write/time budgets, and cleanup policy, then call `approve-exploration-plan confirm=true` only once the user approves the whole plan. Run `start-exploration-plan`; complete any returned test-data tasks before the host Agent executes the work package. Submit exact action evidence through `submit-exploration-result`. Brain Creator validates every action against the approved plan, refreshes System Brain, and resumes compilation. Review with `bc_review target=exploration-plan`; cancel an unstarted plan when approval is declined.
+For the first requirement-directed exploration, call `create-onboarding-plan`, preview `approve-onboarding-plan`, and obtain one explicit approval for the baseline, roles, routes, actions, data policy, write/time budgets, and cleanup policy. Approval fails closed if the Requirement assets changed after preview; recreate the plan instead of approving stale scope. Run `start-onboarding-plan`; complete any returned test-data tasks before the host Agent executes the requirement-question work package. Submit exact action evidence plus `taskEvidence` for every returned question and requested evidence label through `submit-exploration-result`. Brain Creator validates every action and question against the linked ExplorationPlan, refreshes System Brain, resumes compilation, and synchronizes OnboardingPlan status. Review with `bc_review target=onboarding-plan`.
+
+For later evidence that requires real writes or role transitions, do not misuse `interactionMode=safe`. Use the existing ExplorationPlan flow for the pending tasks. Review it with `bc_review target=exploration-plan`; cancel an unstarted plan when approval is declined.
 
 ### 7. Plan Test Data
 

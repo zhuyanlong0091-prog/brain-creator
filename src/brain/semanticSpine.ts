@@ -222,7 +222,7 @@ export class SemanticSpineService {
     return relations;
   }
 
-  confirmRequirementActions(requirementSetId: string) {
+  confirmRequirementActions(requirementSetId: string, options: { persist?: boolean } = {}) {
     const now = new Date().toISOString();
     const concepts = this.store.semanticConcepts.filter(
       (concept) => concept.kind === "action" && concept.requirementSetId === requirementSetId
@@ -235,7 +235,7 @@ export class SemanticSpineService {
         alias.updatedAt = now;
       }
     }
-    if (concepts.length > 0) this.store.persist();
+    if (concepts.length > 0 && options.persist !== false) this.store.persist();
     return concepts;
   }
 
