@@ -1679,6 +1679,56 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       nextAction: "Recompile cases affected by the confirmed System Brain snapshot."
     };
   }
+  if (action === "reconcile-system-brain") {
+    const result = context.knowledgeService.reconcileSystemBrain(
+      stringArg(input, "knowledgeProjectId"),
+      stringArg(input, "systemId"),
+      stringArg(input, "requirementSetId"),
+      optionalStringArg(input, "systemBrainSnapshotId")
+    );
+    return responseModeArg(input) === "summary"
+      ? {
+          status: "reconciled",
+          systemId: result.systemId,
+          requirementSetId: result.requirementSetId,
+          expectedCount: result.expectedCount,
+          observedCount: result.observedCount,
+          summary: result.summary,
+          unresolved: result.unresolved,
+          nextAction: result.unresolved.length > 0
+            ? "Review unresolved System Brain bindings."
+            : "Review and confirm the semantic bindings."
+        }
+      : result;
+  }
+  if (action === "confirm-semantic-binding") {
+    const bindingId = stringArg(input, "semanticBindingId");
+    const binding = context.repository.semanticBindings.find((item) => item.id === bindingId);
+    if (!binding) throw new Error("Semantic binding not found");
+    if (!optionalBooleanArg(input, "confirm")) {
+      return {
+        status: "preview",
+        binding,
+        requiresConfirmation: true,
+        nextAction: "Confirm the semantic binding only when expected and observed behavior agree."
+      };
+    }
+    return {
+      status: "confirmed",
+      binding: context.knowledgeService.confirmSemanticBinding(
+        bindingId,
+        optionalStringArg(input, "confirmedBy") ?? "agent-user"
+      ),
+      nextAction: "Reconcile affected cases before compiling or executing them."
+    };
+  }
+  if (action === "recompile-stale-cases") {
+    return context.knowledgeService.recompileStaleSystemBrainCases({
+      projectId: stringArg(input, "knowledgeProjectId"),
+      systemId: stringArg(input, "systemId"),
+      changeSetId: optionalStringArg(input, "systemBrainChangeSetId")
+    });
+  }
   const selectedIntentIds = stringArrayArg(input, "testIntentIds");
   const selectedModules = stringArrayArg(input, "modules");
   const requirementSetId = optionalStringArg(input, "requirementSetId");
@@ -5241,6 +5291,32 @@ function knowledgeReview(
         !idValue && offset + runs.length < matchingRuns.length
           ? offset + runs.length
           : undefined
+    };
+  }
+  if (target === "semantic-binding") {
+    const requestedSystemId = optionalStringArg(input, "systemId");
+    const requestedRequirementSetId = optionalStringArg(input, "requirementSetId");
+    const items = context.repository.semanticBindings.filter(
+      (item) =>
+        (!idValue || item.id === idValue) &&
+        (!requestedSystemId || item.systemId === requestedSystemId) &&
+        (!requestedRequirementSetId || item.requirementSetId === requestedRequirementSetId) &&
+        context.repository.requirementSets.some(
+          (requirementSet) =>
+            requirementSet.id === item.requirementSetId &&
+            requirementSet.knowledgeProjectId === projectId
+        )
+    );
+    return {
+      project,
+      summary: {
+        total: items.length,
+        confirmed: items.filter((item) => item.status === "confirmed").length,
+        candidates: items.filter((item) => item.status === "candidate").length,
+        stale: items.filter((item) => item.status === "stale").length,
+        conflicted: items.filter((item) => item.status === "conflicted").length
+      },
+      ...paginateReviewItems(items, input)
     };
   }
   if (target === "requirement") {
@@ -10013,6 +10089,7 @@ type KnowledgeReviewTarget =
   | "execution-diagnosis"
   | "evidence"
   | "compile-run"
+  | "semantic-binding"
   | "testdata";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
@@ -10040,6 +10117,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "execution-diagnosis",
       "evidence",
       "compile-run",
+      "semantic-binding",
       "testdata"
     ].includes(value)
   ) {
@@ -10124,6 +10202,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "execution-diagnosis",
     "evidence",
     "compile-run",
+    "semantic-binding",
     "testdata"
   ].includes(value);
 }
@@ -10659,7 +10738,10 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "record-training-evidence",
       "explore-system",
       "refresh-system-brain",
-      "confirm-system-snapshot"
+      "confirm-system-snapshot",
+      "reconcile-system-brain",
+      "confirm-semantic-binding",
+      "recompile-stale-cases"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
@@ -10700,7 +10782,10 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "record-training-evidence"
     | "explore-system"
     | "refresh-system-brain"
-    | "confirm-system-snapshot";
+    | "confirm-system-snapshot"
+    | "reconcile-system-brain"
+    | "confirm-semantic-binding"
+    | "recompile-stale-cases";
 }
 
 function diagnosisAssetTypeArg(

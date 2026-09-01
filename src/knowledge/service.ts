@@ -77,15 +77,24 @@ import {
   extractSemanticActionTerms,
   type SemanticSpineService
 } from "../brain/semanticSpine.js";
+import {
+  propagateSystemBrainChangeSet,
+  SystemBrainReconciliationService,
+  type ExpectedSemanticFact
+} from "../brain/systemReconciliation.js";
 
 export class KnowledgeService {
+  private readonly systemReconciliation: SystemBrainReconciliationService;
+
   constructor(
     private readonly repository: InMemoryBrainCreatorRepository,
     private readonly knowledgeDir: string,
     private readonly sourceBaseDir = process.cwd(),
     private readonly systemBrainSnapshots?: SystemBrainSnapshotService,
     private readonly semanticSpine?: SemanticSpineService
-  ) {}
+  ) {
+    this.systemReconciliation = new SystemBrainReconciliationService(repository);
+  }
 
   async createProject(input: { name: string; key: string; defaultLocale: string }) {
     const key = normalizeKey(input.key);
@@ -1913,10 +1922,126 @@ export class KnowledgeService {
     if (snapshotResult?.changeSet) {
       this.markSystemBrainImpacts(systemId, snapshotResult.changeSet.id, snapshotResult.changeSet.changes);
     }
+    if (snapshotResult?.snapshot) {
+      for (const requirementSet of this.repository.requirementSets.filter(
+        (item) => item.knowledgeProjectId === projectId && item.status !== "superseded"
+      )) {
+        this.reconcileSystemBrain(projectId, systemId, requirementSet.id, snapshotResult.snapshot.id);
+      }
+    }
     await this.writeProjectIndex(project);
     await this.writeSystemKnowledge(project, systemId);
     await this.writeSystemBrain(project, brain);
     return brain;
+  }
+
+  reconcileSystemBrain(
+    projectId: string,
+    systemId: string,
+    requirementSetId: string,
+    snapshotId?: string
+  ) {
+    const project = this.getProject(projectId);
+    if (!project.systemIds.includes(systemId)) {
+      throw new Error("Business system must be bound before reconciling System Brain");
+    }
+    const requirementSet = this.getRequirementSet(requirementSetId);
+    if (requirementSet.knowledgeProjectId !== projectId) {
+      throw new Error("RequirementSet does not belong to the selected knowledge project");
+    }
+    const snapshot = snapshotId
+      ? this.repository.systemBrainSnapshots.find(
+          (item) => item.id === snapshotId && item.systemId === systemId
+        )
+      : this.systemBrainSnapshots?.latest(systemId) ?? this.systemBrainSnapshots?.latest(systemId, "candidate");
+    if (!snapshot) throw new Error("System Brain snapshot is required before reconciliation");
+    return this.systemReconciliation.reconcileSnapshot({
+      knowledgeProjectId: projectId,
+      requirementSetId,
+      systemId,
+      expected: this.expectedSemanticFacts(requirementSetId),
+      snapshot
+    });
+  }
+
+  confirmSemanticBinding(bindingId: string, confirmedBy = "agent-user") {
+    return this.systemReconciliation.confirm(bindingId, confirmedBy);
+  }
+
+  recompileStaleSystemBrainCases(input: {
+    projectId: string;
+    systemId: string;
+    changeSetId?: string;
+  }) {
+    const project = this.getProject(input.projectId);
+    if (!project.systemIds.includes(input.systemId)) {
+      throw new Error("Business system must be bound before recompiling System Brain cases");
+    }
+    const changeSet = input.changeSetId
+      ? this.repository.systemBrainChangeSets.find(
+          (item) => item.id === input.changeSetId && item.systemId === input.systemId
+        )
+      : undefined;
+    if (input.changeSetId && !changeSet) throw new Error("System Brain change set not found");
+    if (changeSet) {
+      const targetSnapshot = this.repository.systemBrainSnapshots.find(
+        (item) => item.id === changeSet.toSnapshotId && item.systemId === input.systemId
+      );
+      if (targetSnapshot?.status !== "confirmed") {
+        throw new Error("Confirm the System Brain snapshot before recompiling stale cases");
+      }
+    }
+    const intentIds = changeSet?.affectedTestIntentIds?.length
+      ? changeSet.affectedTestIntentIds
+      : [...new Set(
+          this.repository.executableCases
+            .filter((item) =>
+              item.systemId === input.systemId &&
+              item.status === "stale" &&
+              (!input.changeSetId || item.staleByChangeSetId === input.changeSetId)
+            )
+            .map((item) => item.testIntentId)
+        )];
+    if (intentIds.length === 0) {
+      return {
+        changeSetId: input.changeSetId,
+        affectedTestIntentIds: [],
+        affectedExecutableCaseIds: [],
+        compileRun: undefined,
+        nextAction: "No stale System Brain cases require recompilation."
+      };
+    }
+    const result = this.compileExecutableCasesBatch({
+      testIntentIds: intentIds,
+      systemId: input.systemId
+    });
+    return {
+      ...result,
+      changeSetId: input.changeSetId,
+      affectedTestIntentIds: intentIds,
+      affectedExecutableCaseIds: result.compileRun.items
+        .map((item) => item.executableCaseId)
+        .filter((value): value is string => Boolean(value)),
+      nextAction: result.compileRun.status === "completed"
+        ? "Review the incrementally recompiled cases before execution."
+        : "Review blockers in the incremental compile run."
+    };
+  }
+
+  private expectedSemanticFacts(requirementSetId: string): ExpectedSemanticFact[] {
+    return this.repository.semanticConcepts
+      .filter((concept) =>
+        concept.requirementSetId === requirementSetId &&
+        concept.systemId === undefined &&
+        concept.status !== "deprecated"
+      )
+      .map((concept) => ({
+        id: concept.id,
+        requirementSetId,
+        kind: concept.kind,
+        label: concept.canonicalName,
+        sourceRefs: concept.sourceRefs
+      }));
   }
 
   private markSystemBrainImpacts(
@@ -1929,46 +2054,18 @@ export class KnowledgeService {
       reasons: string[];
     }>
   ) {
-    const actionable = changes.filter((change) => change.impact !== "none");
-    if (actionable.length === 0) return;
-    const changedRefs = new Set(actionable.flatMap((change) => change.sourceRefs));
-    const now = timestamp();
-    const affectedCases = this.repository.executableCases.filter((executableCase) => {
-      if (executableCase.systemId !== systemId || executableCase.status === "superseded") return false;
-      const caseRefs = [
-        ...executableCase.steps.flatMap((step) => step.sourceRefs),
-        ...(executableCase.pathPlan?.navigationSourceRefs ?? []),
-        ...(executableCase.pathPlan?.candidatePaths.flatMap((path) => path.sourceRefs) ?? []),
-        ...(executableCase.statePlan?.transitionSourceRefs ?? []),
-        ...(executableCase.statePlan?.candidates.flatMap((candidate) => candidate.sourceRefs) ?? [])
-      ];
-      const directMatch = caseRefs.some((ref) => changedRefs.has(ref));
-      const behaviorChange = actionable.some((change) =>
-        change.kind === "transition" || change.kind === "workflow" || change.kind === "api-flow"
-      );
-      const unscopedBehaviorChange = behaviorChange && actionable.some(
-        (change) =>
-          (change.kind === "transition" || change.kind === "workflow" || change.kind === "api-flow") &&
-          change.sourceRefs.length === 0
-      );
-      return directMatch || unscopedBehaviorChange;
+    const changeSet = this.repository.systemBrainChangeSets.find((item) => item.id === changeSetId);
+    if (!changeSet) return;
+    const projectBindings = this.repository.semanticBindings.filter(
+      (binding) => binding.systemId === systemId
+    );
+    propagateSystemBrainChangeSet({
+      changeSet,
+      executableCases: this.repository.executableCases,
+      testIntents: this.repository.testIntents,
+      semanticBindings: projectBindings,
+      persist: () => this.repository.persist()
     });
-    for (const executableCase of affectedCases) {
-      executableCase.status = "stale";
-      executableCase.staleAt = now;
-      executableCase.staleByChangeSetId = changeSetId;
-      executableCase.staleReason = actionable
-        .map((change) => change.reasons[0])
-        .filter(Boolean)
-        .join("; ") || "System Brain evidence changed";
-      executableCase.updatedAt = now;
-      const intent = this.repository.testIntents.find((candidate) => candidate.id === executableCase.testIntentId);
-      if (intent && intent.status !== "stale") {
-        intent.status = "stale";
-        intent.updatedAt = now;
-      }
-    }
-    if (affectedCases.length > 0) this.repository.persist();
   }
 
   private indexSystemBrainSemantics(brain: SystemBrain, knowledgeProjectId: string, systemId: string) {

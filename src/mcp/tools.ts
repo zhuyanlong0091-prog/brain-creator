@@ -135,7 +135,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, confirming Requirement Eval, atomically approving a baseline with bounded first-system onboarding, reviewing or rolling back historical execution diagnoses, exploring System Brain, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, and confirming immutable execution preflight snapshots.",
+      "Requirement-first facade for ingesting sources, confirming Requirement Eval, atomically approving a baseline with bounded first-system onboarding, reviewing or rolling back historical execution diagnoses, exploring and reconciling System Brain evidence, incrementally recompiling stale cases, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, and confirming immutable execution preflight snapshots.",
     inputSchema: z.object({
       action: z.enum([
         "ingest-requirement",
@@ -173,10 +173,15 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "record-training-evidence",
         "explore-system",
         "refresh-system-brain",
-        "confirm-system-snapshot"
+        "confirm-system-snapshot",
+        "reconcile-system-brain",
+        "confirm-semantic-binding",
+        "recompile-stale-cases"
       ]),
       knowledgeProjectId: z.string().optional(),
       systemBrainSnapshotId: z.string().optional(),
+      systemBrainChangeSetId: z.string().optional(),
+      semanticBindingId: z.string().optional(),
       requirementSetId: z.string().optional(),
       requirementSourceId: z.string().optional(),
       attachmentId: z.string().optional(),
@@ -576,7 +581,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_review",
     title: "Brain Creator review",
     description:
-      "Facade review entry for onboarding plans, document and requirement suite runs, run-ledger timelines, execution diagnoses, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain, and system exploration runs.",
+      "Facade review entry for onboarding plans, document and requirement suite runs, run-ledger timelines, execution diagnoses, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain snapshots and semantic bindings, and system exploration runs.",
     inputSchema: z.object({
       target: z.enum([
         "suite-run",
@@ -600,7 +605,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "execution-diagnosis",
         "evidence",
         "compile-run",
-        "testdata"
+        "testdata",
+        "semantic-binding"
       ]),
       knowledgeProjectId: z.string().optional(),
       requirementSetId: z.string().optional(),

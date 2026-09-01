@@ -112,7 +112,8 @@ export type SemanticConceptKind =
   | "term"
   | "data-entity"
   | "data-field"
-  | "assertion";
+  | "assertion"
+  | "integration";
 
 export type SemanticAssetStatus = "draft" | "confirmed" | "conflicted" | "deprecated";
 
@@ -394,5 +395,7 @@ export type SystemBrainChangeSet = {
     behaviorChanged: number;
     evidenceRefreshed: number;
   };
+  affectedTestIntentIds?: string[];
+  affectedExecutableCaseIds?: string[];
   createdAt: string;
 };

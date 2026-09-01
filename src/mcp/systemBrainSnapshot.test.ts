@@ -313,9 +313,27 @@ describe("System Brain snapshot MCP review", () => {
     expect(context.repository.testIntents[0].status).toBe("stale");
     expect(context.repository.executableCases.find((item) => item.id === "case-unaffected")?.status).toBe("ready");
     expect(context.repository.testIntents.find((item) => item.id === "intent-unaffected")?.status).toBe("compiled");
+    const changeSet = context.repository.systemBrainChangeSets.at(-1);
+    expect(changeSet).toEqual(expect.objectContaining({
+      affectedTestIntentIds: ["intent-stale"],
+      affectedExecutableCaseIds: ["case-stale"]
+    }));
+    const latestAfterChange = context.systemBrainSnapshots.history(system.id)[0];
+    expect(() => context.knowledgeService.recompileStaleSystemBrainCases({
+      projectId: project.id,
+      systemId: system.id,
+      changeSetId: changeSet?.id
+    })).toThrow("Confirm the System Brain snapshot");
+    context.systemBrainSnapshots.confirm(latestAfterChange.id, "tester");
+    const incremental = context.knowledgeService.recompileStaleSystemBrainCases({
+      projectId: project.id,
+      systemId: system.id,
+      changeSetId: changeSet?.id
+    });
+    expect(incremental.compileRun?.items.map((item) => item.testIntentId)).toEqual(["intent-stale"]);
     const compiled = context.knowledgeService.compileExecutableCases("intent-stale", system.id);
-    expect(compiled.reused).toBe(false);
+    expect(compiled.reused).toBe(true);
     expect(compiled.executableCase.id).not.toBe("case-stale");
-    expect(compiled.executableCase.systemBrainSnapshotId).toBe(first.id);
+    expect(compiled.executableCase.systemBrainSnapshotId).toBe(latestAfterChange.id);
   });
 });

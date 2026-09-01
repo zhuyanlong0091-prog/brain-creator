@@ -44,6 +44,8 @@ Agent 创建/选择系统与绑定关系，配置鉴权，再调用 `explore-sys
 
 `interactionMode` 默认 `off`。只有用户需要 Tab、折叠或原生下拉状态证据时才使用 `safe`，且不提交表单。复杂菜单、数据录入和业务流由宿主 Agent 补充页面或训练证据。
 
+刷新 System Brain 后，使用 `bc_prepare action=reconcile-system-brain` 将已批准的 RequirementSet 与候选系统快照对账，再通过 `bc_review target=semantic-binding` 查看 `exact`、`alias`、`step-expansion` 和 `conditional` 绑定。它们都是带证据的候选，不会静默确认；冲突和未观察到的内容必须继续保留。行为 ChangeSet 将 TestIntent 或 ExecutableCase 标记为 stale 后，先确认新快照，再使用 `bc_prepare action=recompile-stale-cases` 只重编译受影响的意图。
+
 ### 6. 编译用例
 
 `compile-cases` 必须带 `systemId`。Brain Creator 按需求路径、System Brain、测试数据、步骤来源和最终用例五阶段编译，只在唯一最短导航路径和唯一状态转换证据存在时补全隐含动作，并保存 `pathPlan` 与 `statePlan`。

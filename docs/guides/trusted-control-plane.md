@@ -52,6 +52,8 @@ You can use `testIntentIds` for an explicit subset. The existing single `testInt
 
 Each batch creates a `CompileRun` with `ready`, `needsExploration`, `needsData`, `blocked`, `ambiguous`, `skipped`, and `reused` counts. Compilation is keyed by TestIntent, system, requirement hash, and current System Brain evidence. Repeating an unchanged request reuses the case. Changed evidence creates a new case and marks the old case `superseded`.
 
+After refreshing System Brain, use `bc_prepare action=reconcile-system-brain` to compare approved Requirement semantics with the selected system's observed evidence. Review the resulting bindings with `bc_review target=semantic-binding`; alias, multi-step expansion, and conditional matches remain auditable candidates, while conflicts and missing observations stay unresolved. When a behavioral ChangeSet marks intents or cases stale, confirm the new snapshot and call `bc_prepare action=recompile-stale-cases` to recompile only the affected intents.
+
 Review bounded details with:
 
 ```json

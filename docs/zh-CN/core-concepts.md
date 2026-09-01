@@ -76,7 +76,7 @@ System Brain 回答：**选定的真实系统当前如何工作？**
 
 只有定位器选择器变化且语义目标和角色保持不变时，才记为 `locator-changed` 并可自动接受。流程、状态转换或接口行为变化会记为 `behavior-changed`，需要复核并重新评估受影响用例。单次未观察到资产不能直接判定系统删除。
 
-确认快照发生行为变化后，引用该 System Brain 的 TestIntent 和 ExecutableCase 会标记为 `stale`，并记录 ChangeSet、原因和时间。测试数据补齐不会把 stale 用例伪装成 ready；需要先确认新快照，再增量重编译受影响意图。`bc_review target=system-brain view=diff` 可查看差异，`bc_status` 可查看 stale 数量和运行恢复信息。
+确认快照发生行为变化后，引用该 System Brain 的 TestIntent 和 ExecutableCase 会标记为 `stale`，并记录 ChangeSet、原因和时间。`bc_prepare action=reconcile-system-brain` 会把已批准需求语义与观察到的页面、流程、状态转换和接口进行对账；`bc_review target=semantic-binding` 会展示 exact、alias、step-expansion、conditional、missing 和 conflict 结果。测试数据补齐不会把 stale 用例伪装成 ready；需要先确认新快照，再使用 `bc_prepare action=recompile-stale-cases` 增量重编译受影响意图。`bc_review target=system-brain view=diff` 可查看差异，`bc_status` 可查看 stale 数量和运行恢复信息。
 
 ## Case Compiler
 
