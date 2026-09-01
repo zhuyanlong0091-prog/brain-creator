@@ -202,6 +202,7 @@ export type BusinessScenario = {
   testDataNeeds: string[];
   expectedBusinessOutcomes: string[];
   sourceRefs: string[];
+  testIntentIds?: string[];
   risk: "low" | "medium" | "high" | "critical";
   status: "draft" | "approved" | "stale" | "blocked";
 };
@@ -216,6 +217,9 @@ export type ScenarioTrustStatus =
 
 export type ScenarioAssuranceContract = {
   scenarioId: string;
+  systemId?: string;
+  systemBrainSnapshotId?: string;
+  dataPlanHash?: string;
   requirementRefs: string[];
   workflowRefs: string[];
   stateTransitionRefs: string[];
@@ -228,6 +232,8 @@ export type ScenarioAssuranceContract = {
   independence: "deterministic" | "isolated-single-provider" | "cross-provider" | "human-confirmed";
   verdict: "pass" | "needs-review" | "blocked";
   evidenceRefs: string[];
+  reasons?: string[];
+  requiredActions?: string[];
 };
 
 export type ScenarioTrustRecord = {

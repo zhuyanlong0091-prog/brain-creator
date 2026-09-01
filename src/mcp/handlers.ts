@@ -125,6 +125,10 @@ import {
   normalizeReporterExitCode,
   parsePlaywrightJsonReport
 } from "../execution/playwrightReporter.js";
+import {
+  EvaluationProviderRegistry,
+  type MutationOutcome
+} from "../brain/scenarioAssurance.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
 import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import { id } from "../shared/id.js";
@@ -186,6 +190,7 @@ export type BrainCreatorMcpContext = {
   harness: HarnessRuntime;
   semanticSpine: SemanticSpineService;
   systemBrainSnapshots: SystemBrainSnapshotService;
+  providerRegistry: EvaluationProviderRegistry;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
@@ -274,6 +279,9 @@ export function createBrainCreatorMcpContext(
   const harness = new HarnessRuntime(repository);
   const semanticSpine = new SemanticSpineService(repository);
   const systemBrainSnapshots = new SystemBrainSnapshotService(repository);
+  const providerRegistry = new EvaluationProviderRegistry({
+    environment: initialRuntimeEnvironment
+  });
   const service = new BrainCreatorService(repository);
   const configuredAuthProviders = new Set(
     (input.authRefreshAdapters ?? []).map((adapter) => adapter.provider)
@@ -349,6 +357,7 @@ export function createBrainCreatorMcpContext(
     harness,
     semanticSpine,
     systemBrainSnapshots,
+    providerRegistry,
     workDir,
     agentBridge:
       input.agentBridge ??
@@ -395,6 +404,9 @@ export function createBrainCreatorMcpContext(
       if (runtimeManaged) {
         context.agentBridge = candidateBridge;
         context.feishuReader = configuredFeishuReader(candidateEnvironment);
+        context.providerRegistry = new EvaluationProviderRegistry({
+          environment: candidateEnvironment
+        });
       }
       if (authRegistryManaged) context.authRefreshRegistry = candidateAuthRefreshRegistry;
       context.runtimeConfiguration = configuration;
@@ -1228,6 +1240,61 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       confirmedBy: optionalStringArg(input, "confirmedBy")
     });
   }
+  if (action === "assess-scenarios") {
+    const result = context.knowledgeService.assessBusinessScenarios({
+      knowledgeProjectId: stringArg(input, "knowledgeProjectId"),
+      requirementSetId: stringArg(input, "requirementSetId"),
+      systemId: optionalStringArg(input, "systemId"),
+      scenarioIds: stringArrayArg(input, "scenarioIds"),
+      providerIndependence: optionalStringArg(input, "providerIndependence") as
+        | "deterministic"
+        | "isolated-single-provider"
+        | "cross-provider"
+        | "human-confirmed"
+        | undefined
+    });
+    return {
+      status: result.summary.blocked > 0 ? "blocked" : result.summary.needsReview > 0 ? "needs-review" : "passed",
+      ...result
+    };
+  }
+  if (action === "record-scenario-run") {
+    const scenarioId = stringArg(input, "scenarioId");
+    const scenario = context.repository.businessScenarios.find((item) => item.id === scenarioId);
+    if (!scenario) throw new Error("Business scenario not found");
+    const requirementSet = context.repository.requirementSets.find(
+      (item) => item.id === scenario.requirementSetId
+    );
+    if (!requirementSet) throw new Error("Requirement set not found for business scenario");
+    return {
+      status: "recorded",
+      trust: context.knowledgeService.recordScenarioStrongRun({
+        scenarioId,
+        systemId: optionalStringArg(input, "systemId"),
+        passed: input.runPassed === true,
+        strongEvidence: input.strongEvidence === true,
+        requirementHash: optionalStringArg(input, "requirementHash") ?? requirementSet.contentHash,
+        systemSnapshotHash: optionalStringArg(input, "systemSnapshotHash"),
+        dataPlanHash: optionalStringArg(input, "dataPlanHash"),
+        evidenceRefs: stringArrayArg(input, "evidenceRefs"),
+        reason: optionalStringArg(input, "reason")
+      }),
+      nextAction: "Review scenario trust status before enabling unattended execution."
+    };
+  }
+  if (action === "evaluate-mutations") {
+    const result = context.knowledgeService.evaluateScenarioMutations({
+      mutations: mutationResultsArg(input),
+      threshold: optionalNumberArg(input, "mutationThreshold")
+    });
+    return {
+      status: result.verdict,
+      ...result,
+      nextAction: result.verdict === "pass"
+        ? "Record the mutation evidence with the scenario assurance review."
+        : "Review survived or blocked mutations before promoting the scenario."
+    };
+  }
   if (action === "approve-baseline") {
     if (!optionalBooleanArg(input, "confirm")) {
       return {
@@ -1984,6 +2051,13 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
       bridgeProvider: context.agentBridge?.provider ?? context.runtimeConfiguration?.bridgeProvider ?? "disabled",
       connectorStatus: context.feishuReader ? "feishu-configured" : "host-agent-fallback",
       reloadOperation: "bc_configure target=runtime operation=reload-config"
+    },
+    providerEvaluation: {
+      primary: context.providerRegistry.primary(),
+      evaluator: context.providerRegistry.evaluator(),
+      available: context.providerRegistry.list().filter(
+        (item) => item.role === "evaluator" && item.available
+      )
     },
     brainRuntime: brainRuntimeStatus(context, systemId),
     requirementSuiteRuns: {
@@ -3187,6 +3261,9 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
         ...(Array.isArray(input.bridgeArgs) ? { bridgeArgs: stringArrayArg(input, "bridgeArgs") } : {}),
         ...(optionalNumberArg(input, "bridgeTimeoutMs") !== undefined
           ? { bridgeTimeoutMs: optionalNumberArg(input, "bridgeTimeoutMs") }
+          : {}),
+        ...(optionalStringArg(input, "evaluationProvider")
+          ? { evaluationProvider: optionalStringArg(input, "evaluationProvider") as "claude" | "codex" }
           : {}),
         ...(input.providerConfigs !== undefined ? { providerConfigs: recordArg(input, "providerConfigs") } : {}),
         ...(input.connectorConfigs !== undefined ? { connectorConfigs: recordArg(input, "connectorConfigs") } : {})
@@ -5221,6 +5298,27 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
           cleanupDue
         }
       },
+      scenarios: {
+        total: context.repository.businessScenarios.filter(
+          (scenario) => scenario.knowledgeProjectId === projectId
+        ).length,
+        assurance: countBy(
+          context.repository.scenarioAssuranceContracts.filter((contract) =>
+            context.repository.businessScenarios.some(
+              (scenario) => scenario.id === contract.scenarioId && scenario.knowledgeProjectId === projectId
+            )
+          ),
+          (contract) => contract.verdict
+        ),
+        trust: countBy(
+          context.repository.scenarioTrustRecords.filter((record) =>
+            context.repository.businessScenarios.some(
+              (scenario) => scenario.id === record.scenarioId && scenario.knowledgeProjectId === projectId
+            )
+          ),
+          (record) => record.status
+        )
+      },
       requirementEvalHistory: context.knowledgeService.requirementEvalAccuracy(projectId),
       explorations: {
         total: explorations.length,
@@ -5315,6 +5413,58 @@ function knowledgeReview(
         candidates: items.filter((item) => item.status === "candidate").length,
         stale: items.filter((item) => item.status === "stale").length,
         conflicted: items.filter((item) => item.status === "conflicted").length
+      },
+      ...paginateReviewItems(items, input)
+    };
+  }
+  if (target === "business-scenario") {
+    const items = context.knowledgeService
+      .listBusinessScenarios({
+        knowledgeProjectId: projectId,
+        requirementSetId: optionalStringArg(input, "requirementSetId"),
+        systemId: optionalStringArg(input, "systemId")
+      })
+      .filter((item) => !idValue || item.id === idValue);
+    return {
+      project,
+      summary: {
+        total: items.length,
+        byFamily: countBy(items, (item) => item.family),
+        byStatus: countBy(items, (item) => item.status)
+      },
+      ...paginateReviewItems(items, input)
+    };
+  }
+  if (target === "scenario-assurance") {
+    const items = context.knowledgeService.listScenarioAssurance({
+      knowledgeProjectId: projectId,
+      requirementSetId: optionalStringArg(input, "requirementSetId"),
+      systemId: optionalStringArg(input, "systemId"),
+      scenarioId: idValue
+    });
+    return {
+      project,
+      summary: {
+        total: items.length,
+        byVerdict: countBy(items, (item) => item.verdict),
+        byBinding: countBy(items, (item) => item.systemBinding),
+        byOracle: countBy(items, (item) => item.oracleStrength)
+      },
+      ...paginateReviewItems(items, input)
+    };
+  }
+  if (target === "scenario-trust") {
+    const items = context.knowledgeService.listScenarioTrust({
+      knowledgeProjectId: projectId,
+      requirementSetId: optionalStringArg(input, "requirementSetId"),
+      scenarioId: idValue
+    });
+    return {
+      project,
+      summary: {
+        total: items.length,
+        byStatus: countBy(items, (item) => item.status),
+        trusted: items.filter((item) => item.status === "trusted").length
       },
       ...paginateReviewItems(items, input)
     };
@@ -9518,6 +9668,35 @@ function optionalBooleanArg(input: Record<string, unknown>, key: string): boolea
   return input[key] === true;
 }
 
+function mutationResultsArg(input: Record<string, unknown>): MutationOutcome[] {
+  const value = input.mutationResults;
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error("mutationResults must be an array");
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`mutationResults[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    const status = record.status;
+    if (typeof record.id !== "string" || typeof record.scenarioId !== "string") {
+      throw new Error(`mutationResults[${index}] requires id and scenarioId`);
+    }
+    if (status !== "caught" && status !== "survived" && status !== "blocked") {
+      throw new Error(`mutationResults[${index}].status is invalid`);
+    }
+    const evidenceRefs = record.evidenceRefs;
+    return {
+      id: record.id,
+      scenarioId: record.scenarioId,
+      status: status as MutationOutcome["status"],
+      evidenceRefs: Array.isArray(evidenceRefs)
+        ? evidenceRefs.filter((item): item is string => typeof item === "string")
+        : [],
+      reason: typeof record.reason === "string" ? record.reason : undefined
+    };
+  });
+}
+
 async function materializeAuthStorageState(
   context: BrainCreatorMcpContext,
   system: SystemProfile,
@@ -10090,7 +10269,10 @@ type KnowledgeReviewTarget =
   | "evidence"
   | "compile-run"
   | "semantic-binding"
-  | "testdata";
+  | "testdata"
+  | "business-scenario"
+  | "scenario-assurance"
+  | "scenario-trust";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
@@ -10118,7 +10300,10 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "evidence",
       "compile-run",
       "semantic-binding",
-      "testdata"
+      "testdata",
+      "business-scenario",
+      "scenario-assurance",
+      "scenario-trust"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
@@ -10203,7 +10388,10 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "evidence",
     "compile-run",
     "semantic-binding",
-    "testdata"
+    "testdata",
+    "business-scenario",
+    "scenario-assurance",
+    "scenario-trust"
   ].includes(value);
 }
 
@@ -10710,6 +10898,9 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "confirm-attachment-analysis",
       "generate-analysis",
       "generate-test-design",
+      "assess-scenarios",
+      "record-scenario-run",
+      "evaluate-mutations",
       "confirm-eval-actions",
       "review-legacy-diagnosis",
       "rollback-legacy-diagnosis",
@@ -10754,6 +10945,9 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "confirm-attachment-analysis"
     | "generate-analysis"
     | "generate-test-design"
+    | "assess-scenarios"
+    | "record-scenario-run"
+    | "evaluate-mutations"
     | "confirm-eval-actions"
     | "review-legacy-diagnosis"
     | "rollback-legacy-diagnosis"

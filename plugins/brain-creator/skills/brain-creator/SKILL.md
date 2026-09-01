@@ -21,21 +21,21 @@ The recommended entrypoint is a requirement document or link. Existing Excel/Mar
 
 ## L3 Trust Foundation
 
-Repository schema 20 persists the vocabulary for later L3 behavior: BusinessObjectModel, DecisionTableModel, SemanticBinding, BusinessScenario, ScenarioAssuranceContract, ScenarioTrustRecord, and OnboardingPlan. Persistence is not approval. Do not infer, announce, or write `verified` or `trusted` from a legacy ExecutableCase, a single Playwright pass, an LLM confidence value, or a semantic alias.
+Repository schema 20 persists the L3 vocabulary: BusinessObjectModel, DecisionTableModel, SemanticBinding, BusinessScenario, ScenarioAssuranceContract, ScenarioTrustRecord, and OnboardingPlan. PR E adds scenario portfolio generation, Assurance evaluation, trust tracking, mutation outcome evaluation, and optional evaluator-provider readiness. Persistence is not approval. Do not infer, announce, or write `verified` or `trusted` from a legacy ExecutableCase, a single Playwright pass, an LLM confidence value, or a semantic alias.
 
-The built-in Alias Policy is domain-neutral and auditable. A term match such as `新增`/`新建`/`create` is only a candidate semantic relationship. Conditional behavior and multi-step expansion still require Requirement sources, System evidence, and the corresponding assurance gates. Use the OnboardingPlan Facade for the default first-system workflow; scenario-trust calls remain unavailable until their later phase is implemented.
+The built-in Alias Policy is domain-neutral and auditable. A term match such as `新增`/`新建`/`create` is only a candidate semantic relationship. Conditional behavior and multi-step expansion still require Requirement sources, System evidence, and the corresponding assurance gates. Use `bc_review target=business-scenario` to inspect generated scenario families, `bc_prepare action=assess-scenarios` to evaluate system/data/oracle readiness, and `bc_prepare action=record-scenario-run` only after a strong observed run. `verified` requires one unchanged strong run; `trusted` requires three. Mutation evaluation accepts recorded outcomes through `bc_prepare action=evaluate-mutations`; blocked outcomes are not counted as caught defects. Use the OnboardingPlan Facade for the default first-system workflow.
 
-In a source checkout, `npm run verify:autonomy-baseline` reports measured deterministic capabilities and explicitly lists unmeasured scenario and mutation capabilities. Never summarize a `not-measured` metric as a pass.
+In a source checkout, `npm run verify:autonomy-baseline` reports measured deterministic scenario-portfolio and synthetic mutation foundations, while historical Bug replay and real-system mutation effectiveness remain unmeasured. Never summarize a `not-measured` metric as a pass.
 
 ## Facade-First Tool Policy
 
 New installations use `BRAIN_CREATOR_TOOL_PROFILE=facade`. Prefer these high-level tools:
 
-- `bc_prepare`: ingest requirements, generate analysis and test design, approve baselines, run bounded system exploration, submit evidence, batch compile cases, confirm page bindings, and control Gap lifecycles.
+- `bc_prepare`: ingest requirements, generate analysis and test design, assess BusinessScenario assurance, record strong scenario runs, evaluate mutation outcomes, approve baselines, run bounded system exploration, submit evidence, batch compile cases, confirm page bindings, and control Gap lifecycles.
 - `bc_status`: inspect knowledge projects or runtime systems and choose the next action.
 - `bc_configure`: create knowledge projects, systems, auth, rules, terms, bindings, checkpoints, verify or archive auth, inspect connectors, update/reload runtime Bridge configuration, and reload the store safely.
 - `bc_run`: preview or execute requirement suites, approved cases, document suites, and bug regression.
-- `bc_review`: review requirements, knowledge, coverage, Requirement Eval history, System Brain, CompileRuns, executable cases, evidence, suites, bugs, and Gaps.
+- `bc_review`: review requirements, knowledge, coverage, Requirement Eval history, System Brain, BusinessScenario, Scenario Assurance, Scenario Trust, CompileRuns, executable cases, evidence, suites, bugs, and Gaps.
 - `bc_intent_preview`: preview ambiguous operational wording without executing it.
 - `bc_submit_agent_output`: return Planner, Generator, or Healer output in host-agent mode.
 - `bc_command`: optional `/bc help`, status, suite, bug, and Gap shortcuts.

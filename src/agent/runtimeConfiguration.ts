@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 
 export type RuntimeBridgeProvider = "auto" | "claude" | "codex" | "host-agent" | "disabled";
+export type RuntimeEvaluationProvider = "claude" | "codex";
 
 export type RuntimeConfiguration = {
   schemaVersion: 1;
@@ -10,6 +11,7 @@ export type RuntimeConfiguration = {
   bridgeCommand?: string;
   bridgeArgs?: string[];
   bridgeTimeoutMs?: number;
+  evaluationProvider?: RuntimeEvaluationProvider;
   providerConfigs: Record<string, string>;
   connectorConfigs: Record<string, string>;
   updatedAt: string;
@@ -83,6 +85,9 @@ export function validateRuntimeConfiguration(value: unknown): RuntimeConfigurati
   )) {
     throw new Error("Runtime configuration bridgeTimeoutMs must be between 1000 and 600000");
   }
+  if (input.evaluationProvider !== undefined && input.evaluationProvider !== "claude" && input.evaluationProvider !== "codex") {
+    throw new Error("Runtime configuration evaluationProvider is invalid");
+  }
   const providerConfigs = referenceMap(input.providerConfigs, "providerConfigs");
   const connectorConfigs = referenceMap(input.connectorConfigs, "connectorConfigs");
   return {
@@ -91,6 +96,9 @@ export function validateRuntimeConfiguration(value: unknown): RuntimeConfigurati
     ...(typeof input.bridgeCommand === "string" ? { bridgeCommand: input.bridgeCommand } : {}),
     ...(Array.isArray(input.bridgeArgs) ? { bridgeArgs: [...input.bridgeArgs] as string[] } : {}),
     ...(typeof input.bridgeTimeoutMs === "number" ? { bridgeTimeoutMs: input.bridgeTimeoutMs } : {}),
+    ...(input.evaluationProvider === "claude" || input.evaluationProvider === "codex"
+      ? { evaluationProvider: input.evaluationProvider }
+      : {}),
     providerConfigs,
     connectorConfigs,
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : new Date().toISOString()
@@ -132,6 +140,9 @@ export function runtimeEnvironment(
   }
   if (configuration.bridgeTimeoutMs !== undefined) {
     setIfAbsent(environment, "BRAIN_CREATOR_AGENT_TIMEOUT_MS", String(configuration.bridgeTimeoutMs));
+  }
+  if (configuration.evaluationProvider) {
+    setIfAbsent(environment, "BRAIN_CREATOR_EVAL_PROVIDER", configuration.evaluationProvider);
   }
   for (const [key, reference] of Object.entries(configuration.connectorConfigs)) {
     const value = resolveReference(reference, baseEnvironment);

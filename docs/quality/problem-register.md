@@ -153,3 +153,29 @@ the affected intents, preserving the previous cases as superseded. This closes
 the PR D control path, but does not claim that full workflow/state semantic
 coverage, scenario assurance, or production-grade System Brain exploration is
 complete; those remain later slices.
+
+## Current implementation slice: scenario assurance and provider evaluation
+
+PR E adds a domain-neutral BusinessScenario portfolio to test design. Workflow
+models create main-flow, branch, and cross-role scenarios; state models create
+positive and negative transition scenarios; decision tables and uncovered
+TestIntents retain their own scenario families. Scenario IDs are deterministic,
+and stale scenarios are marked instead of silently accumulating duplicate
+assets.
+
+Scenario Assurance now evaluates unique System Brain binding, TestDataProfile
+readiness, requirement-backed oracle strength, unsupported inference, and
+provider independence. A strong observed run can be recorded as `verified`,
+while `trusted` requires three unchanged strong runs. Requirement, system, or
+data hash changes reset the record to `bound`; failed or incomplete evidence
+quarantines the scenario. The Facade surfaces these through
+`bc_prepare action=assess-scenarios`, `record-scenario-run`, and the
+`business-scenario`, `scenario-assurance`, and `scenario-trust` review targets.
+
+The mutation evaluator measures explicitly recorded caught, survived, and
+blocked outcomes. Blocked mutations are reported separately and are not
+counted as detected defects. This slice does not generate mutations or replay
+historical Bugs against real systems, so real-system mutation effectiveness
+remains partial. Provider Registry exposes the host-agent primary and an
+optional Claude/Codex evaluator readiness descriptor; it does not make a
+second CLI a required dependency.
