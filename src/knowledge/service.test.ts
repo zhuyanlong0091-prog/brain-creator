@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryBrainCreatorRepository, JsonFileBrainCreatorRepository } from "../domain/repository.js";
-import type { RequirementContentPackage } from "../domain/types.js";
+import type { RequirementContentPackage, TestDataProfile } from "../domain/types.js";
 import { encryptSecrets } from "../shared/crypto.js";
 import { SemanticSpineService } from "../brain/semanticSpine.js";
 import { KnowledgeService } from "./service.js";
@@ -241,6 +241,73 @@ describe("KnowledgeService", () => {
     expect(second.compileRun.items.every((item) => item.result === "reused")).toBe(true);
     expect(repository.executableCases).toHaveLength(design.testIntents.length);
     expect(repository.compileRuns).toHaveLength(2);
+  });
+
+  it("persists explicit cross-case entity dependencies and oracle contracts", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({
+      name: "Employee lifecycle",
+      key: "employee-lifecycle-dependencies",
+      defaultLocale: "en-US"
+    });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage(
+        "employee-dependency-hash",
+        "Create an employee. Edit the employee created by the previous case."
+      )
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    const [producer, consumer] = design.testIntents;
+    expect(consumer).toBeDefined();
+    producer.producesEntityRefs = ["employee:testperson001"];
+    consumer.consumesEntityRefs = ["employee:testperson001"];
+    const profile: TestDataProfile = {
+      id: "data-employee-reference",
+      knowledgeProjectId: project.id,
+      requirementSetId: ingested.requirementSet.id,
+      name: "Employee entity",
+      field: "Employee",
+      strategy: "existing-reference",
+      constraints: ["status=active"],
+      seed: "employee:testperson001",
+      entityReference: "employee:testperson001",
+      sourceRefs: producer.requirementRefs,
+      createdAt: new Date(0).toISOString()
+    };
+    repository.testDataProfiles.push(profile);
+    if (design.evaluationGate.actions.length > 0) {
+      await service.confirmEvaluationActions({
+        requirementSetId: ingested.requirementSet.id,
+        actionIds: design.evaluationGate.actions.map((action) => action.id),
+        note: "The employee lifecycle cases are confirmed for compilation.",
+        confirm: true
+      });
+    }
+    service.approveRequirementSet(ingested.requirementSet.id);
+
+    const compiled = service.compileExecutableCases(consumer.id);
+
+    expect(compiled.executableCase.caseDependencyGraph).toEqual(expect.objectContaining({
+      verdict: "ready",
+      edges: [expect.objectContaining({
+        fromTestIntentId: producer.id,
+        toTestIntentId: consumer.id,
+        entityReference: "employee:testperson001"
+      })]
+    }));
+    expect(compiled.executableCase.dataPlan?.entityReferences).toEqual([
+      "employee:testperson001"
+    ]);
+    expect(compiled.executableCase.assertionContracts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requirementRefs: expect.arrayContaining(consumer.requirementRefs),
+          evidenceRequirements: expect.arrayContaining(["actual-value", "screenshot", "trace"])
+        })
+      ])
+    );
   });
 
   it("rejects an explicit batch selection that crosses requirement sets", async () => {

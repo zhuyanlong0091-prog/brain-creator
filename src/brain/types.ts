@@ -279,6 +279,7 @@ export type EvaluationProviderDescriptor = {
 export type BusinessEntityInstance = {
   id: string;
   entityKey: string;
+  entityReference?: string;
   semanticConceptId: string;
   knowledgeProjectId?: string;
   systemId?: string;

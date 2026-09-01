@@ -82,6 +82,16 @@ export function executableCaseCompileStatus(
     repository.gaps.some((gap) => gap.id === gapId && gap.status === "open")
   );
   if (hasOpenGap) return "blocked";
+  const dependencyIssues = executableCase.caseDependencyGraph?.unresolved.filter(
+    (issue) => issue.testIntentId === executableCase.testIntentId
+  ) ?? [];
+  if (dependencyIssues.some((issue) => issue.reason === "cycle")) return "blocked";
+  if (dependencyIssues.some((issue) => issue.reason === "ambiguous-producer")) return "ambiguous";
+  if (dependencyIssues.some((issue) => issue.reason === "missing-producer")) return "needs-data";
+  const plannedEntityReferences = new Set(executableCase.dataPlan?.entityReferences ?? []);
+  if ((executableCase.entityReferenceRequirements ?? []).some(
+    (reference) => !plannedEntityReferences.has(reference)
+  )) return "needs-data";
   const pendingTasks = repository.explorationTasks.filter(
     (task) => executableCase.explorationTaskIds?.includes(task.id) && task.status === "pending"
   );

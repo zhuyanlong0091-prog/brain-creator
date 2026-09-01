@@ -78,6 +78,28 @@ describe("Test data planner", () => {
     );
   });
 
+  it("carries a stable entity reference into both the data plan and executable step", () => {
+    const profile = dataProfile({
+      id: "data-employee-name",
+      field: "Employee Name",
+      strategy: "generated",
+      seed: "employee-name-seed",
+      entityReference: "employee:testperson001"
+    });
+
+    const planned = planTestData([profile], [
+      step("fill", "Fill Employee Name", "Employee Name")
+    ]);
+
+    expect(planned.plan.entityReferences).toEqual(["employee:testperson001"]);
+    expect(planned.plan.operations[0]).toEqual(expect.objectContaining({
+      entityReference: "employee:testperson001"
+    }));
+    expect(planned.steps[0]).toEqual(expect.objectContaining({
+      dataReference: "employee:testperson001"
+    }));
+  });
+
   it("orders runtime-captured data after its declared dependencies", () => {
     const account = dataProfile({
       id: "data-account",

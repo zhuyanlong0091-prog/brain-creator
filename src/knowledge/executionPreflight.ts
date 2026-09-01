@@ -549,6 +549,7 @@ export class ExecutionPreflightService {
       return {
         profileId: operation.profileId,
         field: operation.field,
+        entityReference: operation.entityReference,
         decision: operation.decision,
         value:
           operation.decision === "resolve-secret"

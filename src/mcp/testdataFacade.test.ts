@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
+import type { RequirementSet, TestIntent } from "../domain/types.js";
 
 const tempDirs: string[] = [];
 
@@ -72,4 +73,86 @@ describe("Testdata Brain facade", () => {
       })
     );
   });
+
+  it("reviews explicit cross-case dependencies through the facade", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "brain-creator-case-dependency-facade-"));
+    tempDirs.push(workDir);
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const system = context.service.createSystemProfile({
+      name: "Orders",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://orders.example.test"]
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Orders knowledge",
+      key: "orders-case-dependency-facade",
+      defaultLocale: "en-US"
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const now = new Date(0).toISOString();
+    const requirementSet: RequirementSet = {
+      id: "requirement-orders-dependencies",
+      knowledgeProjectId: project.id,
+      sourceId: "source-orders-dependencies",
+      version: 1,
+      title: "Order lifecycle",
+      summary: "Create then edit an order",
+      contentHash: "orders-dependencies-hash",
+      status: "approved",
+      affectedNodeIds: [],
+      createdAt: now,
+      updatedAt: now
+    };
+    const producer: TestIntent = intent("intent-order-create", project.id, requirementSet.id, {
+      producesEntityRefs: ["order:1001"]
+    });
+    const consumer: TestIntent = intent("intent-order-edit", project.id, requirementSet.id, {
+      consumesEntityRefs: ["order:1001"]
+    });
+    context.repository.requirementSets.push(requirementSet);
+    context.repository.testIntents.push(consumer, producer);
+
+    const result = await handleBrainCreatorTool(context, "bc_review", {
+      target: "case-dependency",
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      responseMode: "full"
+    });
+    const payload = JSON.parse(result.content[0].type === "text" ? result.content[0].text : "{}");
+
+    expect(payload.data.items[0]).toEqual(expect.objectContaining({
+      verdict: "ready",
+      edges: [expect.objectContaining({
+        fromTestIntentId: producer.id,
+        toTestIntentId: consumer.id,
+        entityReference: "order:1001"
+      })]
+    }));
+  });
 });
+
+function intent(id: string, projectId: string, requirementSetId: string, overrides: Partial<TestIntent> = {}): TestIntent {
+  return {
+    id,
+    knowledgeProjectId: projectId,
+    requirementSetId,
+    title: id,
+    module: "Orders",
+    priority: "P1",
+    objective: "Use an order",
+    preconditions: [],
+    expectedResults: ["The order is accepted"],
+    requirementRefs: [`requirement:${id}`],
+    knowledgeNodeRefs: [],
+    techniques: ["scenario"],
+    status: "approved",
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    ...overrides
+  };
+}

@@ -163,6 +163,9 @@ function planProfile(
     profileId: profile.id,
     field: profile.field,
     strategy: profile.strategy,
+    ...(profile.entityReference
+      ? { entityReference: profile.entityReference }
+      : {}),
     dependsOnProfileIds: dependencies,
     cleanup: profile.cleanup ?? "none",
     constraints: profile.constraints,
@@ -335,7 +338,12 @@ function summarizePlan(
       (operation) =>
         operation.decision === "create" && operation.cleanup !== "none"
     ),
-    sourceRefs: unique(operations.flatMap((operation) => operation.sourceRefs))
+    sourceRefs: unique(operations.flatMap((operation) => operation.sourceRefs)),
+    entityReferences: unique(
+      operations
+        .map((operation) => operation.entityReference)
+        .filter((reference): reference is string => Boolean(reference))
+    )
   };
 }
 
@@ -392,6 +400,9 @@ function bindDataSteps(
     return {
       ...step,
       dataProfileId: selected.profileId,
+      ...(selected.entityReference
+        ? { dataReference: selected.entityReference }
+        : {}),
       value:
         selected.decision === "resolve-secret"
           ? undefined

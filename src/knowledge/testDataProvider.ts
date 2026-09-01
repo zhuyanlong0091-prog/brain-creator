@@ -36,6 +36,7 @@ type SubmitInput = {
 type PrepareOperation = {
   profileId: string;
   field: string;
+  entityReference?: string;
   lookupQuery?: string;
   cleanup: TestDataTask["cleanup"];
   allowedDecisions: Array<"reuse" | "create">;
@@ -73,6 +74,9 @@ export class TestDataProviderService {
       const operation: PrepareOperation = {
         profileId: cleanupLease.profileId,
         field: this.findField(executableCase, cleanupLease.profileId),
+        ...(cleanupLease.entityReference
+          ? { entityReference: cleanupLease.entityReference }
+          : {}),
         cleanup: cleanupLease.cleanup,
         allowedDecisions: [],
         constraints: [],
@@ -327,6 +331,9 @@ export class TestDataProviderService {
     return {
       profileId: operation.profileId,
       field: operation.field,
+      ...(operation.entityReference
+        ? { entityReference: operation.entityReference }
+        : {}),
       lookupQuery: operation.lookupQuery,
       cleanup: operation.cleanup,
       allowedDecisions:
@@ -377,6 +384,9 @@ export class TestDataProviderService {
       executableCaseId: input.executableCase.id,
       profileId: input.operation.profileId,
       field: input.operation.field,
+      ...(input.operation.entityReference
+        ? { entityReference: input.operation.entityReference }
+        : {}),
       action: input.action,
       status: "pending",
       idempotencyKey,
@@ -400,6 +410,9 @@ export class TestDataProviderService {
         executableCaseId: task.executableCaseId,
         action: task.action,
         field: task.field,
+        ...(task.entityReference
+          ? { entityReference: task.entityReference }
+          : {}),
         lookupQuery: task.lookupQuery,
         allowedDecisions: input.operation.allowedDecisions,
         cleanup: task.cleanup,
@@ -431,6 +444,9 @@ export class TestDataProviderService {
       "# Test Data Preparation Task",
       "",
       `Find data for field "${task.field}" in the bound business system.`,
+      ...(task.entityReference
+        ? [`Semantic entity reference: ${task.entityReference}`]
+        : []),
       `Lookup query: ${task.lookupQuery ?? "(not specified)"}`,
       `Allowed decisions: ${operation.allowedDecisions.join(", ")}`,
       "Prefer reusing an existing matching record.",
@@ -464,6 +480,9 @@ export class TestDataProviderService {
       taskId: input.task.id,
       decision: input.decision,
       reference: input.reference,
+      ...(input.task.entityReference
+        ? { entityReference: input.task.entityReference }
+        : {}),
       value: input.value,
       cleanup: input.decision === "create" ? input.task.cleanup : "none",
       status: "active",
@@ -498,6 +517,7 @@ export class TestDataProviderService {
       systemId: task.systemId,
       entityType: entityTypeFromReference(lease.reference) ?? task.field,
       reference: lease.reference,
+      entityReference: task.entityReference,
       sourceRefs: [...task.sourceRefs, ...sourceRefs]
     });
     const operation = executableCase.dataPlan?.operations.find(
