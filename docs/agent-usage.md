@@ -59,6 +59,14 @@ The Agent presents every Requirement Eval action. Clarifications and missing bra
 
 Seven golden samples cover ordinary clauses, complex Markdown rule tables, cross-module workflows, permission matrices, contradictions, and missing branches. Historical quality can be reviewed with `bc_review target=requirement-eval-accuracy`; technical failures remain inconclusive instead of reducing the requirement score.
 
+### 4.1 Review Business Scenarios And Assurance
+
+After test design, Brain Creator also creates a domain-neutral `BusinessScenario` portfolio. Review it with `bc_review target=business-scenario`; the summary groups main flows, branches, state transitions, invalid transitions, cross-role journeys, exceptions, data, and integration scenarios. Use `bc_prepare action=assess-scenarios` after binding a system to evaluate each scenario against the current System Brain, TestDataProfile, and requirement-backed oracle.
+
+Assurance is a gate, not a confidence label. A scenario without a unique system binding, usable data plan, or source-backed oracle remains blocked or needs review. Use `bc_review target=scenario-assurance` to inspect the binding, data readiness, oracle strength, reasons, and evidence. A strong observed run can be recorded with `bc_prepare action=record-scenario-run`; the first unchanged strong run reaches `verified`, and three unchanged strong runs are required for `trusted`. Scenario generation, a single green Playwright run, or an LLM confidence score never promotes a scenario automatically.
+
+Mutation results can be submitted through `bc_prepare action=evaluate-mutations`. The evaluator counts caught and survived mutations separately from blocked mutations, so blocked coverage cannot be mistaken for defect detection. This PR E slice evaluates recorded mutation outcomes; mutation generation and historical Bug replay remain follow-up capabilities.
+
 ### 5. Bind And Explore System Brain
 
 The Agent uses `bc_configure target=system` and `bc_configure target=system-binding`, then configures auth. Protected password, recovery, CAPTCHA, or 2FA uses `bc_create_auth_checkpoint` and workspace-local storage state.

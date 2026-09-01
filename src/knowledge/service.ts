@@ -23,9 +23,12 @@ import type {
   RequirementSet,
   RequirementSource,
   RequirementCoverageProfile,
+  TestDataProfile,
   TestIntent,
   CoverageDimension,
-  AssertionContractType
+  AssertionContractType,
+  WorkflowModel,
+  StateMachineModel
 } from "../domain/types.js";
 import type { RequirementModelBundle } from "./requirementHarness.js";
 import { id } from "../shared/id.js";
@@ -82,6 +85,21 @@ import {
   SystemBrainReconciliationService,
   type ExpectedSemanticFact
 } from "../brain/systemReconciliation.js";
+import {
+  buildBusinessScenarios,
+  buildScenarioAssurance,
+  createScenarioTrustRecord,
+  evaluateMutationSuite,
+  updateScenarioTrust,
+  type MutationEvaluation,
+  type MutationOutcome,
+  type ScenarioTrustUpdate
+} from "../brain/scenarioAssurance.js";
+import type {
+  BusinessScenario,
+  ScenarioAssuranceContract,
+  ScenarioTrustRecord
+} from "../brain/types.js";
 
 export class KnowledgeService {
   private readonly systemReconciliation: SystemBrainReconciliationService;
@@ -329,6 +347,15 @@ export class KnowledgeService {
         existingCoverageProfile,
         criticalAttachments
       );
+      const scenarioPortfolio = this.syncBusinessScenarios({
+        knowledgeProjectId: requirementSet.knowledgeProjectId,
+        requirementSetId,
+        workflows: this.repository.workflowModels.filter((item) => item.requirementSetId === requirementSetId),
+        stateMachines: this.repository.stateMachineModels.filter((item) => item.requirementSetId === requirementSetId),
+        decisionTables: this.repository.decisionTableModels.filter((item) => item.requirementSetId === requirementSetId),
+        testIntents: existingIntents,
+        dataProfiles: this.repository.testDataProfiles.filter((item) => item.requirementSetId === requirementSetId)
+      });
       requirementSet.evaluationGate ??= buildRequirementEvaluationGate(
         analysis,
         reusedEvaluation,
@@ -370,6 +397,7 @@ export class KnowledgeService {
         decisionTableModels: this.repository.decisionTableModels.filter(
           (item) => item.requirementSetId === requirementSetId
         ),
+        ...scenarioPortfolio,
         coverageProfile: existingCoverageProfile,
         coverage: {
           totalClauses: analysis.clauses.length,
@@ -466,6 +494,15 @@ export class KnowledgeService {
     this.repository.requirementCoverageProfiles.push(coverageProfile);
     this.repository.testIntents.push(...testIntents);
     this.repository.testDataProfiles.push(...design.dataProfiles);
+    const scenarioPortfolio = this.syncBusinessScenarios({
+      knowledgeProjectId: requirementSet.knowledgeProjectId,
+      requirementSetId,
+      workflows: proposedModels.workflowModels,
+      stateMachines: proposedModels.stateMachineModels,
+      decisionTables: proposedModels.decisionTableModels,
+      testIntents,
+      dataProfiles: design.dataProfiles
+    });
     const gaps = [
       ...analysis.openQuestions.map((question) =>
         this.createGap(
@@ -512,7 +549,7 @@ export class KnowledgeService {
       proposedModels.decisionTableModels
     );
     await this.writeModuleKnowledge(requirementSet, analysis, design.testIntents);
-    return {
+    const result = {
       analysis,
       evaluation: processEvaluation,
       evaluationGate: requirementSet.evaluationGate,
@@ -522,9 +559,11 @@ export class KnowledgeService {
       impact: this.requirementImpact(requirementSet.id),
       ...proposedModels,
       businessObjectModels,
+      ...scenarioPortfolio,
       coverageProfile,
       ...design
     };
+    return result as typeof result & { reused?: boolean };
   }
 
   async confirmEvaluationActions(input: {
@@ -1332,6 +1371,211 @@ export class KnowledgeService {
 
   listTestIntents(projectId: string) {
     return this.repository.testIntents.filter((item) => item.knowledgeProjectId === projectId);
+  }
+
+  listBusinessScenarios(input: {
+    knowledgeProjectId: string;
+    requirementSetId?: string;
+    systemId?: string;
+    status?: BusinessScenario["status"];
+  }) {
+    this.getProject(input.knowledgeProjectId);
+    return this.repository.businessScenarios.filter(
+      (scenario) =>
+        scenario.knowledgeProjectId === input.knowledgeProjectId &&
+        (!input.requirementSetId || scenario.requirementSetId === input.requirementSetId) &&
+        (!input.status || scenario.status === input.status) &&
+        (!input.systemId || this.repository.scenarioAssuranceContracts.some(
+          (contract) => contract.scenarioId === scenario.id && contract.systemId === input.systemId
+        ))
+    );
+  }
+
+  listScenarioAssurance(input: {
+    knowledgeProjectId: string;
+    requirementSetId?: string;
+    systemId?: string;
+    scenarioId?: string;
+  }) {
+    this.getProject(input.knowledgeProjectId);
+    const scenarioIds = new Set(
+      this.repository.businessScenarios
+        .filter((scenario) => scenario.knowledgeProjectId === input.knowledgeProjectId)
+        .filter((scenario) => !input.requirementSetId || scenario.requirementSetId === input.requirementSetId)
+        .map((scenario) => scenario.id)
+    );
+    return this.repository.scenarioAssuranceContracts.filter(
+      (contract) =>
+        scenarioIds.has(contract.scenarioId) &&
+        (!input.systemId || contract.systemId === input.systemId) &&
+        (!input.scenarioId || contract.scenarioId === input.scenarioId)
+    );
+  }
+
+  listScenarioTrust(input: {
+    knowledgeProjectId: string;
+    requirementSetId?: string;
+    scenarioId?: string;
+  }) {
+    this.getProject(input.knowledgeProjectId);
+    const scenarioIds = new Set(
+      this.repository.businessScenarios
+        .filter((scenario) => scenario.knowledgeProjectId === input.knowledgeProjectId)
+        .filter((scenario) => !input.requirementSetId || scenario.requirementSetId === input.requirementSetId)
+        .filter((scenario) => !input.scenarioId || scenario.id === input.scenarioId)
+        .map((scenario) => scenario.id)
+    );
+    return this.repository.scenarioTrustRecords.filter((record) => scenarioIds.has(record.scenarioId));
+  }
+
+  assessBusinessScenarios(input: {
+    knowledgeProjectId: string;
+    requirementSetId: string;
+    systemId?: string;
+    scenarioIds?: string[];
+    providerIndependence?: ScenarioAssuranceContract["independence"];
+  }) {
+    const requirementSet = this.getRequirementSet(input.requirementSetId);
+    if (requirementSet.knowledgeProjectId !== input.knowledgeProjectId) {
+      throw new Error("Requirement set does not belong to the knowledge project");
+    }
+    const project = this.getProject(input.knowledgeProjectId);
+    if (input.systemId && !project.systemIds.includes(input.systemId)) {
+      throw new Error("Business system must be bound before assessing scenarios");
+    }
+    const selectedIds = input.scenarioIds?.length ? new Set(input.scenarioIds) : undefined;
+    const scenarios = this.repository.businessScenarios.filter(
+      (scenario) =>
+        scenario.knowledgeProjectId === input.knowledgeProjectId &&
+        scenario.requirementSetId === input.requirementSetId &&
+        (!selectedIds || selectedIds.has(scenario.id))
+    );
+    if (scenarios.length === 0) throw new Error("No business scenarios found for assessment");
+    const systemSnapshot = input.systemId && this.systemBrainSnapshots
+      ? this.systemBrainSnapshots.latest(input.systemId)
+      : undefined;
+    const dataProfiles = this.repository.testDataProfiles.filter(
+      (profile) => profile.requirementSetId === input.requirementSetId
+    );
+    const bindings = this.repository.semanticBindings.filter(
+      (binding) => binding.requirementSetId === input.requirementSetId && (!input.systemId || binding.systemId === input.systemId)
+    );
+    const contracts = scenarios.map((scenario) => buildScenarioAssurance({
+      scenario,
+      systemId: input.systemId,
+      systemSnapshot,
+      semanticBindings: bindings,
+      dataProfiles,
+      providerIndependence: input.providerIndependence
+    }));
+    for (const contract of contracts) {
+      const index = this.repository.scenarioAssuranceContracts.findIndex(
+        (existing) => existing.scenarioId === contract.scenarioId && existing.systemId === contract.systemId
+      );
+      if (index >= 0) this.repository.scenarioAssuranceContracts[index] = contract;
+      else this.repository.scenarioAssuranceContracts.push(contract);
+      if (!this.repository.scenarioTrustRecords.some((record) => record.scenarioId === contract.scenarioId)) {
+        this.repository.scenarioTrustRecords.push(createScenarioTrustRecord({
+          scenarioId: contract.scenarioId,
+          requirementHash: requirementSet.contentHash,
+          systemSnapshotHash: systemSnapshot?.contentHash,
+          grounded: contract.requirementRefs.length > 0,
+          bound: contract.systemBinding === "unique" && contract.testDataReadiness !== "blocked"
+        }));
+      }
+    }
+    this.repository.persist();
+    return {
+      requirementSetId: input.requirementSetId,
+      systemId: input.systemId,
+      contracts,
+      summary: {
+        total: contracts.length,
+        pass: contracts.filter((contract) => contract.verdict === "pass").length,
+        needsReview: contracts.filter((contract) => contract.verdict === "needs-review").length,
+        blocked: contracts.filter((contract) => contract.verdict === "blocked").length
+      },
+      nextAction: contracts.some((contract) => contract.verdict !== "pass")
+        ? "Review scenario assurance blockers before compiling cases."
+        : "Compile only the assured scenarios into executable cases."
+    };
+  }
+
+  recordScenarioStrongRun(input: ScenarioTrustUpdate & {
+    scenarioId: string;
+  }) {
+    const scenario = this.repository.businessScenarios.find((item) => item.id === input.scenarioId);
+    if (!scenario) throw new Error("Business scenario not found");
+    const assurance = this.repository.scenarioAssuranceContracts.find(
+      (contract) =>
+        contract.scenarioId === input.scenarioId &&
+        (!input.systemId || contract.systemId === input.systemId)
+    );
+    if (!assurance || assurance.verdict !== "pass") {
+      throw new Error("Scenario assurance must pass before recording a strong run");
+    }
+    const requirementSet = this.getRequirementSet(scenario.requirementSetId);
+    const current = this.repository.scenarioTrustRecords.find(
+      (record) => record.scenarioId === input.scenarioId
+    ) ?? createScenarioTrustRecord({
+      scenarioId: input.scenarioId,
+      requirementHash: requirementSet.contentHash,
+      grounded: scenario.sourceRefs.length > 0,
+      bound: false
+    });
+    const updated = updateScenarioTrust(current, input);
+    const existingIndex = this.repository.scenarioTrustRecords.findIndex(
+      (record) => record.scenarioId === input.scenarioId
+    );
+    if (existingIndex >= 0) this.repository.scenarioTrustRecords[existingIndex] = updated;
+    else this.repository.scenarioTrustRecords.push(updated);
+    this.repository.persist();
+    return updated;
+  }
+
+  evaluateScenarioMutations(input: { mutations: MutationOutcome[]; threshold?: number }): MutationEvaluation {
+    return evaluateMutationSuite(input);
+  }
+
+  private syncBusinessScenarios(input: {
+    knowledgeProjectId: string;
+    requirementSetId: string;
+    workflows: WorkflowModel[];
+    stateMachines: StateMachineModel[];
+    decisionTables: DecisionTableModel[];
+    testIntents: TestIntent[];
+    dataProfiles: TestDataProfile[];
+  }) {
+    const scenarios = buildBusinessScenarios(input);
+    const activeIds = new Set(scenarios.map((scenario) => scenario.id));
+    for (const existing of this.repository.businessScenarios.filter(
+      (scenario) => scenario.requirementSetId === input.requirementSetId
+    )) {
+      if (!activeIds.has(existing.id)) existing.status = "stale";
+    }
+    for (const scenario of scenarios) {
+      const existing = this.repository.businessScenarios.find((item) => item.id === scenario.id);
+      if (existing) Object.assign(existing, scenario);
+      else this.repository.businessScenarios.push(scenario);
+      if (!this.repository.scenarioTrustRecords.some((record) => record.scenarioId === scenario.id)) {
+        this.repository.scenarioTrustRecords.push(createScenarioTrustRecord({
+          scenarioId: scenario.id,
+          requirementHash: this.getRequirementSet(input.requirementSetId).contentHash,
+          grounded: scenario.sourceRefs.length > 0,
+          bound: false
+        }));
+      }
+    }
+    this.repository.persist();
+    return {
+      businessScenarios: this.repository.businessScenarios.filter((scenario) => scenario.requirementSetId === input.requirementSetId),
+      scenarioAssuranceContracts: this.repository.scenarioAssuranceContracts.filter((contract) =>
+        scenarios.some((scenario) => scenario.id === contract.scenarioId)
+      ),
+      scenarioTrustRecords: this.repository.scenarioTrustRecords.filter((record) =>
+        scenarios.some((scenario) => scenario.id === record.scenarioId)
+      )
+    };
   }
 
   testIntentCoverage(projectId: string, systemId?: string) {

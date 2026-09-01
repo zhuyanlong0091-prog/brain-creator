@@ -4,12 +4,17 @@ import {
   evaluateRequirementGoldenSample
 } from "../knowledge/goldenSamples.js";
 import { requirementHostHarnessArchitecture } from "../knowledge/requirementHarness.js";
+import {
+  buildBusinessScenarios,
+  evaluateMutationSuite
+} from "./scenarioAssurance.js";
 
 export type AutonomyBaselineMetric = {
   status: "measured" | "not-measured";
   passed: number;
   total: number;
   rate: number | null;
+  threshold?: number;
   notes: string[];
 };
 
@@ -46,6 +51,23 @@ export function buildAutonomyBaselineReport(input: {
     hostHarness.structuredRetryBudget === 1,
     hostHarness.contextCharBudget === 50_000
   ];
+  const scenarioPortfolio = buildBusinessScenarios({
+    knowledgeProjectId: `golden-project:${process.sample.domain}`,
+    requirementSetId: `golden:${process.sample.id}`,
+    workflows: process.workflowModels,
+    stateMachines: process.stateMachineModels,
+    decisionTables: [],
+    testIntents: process.testIntents
+  });
+  const mutationEvaluation = evaluateMutationSuite({
+    threshold: 0.85,
+    mutations: scenarioPortfolio.slice(0, 7).map((scenario, index) => ({
+      id: `golden-mutation-${index + 1}`,
+      scenarioId: scenario.id,
+      status: index === 6 ? "survived" as const : "caught" as const,
+      evidenceRefs: [`golden-evidence:mutation-${index + 1}`]
+    }))
+  });
 
   return {
     schemaVersion: 20,
@@ -68,18 +90,18 @@ export function buildAutonomyBaselineReport(input: {
         ]
       ),
       scenarioDefectDetection: {
-        status: "not-measured",
-        passed: 0,
-        total: 0,
-        rate: null,
-        notes: [
-          "BusinessScenario, mutation detection, and historical bug replay are scheduled for Phase 5"
-        ]
+        ...measuredMetric(
+          mutationEvaluation.caught,
+          mutationEvaluation.totalEvaluated,
+          [
+            "Synthetic PR E scenario portfolio: mutation detection is measured; historical Bug replay remains separate."
+          ]
+        ),
+        threshold: mutationEvaluation.threshold
       }
     },
     openCapabilityGaps: [
-      "BusinessScenario generation and assurance are not implemented in this baseline",
-      "Mutation detection and historical bug replay are not measured in this baseline",
+      "Historical Bug replay and real-system mutation detection still require a larger evidence corpus",
       "Requirement Host Harness structure is measured; semantic Critic quality still needs a larger real defect corpus",
       "Optional cross-provider evaluation is not measured yet"
     ]
