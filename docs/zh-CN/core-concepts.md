@@ -27,7 +27,7 @@ Agent 负责对话和宿主能力。Brain Creator 提供持久化领域模型、
 
 共享语义主干负责连接这些边界。例如，需求中的“新增”和系统中的“新建”可以解析为同一个 `action:create` 概念；`employee:testperson001` 是可被后续编辑用例消费的业务实体引用。
 
-schema 20 建立了 L3 所需的持久化词汇：`BusinessObjectModel`、`DecisionTableModel`、`SemanticBinding`、`BusinessScenario`、`ScenarioAssuranceContract`、`ScenarioTrustRecord` 和 `OnboardingPlan`。这些集合只是后续能力的基础，不代表场景生成或自主晋升已经完成。旧版可执行用例不会在迁移时直接获得 `verified` 或 `trusted`。
+schema 20 建立了 L3 所需的持久化词汇：`BusinessObjectModel`、`DecisionTableModel`、`SemanticBinding`、`BusinessScenario`、`ScenarioAssuranceContract`、`ScenarioTrustRecord` 和 `OnboardingPlan`。OnboardingPlan 现在通过一次审批连接已评审需求基线与需求驱动的受限系统探索；场景生成和自主可信晋升仍属于后续能力。旧版可执行用例不会在迁移时直接获得 `verified` 或 `trusted`。
 
 内置动作别名策略是通用且可审计的，可以归一化“新增”“新建”和 `create` 等词。仅有文案别名不能证明两个业务动作等价；条件映射和多步骤展开仍必须经过系统证据与后续可信门禁。
 

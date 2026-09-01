@@ -95,7 +95,11 @@ System Brain 证据缺失或歧义时会创建 `ExplorationTask`，它不是最�
 
 ## 授权状态化探索
 
-只读探索无法发现仅在新建、提交、审批、驳回或关闭后出现的控件。此时从一个或多个待处理 ExplorationTask 创建 `ExplorationPlan`，明确鉴权角色、允许路由、授权动作、写次数、时长和清理策略。
+首次接入系统时，应在 Requirement Eval 通过、系统已绑定且所有角色鉴权已验证后，调用 `bc_prepare action=create-onboarding-plan`。Brain Creator 会根据已确认的流程、状态机、决策表和 TestIntent 生成具体探索问题，并在 OnboardingPlan 内创建受限的 ExplorationPlan。
+
+先预览 `approve-onboarding-plan`，向用户展示需求摘要、未解决问题、角色、路由、写操作、时长和清理策略，再携带 `confirm=true`、`confirmedBy` 和 `confirmationNote` 确认。该操作会先验证两侧，再原子批准 RequirementSet 和 ExplorationPlan。使用 `start-onboarding-plan` 启动；通过 `bc_status` 和 `bc_review target=onboarding-plan` 可恢复当前计划。原有分别批准基线和 ExplorationPlan 的流程继续兼容后续补充探索。
+
+只读探索无法发现仅在新建、提交、审批、驳回或关闭后出现的控件。后续出现证据缺口时，从一个或多个待处理 ExplorationTask 创建 `ExplorationPlan`，明确鉴权角色、允许路由、授权动作、写次数、时长和清理策略。
 
 依次调用 `bc_prepare action=create-exploration-plan`、预览 `approve-exploration-plan`，再携带人工说明和确认人一次批准。Brain Creator 会拒绝生产环境、未验证或跨系统角色、allowlist 外 URL、危险动作和超预算结果。`start-exploration-plan` 返回受限的宿主 Agent 工作包；测试数据未就绪时先返回 `needs-data`。
 

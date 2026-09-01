@@ -247,6 +247,7 @@ export type OnboardingPlan = {
   systemId: string;
   requirementSummary: string;
   baselineAssetIds: string[];
+  baselineFingerprint?: string;
   explorationPlanId: string;
   unresolvedQuestions: string[];
   allowedRoutes: string[];

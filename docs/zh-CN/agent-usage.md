@@ -36,7 +36,7 @@ Agent 通过 `bc_configure target=knowledge-project` 创建知识项目，此时
 
 ### 4. 批准基线
 
-每个 Requirement Eval action 都必须展示给用户。澄清项与缺失分支需要 `confirmationNote`；直接矛盾必须修订来源。门禁通过后才允许 `approve-baseline confirm=true`。
+每个 Requirement Eval action 都必须展示给用户。澄清项与缺失分支需要 `confirmationNote`；直接矛盾必须修订来源。首次接入系统时，默认先绑定系统和已验证角色，再创建 OnboardingPlan，由用户一次批准需求基线和受限探索。无需接入系统时，`approve-baseline confirm=true` 继续作为兼容入口。
 
 ### 5. 绑定并探索 System Brain
 
@@ -50,7 +50,9 @@ Agent 创建/选择系统与绑定关系，配置鉴权，再调用 `explore-sys
 
 候选相同、目标不可达或定位证据缺失时，状态为 `ambiguous` 或 `needs-exploration`，并创建可恢复的 `ExplorationTask`，不会立即创建 Gap。System Brain 补充证据后，先预览再确认 `bc_prepare action=resolve-exploration-task`，编译器会自动续编。只有探索明确失败时才创建 `system-brain-exploration` Gap。
 
-如果证据需要真实写操作或角色流转，不能借用 `interactionMode=safe`。应为待处理任务创建 `ExplorationPlan`，向用户展示角色、路由、动作、数据策略、写次数/时长和清理策略，整套方案批准后再调用 `approve-exploration-plan confirm=true`。`start-exploration-plan` 若返回测试数据任务，应先完成数据准备，再由宿主 Agent 执行受限工作包。通过 `submit-exploration-result` 回传逐动作证据后，Brain Creator 会校验授权范围、刷新 System Brain 并自动续编。使用 `bc_review target=exploration-plan` 复盘；未启动方案被拒绝时应取消。
+首次执行需求驱动探索时，调用 `create-onboarding-plan`，预览 `approve-onboarding-plan`，向用户一次展示并确认需求基线、角色、路由、动作、数据策略、写次数/时长和清理策略。若预览后需求资产发生变化，审批会失败并要求重建方案，禁止批准过期范围。`start-onboarding-plan` 若返回测试数据任务，应先完成数据准备，再由宿主 Agent 执行包含需求问题的受限工作包。通过 `submit-exploration-result` 回传逐动作证据，并为每个问题及其 requestedEvidence 提交独立 `taskEvidence`。Brain Creator 会按关联 ExplorationPlan 校验授权范围和逐问题证据、刷新 System Brain、自动续编并同步 OnboardingPlan 状态。使用 `bc_review target=onboarding-plan` 复盘。
+
+后续证据需要真实写操作或角色流转时，不能借用 `interactionMode=safe`，继续使用原有 ExplorationPlan 流程。使用 `bc_review target=exploration-plan` 复盘；未启动方案被拒绝时应取消。
 
 ### 7. 规划测试数据
 

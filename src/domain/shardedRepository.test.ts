@@ -135,6 +135,44 @@ describe("ShardedFileBrainCreatorRepository", () => {
     expect(() => repository.reload()).toThrow(/shard gaps is missing/);
   });
 
+  it("recovers the complete pre-transaction snapshot after a shard write fails", async () => {
+    const root = await tempDir();
+    const storeDir = join(root, "store");
+    const legacyPath = join(root, "legacy.json");
+    const repository = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
+    const service = new BrainCreatorService(repository);
+    service.createSystemProfile({
+      name: "Stable",
+      environment: "test",
+      baseUrl: "https://stable.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://stable.example.test"]
+    });
+    const blockedShard = join(storeDir, "collections", "onboardingPlans.json");
+    await rm(blockedShard);
+    await mkdir(blockedShard);
+
+    expect(() => repository.transaction(() => {
+      repository.systemProfiles[0].name = "Partially changed";
+      repository.onboardingPlans.push({ id: "partial-onboarding" } as never);
+    })).toThrow();
+    expect(repository.systemProfiles[0].name).toBe("Stable");
+    expect(repository.onboardingPlans).toEqual([]);
+
+    await rm(blockedShard, { recursive: true });
+    await mkdir(join(storeDir, ".write.lock"));
+    await writeFile(
+      join(storeDir, ".write.lock", "owner.json"),
+      JSON.stringify({ pid: 2_147_483_647 }),
+      "utf8"
+    );
+    const recovered = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
+
+    expect(recovered.systemProfiles[0].name).toBe("Stable");
+    expect(recovered.onboardingPlans).toEqual([]);
+    expect(existsSync(join(storeDir, ".transaction.json"))).toBe(false);
+  });
+
   it("restores an earlier schema 17 store that predates optional requirement analysis shards", async () => {
     const root = await tempDir();
     const storeDir = join(root, "store");

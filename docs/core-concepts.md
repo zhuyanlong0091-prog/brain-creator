@@ -27,7 +27,7 @@ The five Brains are logical boundaries inside one package, not five services:
 
 The shared semantic spine connects these boundaries. For example, requirement terms such as `新增` and observed terms such as `新建` can resolve to the same `action:create` concept. A value such as `employee:testperson001` is a business entity reference that can be produced by one case and consumed by a later edit case.
 
-Schema 20 establishes the persistent vocabulary for L3 work: `BusinessObjectModel`, `DecisionTableModel`, `SemanticBinding`, `BusinessScenario`, `ScenarioAssuranceContract`, `ScenarioTrustRecord`, and `OnboardingPlan`. These collections are foundations, not a claim that scenario generation or autonomous promotion is already complete. Legacy executable cases are never migrated directly to `verified` or `trusted`.
+Schema 20 establishes the persistent vocabulary for L3 work: `BusinessObjectModel`, `DecisionTableModel`, `SemanticBinding`, `BusinessScenario`, `ScenarioAssuranceContract`, `ScenarioTrustRecord`, and `OnboardingPlan`. OnboardingPlan now joins a reviewed Requirement baseline to requirement-directed, bounded system exploration under one approval; scenario generation and autonomous trust promotion remain later capabilities. Legacy executable cases are never migrated directly to `verified` or `trusted`.
 
 The built-in action alias policy is domain-neutral and auditable. It can normalize terms such as `新增`, `新建`, and `create`, but a text alias alone does not prove that two business operations are equivalent. Conditional and multi-step bindings require system evidence and later assurance gates.
 
