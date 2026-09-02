@@ -66,6 +66,7 @@ import {
   playwrightTestArgs
 } from "../execution/browserObservation.js";
 import { normalizeHostSkillAnalysis } from "../knowledge/policies.js";
+import { assessRequirementSourceComplexity } from "../knowledge/requirementRouting.js";
 import { buildContextPack } from "../knowledge/retriever.js";
 import { reconcileRequirementCoverage } from "../knowledge/requirementReconciliation.js";
 import {
@@ -1195,8 +1196,28 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     });
   }
   if (action === "generate-analysis" || action === "generate-test-design") {
-    const provider = policyProviderArg(input, "provider");
     const requirementSetId = stringArg(input, "requirementSetId");
+    const requirementSet = context.repository.requirementSets.find((item) => item.id === requirementSetId);
+    if (!requirementSet) throw new Error("Requirement set not found");
+    const source = context.repository.requirementSources.find((item) => item.id === requirementSet.sourceId);
+    if (!source) throw new Error("Requirement source not found");
+    const complexity = assessRequirementSourceComplexity(source);
+    const requestedProvider = optionalStringArg(input, "provider");
+    const provider = requestedProvider
+      ? policyProviderArg(input, "provider")
+      : action === "generate-analysis" || complexity.level === "complex"
+        ? "host-agent"
+        : "builtin";
+    if (complexity.level === "complex" && provider === "builtin") {
+      return {
+        status: "preview-only",
+        provider,
+        requirementSetId,
+        complexity,
+        requiresHostHarness: true,
+        nextAction: "Run the complex requirement through provider=host-agent before approving or executing it."
+      };
+    }
     if (provider === "host-agent") {
       if (action === "generate-analysis") {
         return input.taskId && input.analysisPackage !== undefined
@@ -6014,7 +6035,7 @@ function configuredFeishuReader(environment: Record<string, string | undefined> 
 function isFeishuRequirementSource(source: string) {
   try {
     const hostname = new URL(source).hostname.toLowerCase();
-    return hostname.endsWith(".feishu.cn") || hostname.endsWith(".larksuite.com");
+    return hostname.endsWith(".feishu.cn") || hostname.endsWith(".larksuite.com") || hostname.endsWith(".larkenterprise.com");
   } catch {
     return false;
   }
@@ -11373,6 +11394,15 @@ function requirementContentPackageArg(
     !Array.isArray(candidate.warnings)
   ) {
     throw new Error(`${key} is invalid`);
+  }
+  if (candidate.blocks.some((block) => {
+    if (!block || typeof block !== "object" || typeof block.type !== "string" || typeof block.text !== "string") {
+      return true;
+    }
+    const sourceRefs = block.sourceRefs;
+    return sourceRefs !== undefined && (!Array.isArray(sourceRefs) || sourceRefs.some((ref) => typeof ref !== "string"));
+  })) {
+    throw new Error(`${key}.blocks contains an invalid document block`);
   }
   return candidate;
 }

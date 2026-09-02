@@ -115,6 +115,22 @@ describe("FeishuOpenApiAdapter", () => {
     expect(fetcher.mock.calls.some(([url]) => String(url).includes("wiki/v2"))).toBe(false);
   });
 
+  it("accepts enterprise Feishu domains for direct Docx links", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ code: 0, tenant_access_token: "tenant-token", expire: 7200 }))
+      .mockResolvedValueOnce(
+        json({ code: 0, data: { document: { document_id: "doc-token", revision_id: 1, title: "Enterprise" } } })
+      )
+      .mockResolvedValueOnce(
+        json({ code: 0, data: { items: [block(2, "Enterprise content")], has_more: false } })
+      );
+    const adapter = new FeishuOpenApiAdapter({ appId: "app-id", appSecret: "app-secret", fetcher });
+
+    await expect(adapter.readRequirement("https://tenant.larkenterprise.com/docx/doc-token"))
+      .resolves.toEqual(expect.objectContaining({ title: "Enterprise", sourceType: "feishu" }));
+  });
+
   it("returns actionable errors for permissions and unsupported Wiki resources", async () => {
     const denied = vi
       .fn<typeof fetch>()

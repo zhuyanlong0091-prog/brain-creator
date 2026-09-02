@@ -22,6 +22,8 @@ Agent 通过 `bc_configure target=knowledge-project` 创建知识项目，此时
 
 飞书优先使用 OpenAPI；没有凭据时，宿主 Agent 读取文档并提交标准 `RequirementContentPackage`。
 
+来源接入会保留 Markdown、HTML、DOCX 的有序文档块 AST：标题保留层级，表格保留表头和行，图片保留引用，每个块都有稳定来源锚点；`.larkenterprise.com` 与标准飞书、Lark 域名一样受支持。未指定 provider 时，`generate-analysis` 默认使用 host-agent Harness；对结构化或包含图片的来源显式选择 builtin 只返回预览，不能批准或执行。
+
 来源包含图片时，生成测试设计前必须使用返回的 `requirementSourceId` 调用 `bc_prepare action=analyze-attachments`。Brain Creator 先把附件下载到受控本地路径；返回 `needs-host-vision` 时，宿主使用多模态能力读取每个 `recognitionRequests[].localPath`，再通过 `submit-attachment-analysis` 提交符合 schema 的结构化结果。结果保持 draft，展示给用户并明确确认后，才能调用 `confirm-attachment-analysis confirm=true`。仅发现附件不是失败，只有已记录的下载或识别重试耗尽后才能创建 Gap。
 
 需求理解使用 `bc_prepare action=generate-analysis provider=host-agent`。响应会依次推进文档地图、条款分析、业务建模和隔离 Coverage Critic；宿主执行每个返回的 prompt，再以同一 action 携带 `taskId` 和 JSON `analysisPackage` 提交结果。Critic 只读取来源证据和结构化阶段产物，不继承设计者对话。完成后再以相同 provider 调用 `generate-test-design`。结构化失败只重试一次，第二次失败会持久化为可恢复 Gap。Host Skill 可以为文档地图和条款分析提供增强输入，但不能跳过业务建模或 Critic。

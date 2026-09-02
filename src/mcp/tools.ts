@@ -465,14 +465,32 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         })
         .optional(),
       source: z.string().optional(),
-      provider: z.enum(["builtin", "host-skill", "host-agent"]).default("builtin"),
+      provider: z.enum(["builtin", "host-skill", "host-agent"]).optional(),
       confirm: z.boolean().default(false),
       allowPrivateNetwork: z.boolean().default(false),
       contentPackage: z
         .object({
           title: z.string(),
           content: z.string(),
-          blocks: z.array(z.object({ type: z.string(), text: z.string(), level: z.number().optional() })),
+          blocks: z.array(z.object({
+            id: z.string().optional(),
+            type: z.string(),
+            text: z.string(),
+            level: z.number().optional(),
+            parentId: z.string().optional(),
+            order: z.number().int().nonnegative().optional(),
+            sourceRef: z.string().optional(),
+            sourceRefs: z.array(z.string()).optional(),
+            table: z.object({
+              headers: z.array(z.string()),
+              rows: z.array(z.array(z.string()))
+            }).optional(),
+            image: z.object({
+              alt: z.string().optional(),
+              reference: z.string().optional(),
+              attachmentId: z.string().optional()
+            }).optional()
+          })),
           attachments: z.array(z.object({
             blockId: z.string().optional(),
             fileToken: z.string().optional(),
