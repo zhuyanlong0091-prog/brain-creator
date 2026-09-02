@@ -4,6 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { KnowledgeProject, RequirementSet, RequirementSource } from "../domain/types.js";
 import type {
   BusinessModelerOutput,
@@ -105,7 +106,10 @@ describe("Requirement Host Harness facade", () => {
     expect(response).toEqual(expect.objectContaining({
       status: "completed",
       result: expect.objectContaining({
-        evaluation: expect.objectContaining({ verdict: "pass" })
+        evaluation: expect.objectContaining({ verdict: "pass" }),
+        stageEvaluations: expect.arrayContaining([
+          expect.objectContaining({ stage: "coverage-critic", evaluator: "isolated-critic" })
+        ])
       })
     }));
     expect(context.repository.knowledgeNodes).toHaveLength(0);
@@ -123,6 +127,59 @@ describe("Requirement Host Harness facade", () => {
     expect(designed.decisionTableModels).toHaveLength(1);
     expect(context.repository.knowledgeNodes.length).toBeGreaterThan(0);
     expect(context.repository.businessObjectModels[0].semanticConceptId).toMatch(/^semantic_/);
+    expect(context.repository.stageEvalRecords).toEqual(expect.arrayContaining([
+      expect.objectContaining({ stage: "document-mapper", evaluator: "producer", status: "current" }),
+      expect.objectContaining({ stage: "document-mapper", evaluator: "schema-validator", status: "current" }),
+      expect.objectContaining({ stage: "coverage-critic", evaluator: "isolated-critic", status: "current" }),
+      expect.objectContaining({ stage: "adjudicator", evaluator: "adjudicator", verdict: "pass" })
+    ]));
+
+    const approvalPreview = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "approve-baseline",
+      requirementSetId: fixture.requirementSet.id,
+      confirm: false
+    }));
+    expect(approvalPreview.approvalRequired).toBe(true);
+    expect(approvalPreview.approvalChallenge.code).toMatch(/^BC-\d{6}$/);
+
+    const agentNoteApproval = await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "approve-baseline",
+      requirementSetId: fixture.requirementSet.id,
+      confirm: true,
+      confirmedBy: "agent-note",
+      confirmationNote: "The agent says this is approved."
+    });
+    expect(JSON.parse(textOf(agentNoteApproval)).success).toBe(false);
+
+    const receipt = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "approval",
+      operation: "create",
+      requirementSetId: fixture.requirementSet.id,
+      approvalMethod: "challenge-response",
+      approvalChallengeId: approvalPreview.approvalChallenge.challengeId,
+      approvalCode: approvalPreview.approvalChallenge.code,
+      assetHash: approvalPreview.baselineFingerprint,
+      confirmedBy: "tester"
+    }));
+    const approved = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "approve-baseline",
+      requirementSetId: fixture.requirementSet.id,
+      confirm: true,
+      approvalReceiptId: receipt.receipt.id
+    }));
+    expect(approved.status).toBe("approved");
+
+    const stageReview = dataOf(await handleBrainCreatorTool(context, "bc_review", {
+      target: "stage-eval",
+      knowledgeProjectId: fixture.project.id,
+      requirementSetId: fixture.requirementSet.id,
+      responseMode: "summary"
+    }));
+    expect(stageReview.summary.current).toBeGreaterThan(0);
+    expect(stageReview.summary.byStage).toEqual(expect.objectContaining({
+      "document-mapper": expect.any(Number),
+      adjudicator: expect.any(Number)
+    }));
 
     const reused = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
       action: "generate-test-design",
@@ -390,4 +447,12 @@ function dataOf(result: { content: Array<{ type: string; text?: string }> }) {
   const envelope = JSON.parse(text);
   if (!envelope.success) throw new Error(envelope.errors?.join("; ") ?? "MCP call failed");
   return envelope.data;
+}
+
+function textOf(result: CallToolResult) {
+  const item = result.content.find(
+    (candidate): candidate is Extract<CallToolResult["content"][number], { type: "text" }> => candidate.type === "text"
+  );
+  if (!item?.text) throw new Error("Missing MCP text result");
+  return item.text;
 }

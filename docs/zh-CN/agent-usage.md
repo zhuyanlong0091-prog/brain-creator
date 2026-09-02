@@ -40,6 +40,8 @@ Agent 通过 `bc_configure target=knowledge-project` 创建知识项目，此时
 
 每个 Requirement Eval action 都必须展示给用户。澄清项与缺失分支需要 `confirmationNote`；直接矛盾必须修订来源。首次接入系统时，默认先绑定系统和已验证角色，再创建 OnboardingPlan，由用户一次批准需求基线和受限探索。无需接入系统时，`approve-baseline confirm=true` 继续作为兼容入口。
 
+Host 基线还会记录 Producer、Schema Validator、隔离 Critic 和 Adjudicator 四类阶段 Eval，可用 `bc_review target=stage-eval` 查看。来源或模型输入变化后，受影响的阶段记录会变为 stale，不会静默复用。对于 host-agent 或 host-skill 分析，普通 Agent 备注不能当作人工批准；先预览 `approve-baseline` 获取一次性挑战码，再通过 `bc_configure target=approval` 创建 `challenge-response` 凭证，最后将 `approvalReceiptId` 带入确认调用。Host attestation 只有同时提供宿主消息 ID 和证明 hash 才有效。
+
 ### 5. 绑定并探索 System Brain
 
 Agent 创建/选择系统与绑定关系，配置鉴权，再调用 `explore-system`。探索仅访问 allowlist 内 HTTP(S) 链接，并受页面数、深度和时间预算限制。

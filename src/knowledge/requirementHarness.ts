@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { BrainEvalResult, BrainTask, BrainContextPack } from "../brain/types.js";
+import type { BrainEvalResult, BrainTask, BrainContextPack, StageEvalRecord } from "../brain/types.js";
 import type { HarnessRuntime } from "../brain/harness.js";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
+import type { RequirementGateService } from "../evaluation/requirementGate.js";
 import type {
   BusinessObjectModel,
   DecisionTableModel,
@@ -105,6 +106,7 @@ export type RequirementHostHarnessResult = {
   models: RequirementModelBundle;
   evaluation: BrainEvalResult;
   critic: CoverageCriticOutput;
+  stageEvaluations?: StageEvalRecord[];
 };
 
 export type RequirementHostHarnessResponse = {
@@ -158,7 +160,8 @@ export class RequirementAnalysisHostHarness {
   constructor(
     private readonly repository: InMemoryBrainCreatorRepository,
     private readonly harness: HarnessRuntime,
-    private readonly knowledgeDir: string
+    private readonly knowledgeDir: string,
+    private readonly requirementGate?: RequirementGateService
   ) {}
 
   async start(requirementSetId: string): Promise<RequirementHostHarnessResponse> {
@@ -227,12 +230,14 @@ export class RequirementAnalysisHostHarness {
     }
     const stage = stageFromTask(task);
     const validation = validateStageOutput(stage, input.output, this.allowedSourcePrefixes(task.requirementSetId!));
-    if (!validation.ok) return this.handleInvalidOutput(task, stage, validation.errors);
+    if (!validation.ok) return this.handleInvalidOutput(task, stage, validation.errors, input.output);
 
     const output = input.output as StageOutputs[RequirementHarnessStage];
     const artifactPath = await this.writeStageOutput(task, stage, output);
     if (stage !== "coverage-critic") {
-      this.harness.completeDeferredTask(task.id, stagePassEvaluation(stage, output), [artifactPath]);
+      const evaluation = stagePassEvaluation(stage, output);
+      this.harness.completeDeferredTask(task.id, evaluation, [artifactPath]);
+      this.recordStageEvaluations(task, stage, output, evaluation);
       return this.createStageTask(task.requirementSetId!, STAGES[STAGES.indexOf(stage) + 1], task.sessionId!, false);
     }
     this.harness.setOutputRefs(task.id, [artifactPath]);
@@ -244,8 +249,15 @@ export class RequirementAnalysisHostHarness {
     if (result.evaluation.verdict === "retry") {
       return this.handleInvalidOutput(task, stage, result.evaluation.reasons.length > 0
         ? result.evaluation.reasons
-        : ["Coverage Critic requested one retry"]);
+        : ["Coverage Critic requested one retry"], output);
     }
+    const requirementSet = this.requirementSet(task.requirementSetId!);
+    requirementSet.analysisProvider = result.analysis.provider;
+    this.repository.persist();
+    const producerEvaluation = stagePassEvaluation(stage, output);
+    this.recordStageEvaluations(task, stage, output, producerEvaluation);
+    this.recordStageEvaluations(task, stage, output, result.evaluation, "isolated-critic");
+    result.stageEvaluations = this.requirementGate?.list({ requirementSetId: task.requirementSetId });
     this.harness.completeDeferredTask(task.id, result.evaluation, [artifactPath]);
     if (result.evaluation.verdict === "blocked") {
       const gap = this.createGap(
@@ -278,7 +290,8 @@ export class RequirementAnalysisHostHarness {
   private async handleInvalidOutput(
     task: BrainTask,
     stage: RequirementHarnessStage,
-    errors: string[]
+    errors: string[],
+    output?: unknown
   ): Promise<RequirementHostHarnessResponse> {
     const attempts = this.repository.brainTasks.filter(
       (candidate) => candidate.sessionId === task.sessionId && candidate.operation === task.operation
@@ -293,6 +306,7 @@ export class RequirementAnalysisHostHarness {
         ? [`Retry ${stage} once with output matching the declared schema`]
         : ["Review the requirement source and resume the blocked analysis"]
     };
+    this.recordStageEvaluations(task, stage, output ?? {}, evaluation, "schema-validator");
     this.harness.completeDeferredTask(task.id, evaluation);
     if (attempts === 1) {
       this.harness.transition(task.id, "failed", "Invalid structured output; one retry was scheduled");
@@ -390,7 +404,54 @@ export class RequirementAnalysisHostHarness {
     this.harness.setOutputRefs(task.id, [artifactPath]);
     this.harness.transition(task.id, "evaluating");
     this.harness.applyEval(task.id, stagePassEvaluation(stage, output));
+    const evaluation = stagePassEvaluation(stage, output);
+    this.recordStageEvaluations(task, stage, output, evaluation);
     return this.harness.getTask(task.id)!;
+  }
+
+  private recordStageEvaluations(
+    task: BrainTask,
+    stage: RequirementHarnessStage,
+    output: unknown,
+    evaluation: BrainEvalResult,
+    evaluator = "producer"
+  ) {
+    if (!this.requirementGate || !task.requirementSetId) return;
+    const source = this.requirementSource(task.requirementSetId);
+    const inputHashes = [
+      source.contentHash,
+      createHash("sha256").update(task.contextPack?.content ?? "").digest("hex")
+    ];
+    const openQuestions = isRecord(output) && Array.isArray(output.openQuestions)
+      ? array(output.openQuestions).filter(isNonEmptyString)
+      : [];
+    const counterEvidenceRefs = stage === "coverage-critic" && isRecord(output)
+      ? array(output.contradictions).filter(isNonEmptyString)
+      : [];
+    this.requirementGate.recordStageEvaluation({
+      requirementSetId: task.requirementSetId,
+      stage,
+      evaluator,
+      inputHashes,
+      supportRefs: collectSourceRefs(output),
+      counterEvidenceRefs,
+      openQuestions,
+      verdict: evaluation.verdict,
+      reasons: evaluation.reasons,
+      requiredActions: evaluation.nextActions,
+      policyVersion: REQUIREMENT_ANALYSIS_POLICY.version
+    });
+    if (evaluator === "producer") {
+      this.requirementGate.recordStageEvaluation({
+        requirementSetId: task.requirementSetId,
+        stage,
+        evaluator: "schema-validator",
+        inputHashes,
+        supportRefs: collectSourceRefs(output),
+        verdict: "pass",
+        policyVersion: REQUIREMENT_ANALYSIS_POLICY.version
+      });
+    }
   }
 
   private taskPackage(task: BrainTask, stage: RequirementHarnessStage, retry = false): RequirementHostHarnessResponse {
@@ -525,7 +586,13 @@ export class RequirementAnalysisHostHarness {
       ]),
       nextActions: verdict === "pass" ? ["Review the generated requirement baseline"] : critic.requiredActions
     };
-    return { analysis, models, evaluation, critic };
+    return {
+      analysis,
+      models,
+      evaluation,
+      critic,
+      stageEvaluations: this.requirementGate?.list({ requirementSetId })
+    };
   }
 
   private createGap(
@@ -559,6 +626,13 @@ export class RequirementAnalysisHostHarness {
     const source = this.repository.requirementSources.find((item) => item.id === requirementSet.sourceId);
     if (!source) throw new Error("Requirement source not found");
     return requirementSet;
+  }
+
+  private requirementSource(requirementSetId: string) {
+    const requirementSet = this.requirementSet(requirementSetId);
+    const source = this.repository.requirementSources.find((item) => item.id === requirementSet.sourceId);
+    if (!source) throw new Error("Requirement source not found");
+    return source;
   }
 
   private allowedSourcePrefixes(requirementSetId: string) {

@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { BrainCreatorService } from "../domain/service.js";
@@ -132,6 +133,7 @@ import {
   type MutationOutcome
 } from "../brain/scenarioAssurance.js";
 import { EvaluationIntegrityService } from "../evaluation/evaluationIntegrity.js";
+import { RequirementGateService } from "../evaluation/requirementGate.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
 import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import { id } from "../shared/id.js";
@@ -196,6 +198,7 @@ export type BrainCreatorMcpContext = {
   systemBrainSnapshots: SystemBrainSnapshotService;
   providerRegistry: EvaluationProviderRegistry;
   evaluationIntegrity: EvaluationIntegrityService;
+  requirementGate: RequirementGateService;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
@@ -288,6 +291,7 @@ export function createBrainCreatorMcpContext(
     environment: initialRuntimeEnvironment
   });
   const evaluationIntegrity = new EvaluationIntegrityService(repository);
+  const requirementGate = new RequirementGateService(repository);
   const service = new BrainCreatorService(repository);
   const configuredAuthProviders = new Set(
     (input.authRefreshAdapters ?? []).map((adapter) => adapter.provider)
@@ -311,7 +315,8 @@ export function createBrainCreatorMcpContext(
   const requirementAnalysisHarness = new RequirementAnalysisHostHarness(
     repository,
     harness,
-    input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir)
+    input.knowledgeDir ?? resolveBrainCreatorKnowledgeDir(workDir),
+    requirementGate
   );
   const testDataBrain = new TestDataBrainService(repository, [
     ...(input.testDataProviders ?? []),
@@ -365,6 +370,7 @@ export function createBrainCreatorMcpContext(
     systemBrainSnapshots,
     providerRegistry,
     evaluationIntegrity,
+    requirementGate,
     workDir,
     agentBridge:
       input.agentBridge ??
@@ -1243,12 +1249,13 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
           nextAction: "Resolve the Requirement Host Harness findings before generating test design."
         };
       }
-      return context.knowledgeService.generateTestDesign(
+      const design = await context.knowledgeService.generateTestDesign(
         requirementSetId,
         provider,
         result.analysis,
         result.models
       );
+      return adjudicateRequirementDesign(context, requirementSet, provider, design);
     }
     if (provider === "host-skill" && action === "generate-test-design" && input.analysisPackage === undefined) {
       const result = await context.requirementAnalysisHarness.latestCompletedResult(requirementSetId);
@@ -1261,12 +1268,13 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
             nextAction: "Resolve the Requirement Host Harness findings before generating test design."
           };
         }
-        return context.knowledgeService.generateTestDesign(
+        const design = await context.knowledgeService.generateTestDesign(
           requirementSetId,
           provider,
           result.analysis,
           result.models
         );
+        return adjudicateRequirementDesign(context, requirementSet, provider, design);
       }
     }
     if (provider === "host-skill" && input.analysisPackage === undefined) {
@@ -1284,11 +1292,17 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
         normalizeHostSkillAnalysis(input.analysisPackage, requirementSetId)
       );
     }
-    return context.knowledgeService.generateTestDesign(
+    const design = await context.knowledgeService.generateTestDesign(
       requirementSetId,
       provider,
       undefined
     );
+    if (provider === "builtin") {
+      requirementSet.analysisProvider = "builtin";
+      requirementSet.baselineFingerprint = context.requirementGate.baselineFingerprint(requirementSetId);
+      context.repository.persist();
+    }
+    return design;
   }
   if (action === "confirm-eval-actions") {
     const requirementSetId = stringArg(input, "requirementSetId");
@@ -1390,15 +1404,40 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     };
   }
   if (action === "approve-baseline") {
+    const requirementSetId = stringArg(input, "requirementSetId");
+    const requirementSet = context.repository.requirementSets.find((item) => item.id === requirementSetId);
+    if (!requirementSet) throw new Error("Requirement set not found");
+    const requiresReceipt = requirementSet.analysisProvider === "host-agent" ||
+      requirementSet.analysisProvider === "host-skill";
     if (!optionalBooleanArg(input, "confirm")) {
+      const challenge = requiresReceipt
+        ? context.requirementGate.issueApprovalChallenge(requirementSetId)
+        : undefined;
       return {
         status: "preview",
-        requirementSetId: stringArg(input, "requirementSetId"),
+        requirementSetId,
+        analysisProvider: requirementSet.analysisProvider ?? "builtin",
+        baselineFingerprint: context.requirementGate.baselineFingerprint(requirementSetId),
+        approvalRequired: requiresReceipt,
+        approvalReceiptId: requirementSet.approvalReceiptId,
+        approvalChallenge: challenge,
+        stageEvaluations: context.requirementGate.list({ requirementSetId, status: "current" }),
         requiresConfirmation: true,
-        nextAction: "Ask the user to confirm the requirement baseline before approval."
+        nextAction: requiresReceipt
+          ? "Create an approval receipt from the challenge or host proof, then approve the requirement baseline."
+          : "Ask the user to confirm the requirement baseline before approval."
       };
     }
-    return context.knowledgeService.approveRequirementSet(stringArg(input, "requirementSetId"));
+    if (requiresReceipt || optionalStringArg(input, "approvalReceiptId")) {
+      const receiptId = optionalStringArg(input, "approvalReceiptId") ?? requirementSet.approvalReceiptId;
+      if (!receiptId) throw new Error("A verified approval receipt is required for Host Harness baselines");
+      context.requirementGate.verifyApprovalReceipt(requirementSetId, receiptId);
+      requirementSet.approvalReceiptId = receiptId;
+      requirementSet.baselineFingerprint = context.requirementGate.baselineFingerprint(requirementSetId);
+      requirementSet.updatedAt = new Date().toISOString();
+      context.repository.persist();
+    }
+    return context.knowledgeService.approveRequirementSet(requirementSetId);
   }
   if (
     action === "resolve-gap" ||
@@ -3318,11 +3357,61 @@ async function reviewFacade(context: BrainCreatorMcpContext, input: Record<strin
   };
 }
 
+function adjudicateRequirementDesign(
+  context: BrainCreatorMcpContext,
+  requirementSet: NonNullable<BrainCreatorMcpContext["repository"]["requirementSets"][number]>,
+  provider: "host-agent" | "host-skill",
+  design: Awaited<ReturnType<KnowledgeService["generateTestDesign"]>>
+) {
+  const source = context.repository.requirementSources.find((item) => item.id === requirementSet.sourceId);
+  if (!source) throw new Error("Requirement source not found");
+  const inputHash = createHash("sha256")
+    .update(JSON.stringify({
+      analysis: design.analysis,
+      workflowModels: design.workflowModels,
+      stateMachineModels: design.stateMachineModels,
+      businessObjectModels: design.businessObjectModels,
+      decisionTableModels: design.decisionTableModels,
+      testIntents: design.testIntents,
+      coverage: design.coverage
+    }))
+    .digest("hex");
+  const adjudication = context.requirementGate.adjudicateBaseline({
+    requirementSetId: requirementSet.id,
+    provider,
+    evaluation: {
+      verdict: design.evaluation.verdict === "needs-user" ? "needs-review" : design.evaluation.verdict,
+      score: design.evaluation.score,
+      reasons: design.evaluation.reasons,
+      affectedAssetIds: [requirementSet.id],
+      evidenceRefs: design.analysis.clauses.flatMap((clause) => clause.sourceRefs),
+      nextActions: design.evaluation.requiredActions
+    },
+    supportRefs: [
+      ...design.analysis.clauses.flatMap((clause) => clause.sourceRefs),
+      ...design.testIntents.flatMap((intent) => intent.requirementRefs)
+    ],
+    inputHashes: [source.contentHash, inputHash],
+    policyVersion: design.analysis.policyVersion
+  });
+  requirementSet.analysisProvider = provider;
+  requirementSet.evaluationStageIds = adjudication.stageEvaluations.map((record) => record.id);
+  requirementSet.baselineFingerprint = context.requirementGate.baselineFingerprint(requirementSet.id);
+  context.repository.persist();
+  return {
+    ...design,
+    evaluation: adjudication.evaluation,
+    stageEvaluations: adjudication.stageEvaluations,
+    adjudication: adjudication.record
+  };
+}
+
 async function configureFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const target = configureTargetArg(input, "target");
+  const operation = optionalStringArg(input, "operation") ?? "create";
   if (target === "runtime") {
-    const operation = optionalStringArg(input, "operation") ?? "reload-store";
-    if (!["update", "reload-config", "reload-store", "rebuild-index"].includes(operation)) {
+    const runtimeOperation = operation === "create" ? "reload-store" : operation;
+    if (!["update", "reload-config", "reload-store", "rebuild-index"].includes(runtimeOperation)) {
       throw new Error("runtime operation is invalid");
     }
     const active = [
@@ -3346,7 +3435,7 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
         retryable: true
       });
     }
-    if (operation === "update") {
+    if (runtimeOperation === "update") {
       const patch: RuntimeConfigurationPatch = {
         ...(optionalStringArg(input, "bridgeProvider")
           ? { bridgeProvider: optionalStringArg(input, "bridgeProvider") as RuntimeConfiguration["bridgeProvider"] }
@@ -3365,20 +3454,20 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
       const configuration = mergeRuntimeConfiguration(context.runtimeConfiguration, patch);
       return {
         status: "config-reloaded",
-        operation,
+        operation: runtimeOperation,
         ...(await context.reloadRuntimeConfiguration({ configuration, persist: true })),
         nextAction: "review-status"
       };
     }
-    if (operation === "reload-config") {
+    if (runtimeOperation === "reload-config") {
       return {
         status: "config-reloaded",
-        operation,
+        operation: runtimeOperation,
         ...(await context.reloadRuntimeConfiguration()),
         nextAction: "review-status"
       };
     }
-    if (operation === "rebuild-index") {
+    if (runtimeOperation === "rebuild-index") {
       if (!(context.repository instanceof ShardedFileBrainCreatorRepository)) {
         throw new Error(`Index rebuild requires the schema ${SHARDED_REPOSITORY_SCHEMA_VERSION} sharded repository`);
       }
@@ -3393,6 +3482,36 @@ async function configureFacade(context: BrainCreatorMcpContext, input: Record<st
       counts: context.repository.reload(),
       reloadedAt: new Date().toISOString(),
       nextAction: "review-status"
+    };
+  }
+  if (target === "approval") {
+    const requirementSetId = stringArg(input, "requirementSetId");
+    if (operation === "preflight") {
+      const challenge = context.requirementGate.issueApprovalChallenge(requirementSetId);
+      return {
+        status: "approval-challenge-issued",
+        requirementSetId,
+        challenge,
+        nextAction: "Return the one-time approval code to Brain Creator without editing the requirement source."
+      };
+    }
+    if (operation !== "create") throw new Error("approval operation is invalid");
+    const method = optionalStringArg(input, "approvalMethod") as "host-attested" | "challenge-response" | undefined;
+    if (!method) throw new Error("approvalMethod is required");
+    const receipt = context.requirementGate.createApprovalReceipt({
+      requirementSetId,
+      assetHash: optionalStringArg(input, "assetHash") ?? context.requirementGate.baselineFingerprint(requirementSetId),
+      method,
+      approvedBy: stringArg(input, "confirmedBy"),
+      hostMessageId: optionalStringArg(input, "hostMessageId"),
+      hostMessageHash: optionalStringArg(input, "hostMessageHash"),
+      challengeId: optionalStringArg(input, "approvalChallengeId"),
+      approvalCode: optionalStringArg(input, "approvalCode")
+    });
+    return {
+      status: "approval-receipt-created",
+      receipt,
+      nextAction: "Pass approvalReceiptId to bc_prepare action=approve-baseline with confirm=true."
     };
   }
   if (target === "knowledge-project") {
@@ -5605,6 +5724,79 @@ function knowledgeReview(
         total: items.length,
         byStatus: countBy(items, (item) => item.status),
         trusted: items.filter((item) => item.status === "trusted").length
+      },
+      ...paginateReviewItems(items, input)
+    };
+  }
+  if (target === "stage-eval") {
+    const requirementSetIds = new Set(
+      context.repository.requirementSets
+        .filter((item) => item.knowledgeProjectId === projectId)
+        .filter((item) => !optionalStringArg(input, "requirementSetId") || item.id === optionalStringArg(input, "requirementSetId"))
+        .map((item) => item.id)
+    );
+    const items = context.requirementGate.list({
+      requirementSetId: optionalStringArg(input, "requirementSetId"),
+      stage: optionalStringArg(input, "stage"),
+      status: optionalStringArg(input, "status") as "current" | "stale" | undefined
+    }).filter((item) => requirementSetIds.has(item.subjectRefs
+      .find((ref) => ref.startsWith("requirement-set:"))?.slice("requirement-set:".length) ?? ""));
+    return {
+      project,
+      summary: {
+        total: items.length,
+        current: items.filter((item) => item.status === "current").length,
+        stale: items.filter((item) => item.status === "stale").length,
+        byStage: countBy(items, (item) => item.stage),
+        byVerdict: countBy(items, (item) => item.verdict)
+      },
+      ...paginateReviewItems(items, input)
+    };
+  }
+  if (target === "approval") {
+    const requirementSetIds = new Set(
+      context.repository.requirementSets
+        .filter((item) => item.knowledgeProjectId === projectId)
+        .filter((item) => !optionalStringArg(input, "requirementSetId") || item.id === optionalStringArg(input, "requirementSetId"))
+        .map((item) => item.id)
+    );
+    const items = context.repository.approvalReceipts
+      .filter((receipt) => receipt.assetRefs.some((ref) => requirementSetIds.has(ref.replace("requirement-set:", ""))))
+      .filter((receipt) => !idValue || receipt.id === idValue);
+    return {
+      project,
+      summary: { total: items.length, byMethod: countBy(items, (item) => item.method) },
+      ...paginateReviewItems(items, input)
+    };
+  }
+  if (target === "source-fidelity") {
+    const sources = context.repository.requirementSources.filter(
+      (item) => item.knowledgeProjectId === projectId
+    ).filter((item) => !optionalStringArg(input, "requirementSourceId") || item.id === optionalStringArg(input, "requirementSourceId"));
+    const items = sources.map((source) => ({
+      sourceId: source.id,
+      title: source.title,
+      sourceType: source.sourceType,
+      revision: source.revision,
+      contentHash: source.contentHash,
+      blockCount: source.blocks.length,
+      attachmentCount: source.attachments.length,
+      attachments: source.attachments.map((attachment) => ({
+        id: attachment.id,
+        name: attachment.name,
+        status: attachment.status,
+        analysis: context.repository.attachmentAnalyses.find((item) => item.attachmentId === attachment.id)
+      })),
+      warnings: source.warnings,
+      accessStatus: source.accessStatus
+    })).filter((item) => !idValue || item.sourceId === idValue);
+    return {
+      project,
+      summary: {
+        total: items.length,
+        withWarnings: items.filter((item) => item.warnings.length > 0).length,
+        attachments: items.reduce((sum, item) => sum + item.attachmentCount, 0),
+        analyzedAttachments: items.reduce((sum, item) => sum + item.attachments.filter((attachment) => attachment.analysis).length, 0)
       },
       ...paginateReviewItems(items, input)
     };
@@ -10453,7 +10645,10 @@ type KnowledgeReviewTarget =
   | "testdata"
   | "business-scenario"
   | "scenario-assurance"
-  | "scenario-trust";
+  | "scenario-trust"
+  | "stage-eval"
+  | "source-fidelity"
+  | "approval";
 
 function reviewTargetArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
@@ -10486,7 +10681,10 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "testdata",
       "business-scenario",
       "scenario-assurance",
-      "scenario-trust"
+      "scenario-trust",
+      "stage-eval",
+      "source-fidelity",
+      "approval"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
@@ -10576,7 +10774,10 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "testdata",
     "business-scenario",
     "scenario-assurance",
-    "scenario-trust"
+    "scenario-trust",
+    "stage-eval",
+    "source-fidelity",
+    "approval"
   ].includes(value);
 }
 
@@ -11055,7 +11256,8 @@ function configureTargetArg(input: Record<string, unknown>, key: string) {
       "knowledge-project",
       "system-binding",
       "connector",
-      "runtime"
+      "runtime",
+      "approval"
     ].includes(value)
   ) {
     throw new Error(`${key} is invalid`);
@@ -11069,7 +11271,8 @@ function configureTargetArg(input: Record<string, unknown>, key: string) {
     | "knowledge-project"
     | "system-binding"
     | "connector"
-    | "runtime";
+    | "runtime"
+    | "approval";
 }
 
 function prepareActionArg(input: Record<string, unknown>, key: string) {
