@@ -12,6 +12,7 @@ import type {
   InteractionRecoveryEvidence,
   PageCaptureEvidence,
   SystemExploration,
+  SystemExplorationScope,
   SystemExplorationInteractionTransition,
   SystemExplorationBudget,
   SystemExplorationNavigationEdge,
@@ -26,6 +27,8 @@ import {
   recoverBrowserSurface
 } from "./browserSurface.js";
 import type { KnowledgeService } from "./service.js";
+import { buildSystemBrain } from "./systemBrain.js";
+import { planSystemBrainExploration } from "../brain/systemExplorationScope.js";
 
 export type SystemExplorationPage = {
   depth: number;
@@ -87,6 +90,8 @@ export type SystemExplorerInput = {
   allowedUrls: string[];
   budget: SystemExplorationBudget;
   interactionMode: "off" | "safe";
+  targetUrls?: string[];
+  followLinks?: boolean;
   scenario?: ExplorationScenario;
   artifactDir: string;
   storageStatePath?: string;
@@ -110,6 +115,7 @@ type ExploreInput = {
   authProfileId?: string;
   startUrl?: string;
   interactionMode?: "off" | "safe";
+  explorationMode?: "full" | "incremental";
   scenario?: Omit<ExplorationScenario, "id"> & { id?: string };
   budget?: Partial<SystemExplorationBudget>;
 };
@@ -187,6 +193,7 @@ export class SystemExplorationCoordinator {
     const budget = normalizeBudget(request.budget);
     const interactionMode = request.interactionMode ?? "off";
     const scenario = normalizeExplorationScenario(request.scenario);
+    const explorationMode = request.explorationMode ?? "full";
     if (interactionMode === "off" && budget.maxInteractionsPerPage > 0) {
       throw new Error("maxInteractionsPerPage requires interactionMode=safe");
     }
@@ -216,6 +223,20 @@ export class SystemExplorationCoordinator {
     const storageStatePath = storageStateValue
       ? await resolveProtectedStorageStatePath(workDir, storageStateValue)
       : undefined;
+    const scope = planSystemBrainExploration({
+      mode: explorationMode,
+      startUrl,
+      brain: buildSystemBrain(repository, project.id, system.id),
+      identities: repository.systemPageIdentities.filter(
+        (identity) => identity.systemId === system.id
+      ),
+      confirmedSnapshot: repository.systemBrainSnapshots
+        .filter(
+          (snapshot) =>
+            snapshot.systemId === system.id && snapshot.status === "confirmed"
+        )
+        .sort((left, right) => right.revision - left.revision)[0]
+    });
     const now = new Date().toISOString();
     const explorationId = id("exploration");
     const artifactDir = join(
@@ -233,6 +254,7 @@ export class SystemExplorationCoordinator {
       status: "running",
       interactionMode,
       ...(scenario ? { scenario } : {}),
+      scope,
       budget,
       pageModelIds: [],
       navigationEdges: [],
@@ -254,6 +276,8 @@ export class SystemExplorationCoordinator {
         allowedUrls,
         budget,
         interactionMode,
+        targetUrls: scope.targetRoutes,
+        followLinks: scope.mode === "full",
         scenario,
         artifactDir,
         storageStatePath
@@ -527,9 +551,11 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
     const context = await browser.newContext(
       input.storageStatePath ? { storageState: input.storageStatePath } : {}
     );
-    const queue: Array<{ url: string; depth: number }> = [
-      { url: canonicalUrl(input.startUrl), depth: 0 }
-    ];
+    const initialUrls = input.targetUrls?.length ? input.targetUrls : [input.startUrl];
+    const queue: Array<{ url: string; depth: number }> = initialUrls.map((url) => ({
+      url: canonicalUrl(url),
+      depth: 0
+    }));
     const queued = new Set(queue.map((item) => item.url));
     const visited = new Set<string>();
     const pages: SystemExplorationPage[] = [];
@@ -683,6 +709,7 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
           });
           for (const interaction of interactions) {
             if (
+              input.followLinks !== false &&
               interaction.status === "observed" &&
               interaction.urlChanged &&
               isAllowedExplorationUrl(interaction.after.url, input.allowedUrls) &&
@@ -693,7 +720,7 @@ export class PlaywrightSystemExplorer implements SystemExplorer {
               queue.push({ url: interaction.after.url, depth: candidate.depth + 1 });
             }
           }
-          if (candidate.depth < input.budget.maxDepth) {
+          if (input.followLinks !== false && candidate.depth < input.budget.maxDepth) {
             for (const link of links) {
               if (!queued.has(link.url) && !visited.has(link.url)) {
                 queued.add(link.url);

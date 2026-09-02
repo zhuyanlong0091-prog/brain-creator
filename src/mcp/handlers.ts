@@ -1754,6 +1754,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       systemId: stringArg(input, "systemId"),
       authProfileId: optionalStringArg(input, "authProfileId"),
       startUrl: optionalStringArg(input, "startUrl"),
+      explorationMode: systemExplorationModeArg(input, "explorationMode"),
       scenario: explorationScenarioArg(input),
       interactionMode: explorationInteractionModeArg(input, "interactionMode"),
       budget: {
@@ -5295,6 +5296,9 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const systemBrains = project.systemIds.map((systemId) => {
     const brain = context.knowledgeService.getSystemBrain(projectId, systemId);
     const explorations = context.systemExploration.list(projectId, systemId);
+    const pageIdentities = context.repository.systemPageIdentities.filter(
+      (identity) => identity.systemId === systemId
+    );
     return {
       systemId,
       readiness: brain.readiness,
@@ -5305,6 +5309,12 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       navigationEdges: brain.navigationEdges.length,
       states: brain.states.length,
       stateTransitions: brain.stateTransitions.length,
+      pageIdentities: {
+        total: pageIdentities.length,
+        confirmed: pageIdentities.filter((identity) => identity.status === "confirmed").length,
+        candidate: pageIdentities.filter((identity) => identity.status === "candidate").length,
+        lowConfidence: pageIdentities.filter((identity) => (identity.confidence ?? 1) < 0.8).length
+      },
       latestExploration: explorations.at(-1),
       conflicts: brain.conflicts.length
     };
@@ -6070,11 +6080,15 @@ function knowledgeReview(
     if (!idValue) throw new Error("systemId is required to review System Brain");
     const view = optionalStringArg(input, "view") ?? "current";
     const snapshots = context.systemBrainSnapshots.history(idValue);
+    const pageIdentities = context.repository.systemPageIdentities
+      .filter((identity) => identity.systemId === idValue)
+      .sort((left, right) => left.identityKey.localeCompare(right.identityKey));
     if (view === "history") {
       return {
         project,
         systemId: idValue,
-        snapshots
+        snapshots,
+        pageIdentities
       };
     }
     if (view === "diff") {
@@ -6083,12 +6097,14 @@ function knowledgeReview(
       return {
         project,
         systemId: idValue,
-        diff: context.systemBrainSnapshots.diff(idValue, fromSnapshotId, toSnapshotId)
+        diff: context.systemBrainSnapshots.diff(idValue, fromSnapshotId, toSnapshotId),
+        pageIdentities
       };
     }
     return {
       project,
       brain: context.knowledgeService.getSystemBrain(projectId, idValue),
+      pageIdentities,
       snapshot:
         context.systemBrainSnapshots.latest(idValue) ??
         context.systemBrainSnapshots.latest(idValue, "candidate"),
@@ -11595,6 +11611,15 @@ function explorationInteractionModeArg(
 ): "off" | "safe" {
   const value = optionalStringArg(input, key) ?? "off";
   if (value !== "off" && value !== "safe") throw new Error(`${key} is invalid`);
+  return value;
+}
+
+function systemExplorationModeArg(
+  input: Record<string, unknown>,
+  key: string
+): "full" | "incremental" {
+  const value = optionalStringArg(input, key) ?? "full";
+  if (value !== "full" && value !== "incremental") throw new Error(`${key} is invalid`);
   return value;
 }
 

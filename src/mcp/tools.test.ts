@@ -233,6 +233,7 @@ describe("BRAIN_CREATOR_TOOLS", () => {
         action: "explore-system",
         knowledgeProjectId: "project-1",
         systemId: "system-1",
+        explorationMode: "incremental",
         interactionMode: "safe",
         explorationScenario: {
           name: "Intern replacement field discovery",

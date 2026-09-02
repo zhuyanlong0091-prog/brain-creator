@@ -87,6 +87,7 @@ import {
   SystemBrainReconciliationService,
   type ExpectedSemanticFact
 } from "../brain/systemReconciliation.js";
+import { SystemPageIdentityService } from "../brain/systemPageIdentity.js";
 import {
   buildBusinessScenarios,
   buildScenarioAssurance,
@@ -111,6 +112,7 @@ import type {
 
 export class KnowledgeService {
   private readonly systemReconciliation: SystemBrainReconciliationService;
+  private readonly systemPageIdentities: SystemPageIdentityService;
 
   constructor(
     private readonly repository: InMemoryBrainCreatorRepository,
@@ -120,6 +122,7 @@ export class KnowledgeService {
     private readonly semanticSpine?: SemanticSpineService
   ) {
     this.systemReconciliation = new SystemBrainReconciliationService(repository);
+    this.systemPageIdentities = new SystemPageIdentityService(repository);
   }
 
   async createProject(input: { name: string; key: string; defaultLocale: string }) {
@@ -2377,6 +2380,10 @@ export class KnowledgeService {
       throw new Error("Business system must be bound before refreshing System Brain");
     }
     const sourceBrain = buildSystemBrain(this.repository, projectId, systemId);
+    this.systemPageIdentities.sync({
+      systemId,
+      pages: sourceBrain.pages
+    });
     for (const draft of systemObservationDrafts(sourceBrain)) {
       this.upsertSystemObservation(project, systemId, draft);
     }

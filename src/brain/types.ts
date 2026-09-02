@@ -597,6 +597,10 @@ export type SystemPageIdentity = {
   latestPageModelId: string;
   revision: number;
   status: "candidate" | "confirmed" | "superseded";
+  confidence?: number;
+  lastConfirmedRevision?: number;
+  confirmedAt?: string;
+  confirmedBy?: string;
   sourceRefs: string[];
   createdAt: string;
   updatedAt: string;

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrainCreatorService } from "../domain/service.js";
 import { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import { KnowledgeService } from "./service.js";
+import { SystemBrainSnapshotService } from "../brain/systemSnapshot.js";
 import {
   classifySafeInteractionCandidate,
   isAllowedExplorationUrl,
@@ -419,6 +420,97 @@ describe("System exploration coordinator", () => {
           node.content.includes("Create Order")
       )
     ).toBe(true);
+  });
+
+  it("uses the confirmed System Brain baseline to target incremental exploration", async () => {
+    const fixture = await createFixture();
+    const route = "https://orders.example.test/recruiting";
+    const firstExplorer: SystemExplorer = {
+      explore: vi.fn().mockResolvedValue({
+        pages: [cascadePageResult()],
+        blockers: [],
+        warnings: [],
+        budgetExhausted: false
+      })
+    };
+    fixture.domainService.discoverPageModel({
+      projectId: fixture.systemId,
+      route,
+      name: "Orders seed",
+      authProfileId: "",
+      domText: "Orders seed",
+      captureMode: "manual",
+      targetUrl: route
+    });
+    const coordinator = new SystemExplorationCoordinator({
+      repository: fixture.repository,
+      service: fixture.domainService,
+      knowledgeService: fixture.knowledgeService,
+      workDir: fixture.workDir,
+      explorer: firstExplorer
+    });
+
+    const first = await coordinator.explore({
+      knowledgeProjectId: fixture.projectId,
+      systemId: fixture.systemId,
+      startUrl: route,
+      explorationMode: "full"
+    });
+    const snapshots = new SystemBrainSnapshotService(fixture.repository);
+    const captured = snapshots.capture({
+      knowledgeProjectId: fixture.projectId,
+      systemId: fixture.systemId,
+      brain: first.brain,
+      explorationIds: [first.exploration.id]
+    });
+    snapshots.confirm(captured.snapshot.id, "tester");
+
+    const changedPage = fixture.domainService.discoverPageModel({
+      projectId: fixture.systemId,
+      route,
+      name: "Orders refreshed",
+      authProfileId: "",
+      domText: "Orders refreshed",
+      captureMode: "manual",
+      targetUrl: route
+    });
+    expect(changedPage.pageModel.version).toBeGreaterThan(1);
+
+    const secondExplorer: SystemExplorer = {
+      explore: vi.fn().mockResolvedValue({
+        pages: [pageResult(route, "Orders refreshed", 0, [])],
+        blockers: [],
+        warnings: [],
+        budgetExhausted: false
+      })
+    };
+    const incrementalCoordinator = new SystemExplorationCoordinator({
+      repository: fixture.repository,
+      service: fixture.domainService,
+      knowledgeService: fixture.knowledgeService,
+      workDir: fixture.workDir,
+      explorer: secondExplorer
+    });
+
+    const second = await incrementalCoordinator.explore({
+      knowledgeProjectId: fixture.projectId,
+      systemId: fixture.systemId,
+      startUrl: route,
+      explorationMode: "incremental"
+    });
+
+    expect(secondExplorer.explore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startUrl: route,
+        targetUrls: [route],
+        followLinks: false
+      })
+    );
+    expect(second.exploration.scope).toEqual(expect.objectContaining({
+      mode: "incremental",
+      baseSnapshotId: captured.snapshot.id,
+      targetRoutes: [route]
+    }));
   });
 
   it("blocks invalid scopes before opening a browser", async () => {

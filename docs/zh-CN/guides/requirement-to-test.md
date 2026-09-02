@@ -170,6 +170,8 @@ RunLedger 提供时间线，ExecutionEvidence 提供步骤证据。Bug 必须关
 
 系统探索还会记录采集过程中发现的浏览器表面。System Brain 可以区分主文档、允许范围内的 iframe、开放 Shadow DOM 和 Wujie-like 容器摘要。安全交互导致 URL 变化时会加入探索队列。表面证据只用于观察，不会授权写操作，也不会静默推断跨 frame 动作。
 
+确认过 System Brain 后，可以通过 `explorationMode=incremental` 执行定向刷新。本次探索会以确认快照为基线，只把 stale、低置信度或尚未覆盖行为的页面路由列为目标；如果没有确认基线，会自动回退为完整探索。使用 `bc_review target=system-brain` 查看稳定页面身份，使用 `bc_review target=system-exploration` 查看本次选择的探索范围。
+
 使用 `bc_review` 并设置 `target=coverage` 查看 TestIntent 执行台账。每条意图都会被归类为 strong-verified、limited、failed、blocked、not-selected 或 superseded。同一响应还会返回来源台账，包含块、需求版本、知识节点、意图、可执行用例、执行证据和未读取附件，并展示 `field`、`workflow`、`state`、`permission`、`integration` 五类维度的必需、已验证和缺失情况。需要验证稳定性时，在 `bc_run mode=requirement-suite` 中使用 `repeatCount`。
 
 ## 10. 恢复或回归

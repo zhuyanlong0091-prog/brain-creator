@@ -78,6 +78,8 @@ System Brain 回答：**选定的真实系统当前如何工作？**
 
 每次刷新 System Brain 都可以生成候选快照。快照使用路由、语义角色和归一化含义确定身份，不使用随机 PageModel ID。通过 `bc_review target=system-brain view=history` 查看历史，通过 `view=diff` 查看两个版本的差异。
 
+页面身份会独立于每次采集记录持久化。查询参数、动态业务数据 ID 和页面展示名称变化不会凭空产生新的语义页面；身份会保留 revision、最新 PageModel、置信度和确认历史。首次接入仍可以执行完整探索，后续调用 `explore-system` 时可设置 `explorationMode=incremental`，只重新探索模型 revision 变化、证据低置信度或尚未被确认快照覆盖行为的页面。实际选中的范围和跳过的页面数量会记录在本次探索中，便于复盘。
+
 只有定位器选择器变化且语义目标和角色保持不变时，才记为 `locator-changed` 并可自动接受。流程、状态转换或接口行为变化会记为 `behavior-changed`，需要复核并重新评估受影响用例。单次未观察到资产不能直接判定系统删除。
 
 确认快照发生行为变化后，引用该 System Brain 的 TestIntent 和 ExecutableCase 会标记为 `stale`，并记录 ChangeSet、原因和时间。`bc_prepare action=reconcile-system-brain` 会把已批准需求语义与观察到的页面、流程、状态转换和接口进行对账；`bc_review target=semantic-binding` 会展示 exact、alias、step-expansion、conditional、missing 和 conflict 结果。测试数据补齐不会把 stale 用例伪装成 ready；需要先确认新快照，再使用 `bc_prepare action=recompile-stale-cases` 增量重编译受影响意图。`bc_review target=system-brain view=diff` 可查看差异，`bc_status` 可查看 stale 数量和运行恢复信息。
