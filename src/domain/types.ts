@@ -1004,6 +1004,8 @@ export type TestIntent = {
   producesEntityRefs?: string[];
   /** Stable business entities required by this case; execution order alone is never enough. */
   consumesEntityRefs?: string[];
+  /** Business scenarios that this intent covers; populated by the scenario portfolio. */
+  scenarioIds?: string[];
   status:
     | "draft"
     | "approved"
@@ -1241,6 +1243,8 @@ export type ExecutableCaseDataOperation = {
   value?: string;
   reference?: string;
   entityReference?: string;
+  /** Stable semantic references for entity dependencies resolved within this case. */
+  dependsOnEntityReferences?: string[];
   lookupQuery?: string;
   secretRef?: string;
   dependsOnProfileIds: string[];

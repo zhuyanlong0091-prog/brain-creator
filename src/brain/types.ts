@@ -187,6 +187,44 @@ export type BusinessScenarioFamily =
   | "data"
   | "integration";
 
+export type ScenarioDataReadiness = "ready" | "creatable" | "blocked";
+
+export type ScenarioDataOperation = {
+  profileId: string;
+  field: string;
+  entityReference?: string;
+  action: "lookup" | "create" | "transition" | "verify" | "cleanup";
+  readiness: ScenarioDataReadiness;
+  dependencyProfileIds: string[];
+  dependencyEntityReferences: string[];
+  cleanup: "none" | "delete-created" | "restore";
+  sourceRefs: string[];
+  reason?: string;
+};
+
+export type ScenarioDataDependency = {
+  profileId: string;
+  entityReference: string;
+  dependsOnProfileIds: string[];
+  dependsOnEntityReferences: string[];
+  sourceRefs: string[];
+};
+
+export type ScenarioDataPlan = {
+  scenarioId: string;
+  systemId?: string;
+  profileIds: string[];
+  entityReferences: string[];
+  operations: ScenarioDataOperation[];
+  dependencies: ScenarioDataDependency[];
+  readiness: ScenarioDataReadiness;
+  missingProfileIds: string[];
+  missingEntityReferences: string[];
+  reasons: string[];
+  sourceRefs: string[];
+  plannedLifecycle: Array<"lookup" | "create" | "transition" | "verify" | "cleanup">;
+};
+
 export type BusinessScenario = {
   id: string;
   knowledgeProjectId: string;
@@ -203,6 +241,8 @@ export type BusinessScenario = {
   expectedBusinessOutcomes: string[];
   sourceRefs: string[];
   testIntentIds?: string[];
+  dataPlan?: ScenarioDataPlan;
+  dataPlans?: ScenarioDataPlan[];
   risk: "low" | "medium" | "high" | "critical";
   status: "draft" | "approved" | "stale" | "blocked";
 };
@@ -289,6 +329,19 @@ export type BusinessEntityInstance = {
   createdAt: string;
   updatedAt: string;
   releasedAt?: string;
+  lifecycleEvents?: TestDataLifecycleEvent[];
+};
+
+export type TestDataLifecycleEvent = {
+  id: string;
+  operation: "lookup" | "create" | "transition" | "verify" | "cleanup" | "external-record" | "external-release";
+  status: "found" | "created" | "transitioned" | "verified" | "cleaned";
+  provider: string;
+  reference: string;
+  entityReference?: string;
+  sourceRefs: string[];
+  startedAt: string;
+  completedAt: string;
 };
 
 export type TestDataDependency = {

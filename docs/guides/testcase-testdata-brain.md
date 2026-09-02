@@ -59,6 +59,16 @@ The provider receives the semantic entity reference and the selected `systemId`.
 
 The built-in provider is only a deterministic fixture, not a universal adapter for arbitrary business systems. A real integration must supply system-specific lookup, CRUD, workflow transition, and cleanup behavior, or the host Agent must perform the approved operation and submit evidence through the Facade.
 
+## Scenario Data Plans
+
+Each `BusinessScenario` receives a data plan before case compilation. The plan records selected profiles, stable entity references, profile dependencies, and one of three readiness states:
+
+- `ready`: existing entities or deterministic field values are available;
+- `creatable`: an approved create operation and cleanup policy are required;
+- `blocked`: a profile, entity reference, dependency, or cleanup policy is missing.
+
+When assessed for a target system, the plan carries that system context and is never reused for another system. Review it through `bc_review target=testdata`. Entity lifecycle events record lookup, create, transition, verify, cleanup, and host-agent observation, including the provider and source references.
+
 ## Assertion Contracts
 
 Assertions are compiled separately from action text. Each assertion must have:

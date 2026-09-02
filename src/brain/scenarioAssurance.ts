@@ -12,6 +12,7 @@ import type {
   BusinessScenario,
   EvaluationProviderDescriptor,
   ScenarioAssuranceContract,
+  ScenarioDataPlan,
   ScenarioTrustRecord,
   SemanticBinding,
   SystemBrainSnapshot
@@ -36,6 +37,7 @@ export type ScenarioAssuranceInput = {
   semanticBindings?: SemanticBinding[];
   dataProfiles?: TestDataProfile[];
   readyDataProfileIds?: string[];
+  dataPlan?: ScenarioDataPlan;
   providerIndependence?: ScenarioAssuranceContract["independence"];
 };
 
@@ -312,16 +314,21 @@ export function buildScenarioAssurance(input: ScenarioAssuranceInput): ScenarioA
   const missingData = input.scenario.testDataNeeds.filter(
     (profileId) => !dataProfiles.some((profile) => profile.id === profileId)
   );
-  const testDataReadiness: ScenarioAssuranceContract["testDataReadiness"] = input.scenario.testDataNeeds.length === 0
-    ? "ready"
-    : missingData.length > 0
-      ? "blocked"
-      : input.scenario.testDataNeeds.every((profileId) => input.readyDataProfileIds?.includes(profileId))
-        ? "ready"
-        : "creatable";
+  const testDataReadiness: ScenarioAssuranceContract["testDataReadiness"] = input.dataPlan
+    ? input.dataPlan.readiness
+    : input.scenario.testDataNeeds.length === 0
+      ? "ready"
+      : missingData.length > 0
+        ? "blocked"
+        : input.scenario.testDataNeeds.every((profileId) => input.readyDataProfileIds?.includes(profileId))
+          ? "ready"
+          : "creatable";
   if (missingData.length > 0) {
     reasons.push(`Missing test data profiles: ${missingData.join(", ")}.`);
     requiredActions.push("Create or bind the required test data before execution.");
+  } else if (input.dataPlan?.readiness === "blocked") {
+    reasons.push(...input.dataPlan.reasons);
+    requiredActions.push("Resolve the scenario data plan before execution.");
   } else if (testDataReadiness === "creatable") {
     requiredActions.push("Prepare the generated test data profiles before execution.");
   }

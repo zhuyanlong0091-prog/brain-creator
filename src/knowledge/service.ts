@@ -97,6 +97,7 @@ import {
   type MutationOutcome,
   type ScenarioTrustUpdate
 } from "../brain/scenarioAssurance.js";
+import { buildScenarioDataPlan } from "../brain/testdata.js";
 import {
   evaluateScenarioExecutionTrust,
   type ScenarioExecutionTrustResult
@@ -1572,6 +1573,24 @@ export class KnowledgeService {
     const dataProfiles = this.repository.testDataProfiles.filter(
       (profile) => profile.requirementSetId === input.requirementSetId
     );
+    const dataPlans = scenarios.map((scenario) => {
+      const dataPlan = buildScenarioDataPlan({
+        scenario,
+        profiles: dataProfiles,
+        systemId: input.systemId,
+        entities: input.systemId
+          ? this.repository.businessEntityInstances.filter(
+              (entity) => entity.systemId === input.systemId
+            )
+          : []
+      });
+      scenario.dataPlan = dataPlan;
+      scenario.dataPlans = [
+        ...(scenario.dataPlans ?? []).filter((existing) => existing.systemId !== input.systemId),
+        dataPlan
+      ];
+      return dataPlan;
+    });
     const bindings = this.repository.semanticBindings.filter(
       (binding) => binding.requirementSetId === input.requirementSetId && (!input.systemId || binding.systemId === input.systemId)
     );
@@ -1581,6 +1600,7 @@ export class KnowledgeService {
       systemSnapshot,
       semanticBindings: bindings,
       dataProfiles,
+      dataPlan: dataPlans.find((plan) => plan.scenarioId === scenario.id),
       providerIndependence: input.providerIndependence
     }));
     for (const contract of contracts) {
@@ -1604,6 +1624,7 @@ export class KnowledgeService {
       requirementSetId: input.requirementSetId,
       systemId: input.systemId,
       contracts,
+      dataPlans,
       summary: {
         total: contracts.length,
         pass: contracts.filter((contract) => contract.verdict === "pass").length,
@@ -1661,7 +1682,27 @@ export class KnowledgeService {
     testIntents: TestIntent[];
     dataProfiles: TestDataProfile[];
   }) {
-    const scenarios = buildBusinessScenarios(input);
+    const scenarios = buildBusinessScenarios(input).map((scenario) => ({
+      ...scenario,
+      dataPlan: buildScenarioDataPlan({
+        scenario,
+        profiles: input.dataProfiles,
+        entities: []
+      })
+    }));
+    const scenarioIdsByIntent = new Map<string, string[]>();
+    for (const scenario of scenarios) {
+      for (const intentId of scenario.testIntentIds ?? []) {
+        scenarioIdsByIntent.set(intentId, [
+          ...(scenarioIdsByIntent.get(intentId) ?? []),
+          scenario.id
+        ]);
+      }
+    }
+    for (const intent of input.testIntents) {
+      const scenarioIds = scenarioIdsByIntent.get(intent.id) ?? [];
+      intent.scenarioIds = uniqueStrings(scenarioIds);
+    }
     const activeIds = new Set(scenarios.map((scenario) => scenario.id));
     for (const existing of this.repository.businessScenarios.filter(
       (scenario) => scenario.requirementSetId === input.requirementSetId

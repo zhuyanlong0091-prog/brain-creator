@@ -6035,9 +6035,31 @@ function knowledgeReview(
         dependencies: graph.dependencies
       };
     });
+    const scenarioPlans = context.repository.businessScenarios
+      .filter((scenario) =>
+        scenario.knowledgeProjectId === projectId &&
+        (!requestedSystemId ||
+          scenario.dataPlans?.some((plan) => plan.systemId === requestedSystemId) ||
+          scenario.dataPlan?.systemId === requestedSystemId)
+      )
+      .flatMap((scenario) => {
+        const plans = scenario.dataPlans?.length
+          ? scenario.dataPlans
+          : scenario.dataPlan
+            ? [scenario.dataPlan]
+            : [];
+        return plans
+          .filter((plan) => !requestedSystemId || plan.systemId === requestedSystemId)
+          .map((plan) => ({
+            scenarioId: scenario.id,
+            title: scenario.title,
+            plan
+          }));
+      });
     return {
       project,
       systems,
+      scenarioPlans,
       totals: {
         entities: systems.reduce((total, item) => total + item.entities.length, 0),
         dependencies: systems.reduce((total, item) => total + item.dependencies.length, 0)
