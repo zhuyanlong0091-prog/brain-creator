@@ -4,9 +4,12 @@ import type {
   KnowledgeNodeType,
   LocatorPoint
 } from "../domain/types.js";
+import { canonicalPageIdentityKey } from "../shared/pageIdentity.js";
 
 export type SystemBrainPage = {
   pageModelId: string;
+  pageIdentityId?: string;
+  pageIdentityKey?: string;
   name: string;
   route: string;
   version: number;
@@ -170,12 +173,18 @@ export function buildSystemBrain(
   const sessionIds = new Set(sessions.map((session) => session.id));
   const apiFlows = repository.apiFlows.filter((flow) => sessionIds.has(flow.sessionId));
   const pages = pageModels.map((page): SystemBrainPage => {
+    const pageIdentityKey = canonicalPageIdentityKey(page.route);
+    const pageIdentity = repository.systemPageIdentities.find(
+      (identity) => identity.systemId === systemId && identity.identityKey === pageIdentityKey
+    );
     const locators = repository.locatorPoints.filter(
       (locator) => locator.pageModelId === page.id
     );
     const probes = repository.probeResults.filter((probe) => probe.pageModelId === page.id);
     return {
       pageModelId: page.id,
+      ...(pageIdentity?.id ? { pageIdentityId: pageIdentity.id } : {}),
+      pageIdentityKey,
       name: page.name,
       route: page.route,
       version: page.version,
@@ -869,13 +878,13 @@ function latestPageModels<T extends { route: string; version: number; updatedAt:
 ) {
   const latest = new Map<string, T>();
   for (const page of pages) {
-    const current = latest.get(page.route);
+    const current = latest.get(canonicalPageIdentityKey(page.route));
     if (
       !current ||
       page.version > current.version ||
       (page.version === current.version && page.updatedAt > current.updatedAt)
     ) {
-      latest.set(page.route, page);
+      latest.set(canonicalPageIdentityKey(page.route), page);
     }
   }
   return [...latest.values()];

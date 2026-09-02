@@ -191,6 +191,40 @@ describe("System Brain snapshots", () => {
     ]));
     expect(repository.persist).toHaveBeenCalled();
   });
+
+  it("confirms the stable page identities represented by a snapshot", () => {
+    const repository = {
+      ...store(),
+      systemPageIdentities: [{
+        id: "identity-orders",
+        systemId: "system-orders",
+        identityKey: "page:/orders",
+        canonicalRoute: "/orders",
+        semanticRole: "list",
+        latestPageModelId: "page-1",
+        revision: 1,
+        status: "candidate" as const,
+        sourceRefs: ["page-model:page-1"],
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z"
+      }]
+    };
+    const service = new SystemBrainSnapshotService(repository);
+    const captured = service.capture({
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      brain: brain()
+    });
+
+    service.confirm(captured.snapshot.id, "tester");
+
+    expect(repository.systemPageIdentities[0]).toEqual(expect.objectContaining({
+      identityKey: "page:/orders",
+      status: "confirmed",
+      lastConfirmedRevision: 1,
+      confirmedBy: "tester"
+    }));
+  });
 });
 
 function snapshot(id: string, assets: ReturnType<typeof systemBrainToSnapshotAssets>) {

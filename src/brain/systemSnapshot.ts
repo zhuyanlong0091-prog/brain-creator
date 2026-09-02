@@ -2,20 +2,23 @@ import { createHash } from "node:crypto";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type { SystemBrain } from "../knowledge/systemBrain.js";
 import { id } from "../shared/id.js";
+import { canonicalPageIdentityKey, canonicalPageRoute } from "../shared/pageIdentity.js";
 import { canonicalActionAlias, normalizeSemanticTerm } from "./semanticSpine.js";
+import { pageSemanticRole } from "./systemPageIdentity.js";
 import type {
   SystemBrainChange,
   SystemBrainChangeSet,
   SystemBrainSnapshot,
   SystemBrainSnapshotAsset,
   SystemBrainSnapshotAssetKind,
-  SystemBrainSnapshotStatus
+  SystemBrainSnapshotStatus,
+  SystemPageIdentity
 } from "./types.js";
 
 export type SystemBrainSnapshotStore = Pick<
   InMemoryBrainCreatorRepository,
   "systemBrainSnapshots" | "systemBrainChangeSets"
-> & { persist(): void };
+> & { systemPageIdentities?: SystemPageIdentity[]; persist(): void };
 
 export type CreateSystemBrainSnapshotInput = {
   knowledgeProjectId: string;
@@ -88,6 +91,24 @@ export class SystemBrainSnapshotService {
     snapshot.status = "confirmed";
     snapshot.confirmedAt = now;
     snapshot.confirmedBy = confirmedBy;
+    const identities = this.store.systemPageIdentities;
+    if (identities) {
+      const pageIdentityKeys = new Set(
+        snapshot.assets
+          .filter((asset) => asset.kind === "page")
+          .map((asset) => String(asset.metadata.identityKey ?? asset.semanticId))
+      );
+      for (const identity of identities) {
+        if (identity.systemId !== snapshot.systemId || !pageIdentityKeys.has(identity.identityKey)) {
+          continue;
+        }
+        identity.status = "confirmed";
+        identity.lastConfirmedRevision = identity.revision;
+        identity.confirmedAt = now;
+        identity.confirmedBy = confirmedBy;
+        identity.updatedAt = now;
+      }
+    }
     this.store.persist();
     return snapshot;
   }
@@ -143,14 +164,22 @@ export function systemBrainToSnapshotAssets(brain: SystemBrain): SystemBrainSnap
   };
 
   for (const page of brain.pages) {
-    const pageKey = normalizeRoute(page.route);
+    const pageKey = canonicalPageRoute(page.route);
+    const identityKey = canonicalPageIdentityKey(page.route);
     add(
       "page",
-      `page:${pageKey}`,
+      identityKey,
       page.name,
       { route: pageKey, name: normalizeSemanticTerm(page.name) },
       page.sourceRefs,
-      { route: page.route, pageModelId: page.pageModelId, version: page.version }
+      {
+        route: page.route,
+        canonicalRoute: pageKey,
+        identityKey,
+        semanticRole: pageSemanticRole(page.name),
+        pageModelId: page.pageModelId,
+        version: page.version
+      }
     );
     for (const locator of page.locators) {
       const label = locator.name || locator.text || locator.role;

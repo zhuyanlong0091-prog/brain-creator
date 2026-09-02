@@ -280,6 +280,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         })
         .optional(),
       startUrl: z.string().url().optional(),
+      explorationMode: z.enum(["full", "incremental"]).default("full"),
       maxPages: z.number().int().min(1).max(25).optional(),
       maxDepth: z.number().int().min(0).max(4).optional(),
       maxDurationMs: z.number().int().min(5_000).max(300_000).optional(),

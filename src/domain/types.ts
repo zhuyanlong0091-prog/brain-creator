@@ -247,6 +247,7 @@ export type SystemExploration = {
   status: "running" | "completed" | "partial" | "blocked" | "cancelled";
   interactionMode: "off" | "safe";
   scenario?: ExplorationScenario;
+  scope?: SystemExplorationScope;
   budget: SystemExplorationBudget;
   pageModelIds: string[];
   navigationEdges: SystemExplorationNavigationEdge[];
@@ -257,6 +258,16 @@ export type SystemExploration = {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+};
+
+export type SystemExplorationScope = {
+  mode: "full" | "incremental";
+  baseSnapshotId?: string;
+  targetPageIdentityIds: string[];
+  targetRoutes: string[];
+  reasons: string[];
+  skippedPageCount: number;
+  reason?: string;
 };
 
 export type TrainingSession = {
