@@ -47,8 +47,9 @@ export function planTestData(
       .filter(([, matches]) => matches.length > 1)
       .map(([field]) => field)
   );
+  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
   const operations = profiles.map((profile) =>
-    planProfile(profile, fields, duplicateFields)
+    planProfile(profile, fields, duplicateFields, profilesById)
   );
   const dependencyOrder = topologicalOrder(operations);
   const ordered =
@@ -150,7 +151,8 @@ export function confirmTestDataPlan(
 function planProfile(
   profile: TestDataProfile,
   fields: Map<string, TestDataProfile[]>,
-  duplicateFields: Set<string>
+  duplicateFields: Set<string>,
+  profilesById: Map<string, TestDataProfile>
 ): ExecutableCaseDataOperation {
   const dependencies = (profile.dependsOnFields ?? []).flatMap((field) => {
     const matches = fields.get(normalize(field)) ?? [];
@@ -167,6 +169,9 @@ function planProfile(
       ? { entityReference: profile.entityReference }
       : {}),
     dependsOnProfileIds: dependencies,
+    dependsOnEntityReferences: dependencies
+      .map((profileId) => profilesById.get(profileId)?.entityReference)
+      .filter((reference): reference is string => Boolean(reference)),
     cleanup: profile.cleanup ?? "none",
     constraints: profile.constraints,
     sourceRefs: unique([

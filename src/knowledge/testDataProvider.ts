@@ -518,6 +518,9 @@ export class TestDataProviderService {
       entityType: entityTypeFromReference(lease.reference) ?? task.field,
       reference: lease.reference,
       entityReference: task.entityReference,
+      values: task.field && lease.value !== undefined
+        ? { [task.field]: lease.value }
+        : undefined,
       sourceRefs: [...task.sourceRefs, ...sourceRefs]
     });
     const operation = executableCase.dataPlan?.operations.find(

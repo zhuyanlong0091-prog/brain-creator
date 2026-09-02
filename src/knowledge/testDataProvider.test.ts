@@ -595,6 +595,7 @@ describe("TestDataProviderService", () => {
           strategy: "existing-reference",
           decision: "create",
           status: "needs-resolution",
+          entityReference: "employee:semantic",
           dependsOnProfileIds: [],
           cleanup: "delete-created",
           constraints: [],
@@ -606,6 +607,7 @@ describe("TestDataProviderService", () => {
           strategy: "existing-reference",
           decision: "create",
           status: "needs-resolution",
+          entityReference: "offer:semantic",
           dependsOnProfileIds: ["profile-employee"],
           cleanup: "delete-created",
           constraints: [],
@@ -630,6 +632,7 @@ describe("TestDataProviderService", () => {
       status: "succeeded",
       decision: "create",
       reference: "employee:001",
+      value: "testperson001",
       sourceRefs: ["evidence:employee-created"]
     });
     expect(employee.lease?.reference).toBe("employee:001");
@@ -651,8 +654,17 @@ describe("TestDataProviderService", () => {
 
     expect(fixture.testDataBrain.graph(fixture.system.id)).toEqual(expect.objectContaining({
       entities: expect.arrayContaining([
-        expect.objectContaining({ entityKey: "employee:001", status: "active" }),
-        expect.objectContaining({ entityKey: "offer:001", status: "active" })
+        expect.objectContaining({
+          entityKey: "employee:001",
+          entityReference: "employee:semantic",
+          values: { Employee: "testperson001" },
+          status: "active"
+        }),
+        expect.objectContaining({
+          entityKey: "offer:001",
+          entityReference: "offer:semantic",
+          status: "active"
+        })
       ]),
       dependencies: [expect.objectContaining({
         fromReference: "offer:001",

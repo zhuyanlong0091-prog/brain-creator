@@ -47,14 +47,35 @@ describe("scenario assurance facade", () => {
     });
     const design = await context.knowledgeService.generateTestDesign(ingested.requirementSet.id);
     expect(design.businessScenarios.length).toBeGreaterThan(0);
+    expect(design.businessScenarios.every((scenario) => scenario.dataPlan)).toBe(true);
+    expect(design.businessScenarios.some((scenario) =>
+      scenario.testIntentIds?.some((intentId) =>
+        design.testIntents.some((intent) =>
+          intent.id === intentId && intent.scenarioIds?.includes(scenario.id)
+        )
+      )
+    )).toBe(true);
 
     const assessed = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
       action: "assess-scenarios",
       knowledgeProjectId: project.id,
       requirementSetId: ingested.requirementSet.id
-    })) as { status: string; summary: { blocked: number } };
+    })) as { status: string; summary: { blocked: number }; dataPlans: unknown[] };
     expect(assessed.status).toBe("blocked");
     expect(assessed.summary.blocked).toBeGreaterThan(0);
+    expect(assessed.dataPlans).toHaveLength(design.businessScenarios.length);
+
+    const testDataReview = dataOf(await handleBrainCreatorTool(context, "bc_review", {
+      target: "testdata",
+      knowledgeProjectId: project.id
+    })) as { scenarioPlans: Array<{ plan: { scenarioId: string } }> };
+    expect(testDataReview.scenarioPlans).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          plan: expect.objectContaining({ scenarioId: design.businessScenarios[0].id })
+        })
+      ])
+    );
 
     const rejectedStrongRun = await handleBrainCreatorTool(context, "bc_prepare", {
       action: "record-scenario-run",
