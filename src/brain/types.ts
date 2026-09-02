@@ -406,3 +406,145 @@ export type SystemBrainChangeSet = {
   affectedExecutableCaseIds?: string[];
   createdAt: string;
 };
+
+export type EvaluationProvider =
+  | "builtin"
+  | "host-agent"
+  | "host-skill"
+  | "claude"
+  | "codex";
+
+export type EvaluationTrial = {
+  id: string;
+  comparisonGroupId: string;
+  knowledgeProjectId: string;
+  systemId?: string;
+  requirementSourceId: string;
+  sourceSnapshotId: string;
+  sourceRevision: number;
+  sourceHash: string;
+  provider: EvaluationProvider;
+  workspacePath: string;
+  storePath: string;
+  codeRevision: string;
+  runtimeVersions: Record<string, string>;
+  latestProjectionManifestId: string;
+  status: "active" | "invalidated" | "completed";
+  invalidationReasons: string[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
+export type SourceSnapshot = {
+  id: string;
+  trialId: string;
+  sourceId: string;
+  knowledgeProjectId: string;
+  requirementSetId?: string;
+  sourceType: string;
+  sourceRevision: number;
+  contentHash: string;
+  sourceLocatorHash: string;
+  blockCount: number;
+  attachmentCount: number;
+  warningCount: number;
+  createdAt: string;
+};
+
+export type ProjectionManifest = {
+  id: string;
+  trialId: string;
+  previousManifestId?: string;
+  operation: string;
+  projectionHash: string;
+  assetCounts: Record<string, number>;
+  evidenceRefs: string[];
+  status: "current" | "drifted";
+  createdAt: string;
+};
+
+export type EvaluationInterventionCategory =
+  | "controlled-facade-write"
+  | "user-clarification"
+  | "manual-store-write"
+  | "source-change"
+  | "code-change"
+  | "product-source-change";
+
+export type InterventionRecord = {
+  id: string;
+  trialId: string;
+  category: EvaluationInterventionCategory;
+  actor: string;
+  note: string;
+  evidenceRefs: string[];
+  invalidatesTrial: boolean;
+  createdAt: string;
+};
+
+export type StageEvalRecord = {
+  id: string;
+  trialId?: string;
+  stage: string;
+  subjectRefs: string[];
+  inputHashes: string[];
+  supportRefs: string[];
+  counterEvidenceRefs: string[];
+  openQuestions: string[];
+  verdict: BrainEvalResult["verdict"];
+  reasons: string[];
+  requiredActions: string[];
+  evaluator: string;
+  policyVersion: string;
+  status: "current" | "stale";
+  createdAt: string;
+  staleAt?: string;
+};
+
+export type ApprovalReceipt = {
+  id: string;
+  assetRefs: string[];
+  assetHash: string;
+  method: "host-attested" | "challenge-response";
+  approvedBy: string;
+  hostMessageId?: string;
+  hostMessageHash?: string;
+  challengeHash?: string;
+  createdAt: string;
+};
+
+export type ConformanceVerdict =
+  | "conform"
+  | "nonconform"
+  | "inconclusive"
+  | "context-mismatch"
+  | "not-applicable"
+  | "requirement-review";
+
+export type ConformanceResult = {
+  id: string;
+  scenarioId: string;
+  executionEvidenceId: string;
+  verdict: ConformanceVerdict;
+  expectationRefs: string[];
+  observationRefs: string[];
+  executionRefs: string[];
+  reasons: string[];
+  createdAt: string;
+};
+
+export type SystemPageIdentity = {
+  id: string;
+  systemId: string;
+  identityKey: string;
+  canonicalRoute: string;
+  semanticRole: string;
+  contextSignature?: string;
+  latestPageModelId: string;
+  revision: number;
+  status: "candidate" | "confirmed" | "superseded";
+  sourceRefs: string[];
+  createdAt: string;
+  updatedAt: string;
+};

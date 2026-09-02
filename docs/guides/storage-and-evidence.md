@@ -1,10 +1,10 @@
 # Storage and evidence
 
-Brain Creator uses a local file repository. The default runtime store is `.brain-creator/store/`, a schema 20 sharded directory. The older `.brain-creator/local-assets.json` file remains a migration source and compatibility format; it is not the default write target for a new MCP context.
+Brain Creator uses a local file repository. The default runtime store is `.brain-creator/store/`, a schema 21 sharded directory. The older `.brain-creator/local-assets.json` file remains a migration source and compatibility format; it is not the default write target for a new MCP context.
 
 ## Migration
 
-On first startup, Brain Creator checks for `local-assets.json` when the schema 20 manifest is absent. It validates the JSON, creates a timestamped `local-assets.json.backup-*` file, writes the sharded store through temporary files and atomic renames, and then validates the new manifest. Existing schema 19 stores receive a separate migration snapshot under `store/backups/`. A failed migration does not delete the legacy source or promote legacy cases to a trusted scenario state.
+On first startup, Brain Creator checks for `local-assets.json` when the schema 21 manifest is absent. It validates the JSON, creates a timestamped `local-assets.json.backup-*` file, writes the sharded store through temporary files and atomic renames, and then validates the new manifest. Existing schema 19 and schema 20 stores receive a separate migration snapshot under `store/backups/`. A failed migration does not delete the legacy source or promote legacy cases to a trusted scenario state.
 
 The main paths are:
 
@@ -18,10 +18,18 @@ The main paths are:
   runs/<suite-run-id>/ledger.jsonl
   collections/systemBrainSnapshots.json
   collections/systemBrainChangeSets.json
+  collections/evaluationTrials.json
+  collections/sourceSnapshots.json
+  collections/projectionManifests.json
+  collections/interventionRecords.json
   indexes/asset-index.json
 ```
 
 Set `BRAIN_CREATOR_STORE_DIR` to use another shard directory. `BRAIN_CREATOR_DATA_FILE` remains useful as the legacy migration source. Do not edit either file or directory by hand while Brain Creator is running; use the Facade control plane.
+
+## Evaluation integrity
+
+An L3 A/B or historical accuracy evaluation must start as an `EvaluationTrial`. The Trial freezes the requirement source revision and hash, code revision, runtime versions, workspace, and isolated Store path. After a controlled Facade operation changes the evaluated projection, record a checkpoint with the previous manifest ID and evidence references. Source changes, code changes, manual Store edits, or unexplained projection drift invalidate the Trial. Review the immutable source snapshot, manifest chain, and intervention log with `bc_review target=evaluation-trial`.
 
 ## Doctor checks
 

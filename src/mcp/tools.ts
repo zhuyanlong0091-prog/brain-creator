@@ -138,6 +138,11 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       "Requirement-first facade for ingesting sources, confirming Requirement Eval, atomically approving a baseline with bounded first-system onboarding, reviewing or rolling back historical execution diagnoses, exploring and reconciling System Brain evidence, incrementally recompiling stale cases, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, and confirming immutable execution preflight snapshots.",
     inputSchema: z.object({
       action: z.enum([
+        "start-evaluation-trial",
+        "checkpoint-evaluation-trial",
+        "validate-evaluation-trial",
+        "complete-evaluation-trial",
+        "record-evaluation-intervention",
         "ingest-requirement",
         "refresh-requirement",
         "analyze-attachments",
@@ -182,6 +187,25 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "recompile-stale-cases"
       ]),
       knowledgeProjectId: z.string().optional(),
+      evaluationTrialId: z.string().optional(),
+      comparisonGroupId: z.string().optional(),
+      evaluationProvider: z.enum(["builtin", "host-agent", "host-skill", "claude", "codex"]).optional(),
+      evaluationWorkspacePath: z.string().optional(),
+      evaluationStorePath: z.string().optional(),
+      codeRevision: z.string().optional(),
+      runtimeVersions: z.record(z.string(), z.string()).default({}),
+      previousProjectionManifestId: z.string().optional(),
+      checkpointOperation: z.string().optional(),
+      interventionCategory: z.enum([
+        "controlled-facade-write",
+        "user-clarification",
+        "manual-store-write",
+        "source-change",
+        "code-change",
+        "product-source-change"
+      ]).optional(),
+      interventionActor: z.string().optional(),
+      interventionNote: z.string().optional(),
       systemBrainSnapshotId: z.string().optional(),
       systemBrainChangeSetId: z.string().optional(),
       semanticBindingId: z.string().optional(),
@@ -605,6 +629,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       "Facade review entry for onboarding plans, document and requirement suite runs, run-ledger timelines, execution diagnoses, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain snapshots and semantic bindings, and system exploration runs.",
     inputSchema: z.object({
       target: z.enum([
+        "evaluation-trial",
         "suite-run",
         "case",
         "bug",
@@ -634,6 +659,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "case-dependency"
       ]),
       knowledgeProjectId: z.string().optional(),
+      comparisonGroupId: z.string().optional(),
       requirementSetId: z.string().optional(),
       systemId: z.string().optional(),
       systemName: z.string().optional(),

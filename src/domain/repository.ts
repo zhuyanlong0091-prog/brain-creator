@@ -63,7 +63,12 @@ import type {
   BrainTask,
   BusinessEntityInstance,
   BusinessScenario,
+  ApprovalReceipt,
+  ConformanceResult,
+  EvaluationTrial,
+  InterventionRecord,
   OnboardingPlan,
+  ProjectionManifest,
   ScenarioAssuranceContract,
   ScenarioTrustRecord,
   SemanticAlias,
@@ -72,12 +77,15 @@ import type {
   SemanticRelation,
   SystemBrainChangeSet,
   SystemBrainSnapshot,
+  SystemPageIdentity,
+  SourceSnapshot,
+  StageEvalRecord,
   TestDataDependency
 } from "../brain/types.js";
 
-export const CURRENT_REPOSITORY_SCHEMA_VERSION = 20;
-export const SHARDED_REPOSITORY_SCHEMA_VERSION = 20;
-const LEGACY_SHARDED_REPOSITORY_SCHEMA_VERSIONS = new Set([17, 18, 19]);
+export const CURRENT_REPOSITORY_SCHEMA_VERSION = 21;
+export const SHARDED_REPOSITORY_SCHEMA_VERSION = 21;
+const LEGACY_SHARDED_REPOSITORY_SCHEMA_VERSIONS = new Set([17, 18, 19, 20]);
 const OPTIONAL_LEGACY_COLLECTIONS = new Set([
   "attachmentAnalyses",
   "workflowModels",
@@ -101,7 +109,15 @@ const OPTIONAL_LEGACY_COLLECTIONS = new Set([
   "businessScenarios",
   "scenarioAssuranceContracts",
   "scenarioTrustRecords",
-  "onboardingPlans"
+  "onboardingPlans",
+  "evaluationTrials",
+  "sourceSnapshots",
+  "projectionManifests",
+  "interventionRecords",
+  "stageEvalRecords",
+  "approvalReceipts",
+  "conformanceResults",
+  "systemPageIdentities"
 ]);
 
 export function shardedRepositoryCollectionKeys() {
@@ -173,6 +189,14 @@ export class InMemoryBrainCreatorRepository {
   testDataDependencies: TestDataDependency[] = [];
   systemBrainSnapshots: SystemBrainSnapshot[] = [];
   systemBrainChangeSets: SystemBrainChangeSet[] = [];
+  evaluationTrials: EvaluationTrial[] = [];
+  sourceSnapshots: SourceSnapshot[] = [];
+  projectionManifests: ProjectionManifest[] = [];
+  interventionRecords: InterventionRecord[] = [];
+  stageEvalRecords: StageEvalRecord[] = [];
+  approvalReceipts: ApprovalReceipt[] = [];
+  conformanceResults: ConformanceResult[] = [];
+  systemPageIdentities: SystemPageIdentity[] = [];
 
   persist() {
     return;
@@ -258,6 +282,14 @@ export class InMemoryBrainCreatorRepository {
     this.testDataDependencies = [];
     this.systemBrainSnapshots = [];
     this.systemBrainChangeSets = [];
+    this.evaluationTrials = [];
+    this.sourceSnapshots = [];
+    this.projectionManifests = [];
+    this.interventionRecords = [];
+    this.stageEvalRecords = [];
+    this.approvalReceipts = [];
+    this.conformanceResults = [];
+    this.systemPageIdentities = [];
     this.persist();
   }
 }
@@ -328,6 +360,14 @@ export type RepositorySnapshot = Pick<
   | "testDataDependencies"
   | "systemBrainSnapshots"
   | "systemBrainChangeSets"
+  | "evaluationTrials"
+  | "sourceSnapshots"
+  | "projectionManifests"
+  | "interventionRecords"
+  | "stageEvalRecords"
+  | "approvalReceipts"
+  | "conformanceResults"
+  | "systemPageIdentities"
 >;
 
 export class JsonFileBrainCreatorRepository extends InMemoryBrainCreatorRepository {
@@ -654,7 +694,15 @@ function snapshotRepository(
     businessEntityInstances: repository.businessEntityInstances,
     testDataDependencies: repository.testDataDependencies,
     systemBrainSnapshots: repository.systemBrainSnapshots,
-    systemBrainChangeSets: repository.systemBrainChangeSets
+    systemBrainChangeSets: repository.systemBrainChangeSets,
+    evaluationTrials: repository.evaluationTrials,
+    sourceSnapshots: repository.sourceSnapshots,
+    projectionManifests: repository.projectionManifests,
+    interventionRecords: repository.interventionRecords,
+    stageEvalRecords: repository.stageEvalRecords,
+    approvalReceipts: repository.approvalReceipts,
+    conformanceResults: repository.conformanceResults,
+    systemPageIdentities: repository.systemPageIdentities
   };
 }
 
@@ -783,6 +831,14 @@ function applyRepositorySnapshot(
     repository.testDataDependencies = snapshot.testDataDependencies ?? [];
     repository.systemBrainSnapshots = snapshot.systemBrainSnapshots ?? [];
     repository.systemBrainChangeSets = snapshot.systemBrainChangeSets ?? [];
+    repository.evaluationTrials = snapshot.evaluationTrials ?? [];
+    repository.sourceSnapshots = snapshot.sourceSnapshots ?? [];
+    repository.projectionManifests = snapshot.projectionManifests ?? [];
+    repository.interventionRecords = snapshot.interventionRecords ?? [];
+    repository.stageEvalRecords = snapshot.stageEvalRecords ?? [];
+    repository.approvalReceipts = snapshot.approvalReceipts ?? [];
+    repository.conformanceResults = snapshot.conformanceResults ?? [];
+    repository.systemPageIdentities = snapshot.systemPageIdentities ?? [];
 }
 
 function collectionKeys(): Array<Exclude<keyof RepositorySnapshot, "schemaVersion">> {
@@ -800,7 +856,9 @@ function collectionKeys(): Array<Exclude<keyof RepositorySnapshot, "schemaVersio
     "brainEvents", "semanticConcepts", "semanticAliases", "semanticRelations", "semanticBindings",
     "businessScenarios", "scenarioAssuranceContracts", "scenarioTrustRecords", "onboardingPlans", "businessEntityInstances",
     "testDataDependencies",
-    "systemBrainSnapshots", "systemBrainChangeSets"
+    "systemBrainSnapshots", "systemBrainChangeSets", "evaluationTrials", "sourceSnapshots",
+    "projectionManifests", "interventionRecords", "stageEvalRecords", "approvalReceipts",
+    "conformanceResults", "systemPageIdentities"
   ];
 }
 
@@ -985,6 +1043,35 @@ function systemAssets(repository: InMemoryBrainCreatorRepository, systemId: stri
     ),
     systemBrainChangeSets: repository.systemBrainChangeSets.filter(
       (item) => item.systemId === systemId
+    ),
+    evaluationTrials: repository.evaluationTrials.filter(
+      (item) =>
+        knowledgeProjectIds.has(item.knowledgeProjectId) &&
+        (!item.systemId || item.systemId === systemId)
+    ),
+    sourceSnapshots: repository.sourceSnapshots.filter((item) =>
+      repository.evaluationTrials.some(
+        (trial) =>
+          trial.id === item.trialId &&
+          knowledgeProjectIds.has(trial.knowledgeProjectId) &&
+          (!trial.systemId || trial.systemId === systemId)
+      )
+    ),
+    projectionManifests: repository.projectionManifests.filter((item) =>
+      repository.evaluationTrials.some(
+        (trial) =>
+          trial.id === item.trialId &&
+          knowledgeProjectIds.has(trial.knowledgeProjectId) &&
+          (!trial.systemId || trial.systemId === systemId)
+      )
+    ),
+    interventionRecords: repository.interventionRecords.filter((item) =>
+      repository.evaluationTrials.some(
+        (trial) =>
+          trial.id === item.trialId &&
+          knowledgeProjectIds.has(trial.knowledgeProjectId) &&
+          (!trial.systemId || trial.systemId === systemId)
+      )
     )
   };
 }
@@ -1032,7 +1119,11 @@ function buildAssetIndex(repository: InMemoryBrainCreatorRepository) {
     ...repository.businessEntityInstances.map((item) => ({ id: item.id, type: "business-entity", systemId: item.systemId, label: item.entityKey })),
     ...repository.testDataDependencies.map((item) => ({ id: item.id, type: "test-data-dependency", systemId: item.systemId, label: `${item.fromReference} -> ${item.toReference}` })),
     ...repository.systemBrainSnapshots.map((item) => ({ id: item.id, type: "system-brain-snapshot", systemId: item.systemId, label: `revision ${item.revision}` })),
-    ...repository.systemBrainChangeSets.map((item) => ({ id: item.id, type: "system-brain-change-set", systemId: item.systemId, label: item.status }))
+    ...repository.systemBrainChangeSets.map((item) => ({ id: item.id, type: "system-brain-change-set", systemId: item.systemId, label: item.status })),
+    ...repository.evaluationTrials.map((item) => ({ id: item.id, type: "evaluation-trial", systemId: item.systemId, projectId: item.knowledgeProjectId, label: `${item.provider}:${item.status}` })),
+    ...repository.sourceSnapshots.map((item) => ({ id: item.id, type: "source-snapshot", projectId: item.knowledgeProjectId, requirementSetId: item.requirementSetId, label: item.contentHash })),
+    ...repository.projectionManifests.map((item) => ({ id: item.id, type: "projection-manifest", label: item.operation })),
+    ...repository.interventionRecords.map((item) => ({ id: item.id, type: "evaluation-intervention", label: item.category }))
   ];
 }
 
