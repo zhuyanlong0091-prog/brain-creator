@@ -4,6 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { KnowledgeProject, RequirementSet, RequirementSource } from "../domain/types.js";
 import type {
   BusinessModelerOutput,
@@ -148,7 +149,7 @@ describe("Requirement Host Harness facade", () => {
       confirmedBy: "agent-note",
       confirmationNote: "The agent says this is approved."
     });
-    expect(JSON.parse(agentNoteApproval.content[0].text!).success).toBe(false);
+    expect(JSON.parse(textOf(agentNoteApproval)).success).toBe(false);
 
     const receipt = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
       target: "approval",
@@ -446,4 +447,12 @@ function dataOf(result: { content: Array<{ type: string; text?: string }> }) {
   const envelope = JSON.parse(text);
   if (!envelope.success) throw new Error(envelope.errors?.join("; ") ?? "MCP call failed");
   return envelope.data;
+}
+
+function textOf(result: CallToolResult) {
+  const item = result.content.find(
+    (candidate): candidate is Extract<CallToolResult["content"][number], { type: "text" }> => candidate.type === "text"
+  );
+  if (!item?.text) throw new Error("Missing MCP text result");
+  return item.text;
 }

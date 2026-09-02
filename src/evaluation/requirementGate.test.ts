@@ -168,7 +168,7 @@ describe("RequirementGateService", () => {
       inputHashes: ["source-v1"],
       supportRefs: [],
       policyVersion: "requirement-v2"
-    } as const;
+    };
     gate.recordStageEvaluation({ ...base, verdict: "retry", reasons: ["Invalid shape"] });
     gate.recordStageEvaluation({ ...base, verdict: "pass" });
     expect(gate.list({ requirementSetId: fixture.requirementSet.id, status: "current" })).toEqual([
