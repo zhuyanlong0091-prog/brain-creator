@@ -43,6 +43,17 @@ describe("resolveRequirementSource", () => {
 
     expect(result.status).toBe("ready");
     if (result.status === "ready") {
+      expect(result.contentPackage.blocks).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: "image",
+          text: "Approval state",
+          sourceRefs: [expect.stringContaining("#line:")],
+          image: expect.objectContaining({
+            alt: "Approval state",
+            reference: "./approval.png"
+          })
+        })
+      ]));
       expect(result.contentPackage.attachments).toEqual([
         expect.objectContaining({
           name: "Approval state",
@@ -50,6 +61,43 @@ describe("resolveRequirementSource", () => {
           status: "discovered"
         })
       ]);
+    }
+  });
+
+  it("preserves Markdown headings, tables, lists, and source references in the block AST", async () => {
+    const root = await tempDir();
+    const source = join(root, "requirement.md");
+    await writeFile(source, [
+      "# Order Approval",
+      "",
+      "Managers approve orders.",
+      "",
+      "| Condition | Action |",
+      "| --- | --- |",
+      "| Amount > 1000 | Require approval |",
+      "",
+      "- Record the decision",
+      ""
+    ].join("\n"), "utf8");
+
+    const result = await resolveRequirementSource({ source });
+
+    expect(result.status).toBe("ready");
+    if (result.status === "ready") {
+      expect(result.contentPackage.blocks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "heading", level: 1, text: "Order Approval" }),
+        expect.objectContaining({ type: "paragraph", text: "Managers approve orders." }),
+        expect.objectContaining({
+          type: "table",
+          table: {
+            headers: ["Condition", "Action"],
+            rows: [["Amount > 1000", "Require approval"]]
+          }
+        }),
+        expect.objectContaining({ type: "list-item", text: "Record the decision" })
+      ]));
+      expect(result.contentPackage.blocks.every((block) => (block.sourceRefs?.length ?? 0) > 0)).toBe(true);
+      expect(result.contentPackage.blocks.map((block) => block.order)).toEqual([0, 1, 2, 3]);
     }
   });
 
@@ -100,7 +148,7 @@ describe("resolveRequirementSource", () => {
     zip.addFile(
       "word/document.xml",
       Buffer.from(
-        '<?xml version="1.0"?><w:document xmlns:w="x"><w:body><w:p><w:r><w:t>Contract Approval</w:t></w:r></w:p><w:p><w:r><w:t>Managers approve contracts.</w:t></w:r></w:p></w:body></w:document>'
+        '<?xml version="1.0"?><w:document xmlns:w="x"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Contract Approval</w:t></w:r></w:p><w:p><w:r><w:t>Managers approve contracts.</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Field</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Rule</w:t></w:r></w:p></w:tc></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>Amount</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Required</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>'
       )
     );
     zip.addFile("word/media/image1.png", Buffer.from("image"));
@@ -111,6 +159,18 @@ describe("resolveRequirementSource", () => {
     expect(result.status).toBe("ready");
     if (result.status === "ready") {
       expect(result.contentPackage.content).toContain("Managers approve contracts");
+      expect(result.contentPackage.blocks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "heading", level: 1, text: "Contract Approval" }),
+        expect.objectContaining({ type: "table", table: {
+          headers: ["Field", "Rule"],
+          rows: [["Amount", "Required"]]
+        } }),
+        expect.objectContaining({
+          type: "image",
+          image: expect.objectContaining({ reference: "word/media/image1.png" }),
+          sourceRefs: [expect.stringContaining("word/media/image1.png")]
+        })
+      ]));
       expect(result.contentPackage.attachments).toEqual([
         expect.objectContaining({
           name: "image1.png",
@@ -169,6 +229,11 @@ describe("resolveRequirementSource", () => {
       expect(result.contentPackage.title).toBe("CRM Requirement");
       expect(result.contentPackage.content).toContain("Convert a lead");
       expect(result.contentPackage.content).not.toContain("secret()");
+      expect(result.contentPackage.blocks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "heading", level: 1, text: "Lead conversion" }),
+        expect.objectContaining({ type: "paragraph", text: "Convert a lead to an opportunity." }),
+        expect.objectContaining({ type: "image", image: expect.objectContaining({ alt: "Conversion flow" }) })
+      ]));
       expect(result.contentPackage.attachments).toEqual([
         expect.objectContaining({
           name: "Conversion flow",
@@ -189,6 +254,17 @@ describe("resolveRequirementSource", () => {
         request: expect.objectContaining({ sourceType: "feishu" })
       })
     );
+  });
+
+  it("recognizes enterprise Feishu links as host connector sources", async () => {
+    const result = await resolveRequirementSource({
+      source: "https://tenant.larkenterprise.com/wiki/abc123"
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: "needs-host-connector",
+      connector: "feishu"
+    }));
   });
 
   it("uses a configured Feishu reader before falling back to the host connector", async () => {
@@ -228,6 +304,13 @@ describe("resolveRequirementSource", () => {
     });
 
     expect(result).toEqual(expect.objectContaining({ status: "ready" }));
+    if (result.status === "ready") {
+      expect(result.contentPackage.blocks[0]).toEqual(expect.objectContaining({
+        order: 0,
+        sourceRef: "https://example.feishu.cn/docx/abc123#block:1",
+        sourceRefs: ["https://example.feishu.cn/docx/abc123#block:1"]
+      }));
+    }
   });
 
   it("rejects unsafe protocols and private HTTP targets by default", async () => {

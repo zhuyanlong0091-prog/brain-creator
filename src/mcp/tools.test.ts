@@ -159,6 +159,29 @@ describe("BRAIN_CREATOR_TOOLS", () => {
         }
       }).success
     ).toBe(true);
+    const structuredPackage = prepare?.inputSchema.parse({
+      action: "ingest-requirement",
+      source: "requirements.md",
+      contentPackage: {
+        title: "Orders",
+        content: "Orders require approval.",
+        blocks: [{
+          id: "block-1",
+          type: "table",
+          text: "Amount | Approval",
+          order: 0,
+          sourceRef: "requirements.md#line:3",
+          sourceRefs: ["requirements.md#line:3"],
+          table: { headers: ["Amount"], rows: [["1000"]] }
+        }],
+        attachments: [],
+        source: "requirements.md",
+        sourceType: "local-file",
+        contentHash: "hash",
+        warnings: []
+      }
+    }) as { contentPackage: { blocks: Array<{ table?: { headers: string[] } }> } } | undefined;
+    expect(structuredPackage?.contentPackage.blocks[0].table?.headers).toEqual(["Amount"]);
     expect(
       prepare?.inputSchema.safeParse({
         action: "create-onboarding-plan",

@@ -82,7 +82,7 @@ export class FeishuOpenApiAdapter {
     const title = stringValue(document.title) || wikiTitle || "Feishu Requirement";
     const revision = numberValue(document.revision_id);
     const items = await this.listBlocks(documentId, accessToken);
-    const normalized = normalizeBlocks(items);
+    const normalized = normalizeBlocks(items, source);
     const content = normalized.blocks.map((block) => block.text).filter(Boolean).join("\n").trim();
     if (!content) throw new Error("Feishu document contains no readable text blocks");
     return {
@@ -164,27 +164,63 @@ export class FeishuOpenApiAdapter {
   }
 }
 
-function normalizeBlocks(items: Record<string, unknown>[]) {
+function normalizeBlocks(items: Record<string, unknown>[], source: string) {
   const blocks: RequirementContentBlock[] = [];
   const attachments: RequirementAttachment[] = [];
   const warnings: string[] = [];
   for (const item of items) {
     const blockType = numberValue(item.block_type);
     const type = BLOCK_TYPES[blockType] ?? `unsupported-${blockType}`;
+    const blockId = stringValue(item.block_id) || `block-${blocks.length + 1}`;
+    const sourceRef = `${source}#block:${blockId}`;
     const text = textRuns(item).join("").trim();
-    if (text) {
+    if (text && type !== "image" && type !== "table") {
       const headingLevel = type.startsWith("heading") ? Number(type.replace("heading", "")) : undefined;
-      blocks.push({ type: headingLevel ? "heading" : type, text, level: headingLevel });
+      blocks.push({
+        id: blockId,
+        type: headingLevel ? "heading" : type,
+        text,
+        ...(headingLevel ? { level: headingLevel } : {}),
+        ...(stringValue(item.parent_id) ? { parentId: stringValue(item.parent_id) } : {}),
+        order: blocks.length,
+        sourceRef,
+        sourceRefs: [sourceRef]
+      });
     }
     if (type === "file" || type === "image") {
       const detail = asRecord(item[type]);
       attachments.push({
-        name: stringValue(item.block_id) || `${type}-${attachments.length + 1}`,
-        blockId: stringValue(item.block_id) || undefined,
+        name: blockId,
+        blockId: blockId || undefined,
         fileToken: stringValue(detail.token) || stringValue(detail.file_token) || undefined,
         type,
         status: "discovered",
         attempts: 0
+      });
+      if (type === "image") {
+        blocks.push({
+          id: blockId,
+          type: "image",
+          text: text || blockId,
+          order: blocks.length,
+          sourceRef,
+          sourceRefs: [sourceRef],
+          image: {
+            alt: text || undefined,
+            reference: stringValue(detail.token) || blockId
+          }
+        });
+      }
+    }
+    if (type === "table") {
+      blocks.push({
+        id: blockId,
+        type: "table",
+        text: "",
+        order: blocks.length,
+        sourceRef,
+        sourceRefs: [sourceRef],
+        table: { headers: [], rows: [] }
       });
     }
     if (["bitable", "diagram", "mindnote", "sheet", "table", "add-on"].includes(type)) {
@@ -208,7 +244,11 @@ function textRuns(value: unknown): string[] {
 
 function parseFeishuSource(source: string) {
   const url = new URL(source);
-  if (!url.hostname.endsWith(".feishu.cn") && !url.hostname.endsWith(".larksuite.com")) {
+  if (
+    !url.hostname.endsWith(".feishu.cn") &&
+    !url.hostname.endsWith(".larksuite.com") &&
+    !url.hostname.endsWith(".larkenterprise.com")
+  ) {
     throw new Error("Not a Feishu or Lark document URL");
   }
   const match = /^\/(wiki|docx)\/([^/?#]+)/.exec(url.pathname);

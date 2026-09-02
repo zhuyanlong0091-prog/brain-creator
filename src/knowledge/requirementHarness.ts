@@ -9,6 +9,7 @@ import type {
   DecisionTableModel,
   Gap,
   KnowledgeNodeType,
+  RequirementContentBlock,
   StateMachineModel,
   WorkflowModel
 } from "../domain/types.js";
@@ -345,7 +346,13 @@ export class RequirementAnalysisHostHarness {
     requirementSetId: string,
     stage: RequirementHarnessStage,
     sessionId: string,
-    source: { id: string; title: string; content: string; attachments: Array<{ id?: string; name: string; status?: string }> },
+    source: {
+      id: string;
+      title: string;
+      content: string;
+      blocks: RequirementContentBlock[];
+      attachments: Array<{ id?: string; name: string; status?: string }>;
+    },
     output: StageOutputs[RequirementHarnessStage]
   ) {
     const requirementSet = this.requirementSet(requirementSetId);
@@ -572,7 +579,13 @@ export class RequirementAnalysisHostHarness {
 function buildContextPack(
   stage: RequirementHarnessStage,
   requirementSetId: string,
-  source: { id: string; title: string; content: string; attachments: Array<{ id?: string; name: string; status?: string }> },
+  source: {
+    id: string;
+    title: string;
+    content: string;
+    blocks: RequirementContentBlock[];
+    attachments: Array<{ id?: string; name: string; status?: string }>;
+  },
   attachmentAnalyses: Array<{ id: string; kind: string; markdown: string; nodes: unknown[]; edges: unknown[]; sourceRefs: string[] }>,
   outputs: StageOutputs
 ): BrainContextPack {
@@ -592,11 +605,24 @@ function buildContextPack(
     edges: analysis.edges,
     sourceRefs: analysis.sourceRefs
   })), null, 2);
+  const documentBlocks = JSON.stringify(source.blocks.map((block) => ({
+    id: block.id,
+    type: block.type,
+    text: block.text,
+    level: block.level,
+    order: block.order,
+    sourceRef: block.sourceRef,
+    sourceRefs: block.sourceRefs,
+    table: block.table,
+    image: block.image
+  })), null, 2);
   const fixed = [
     `Requirement: ${source.title}`,
     `Stage: ${stage}`,
     "Confirmed attachment evidence:",
     attachmentEvidence,
+    "Document block AST:",
+    documentBlocks,
     "Structured outputs from completed independent stages:",
     structured
   ].join("\n");

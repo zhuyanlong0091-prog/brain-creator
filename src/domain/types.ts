@@ -632,7 +632,25 @@ export type RequirementSourceType =
   | "obsidian"
   | "host-connector";
 
-export type RequirementContentBlock = { type: string; text: string; level?: number };
+export type RequirementContentBlock = {
+  id?: string;
+  type: string;
+  text: string;
+  level?: number;
+  parentId?: string;
+  order?: number;
+  sourceRef?: string;
+  sourceRefs?: string[];
+  table?: {
+    headers: string[];
+    rows: string[][];
+  };
+  image?: {
+    alt?: string;
+    reference?: string;
+    attachmentId?: string;
+  };
+};
 export type RequirementAttachmentStatus =
   | "discovered"
   | "downloading"

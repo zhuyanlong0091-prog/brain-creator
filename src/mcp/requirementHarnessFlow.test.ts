@@ -14,6 +14,67 @@ import type {
 import { createBrainCreatorMcpContext, handleBrainCreatorTool } from "./handlers.js";
 
 describe("Requirement Host Harness facade", () => {
+  it("routes a complex structured source to the Host Harness by default", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "brain-creator-host-routing-"));
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json"),
+      knowledgeDir: join(workDir, ".brain-creator", "knowledge")
+    });
+    const fixture = requirementFixture();
+    fixture.source.blocks = [{
+      type: "table",
+      text: "Condition | Action",
+      table: { headers: ["Condition"], rows: [["Approval required"]] },
+      sourceRefs: ["requirement.md#line:4"]
+    }];
+    fixture.source.attachments = [{ name: "workflow.png", status: "discovered", attempts: 0 }];
+    context.repository.knowledgeProjects.push(fixture.project);
+    context.repository.requirementSources.push(fixture.source);
+    context.repository.requirementSets.push(fixture.requirementSet);
+
+    const response = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "generate-analysis",
+      requirementSetId: fixture.requirementSet.id
+    }));
+
+    expect(response).toEqual(expect.objectContaining({
+      status: "needs-host-analysis",
+      stage: "document-mapper"
+    }));
+    expect(response.task.provider).toBe("host-agent");
+    expect(response.task.contextPack?.content).toContain("Document block AST");
+    expect(response.task.contextPack?.content).toContain("Approval required");
+    expect(context.repository.knowledgeNodes).toHaveLength(0);
+  });
+
+  it("keeps complex requirements in preview when builtin analysis is explicitly requested", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "brain-creator-builtin-preview-"));
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json"),
+      knowledgeDir: join(workDir, ".brain-creator", "knowledge")
+    });
+    const fixture = requirementFixture();
+    fixture.source.blocks = [{ type: "image", text: "Workflow", image: { reference: "workflow.png" } }];
+    context.repository.knowledgeProjects.push(fixture.project);
+    context.repository.requirementSources.push(fixture.source);
+    context.repository.requirementSets.push(fixture.requirementSet);
+
+    const response = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "generate-analysis",
+      requirementSetId: fixture.requirementSet.id,
+      provider: "builtin"
+    }));
+
+    expect(response).toEqual(expect.objectContaining({
+      status: "preview-only",
+      provider: "builtin",
+      nextAction: expect.stringContaining("host-agent")
+    }));
+    expect(context.repository.knowledgeNodes).toHaveLength(0);
+  });
+
   it("keeps blocked analysis out of domain assets and persists a reviewed host result through test design", async () => {
     const workDir = await mkdtemp(join(tmpdir(), "brain-creator-host-analysis-"));
     const context = createBrainCreatorMcpContext({

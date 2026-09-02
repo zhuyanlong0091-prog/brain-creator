@@ -130,6 +130,8 @@ Supported first-party adapters:
 - Obsidian references such as `obsidian:<path>` and `[[path]]`.
 - Feishu Wiki/Doc links.
 
+Requirement ingestion preserves an ordered block AST for Markdown, HTML, and DOCX. Heading levels, table headers/rows, image references, and stable source anchors must survive into the `RequirementContentPackage`; the host package normalizer fills missing anchors without discarding legacy packages. `.larkenterprise.com` is a supported Feishu domain. When `provider` is omitted, `generate-analysis` uses the host-agent Harness. Builtin remains an offline compatibility path, but an explicit builtin request for a structured or visual source is preview-only and cannot approve or execute it.
+
 For Feishu, prefer direct OpenAPI when both `BRAIN_CREATOR_FEISHU_APP_ID` and `BRAIN_CREATOR_FEISHU_APP_SECRET` are configured. Otherwise use the host lark capability and retry with a `RequirementContentPackage`. Preserve stable block/file tokens, reacquire credentials for each media download, and never persist expiring `authcode` URLs. Unsupported or unreadable content may create a Gap only after the connector and visual-analysis attempts are recorded and exhausted. Never store Feishu credentials in Brain Creator assets.
 
 If `RequirementAnalysis.skill` or `TestCaseDesign.skill` is available and useful, the host may call it and submit normalized output with `provider=host-skill`. Brain Creator normalizes that output into the mapper and clause stages, then still dispatches independent Business Modeler and Coverage Critic tasks. Host Skill output must include source references and cannot bypass schema validation, Eval, Gap, or approval gates. Builtin policies remain available for compatibility and offline deterministic fallback.

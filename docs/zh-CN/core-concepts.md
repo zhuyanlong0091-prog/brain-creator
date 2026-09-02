@@ -50,6 +50,8 @@ Requirement Brain 回答：**业务系统应该做什么，这个预期来自哪
 - `TestIntent`：与来源条款关联、面向人工审核的测试目标。
 - `TestDataProfile`：执行测试意图所需的数据策略。
 
+需求来源会先解析为有序文档块 AST，再进入语义分析。标题保留层级，Markdown/HTML/DOCX 表格保留表头和行，图片保留引用，每个块都带来源锚点。飞书直连和宿主提交的内容包使用同一套补充锚点规则，并支持 `.larkenterprise.com` 域名。未指定 provider 时，`generate-analysis` 默认使用 host-agent Harness；builtin 仍作为离线兼容路径，但结构化或包含图片的来源显式选择 builtin 时只能预览。
+
 宿主辅助分析使用四任务 Harness：文档地图、条款分析、业务建模和隔离 Coverage Critic。前三个阶段把正文、表格和已确认图片转换为带来源的条款、业务对象、流程、状态、决策表和不变量；Critic 只接收这些结构与来源证据，不继承设计者对话。结构合法不等于需求基线可信：Critic 阻塞时不得写入 Requirement 领域资产，第二次 schema 失败会形成可恢复 Gap。
 
 自动生成的知识初始为 draft。confirmed 知识必须保留来源引用。直接矛盾不能靠确认绕过，必须修订来源或基线。
