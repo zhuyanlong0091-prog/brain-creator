@@ -33,6 +33,8 @@ The built-in action alias policy is domain-neutral and auditable. It can normali
 
 The Harness Runtime controls the lifecycle around every Agent task: context preparation, approval, provider waiting, execution, Eval, retry/healing budget, and terminal state. Agent output does not write domain assets until it passes the relevant structured gate. Host-agent continuations resume the same persisted Brain task instead of creating a second hidden lifecycle. Context budgets and path boundaries are enforced before provider output is accepted. The current implementation exposes task state and events through `bc_status`; low-level orchestration remains compatible while it is gradually moved behind this lifecycle.
 
+Requirement analysis has a second, auditable gate: Producer output is schema-validated, reviewed by an isolated Critic, and then adjudicated before a host baseline can be approved. Stage records include input hashes and support references. A changed requirement or model input marks the old record stale. Host approval uses a receipt bound to the current baseline fingerprint; an Agent-written confirmation note alone cannot create human approval.
+
 ### Unified Harness Output And Gates
 
 Planner, Generator, and Healer use versioned structured outputs. Scenarios, steps, assertions, and repairs must carry source references; Generator and Healer stay inside their declared file boundary, and Healer cannot remove assertions. A non-`pass` Planner Eval stops downstream test-asset writes. A business assertion failure in an execution chain still flows through Reporter and Bug/Gap diagnosis.

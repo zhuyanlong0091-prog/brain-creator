@@ -792,6 +792,10 @@ export type RequirementSet = {
   status: "draft" | "approved" | "superseded";
   affectedNodeIds: string[];
   evaluationGate?: RequirementEvaluationGate;
+  analysisProvider?: "builtin" | "host-agent" | "host-skill";
+  evaluationStageIds?: string[];
+  baselineFingerprint?: string;
+  approvalReceiptId?: string;
   previousRequirementSetId?: string;
   approvedAt?: string;
   createdAt: string;

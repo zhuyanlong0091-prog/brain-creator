@@ -33,6 +33,8 @@ schema 21 保留 schema 20 建立的 L3 持久化词汇，并新增 `EvaluationT
 
 Harness Runtime 管理每次 Agent 任务的上下文、审批、执行、Eval、重试预算和终态。Agent 输出必须先通过结构化门禁才能写入领域资产。当前可以通过 `bc_status` 查看任务状态和事件，底层编排接口仍保持兼容。
 
+需求分析还存在一层可审计门禁：Producer 输出先经过 Schema Validator，再由隔离 Critic 复核，最后由 Adjudicator 汇总，Host 基线才允许审批。阶段记录包含输入 hash 和证据引用；需求或模型输入变化会让旧记录变为 stale。Host 审批使用绑定当前基线指纹的凭证，Agent 自己写的确认备注不能单独产生人工批准状态。
+
 ### Harness 统一输出与门禁
 
 Planner、Generator、Healer 使用版本化结构化输出。每个场景、步骤、断言和修复都必须带来源引用；Generator/Healer 只能在声明的文件边界内工作，Healer 不得删除断言。Planner 的非 `pass` Eval 会阻止后续测试资产写入；执行链的业务断言失败仍会进入 Reporter、Bug/Gap 和诊断流程。

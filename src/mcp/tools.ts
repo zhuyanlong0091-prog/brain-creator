@@ -135,7 +135,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, confirming Requirement Eval, atomically approving a baseline with bounded first-system onboarding, reviewing or rolling back historical execution diagnoses, exploring and reconciling System Brain evidence, incrementally recompiling stale cases, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, and confirming immutable execution preflight snapshots.",
+      "Requirement-first facade for ingesting sources, running staged Requirement Eval, approving a baseline with a verified receipt, bounded first-system onboarding, reviewing or rolling back historical execution diagnoses, exploring and reconciling System Brain evidence, incrementally recompiling stale cases, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, and confirming immutable execution preflight snapshots.",
     inputSchema: z.object({
       action: z.enum([
         "start-evaluation-trial",
@@ -287,6 +287,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       maxInteractionsPerPage: z.number().int().min(0).max(10).optional(),
       actionIds: z.array(z.string()).default([]),
       confirmedBy: z.string().optional(),
+      approvalReceiptId: z.string().optional(),
       executableCaseId: z.string().optional(),
       taskId: z.string().optional(),
       taskStatus: z.enum(["succeeded", "failed"]).optional(),
@@ -674,11 +675,15 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "business-scenario",
         "scenario-assurance",
         "scenario-trust",
-        "case-dependency"
+        "case-dependency",
+        "stage-eval",
+        "source-fidelity",
+        "approval"
       ]),
       knowledgeProjectId: z.string().optional(),
       comparisonGroupId: z.string().optional(),
       requirementSetId: z.string().optional(),
+      requirementSourceId: z.string().optional(),
       systemId: z.string().optional(),
       systemName: z.string().optional(),
       environment: z.string().optional(),
@@ -686,6 +691,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       fromSnapshotId: z.string().optional(),
       toSnapshotId: z.string().optional(),
       status: z.string().optional(),
+      stage: z.string().optional(),
       id: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
       offset: z.number().int().min(0).optional(),
@@ -711,9 +717,9 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
   {
     name: "bc_configure",
     title: "Brain Creator configure",
-    description: "Facade configuration entry for system, auth, term, rule, runtime, and auth checkpoint setup.",
+    description: "Facade configuration entry for system, auth, term, rule, runtime, approval receipts, and auth checkpoint setup.",
     inputSchema: z.object({
-      target: z.enum(["system", "auth", "term", "rule", "checkpoint", "knowledge-project", "system-binding", "connector", "runtime"]),
+      target: z.enum(["system", "auth", "term", "rule", "checkpoint", "knowledge-project", "system-binding", "connector", "runtime", "approval"]),
       operation: z.enum(["create", "verify", "preflight", "refresh", "archive", "update", "reload-config", "reload-store", "rebuild-index"]).default("create"),
       knowledgeProjectId: z.string().optional(),
       connector: z.enum(["feishu"]).optional(),
@@ -746,6 +752,12 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       evaluationProvider: z.enum(["claude", "codex"]).optional(),
       providerConfigs: z.record(z.string(), z.string()).optional(),
       connectorConfigs: z.record(z.string(), z.string()).optional(),
+      approvalMethod: z.enum(["host-attested", "challenge-response"]).optional(),
+      approvalChallengeId: z.string().optional(),
+      approvalCode: z.string().optional(),
+      assetHash: z.string().optional(),
+      hostMessageId: z.string().optional(),
+      hostMessageHash: z.string().optional(),
       responseMode: z.enum(["summary", "full"]).default("summary")
     })
   },

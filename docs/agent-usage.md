@@ -61,6 +61,8 @@ The Agent presents every Requirement Eval action. Clarifications and missing bra
 
 Seven golden samples cover ordinary clauses, complex Markdown rule tables, cross-module workflows, permission matrices, contradictions, and missing branches. Historical quality can be reviewed with `bc_review target=requirement-eval-accuracy`; technical failures remain inconclusive instead of reducing the requirement score.
 
+Host baselines also carry staged Eval records for Producer, Schema Validator, isolated Critic, and Adjudicator. Review them with `bc_review target=stage-eval`; a changed source or model input stales the affected record instead of silently reusing it. For host-agent or host-skill analysis, an ordinary Agent note is not approval. Preview `approve-baseline` to receive a one-time challenge, create a `challenge-response` receipt with `bc_configure target=approval`, then pass its `approvalReceiptId` to the confirmed approval call. A host-attested receipt is accepted only with a host message id and proof hash.
+
 ### 4.1 Review Business Scenarios And Assurance
 
 After test design, Brain Creator also creates a domain-neutral `BusinessScenario` portfolio. Review it with `bc_review target=business-scenario`; the summary groups main flows, branches, state transitions, invalid transitions, cross-role journeys, exceptions, data, and integration scenarios. Use `bc_prepare action=assess-scenarios` after binding a system to evaluate each scenario against the current System Brain, TestDataProfile, and requirement-backed oracle.
