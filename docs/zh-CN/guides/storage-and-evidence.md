@@ -1,10 +1,10 @@
 # 存储与证据
 
-Brain Creator 使用本地文件仓库。默认运行仓库是 schema 20 分片目录 `.brain-creator/store/`。旧的 `.brain-creator/local-assets.json` 仍作为迁移源和兼容格式保留，但新 MCP 上下文默认不会继续写入这个单文件。
+Brain Creator 使用本地文件仓库。默认运行仓库是 schema 21 分片目录 `.brain-creator/store/`。旧的 `.brain-creator/local-assets.json` 仍作为迁移源和兼容格式保留，但新 MCP 上下文默认不会继续写入这个单文件。
 
 ## 迁移
 
-首次启动且不存在 schema 20 manifest 时，Brain Creator 会检查 `local-assets.json`，先校验 JSON，创建带时间戳的 `local-assets.json.backup-*` 备份，再通过临时文件和原子重命名写入分片仓库，并校验新的 manifest。已有 schema 19 仓库会在 `store/backups/` 生成独立迁移快照；迁移失败不会删除旧文件，也不会把历史用例自动晋升为可信场景。
+首次启动且不存在 schema 21 manifest 时，Brain Creator 会检查 `local-assets.json`，先校验 JSON，创建带时间戳的 `local-assets.json.backup-*` 备份，再通过临时文件和原子重命名写入分片仓库，并校验新的 manifest。已有 schema 19 和 schema 20 仓库会在 `store/backups/` 生成独立迁移快照；迁移失败不会删除旧文件，也不会把历史用例自动晋升为可信场景。
 
 主要目录如下：
 
@@ -16,10 +16,18 @@ Brain Creator 使用本地文件仓库。默认运行仓库是 schema 20 分片�
   systems/<系统 ID>/assets.json
   knowledge/<知识项目 ID>/requirements/<需求 ID>.json
   runs/<Suite 运行 ID>/ledger.jsonl
+  collections/evaluationTrials.json
+  collections/sourceSnapshots.json
+  collections/projectionManifests.json
+  collections/interventionRecords.json
   indexes/asset-index.json
 ```
 
 可以通过 `BRAIN_CREATOR_STORE_DIR` 指定其他分片目录。`BRAIN_CREATOR_DATA_FILE` 仍可作为旧仓库迁移源。Brain Creator 运行期间不要手工修改这些文件，应使用 Facade 控制面。
+
+## 评估完整性
+
+L3 A/B 对比或历史准确率评估必须先创建 `EvaluationTrial`。Trial 会冻结需求来源版本和 hash、代码 revision、运行时版本、工作区和独立 Store 路径。受控 Facade 操作改变评估投影后，必须使用上一份 manifest ID 和证据引用建立 checkpoint。需求或代码变化、手工修改 Store、无法解释的投影漂移都会使 Trial 失效。可通过 `bc_review target=evaluation-trial` 复盘来源快照、投影链和干预记录。
 
 ## Doctor 检查
 

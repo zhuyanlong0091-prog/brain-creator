@@ -19,7 +19,7 @@ export type AutonomyBaselineMetric = {
 };
 
 export type AutonomyBaselineReport = {
-  schemaVersion: 20;
+  schemaVersion: 21;
   generatedAt: string;
   seed: string;
   metrics: {
@@ -70,7 +70,7 @@ export function buildAutonomyBaselineReport(input: {
   });
 
   return {
-    schemaVersion: 20,
+    schemaVersion: 21,
     generatedAt: input.generatedAt ?? new Date().toISOString(),
     seed: input.seed ?? "brain-creator-l3-baseline",
     metrics: {

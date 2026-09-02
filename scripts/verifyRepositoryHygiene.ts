@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
 
 const trackedFiles = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
   .split("\0")
@@ -21,7 +22,8 @@ const pathViolations = trackedFiles.filter((file) => forbiddenPaths.some((patter
 const contentViolations: string[] = [];
 
 for (const file of trackedFiles) {
-  const content = execFileSync("git", ["show", `HEAD:${file}`], { encoding: "utf8" });
+  if (!existsSync(file) || !statSync(file).isFile()) continue;
+  const content = readFileSync(file, "utf8");
   if (forbiddenContent.some((pattern) => pattern.test(content))) {
     contentViolations.push(file);
   }

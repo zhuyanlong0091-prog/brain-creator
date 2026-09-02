@@ -8,7 +8,7 @@ describe("AutonomyBaselineReport", () => {
       seed: "brain-creator-l3-baseline"
     });
 
-    expect(report.schemaVersion).toBe(20);
+    expect(report.schemaVersion).toBe(21);
     expect(report.generatedAt).toBe("2026-08-30T00:00:00.000Z");
     expect(report.seed).toBe("brain-creator-l3-baseline");
     expect(report.metrics.requirementGolden.total).toBeGreaterThan(1);

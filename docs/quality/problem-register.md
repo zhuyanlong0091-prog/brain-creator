@@ -24,7 +24,7 @@ production acceptance conditions are closed.
 | A5 | Generated output had no ownership hierarchy | resolved | PR B/PR F | New Planner/Generator/Reporter output is written under a versioned System/requirement/Suite tree with readable case names, manifest, index, and latest pointer; historical files have dry-run migration, unresolved preservation, legacy index, and rollback tests |
 | A6 | Gaps had no usable lifecycle | resolved | PR A | Resolve, dismiss, and reopen require a note and evidence references; `service.test.ts`, `controlPlane.test.ts` |
 | A7 | Errors described state but not recovery | partial | PR A/PR C | Facade and execution auth errors now return stable codes, bilingual messages, nextAction, retryable, and UUID trace; Reporter-missing, Bridge-timeout, Bridge-unavailable, store-lock, workspace-path, and execution-budget failures now have stable recovery codes; broader Harness error catalog remains |
-| A8 | Upgrade and migration had no safe path | resolved | PR B/PR F/L3 PR A | Schema 16 migration creates a timestamped backup; schema 20 migration backs up schema 19 and falls back on writer-lock failure; validation, index rebuild, complete Suite export, artifact dry-run/apply/hash validation/rollback, and explicit retention are covered |
+| A8 | Upgrade and migration had no safe path | resolved | PR B/PR F/L3 PR A/PR H | Schema 16 migration creates a timestamped backup; schema 21 migration backs up schema 19/20 and falls back on writer-lock failure; validation, index rebuild, complete Suite export, artifact dry-run/apply/hash validation/rollback, and explicit retention are covered |
 | B1 | SPA exploration missed navigation transitions | partial | PR E | Link navigation and observed safe-interaction URL changes now create queued targets and System Brain navigation edges; state-only changes are explicitly classified as `state` transitions, while full remount and cross-surface recovery remain |
 | B2 | Shared labels produced ambiguous page selection | resolved | PR A/PR E | Confirmed page binding exists; candidate score breakdown and matched evidence are returned for ambiguity diagnostics |
 | B3 | Shadow DOM actions were not reliably reachable | resolved | PR E | Open Shadow DOM, Wujie-like open containers, and same-origin iframe candidates now carry surface-scoped evidence, safe actions, state changes, and System Brain transitions; same-URL iframe candidates now also carry a stable frame ordinal; closed or cross-origin surfaces remain observational |
@@ -179,3 +179,18 @@ historical Bugs against real systems, so real-system mutation effectiveness
 remains partial. Provider Registry exposes the host-agent primary and an
 optional Claude/Codex evaluator readiness descriptor; it does not make a
 second CLI a required dependency.
+
+## Current implementation slice: evaluation integrity
+
+PR H introduces an explicit evaluation boundary for provider, policy, and
+historical-accuracy comparisons. An `EvaluationTrial` freezes the requirement
+source revision/hash, code revision, runtime versions, workspace, and isolated
+Store path. `SourceSnapshot`, chained `ProjectionManifest` records, and
+`InterventionRecord` entries make source or Store drift auditable. A manual
+Store write, source/code change, or unexplained projection change invalidates
+the Trial; its metrics must not be compared with an active peer.
+
+This closes the auditability gap around mismatched inputs and hidden manual
+intervention. It does not claim semantic Eval accuracy, a real approval proof,
+false-ready prevention, or independent Conformance adjudication. Those remain
+the acceptance scope of PR I through PR M.

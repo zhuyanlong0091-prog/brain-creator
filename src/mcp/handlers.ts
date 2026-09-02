@@ -130,6 +130,7 @@ import {
   EvaluationProviderRegistry,
   type MutationOutcome
 } from "../brain/scenarioAssurance.js";
+import { EvaluationIntegrityService } from "../evaluation/evaluationIntegrity.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
 import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import { id } from "../shared/id.js";
@@ -193,6 +194,7 @@ export type BrainCreatorMcpContext = {
   semanticSpine: SemanticSpineService;
   systemBrainSnapshots: SystemBrainSnapshotService;
   providerRegistry: EvaluationProviderRegistry;
+  evaluationIntegrity: EvaluationIntegrityService;
   workDir: string;
   agentBridge?: AgentBridgeWithMetadata;
   runner?: CommandRunner;
@@ -284,6 +286,7 @@ export function createBrainCreatorMcpContext(
   const providerRegistry = new EvaluationProviderRegistry({
     environment: initialRuntimeEnvironment
   });
+  const evaluationIntegrity = new EvaluationIntegrityService(repository);
   const service = new BrainCreatorService(repository);
   const configuredAuthProviders = new Set(
     (input.authRefreshAdapters ?? []).map((adapter) => adapter.provider)
@@ -360,6 +363,7 @@ export function createBrainCreatorMcpContext(
     semanticSpine,
     systemBrainSnapshots,
     providerRegistry,
+    evaluationIntegrity,
     workDir,
     agentBridge:
       input.agentBridge ??
@@ -962,6 +966,52 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
 
 async function prepareFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const action = prepareActionArg(input, "action");
+  if (action === "start-evaluation-trial") {
+    return context.evaluationIntegrity.startTrial({
+      comparisonGroupId: stringArg(input, "comparisonGroupId"),
+      knowledgeProjectId: stringArg(input, "knowledgeProjectId"),
+      systemId: optionalStringArg(input, "systemId"),
+      requirementSourceId: stringArg(input, "requirementSourceId"),
+      provider: evaluationProviderArg(input, "evaluationProvider"),
+      workspacePath: stringArg(input, "evaluationWorkspacePath"),
+      storePath: stringArg(input, "evaluationStorePath"),
+      codeRevision: stringArg(input, "codeRevision"),
+      runtimeVersions: recordArg(input, "runtimeVersions")
+    });
+  }
+  if (action === "checkpoint-evaluation-trial") {
+    return context.evaluationIntegrity.checkpointTrial({
+      trialId: stringArg(input, "evaluationTrialId"),
+      previousProjectionManifestId: stringArg(input, "previousProjectionManifestId"),
+      operation: stringArg(input, "checkpointOperation"),
+      evidenceRefs: stringArrayArg(input, "evidenceRefs")
+    });
+  }
+  if (action === "validate-evaluation-trial") {
+    return context.evaluationIntegrity.validateTrial(
+      stringArg(input, "evaluationTrialId"),
+      {
+        codeRevision: stringArg(input, "codeRevision"),
+        runtimeVersions: recordArg(input, "runtimeVersions")
+      }
+    );
+  }
+  if (action === "complete-evaluation-trial") {
+    return context.evaluationIntegrity.completeTrial(
+      stringArg(input, "evaluationTrialId"),
+      stringArg(input, "codeRevision"),
+      recordArg(input, "runtimeVersions")
+    );
+  }
+  if (action === "record-evaluation-intervention") {
+    return context.evaluationIntegrity.recordIntervention({
+      trialId: stringArg(input, "evaluationTrialId"),
+      category: evaluationInterventionCategoryArg(input, "interventionCategory"),
+      actor: stringArg(input, "interventionActor"),
+      note: stringArg(input, "interventionNote"),
+      evidenceRefs: stringArrayArg(input, "evidenceRefs")
+    });
+  }
   if (action === "rollback-legacy-diagnosis") {
     const resolution = resolveSystemReference(context, input);
     const rollbackInput = {
@@ -4984,6 +5034,7 @@ function recordExecutionEvidenceProgress(
 function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
   const project = context.repository.knowledgeProjects.find((item) => item.id === projectId);
   if (!project) throw new Error("Knowledge project not found");
+  const evaluationTrials = context.evaluationIntegrity.list({ knowledgeProjectId: projectId });
   const sources = context.repository.requirementSources.filter(
     (item) => item.knowledgeProjectId === projectId
   );
@@ -5363,6 +5414,15 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         project.systemIds.length === 1 ? project.systemIds[0] : undefined
       )
     },
+    evaluationIntegrity: {
+      total: evaluationTrials.length,
+      active: evaluationTrials.filter((item) => item.status === "active").length,
+      invalidated: evaluationTrials.filter((item) => item.status === "invalidated").length,
+      completed: evaluationTrials.filter((item) => item.status === "completed").length,
+      activeTrialIds: evaluationTrials
+        .filter((item) => item.status === "active")
+        .map((item) => item.id)
+    },
     connectors: connectorStatus(context, projectId),
     latestCompileRunId: projectCompileRuns.at(-1)?.id,
     activeExplorationTaskId: pendingExplorationTasks.at(-1)?.id,
@@ -5384,6 +5444,36 @@ function knowledgeReview(
 ) {
   const status = knowledgeStatus(context, projectId);
   const project = status.knowledge.project;
+  if (target === "evaluation-trial") {
+    const trials = context.evaluationIntegrity
+      .list({
+        knowledgeProjectId: projectId,
+        comparisonGroupId: optionalStringArg(input, "comparisonGroupId")
+      })
+      .filter((item) => !idValue || item.id === idValue);
+    const items = trials.map((trial) => ({
+      ...trial,
+      sourceSnapshot: context.repository.sourceSnapshots.find(
+        (item) => item.id === trial.sourceSnapshotId
+      ),
+      projectionManifests: context.repository.projectionManifests.filter(
+        (item) => item.trialId === trial.id
+      ),
+      interventions: context.repository.interventionRecords.filter(
+        (item) => item.trialId === trial.id
+      )
+    }));
+    return {
+      project,
+      summary: {
+        total: items.length,
+        active: items.filter((item) => item.status === "active").length,
+        invalidated: items.filter((item) => item.status === "invalidated").length,
+        completed: items.filter((item) => item.status === "completed").length
+      },
+      ...paginateReviewItems(items, input)
+    };
+  }
   if (target === "compile-run") {
     const matchingRuns = context.repository.compileRuns
       .filter(
@@ -10320,6 +10410,7 @@ function explorationResultArg(input: Record<string, unknown>) {
 }
 
 type KnowledgeReviewTarget =
+  | "evaluation-trial"
   | "requirement"
   | "knowledge"
   | "coverage"
@@ -10347,6 +10438,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
   if (
     ![
+      "evaluation-trial",
       "suite-run",
       "case",
       "bug",
@@ -10441,6 +10533,7 @@ function stabilityPolicyArg(input: Record<string, unknown>): StabilityPolicy | u
 
 function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): value is KnowledgeReviewTarget {
   return [
+    "evaluation-trial",
     "requirement",
     "knowledge",
     "coverage",
@@ -10962,6 +11055,11 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
   const value = stringArg(input, key);
   if (
     ![
+      "start-evaluation-trial",
+      "checkpoint-evaluation-trial",
+      "validate-evaluation-trial",
+      "complete-evaluation-trial",
+      "record-evaluation-intervention",
       "ingest-requirement",
       "refresh-requirement",
       "analyze-attachments",
@@ -11009,6 +11107,11 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     throw new Error(`${key} is invalid`);
   }
   return value as
+    | "start-evaluation-trial"
+    | "checkpoint-evaluation-trial"
+    | "validate-evaluation-trial"
+    | "complete-evaluation-trial"
+    | "record-evaluation-intervention"
     | "ingest-requirement"
     | "refresh-requirement"
     | "analyze-attachments"
@@ -11051,6 +11154,35 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "reconcile-system-brain"
     | "confirm-semantic-binding"
     | "recompile-stale-cases";
+}
+
+function evaluationProviderArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (!["builtin", "host-agent", "host-skill", "claude", "codex"].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as "builtin" | "host-agent" | "host-skill" | "claude" | "codex";
+}
+
+function evaluationInterventionCategoryArg(input: Record<string, unknown>, key: string) {
+  const value = stringArg(input, key);
+  if (![
+    "controlled-facade-write",
+    "user-clarification",
+    "manual-store-write",
+    "source-change",
+    "code-change",
+    "product-source-change"
+  ].includes(value)) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as
+    | "controlled-facade-write"
+    | "user-clarification"
+    | "manual-store-write"
+    | "source-change"
+    | "code-change"
+    | "product-source-change";
 }
 
 function diagnosisAssetTypeArg(

@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("ShardedFileBrainCreatorRepository", () => {
-  it("writes schema 20 shards, required ownership directories, and rebuildable indexes", async () => {
+  it("writes schema 21 shards, required ownership directories, and rebuildable indexes", async () => {
     const root = await tempDir();
     const storeDir = join(root, ".brain-creator", "store");
     const legacyPath = join(root, ".brain-creator", "local-assets.json");
@@ -48,7 +48,7 @@ describe("ShardedFileBrainCreatorRepository", () => {
     repository.persist();
 
     const manifest = JSON.parse(await readFile(join(storeDir, "manifest.json"), "utf8"));
-    expect(manifest).toEqual(expect.objectContaining({ schemaVersion: 20, format: "sharded" }));
+    expect(manifest).toEqual(expect.objectContaining({ schemaVersion: 21, format: "sharded" }));
     expect(manifest.collections).toContain("systemProfiles");
     expect(manifest.collections).toContain("attachmentAnalyses");
     expect(existsSync(join(storeDir, "collections", "systemProfiles.json"))).toBe(true);
@@ -56,7 +56,7 @@ describe("ShardedFileBrainCreatorRepository", () => {
     expect(existsSync(join(storeDir, "indexes", "asset-index.json"))).toBe(true);
 
     const restored = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
-    expect(restored.schemaVersion).toBe(20);
+    expect(restored.schemaVersion).toBe(21);
     expect(restored.systemProfiles).toEqual([expect.objectContaining({ id: system.id })]);
     expect(restored.attachmentAnalyses).toEqual([expect.objectContaining({ id: "analysis-1" })]);
 
@@ -91,7 +91,7 @@ describe("ShardedFileBrainCreatorRepository", () => {
 
     const repository = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
 
-    expect(repository.schemaVersion).toBe(20);
+    expect(repository.schemaVersion).toBe(21);
     expect(repository.systemProfiles).toEqual([expect.objectContaining({ id: "system-legacy" })]);
     expect(existsSync(join(storeDir, "manifest.json"))).toBe(true);
     const backups = (await readdir(join(root, ".brain-creator"))).filter((name) =>
@@ -234,11 +234,54 @@ describe("ShardedFileBrainCreatorRepository", () => {
 
     const migrated = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
 
-    expect(migrated.schemaVersion).toBe(20);
+    expect(migrated.schemaVersion).toBe(21);
     expect(migrated.executableCases).toEqual([expect.objectContaining({ id: "legacy-case" })]);
     expect(migrated.scenarioTrustRecords).toEqual([]);
     const backups = await readdir(join(storeDir, "backups"));
     expect(backups.some((name) => name.startsWith("schema-19-"))).toBe(true);
+  });
+
+  it("backs up and migrates a schema 20 store with empty evaluation-integrity collections", async () => {
+    const root = await tempDir();
+    const storeDir = join(root, "store");
+    const legacyPath = join(root, "legacy.json");
+    const initial = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
+    initial.knowledgeProjects.push({ id: "project-schema-20", systemIds: [] } as never);
+    initial.persist();
+
+    const manifestPath = join(storeDir, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const schema21Collections = [
+      "evaluationTrials",
+      "sourceSnapshots",
+      "projectionManifests",
+      "interventionRecords",
+      "stageEvalRecords",
+      "approvalReceipts",
+      "conformanceResults",
+      "systemPageIdentities"
+    ];
+    manifest.schemaVersion = 20;
+    manifest.collections = manifest.collections.filter(
+      (key: string) => !schema21Collections.includes(key)
+    );
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
+    await Promise.all(
+      schema21Collections.map((key) => rm(join(storeDir, "collections", `${key}.json`)))
+    );
+
+    const migrated = new ShardedFileBrainCreatorRepository(storeDir, legacyPath);
+
+    expect(migrated.schemaVersion).toBe(21);
+    expect(migrated.knowledgeProjects).toEqual([
+      expect.objectContaining({ id: "project-schema-20" })
+    ]);
+    expect(migrated.evaluationTrials).toEqual([]);
+    expect(migrated.sourceSnapshots).toEqual([]);
+    expect(migrated.projectionManifests).toEqual([]);
+    expect(migrated.interventionRecords).toEqual([]);
+    const backups = await readdir(join(storeDir, "backups"));
+    expect(backups.some((name) => name.startsWith("schema-20-"))).toBe(true);
   });
 
   it("continues with the schema 19 snapshot when migration cannot acquire the writer lock", async () => {

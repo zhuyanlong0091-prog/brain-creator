@@ -5,12 +5,12 @@ import {
   shardedRepositoryCollectionKeys
 } from "./repository.js";
 
-describe("repository schema 20", () => {
+describe("repository schema 21", () => {
   it("exposes the L3 knowledge, scenario, assurance, and onboarding collections", () => {
     const repository = new InMemoryBrainCreatorRepository();
 
-    expect(CURRENT_REPOSITORY_SCHEMA_VERSION).toBe(20);
-    expect(repository.schemaVersion).toBe(20);
+    expect(CURRENT_REPOSITORY_SCHEMA_VERSION).toBe(21);
+    expect(repository.schemaVersion).toBe(21);
     expect(repository.businessObjectModels).toEqual([]);
     expect(repository.decisionTableModels).toEqual([]);
     expect(repository.semanticBindings).toEqual([]);
@@ -18,6 +18,10 @@ describe("repository schema 20", () => {
     expect(repository.scenarioAssuranceContracts).toEqual([]);
     expect(repository.scenarioTrustRecords).toEqual([]);
     expect(repository.onboardingPlans).toEqual([]);
+    expect(repository.evaluationTrials).toEqual([]);
+    expect(repository.sourceSnapshots).toEqual([]);
+    expect(repository.projectionManifests).toEqual([]);
+    expect(repository.interventionRecords).toEqual([]);
     expect(shardedRepositoryCollectionKeys()).toEqual(expect.arrayContaining([
       "businessObjectModels",
       "decisionTableModels",
@@ -25,7 +29,11 @@ describe("repository schema 20", () => {
       "businessScenarios",
       "scenarioAssuranceContracts",
       "scenarioTrustRecords",
-      "onboardingPlans"
+      "onboardingPlans",
+      "evaluationTrials",
+      "sourceSnapshots",
+      "projectionManifests",
+      "interventionRecords"
     ]));
   });
 
