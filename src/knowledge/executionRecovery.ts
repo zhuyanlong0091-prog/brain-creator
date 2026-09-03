@@ -71,5 +71,8 @@ export function classifyEvidenceFailure(input: {
   if (reporter?.assertions.some((assertion) => assertion.status === "failed")) {
     return { type: "assertion_failure", reason: "Structured reporter contains a failed assertion" };
   }
+  if (reporter?.consoleErrors.length) {
+    return { type: "automation_failure", reason: "Structured reporter contains console errors" };
+  }
   return { type: classifyExecutionFailure(reason), reason: reason || "Execution failed without diagnostic output" };
 }

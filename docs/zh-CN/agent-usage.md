@@ -80,7 +80,7 @@ Requirement Suite 先以 `confirm=false` 预览，用户批准后再 `confirm=tr
 
 ### 10. 复盘证据
 
-使用 `bc_review` 查看需求、知识、覆盖、System Brain、ExecutionPlan、步骤证据、Bug、Gap 和运行账本。需求预期与系统观察始终分层展示。
+使用 `bc_review` 查看需求、知识、覆盖、System Brain、ExecutionPlan、步骤证据、需求符合性结果、Bug、Gap 和运行账本。需求预期与系统观察始终分层展示。`bc_review target=conformance` 会把“过程执行成功”和“需求符合结论”分开：只有强断言、完整来源和结构化证据才能得到 `conform`；证据有限或缺少 Oracle 时分别保留为 `inconclusive` 或 `requirement-review`。
 
 ## 可信控制面约定
 

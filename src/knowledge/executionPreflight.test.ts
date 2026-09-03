@@ -54,6 +54,10 @@ describe("ExecutionPreflightService", () => {
           purpose: "generator"
         }),
         verdict: "ready",
+        integrity: expect.objectContaining({
+          requirementHash: fixture.requirementSet.contentHash,
+          assertionContractHash: expect.stringMatching(/^[a-f0-9]{64}$/)
+        }),
         snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/)
       })
     );
@@ -79,6 +83,30 @@ describe("ExecutionPreflightService", () => {
     expect(changed.executionPlan?.id).not.toBe(first.executionPlan?.id);
     expect(fixture.repository.executionPlans).toHaveLength(2);
     expect(first.executionPlan!.steps[0].instruction).toBe("Open the form");
+  });
+
+  it("blocks a persisted ready case that has no executable oracle", () => {
+    const fixture = preflightFixture();
+    fixture.executableCase.steps = [];
+    fixture.executableCase.assertionContracts = [];
+
+    const result = fixture.service.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true
+    });
+
+    expect(result.status).toBe("blocked");
+    expect(result.draft.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "readiness",
+          status: "blocked",
+          message: expect.stringContaining("no steps")
+        })
+      ])
+    );
   });
 
   it("validates a frozen plan and rejects semantic or blocking changes", () => {
@@ -562,6 +590,29 @@ function preflightFixture() {
       targetSemantic: "Order form",
       origin: "source",
       sourceRefs: ["requirement:orders"]
+    }, {
+      id: "step-assert",
+      order: 2,
+      action: "assert",
+      instruction: "Verify the order was created",
+      targetSemantic: "Order status",
+      expected: "Created",
+      origin: "source",
+      sourceRefs: ["requirement:orders"],
+      assertion: {
+        type: "workflow",
+        strength: "strong",
+        expected: "Created"
+      }
+    }],
+    assertionContracts: [{
+      id: "assertion-orders",
+      stepId: "step-assert",
+      type: "workflow",
+      strength: "strong",
+      expected: "Created",
+      requirementRefs: ["requirement:orders"],
+      evidenceRequirements: ["actual-value", "screenshot", "trace"]
     }],
     dataProfileIds: [],
     gapIds: [],

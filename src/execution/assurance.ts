@@ -28,6 +28,16 @@ export function determineAssuranceLevel(
   reporter: StructuredReporterResult | undefined
 ): AssuranceLevel {
   if (!contracts.length || !reporter) return "none";
+  // A reporter with extra tests/assertions is not evidence for this case.
+  // Requiring an exact cardinality prevents an unrelated green assertion from
+  // masking a missing or unbound business oracle.
+  if (
+    reporter.assertions.length !== contracts.length ||
+    reporter.total !== contracts.length ||
+    reporter.passed !== contracts.length ||
+    reporter.failed !== 0 ||
+    reporter.skipped !== 0
+  ) return "none";
   const results = new Map(reporter.assertions.map((assertion) => [assertion.id, assertion]));
   const exactMatches = contracts.filter((contract) => results.has(contract.id));
   const mapped = exactMatches.length === contracts.length

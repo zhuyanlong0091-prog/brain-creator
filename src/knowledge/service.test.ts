@@ -1182,6 +1182,89 @@ describe("KnowledgeService", () => {
     );
   });
 
+  it("persists a separate conformance result for a uniquely bound strong execution", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, await tempDir());
+    const project = await service.createProject({ name: "Conformance", key: "conformance", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-conformance",
+      name: "Conformance",
+      environment: "test",
+      baseUrl: "https://conformance.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://conformance.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-conformance");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("conformance", "Users create an order record.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    const scenario = repository.businessScenarios.find(
+      (item) => item.requirementSetId === ingested.requirementSet.id
+    );
+    if (!scenario) throw new Error("Expected a generated business scenario");
+    scenario.testIntentIds = [design.testIntents[0].id];
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const executableCase = service.compileExecutableCases(
+      design.testIntents[0].id,
+      "system-conformance"
+    ).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-conformance",
+      executableCaseId: executableCase.id,
+      testCaseId: "test-conformance",
+      contextPackPath: "context/conformance.json"
+    });
+    const contracts = evidence.assertionContracts ?? [];
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "passed",
+      artifactPaths: ["evidence/step-04.png"],
+      tracePaths: ["evidence/trace.zip"],
+      reporterResult: {
+        status: "passed",
+        total: contracts.length,
+        passed: contracts.length,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        assertions: contracts.map((contract) => ({
+          id: contract.id,
+          stepId: contract.stepId,
+          status: "passed" as const,
+          actual: "created",
+          evidenceRefs: ["evidence/assertion.png", "evidence/trace.zip"]
+        })),
+        steps: evidence.steps.map((step) => ({
+          id: step.stepId,
+          title: step.instruction,
+          status: "passed" as const,
+          evidenceRefs: ["evidence/step-04.png"]
+        })),
+        attachments: ["evidence/trace.zip"],
+        consoleErrors: [],
+        networkFailures: []
+      }
+    });
+
+    expect(completed.assuranceLevel).toBe("strong");
+    expect(repository.conformanceResults).toEqual([
+      expect.objectContaining({
+        executionEvidenceId: evidence.id,
+        verdict: "conform",
+        expectationRefs: expect.arrayContaining(executableCase.assertionContracts?.[0].requirementRefs ?? [])
+      })
+    ]);
+    expect(service.listConformanceResults({
+      knowledgeProjectId: project.id,
+      systemId: "system-conformance"
+    })).toHaveLength(1);
+  });
+
   it("estimates Requirement Eval accuracy from traceable historical execution outcomes", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const service = new KnowledgeService(repository, await tempDir());

@@ -102,6 +102,8 @@ Execution evidence now distinguishes process success from requirement assurance.
 
 The static HTML report is written beside the Markdown evidence report. A process that exits with code 0 but has no structured reporter mapping remains `none`; it must not be presented as strong requirement validation. The report is an offline artifact, not a new Brain Creator UI entrypoint.
 
+On completion, Brain Creator also persists a separate `ConformanceResult` so process completion is not confused with sufficient evidence for a requirement claim. Only a passed run with strong assertions and complete source evidence is `conform`; limited evidence is `inconclusive`, an absent oracle requires `requirement-review`, and a confirmed product defect is `nonconform`. Review these outcomes with `bc_review target=conformance`, optionally filtered by system, requirement revision, or scenario.
+
 Completed evidence also evaluates scenario trust. The first strong observed run
 can move a bound scenario to `verified`; three unchanged strong runs are needed
 for `trusted`. A first headless pass is held until observation evidence exists.
