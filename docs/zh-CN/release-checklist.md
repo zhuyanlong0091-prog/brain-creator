@@ -9,6 +9,7 @@ npm test
 npm run build
 npm run docs:build
 npm run verify:requirement-eval
+npm run verify:l3-eval
 npm run verify:package-contents
 npm run verify:package-install
 npm run verify:codex-native-entry
@@ -16,6 +17,8 @@ npm run release:check
 ```
 
 ## npm 发布前
+
+2.2.0 候选版本还必须阅读 [L3 发布候选评估](release-candidate-2.2.0.md)，并确认 `npm run verify:l3-eval:strict` 的真实系统和历史 Bug 门禁已经由部署证据解除。合成黄金样本通过不能替代真实系统回归。
 
 - `package.json`、`package-lock.json`、`src/version.ts` 和插件 manifest 版本一致。
 - `brain-creator --version` 输出目标版本。

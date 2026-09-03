@@ -8,6 +8,11 @@ import {
   buildBusinessScenarios,
   evaluateMutationSuite
 } from "./scenarioAssurance.js";
+import {
+  evaluateL3GoldenCorpus,
+  type L3GoldenCorpusReport,
+  type L3ReleaseGate
+} from "./l3Evaluation.js";
 
 export type AutonomyBaselineMetric = {
   status: "measured" | "not-measured";
@@ -28,6 +33,8 @@ export type AutonomyBaselineReport = {
     requirementHostHarness: AutonomyBaselineMetric;
     scenarioDefectDetection: AutonomyBaselineMetric;
   };
+  l3GoldenCorpus: L3GoldenCorpusReport;
+  releaseGate: L3ReleaseGate;
   openCapabilityGaps: string[];
 };
 
@@ -68,6 +75,10 @@ export function buildAutonomyBaselineReport(input: {
       evidenceRefs: [`golden-evidence:mutation-${index + 1}`]
     }))
   });
+  const l3GoldenCorpus = evaluateL3GoldenCorpus({
+    generatedAt: input.generatedAt,
+    seed: input.seed
+  });
 
   return {
     schemaVersion: 21,
@@ -100,7 +111,10 @@ export function buildAutonomyBaselineReport(input: {
         threshold: mutationEvaluation.threshold
       }
     },
+    l3GoldenCorpus,
+    releaseGate: l3GoldenCorpus.releaseGate,
     openCapabilityGaps: [
+      ...l3GoldenCorpus.releaseGate.blockers,
       "Historical Bug replay and real-system mutation detection still require a larger evidence corpus",
       "Requirement Host Harness structure is measured; semantic Critic quality still needs a larger real defect corpus",
       "Optional cross-provider evaluation is not measured yet"

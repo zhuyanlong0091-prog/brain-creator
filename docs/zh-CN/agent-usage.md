@@ -82,6 +82,10 @@ Requirement Suite 先以 `confirm=false` 预览，用户批准后再 `confirm=tr
 
 使用 `bc_review` 查看需求、知识、覆盖、System Brain、ExecutionPlan、步骤证据、需求符合性结果、Bug、Gap 和运行账本。需求预期与系统观察始终分层展示。`bc_review target=conformance` 会把“过程执行成功”和“需求符合结论”分开：只有强断言、完整来源和结构化证据才能得到 `conform`；证据有限或缺少 Oracle 时分别保留为 `inconclusive` 或 `requirement-review`。
 
+### 11. L3 评估边界
+
+在源码工作区运行 `npm run verify:l3-eval`，评估脱敏 L3 黄金样本。评估覆盖需求理解、流程/状态覆盖、场景覆盖、跨角色流程、同系统多需求隔离、结构化执行证据和 20 轮合成 Runner 样本。需要机器可读输出时运行 `npm run verify:l3-eval:json`；需要保存到指定路径时直接运行 `node --loader ts-node/esm scripts/l3Eval.ts --json --output <path>`。只有检查发布准备度时才使用 `npm run verify:l3-eval:strict`。真实系统回归和历史 Bug 回放尚未测量时，命令会有意保持阻断。
+
 ## 可信控制面约定
 
 正常 Facade 调用使用 `responseMode=summary`，只有审计特定资产时使用 `full`。需求用例优先通过 `requirementSetId`、`testIntentIds` 或模块一次批量编译，并通过 `bc_review target=compile-run` 分页查看详情。页面歧义必须先进入探索；只有用户真实选择了候选页面时才调用 `confirm-page-binding`。探索结论和 Gap 生命周期操作都必须先预览，再携带证据确认。鉴权验证必须访问真实页面，不能只修改状态字段。

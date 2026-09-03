@@ -158,6 +158,10 @@ Failure classification is shared between Ledger and review filters: assertion, a
 
 The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, ExecutionPlans, evidence, conformance results, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge. Coverage review reports required, verified, and missing dimensions for `field`, `workflow`, `state`, `permission`, and `integration`. `bc_review target=conformance` separates a successful process from a requirement claim: only strong, source-backed evidence is `conform`; limited or missing oracles remain `inconclusive` or `requirement-review`.
 
+### 11. L3 Evaluation Boundary
+
+Run `npm run verify:l3-eval` from a source checkout to evaluate the sanitized L3 golden corpus. It covers requirement understanding, workflow/state coverage, scenario coverage, cross-role journeys, same-system multi-requirement isolation, structured execution evidence, and the synthetic 20-iteration Runner sample. Use `npm run verify:l3-eval:json` for machine-readable output, or invoke `node --loader ts-node/esm scripts/l3Eval.ts --json --output <path>` to save it. Use `npm run verify:l3-eval:strict` only when checking release readiness: the command intentionally blocks while real-system regression and historical Bug replay evidence are not measured.
+
 ## User Entrypoints
 
 | User intent | Default Facade action |

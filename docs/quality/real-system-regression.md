@@ -58,3 +58,9 @@ long-running runs.
 
 The fixture is an acceptance sample, not a claim that every real system has
 the same DOM, authentication provider, data API, or workflow semantics.
+
+For the broader L3 delivery gate, run `npm run verify:l3-eval`. That command
+also evaluates sanitized HR, order approval, image state-machine, cross-role,
+multi-requirement, and synthetic long-run samples. It intentionally keeps
+real-system regression and historical Bug replay as `not-measured` until
+deployment evidence is supplied.

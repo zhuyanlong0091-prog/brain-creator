@@ -158,7 +158,7 @@ Brain Creator 采用本地优先策略。运行状态和证据默认写入 `.bra
 
 当前分片仓库版本为 schema 21。schema 19 和 schema 20 仓库会在迁移前生成备份；如果写锁导致迁移无法完成，Brain Creator 会继续保留旧快照，不会部分宣称升级成功。
 
-源码工作区可运行 `npm run verify:autonomy-baseline` 输出确定性的 L3 基线。报告会区分“已测量”和“尚未测量”；BusinessScenario 或 Mutation 指标尚未建设时会明确列为能力缺口，而不是记为通过。
+源码工作区可运行 `npm run verify:autonomy-baseline` 输出确定性的 L3 基线，也可以运行 `npm run verify:l3-eval` 评估扩展后的脱敏黄金样本，覆盖需求理解、流程/状态、业务场景、角色、多需求隔离、执行证据和 20 轮合成 Runner。报告区分“已测量”和“尚未测量”；只有发布门禁才使用 `npm run verify:l3-eval:strict`。历史 Bug 回放、真实系统回归和生产级长周期证据仍需部署环境提供，不能由合成样本替代。
 
 可用 `BRAIN_CREATOR_KNOWLEDGE_DIR` 指向外部 Obsidian 兼容目录。运行数据、鉴权状态、prompt、trace 和生成测试不得提交到 Git。
 

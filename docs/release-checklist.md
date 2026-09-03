@@ -18,6 +18,7 @@ npm run release:check
 Run package gates:
 
 ```bash
+npm run verify:l3-eval
 npm run verify:package-contents
 npm run verify:package-install
 npm run verify:codex-native-entry
@@ -25,6 +26,8 @@ npm run verify:codex-plugin-install
 ```
 
 ## Required Before npm publish
+
+For the 2.2.0 candidate, read [L3 release candidate evidence](release-candidate-2.2.0.md) and confirm that `npm run verify:l3-eval:strict` has real-system and historical Bug evidence from the deployment. Passing synthetic golden samples is not a substitute for real-system regression.
 
 - Confirm final package name: `brain-creator`.
 - Confirm and document license: `MIT`.

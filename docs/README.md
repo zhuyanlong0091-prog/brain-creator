@@ -61,6 +61,7 @@ Start with [Troubleshooting](troubleshooting.md). Then use Brain Creator review 
 - [MCP installation and configuration](mcp-installation.md)
 - [Machine-readable documentation index](llms.txt)
 - [Release checklist](release-checklist.md)
+- [2.2.0 release candidate](release-candidate-2.2.0.md)
 - [Execution quality register](quality/problem-register.md)
 - [Real-system regression samples](quality/real-system-regression.md)
 - [Reliability controls](quality/reliability-controls.md)

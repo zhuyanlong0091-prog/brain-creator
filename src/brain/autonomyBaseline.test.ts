@@ -27,6 +27,11 @@ describe("AutonomyBaselineReport", () => {
       threshold: 0.85
     }));
     expect(report.metrics.scenarioDefectDetection.rate).toBeGreaterThanOrEqual(0.85);
+    expect(report.l3GoldenCorpus.sampleCount).toBe(7);
+    expect(report.releaseGate.status).toBe("blocked");
+    expect(report.releaseGate.blockers).toEqual(expect.arrayContaining([
+      expect.stringContaining("Real-system")
+    ]));
     expect(report.openCapabilityGaps).toEqual(expect.arrayContaining([
       expect.stringContaining("Historical Bug replay")
     ]));

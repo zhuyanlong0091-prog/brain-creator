@@ -21,6 +21,19 @@
 
 除非参数另有说明，命令都应在业务项目中运行。
 
+## L3 黄金评估
+
+源码工作区提供确定性的脱敏评估命令。它用于测量 L3 控制面，不会把合成夹具伪装成真实系统回归：
+
+```bash
+npm run verify:l3-eval
+npm run verify:l3-eval:json
+node --loader ts-node/esm scripts/l3Eval.ts --json --output .brain-creator/evals/l3-baseline.json
+npm run verify:l3-eval:strict
+```
+
+`:strict` 脚本用于发布门禁；真实系统回归或历史 Bug 回放尚未测量时会以非零状态退出。评估输出必须留在 Git 和 npm 包之外。
+
 ## `brain-creator init`
 
 ```text
