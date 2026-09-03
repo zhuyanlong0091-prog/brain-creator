@@ -20,6 +20,7 @@
 - [中文 MCP 安装](zh-CN/mcp-installation.md): 配置 Claude、Codex 与 host-agent。
 - [中文故障排查](zh-CN/troubleshooting.md): 按症状解决安装和执行问题。
 - [中文会话恢复](zh-CN/e2e-session-resume-workflow.md): 在新 Agent 会话中恢复持久状态并继续正确任务。
+- [中文 2.2.0 发布候选](zh-CN/release-candidate-2.2.0.md): 查看 L3 黄金评估的已测量范围和发布阻断项。
 
 ## Guides
 
@@ -36,6 +37,7 @@
 - [MCP installation](mcp-installation.md): Configure Claude, Codex, host-agent, the Codex plugin, and MCP transport.
 - [Troubleshooting](troubleshooting.md): Diagnose installation, provider, browser, authentication, connector, evidence, and execution problems by symptom.
 - [Release checklist](release-checklist.md): Verify source, package, plugin, and npm publish gates.
+- [2.2.0 release candidate](release-candidate-2.2.0.md): Read the measured L3 golden dimensions and remaining release blockers.
 - [Execution quality register](quality/problem-register.md): Track the sanitized 41-item execution quality baseline and acceptance gates.
 
 ## Product rules

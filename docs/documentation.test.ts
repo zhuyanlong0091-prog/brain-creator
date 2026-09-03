@@ -13,6 +13,7 @@ const publicDocs = [
   "docs/cli-reference.md",
   "docs/mcp-installation.md",
   "docs/troubleshooting.md",
+  "docs/release-candidate-2.2.0.md",
   "docs/zh-CN/index.md",
   "docs/zh-CN/getting-started.md",
   "docs/zh-CN/core-concepts.md",
@@ -23,6 +24,7 @@ const publicDocs = [
   "docs/zh-CN/cli-reference.md",
   "docs/zh-CN/mcp-installation.md",
   "docs/zh-CN/troubleshooting.md",
+  "docs/zh-CN/release-candidate-2.2.0.md",
   "docs/zh-CN/release-checklist.md"
 ];
 
@@ -37,6 +39,7 @@ const localizedPairs = [
   ["docs/cli-reference.md", "docs/zh-CN/cli-reference.md"],
   ["docs/mcp-installation.md", "docs/zh-CN/mcp-installation.md"],
   ["docs/troubleshooting.md", "docs/zh-CN/troubleshooting.md"],
+  ["docs/release-candidate-2.2.0.md", "docs/zh-CN/release-candidate-2.2.0.md"],
   ["docs/release-checklist.md", "docs/zh-CN/release-checklist.md"]
 ];
 

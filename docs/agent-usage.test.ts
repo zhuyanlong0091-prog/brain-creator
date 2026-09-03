@@ -63,7 +63,10 @@ describe("Agent-native usage documentation", () => {
       "bc_create_auth_checkpoint",
       "bc_cancel_plan",
       "bc_resume_plan",
-      "bc_report_gap"
+      "bc_report_gap",
+      "npm run verify:l3-eval",
+      "npm run verify:l3-eval:strict",
+      "npm run verify:l3-eval:json"
     ]) {
       expect(content).toContain(marker);
     }
@@ -89,5 +92,13 @@ describe("Agent-native usage documentation", () => {
     expect(packageJson.scripts["verify:live-session-resume-workflow"]).toContain(
       "scripts/liveSessionResumeWorkflowSmoke.ts"
     );
+  });
+
+  it("keeps the L3 evaluation scripts available in the source checkout", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+    expect(packageJson.scripts["verify:l3-eval"]).toContain("scripts/l3Eval.ts");
+    expect(packageJson.scripts["verify:l3-eval:strict"]).toContain("--strict");
+    expect(packageJson.scripts["verify:l3-eval:json"]).toContain("--json");
   });
 });

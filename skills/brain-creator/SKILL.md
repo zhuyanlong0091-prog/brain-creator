@@ -259,3 +259,10 @@ the scenario. Use the offline execution report and `bc_status` to explain the
 current step, data references, evidence strength, diagnosis, and next action
 in plain language. A green Playwright process is never equivalent to complete
 requirement conformance.
+
+For L3 evaluation, use `npm run verify:l3-eval` from a source checkout. Treat
+the sanitized HR, order approval, image state-machine, cross-role,
+multi-requirement, and synthetic long-run samples as control evidence only.
+The command must report real-system regression and historical Bug replay as
+`not-measured` until deployment evidence is supplied; never describe the
+synthetic result as full autonomy or production readiness.

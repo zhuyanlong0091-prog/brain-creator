@@ -21,6 +21,19 @@ Use the consolidated `brain-creator` command to install, inspect, diagnose, and 
 
 Run commands from the business project unless the option says otherwise.
 
+## L3 golden evaluation
+
+The source checkout includes a deterministic, sanitized evaluation command. It measures the L3 control surface without claiming that a synthetic fixture is a real-system regression:
+
+```bash
+npm run verify:l3-eval
+npm run verify:l3-eval:json
+node --loader ts-node/esm scripts/l3Eval.ts --json --output .brain-creator/evals/l3-baseline.json
+npm run verify:l3-eval:strict
+```
+
+The `:strict` script is a release gate and exits non-zero while real-system regression or historical Bug replay evidence is not measured. Evaluation output must remain outside Git and npm artifacts.
+
 ## `brain-creator init`
 
 ```text

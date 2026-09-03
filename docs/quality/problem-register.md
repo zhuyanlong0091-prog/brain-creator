@@ -135,6 +135,23 @@ its allowed redirect/service URLs, and an external scheduler must be supplied
 by the deployment. These adapters are not treated as proof of a successful
 login until their returned storage state is verified against the target system.
 
+## Current implementation slice: L3 golden evaluation delivery
+
+PR N adds a deterministic, sanitized L3 corpus and a release-gate report. The
+corpus measures requirement understanding, workflow/state coverage, scenario
+coverage, cross-role journeys, same-system multi-requirement isolation,
+structured runtime evidence, and a 20-iteration synthetic Runner sample. Each
+dimension records its numerator, denominator, threshold, sample IDs, and notes.
+
+This slice deliberately does not close the remaining production claims. The
+report keeps real-system regression and historical Bug replay as
+`not-measured`, and labels the long-run result as synthetic. Run
+`npm run verify:l3-eval` for the normal deterministic check; use the explicit
+`npm run verify:l3-eval:strict` script only when a deployment is ready to enforce
+the release gate. No real-system URL,
+account, browser state, screenshot, trace, or business record belongs in this
+repository.
+
 ## Current implementation slice: System Brain reconciliation
 
 PR D adds the missing Expected/Observed reconciliation control for the System

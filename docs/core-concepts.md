@@ -158,7 +158,7 @@ Brain Creator is local-first. Runtime state and evidence default to `.brain-crea
 
 The current sharded repository schema is 21. Schema 19 and schema 20 stores are backed up before migration; if the writer lock prevents migration, Brain Creator retains the previous snapshot instead of partially claiming the upgrade.
 
-Run `npm run verify:autonomy-baseline` from a source checkout to print the deterministic L3 baseline. The report distinguishes measured controls from capabilities that are not measured yet; the scenario portfolio and synthetic mutation detection foundations are measured, while historical Bug replay and real-system mutation effectiveness remain open.
+Run `npm run verify:autonomy-baseline` from a source checkout to print the deterministic L3 baseline. Run `npm run verify:l3-eval` for the expanded sanitized corpus covering requirement understanding, workflow/state coverage, scenarios, roles, multi-requirement isolation, runtime evidence, and the synthetic 20-iteration Runner. The report distinguishes measured controls from capabilities that are not measured yet. Use `npm run verify:l3-eval:strict` only for release gating: historical Bug replay, real-system regression, and production long-run evidence remain blockers until deployment evidence is supplied.
 
 You can set `BRAIN_CREATOR_KNOWLEDGE_DIR` to an external Obsidian-compatible directory. Runtime data, auth state, prompts, traces, and generated tests must remain uncommitted.
 

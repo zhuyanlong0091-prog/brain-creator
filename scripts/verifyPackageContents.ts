@@ -30,6 +30,8 @@ const requiredPaths = [
   "docs/zh-CN/troubleshooting.md",
   "docs/zh-CN/release-checklist.md",
   "docs/release-notes-2.1.1.md",
+  "docs/release-candidate-2.2.0.md",
+  "docs/zh-CN/release-candidate-2.2.0.md",
   "docs/llms.txt",
   "docs/public/brain-creator-mark.png",
   "LICENSE",
