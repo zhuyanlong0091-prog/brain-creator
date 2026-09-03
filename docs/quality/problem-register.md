@@ -76,6 +76,12 @@ production acceptance conditions are closed.
 
 This register closes only through its stated acceptance checks. A passing feature test does not close broader evidence, security, or reliability work assigned to a later PR.
 
+## Follow-up issue from real requirement review
+
+| ID | Sanitized problem | Status | Target | Acceptance condition / check |
+|---|---|---|---|---|
+| H1 | 需求分析报告直接暴露内部英文字段，且缺少 BusinessScenario 审核结果；用户难以仅凭需求分析和测试意图文档判断业务范围 | partial | Readable requirement reports | `analysis.md` 使用面向用户的中文章节和业务描述，`test-intents.md` 独立承载完整测试意图，业务场景在分析报告中可审核；对应 `reportWriter.test.ts` 与 `service.test.ts` |
+
 ## L3 Requirement Host Harness calibration
 
 The L3 PR B slice adds a recoverable Document Mapper → Clause Analyst →
