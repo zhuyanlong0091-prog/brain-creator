@@ -429,14 +429,27 @@ describe("KnowledgeService", () => {
       join(knowledgeDir, "order-coverage", "requirements", ingested.requirementSet.id, "analysis.md"),
       "utf8"
     );
+    const testIntentReport = await readFile(
+      join(knowledgeDir, "order-coverage", "requirements", ingested.requirementSet.id, "test-intents.md"),
+      "utf8"
+    );
+    const projectIndex = await readFile(
+      join(knowledgeDir, "order-coverage", "MOC.md"),
+      "utf8"
+    );
 
     expect(design.testIntents).toHaveLength(4);
     expect(design.evaluation.coverage).toEqual(
       expect.objectContaining({ totalClauses: 4, coveredClauses: 4, coverageRate: 1 })
     );
-    expect(report).toContain("## Requirement Clauses");
-    expect(report).toContain("## Evaluation");
-    expect(report).toContain("Coverage: 4/4 (100%)");
+    expect(report).toContain("## 三、需求条款");
+    expect(report).toContain("## 六、业务场景分析");
+    expect(report).not.toContain("## Requirement Clauses");
+    expect(report).not.toContain("module=");
+    expect(testIntentReport).toContain("：测试意图");
+    expect(testIntentReport).toContain("验证目标");
+    expect(testIntentReport).toContain("预期结果");
+    expect(projectIndex).toContain("test-intents");
     expect(report).toContain(design.analysis.clauses[0].sourceRef);
   });
 

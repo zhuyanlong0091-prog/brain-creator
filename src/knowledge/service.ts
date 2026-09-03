@@ -105,6 +105,10 @@ import {
 } from "../execution/trustPromotion.js";
 import { evaluateConformance } from "../execution/conformance.js";
 import { buildCaseDependencyGraph } from "./caseDependencyGraph.js";
+import {
+  renderRequirementAnalysisReport,
+  renderTestIntentReport
+} from "./reportWriter.js";
 import type {
   BusinessScenario,
   ScenarioAssuranceContract,
@@ -379,6 +383,29 @@ export class KnowledgeService {
       const coveredClauseSourceRefs = [
         ...new Set(existingIntents.flatMap((item) => item.requirementRefs))
       ];
+      await this.writeAnalysis(
+        requirementSet,
+        analysis,
+        existingIntents,
+        reusedEvaluation,
+        {
+          totalClauses: analysis.clauses.length,
+          coveredClauseSourceRefs,
+          uncoveredClauseSourceRefs: analysis.clauses
+            .map((clause) => clause.sourceRef)
+            .filter((sourceRef) => !coveredClauseSourceRefs.includes(sourceRef)),
+          intentCount: existingIntents.length
+        },
+        requirementSet.evaluationGate!,
+        existingCoverageProfile,
+        this.repository.workflowModels.filter((item) => item.requirementSetId === requirementSetId),
+        this.repository.stateMachineModels.filter((item) => item.requirementSetId === requirementSetId),
+        this.repository.businessObjectModels.filter((item) => item.requirementSetId === requirementSetId),
+        this.repository.decisionTableModels.filter((item) => item.requirementSetId === requirementSetId),
+        scenarioPortfolio.businessScenarios,
+        scenarioPortfolio.scenarioAssuranceContracts,
+        scenarioPortfolio.scenarioTrustRecords
+      );
       return {
         reused: true,
         analysis,
@@ -558,7 +585,10 @@ export class KnowledgeService {
       proposedModels.workflowModels,
       proposedModels.stateMachineModels,
       businessObjectModels,
-      proposedModels.decisionTableModels
+      proposedModels.decisionTableModels,
+      scenarioPortfolio.businessScenarios,
+      scenarioPortfolio.scenarioAssuranceContracts,
+      scenarioPortfolio.scenarioTrustRecords
     );
     await this.writeModuleKnowledge(requirementSet, analysis, design.testIntents);
     const result = {
@@ -2911,6 +2941,10 @@ export class KnowledgeService {
     const projectDir = join(this.knowledgeDir, project.key);
     await mkdir(projectDir, { recursive: true });
     const sets = this.listRequirementSets(project.id);
+    const linkTitle = (title: string, version: number) =>
+      /[�\u0000-\u001F]/.test(title) || title.trim().length < 2
+        ? `需求版本 v${version}`
+        : title;
     await writeFile(
       join(projectDir, "MOC.md"),
       [
@@ -2922,7 +2956,10 @@ export class KnowledgeService {
         `# ${project.name}`,
         "",
         "## Requirements",
-        ...sets.map((item) => `- [[requirements/${item.id}/analysis|${item.title} v${item.version}]]`),
+        ...sets.flatMap((item) => [
+          `- [[requirements/${item.id}/analysis|${linkTitle(item.title, item.version)} v${item.version}：需求分析报告]]`,
+          `- [[requirements/${item.id}/test-intents|${linkTitle(item.title, item.version)}：测试意图]]`
+        ]),
         "",
         "## Systems",
         ...(project.systemIds.length > 0
@@ -2968,93 +3005,52 @@ export class KnowledgeService {
     workflowModels = this.repository.workflowModels.filter((item) => item.requirementSetId === set.id),
     stateMachineModels = this.repository.stateMachineModels.filter((item) => item.requirementSetId === set.id),
     businessObjectModels = this.repository.businessObjectModels.filter((item) => item.requirementSetId === set.id),
-    decisionTableModels = this.repository.decisionTableModels.filter((item) => item.requirementSetId === set.id)
+    decisionTableModels = this.repository.decisionTableModels.filter((item) => item.requirementSetId === set.id),
+    businessScenarios = this.repository.businessScenarios.filter((item) => item.requirementSetId === set.id),
+    scenarioAssuranceContracts = this.repository.scenarioAssuranceContracts.filter((item) =>
+      businessScenarios.some((scenario) => scenario.id === item.scenarioId)
+    ),
+    scenarioTrustRecords = this.repository.scenarioTrustRecords.filter((item) =>
+      businessScenarios.some((scenario) => scenario.id === item.scenarioId)
+    )
   ) {
     const project = this.getProject(set.knowledgeProjectId);
     const requirementDir = join(this.knowledgeDir, project.key, "requirements", set.id);
     await mkdir(requirementDir, { recursive: true });
     await writeFile(
       join(requirementDir, "analysis.md"),
-      [
-        "---",
-        `requirement_set_id: ${set.id}`,
-        `policy: ${analysis.policyId}@${analysis.policyVersion}`,
-        `provider: ${analysis.provider}`,
-        `status: ${set.status}`,
-        "---",
-        "",
-        `# ${set.title} Analysis`,
-        "",
-        "## Requirement Clauses",
-        ...analysis.clauses.map(
-          (clause) =>
-            `- [${clause.sourceRef}] [module=${clause.module}] ${clause.text} (${clause.nodeTypes.length > 0 ? clause.nodeTypes.join(", ") : "unclassified"})`
-        ),
-        "",
-        "## Knowledge",
-        ...analysis.nodes.map(
-          (node) => `- **${node.type}** ${node.title}: ${node.content} [${node.sourceRefs.join(", ")}]`
-        ),
-        "",
-        "## Evaluation",
-        `- Verdict: ${evaluation.verdict}`,
-        `- Score: ${evaluation.score}`,
-        `- Coverage: ${evaluation.coverage.coveredClauses}/${evaluation.coverage.totalClauses} (${Math.round(evaluation.coverage.coverageRate * 100)}%)`,
-        `- Test intents: ${coverage.intentCount}`,
-        `- Unsupported claims: ${evaluation.unsupportedClaims.length}`,
-        `- Gate status: ${evaluationGate.status}`,
-        "",
-        "### Required Actions",
-        ...(evaluationGate.actions.length > 0
-          ? evaluationGate.actions.map(
-              (action) =>
-                `- [${action.status}] ${action.id} (${action.kind}): ${action.message} [${action.sourceRefs.join(", ")}]`
-            )
-          : ["- None"]),
-        "",
-        "### Contradictions",
-        ...(analysis.contradictions.length > 0
-          ? analysis.contradictions.map((item) => `- ${item}`)
-          : ["- None"]),
-        "",
-        "### Missing Branches",
-        ...(analysis.missingBranches.length > 0
-          ? analysis.missingBranches.map((item) => `- ${item}`)
-          : ["- None"]),
-        "",
-        "## Process Models",
-        `- Business object models: ${businessObjectModels.length}`,
-        `- Workflow models: ${workflowModels.length}`,
-        `- State-machine models: ${stateMachineModels.length}`,
-        `- Decision-table models: ${decisionTableModels.length}`,
-        ...businessObjectModels.map(
-          (model) => `- Business object ${model.id}: ${model.name}; actors=${model.actors.join(", ") || "none"}; states=${model.states.join(", ") || "none"}; sources=${model.sourceRefs.join(", ")}`
-        ),
-        ...workflowModels.map(
-          (model) => `- Workflow ${model.id}: ${model.transitions.length} transitions; actors=${model.actors.join(", ") || "none"}; sources=${model.sourceRefs.join(", ")}`
-        ),
-        ...stateMachineModels.map(
-          (model) => `- State machine ${model.id}: ${model.states.length} states, ${model.transitions.length} transitions; sources=${model.sourceRefs.join(", ")}`
-        ),
-        ...decisionTableModels.map(
-          (model) => `- Decision table ${model.id}: ${model.rules.length} rules; conditions=${model.conditions.join(", ") || "none"}; sources=${model.sourceRefs.join(", ")}`
-        ),
-        "",
-        "## Coverage Dimensions",
-        ...(coverageProfile
-          ? Object.entries(coverageProfile.dimensions).map(
-              ([dimension, detail]) => `- ${dimension}: ${detail.coveredRefs.length}/${detail.requirementRefs.length}; intents=${detail.intentCount}; missing=${detail.missingRefs.join(", ") || "none"}`
-            )
-          : ["- Not generated"]),
-        "",
-        "## Open Questions",
-        ...(analysis.openQuestions.length > 0 ? analysis.openQuestions.map((item) => `- ${item}`) : ["- None"]),
-        "",
-        "## Test Intents",
-        ...intents.map((intent) => `- ${intent.id}: ${intent.title} [${intent.status}]`)
-      ].join("\n"),
+      renderRequirementAnalysisReport({
+        title: set.title,
+        setStatus: set.status,
+        analysis,
+        evaluation,
+        evaluationGate,
+        coverage,
+        coverageProfile,
+        workflowModels,
+        stateMachineModels,
+        businessObjectModels,
+        decisionTableModels,
+        businessScenarios,
+        scenarioAssuranceContracts,
+        scenarioTrustRecords,
+        intents
+      }),
       "utf8"
     );
+    await writeFile(
+      join(requirementDir, "test-intents.md"),
+      renderTestIntentReport({
+        title: set.title,
+        setStatus: set.status,
+        intents,
+        scenarioCount: businessScenarios.filter((item) => item.status !== "stale").length,
+        workflowCount: workflowModels.length,
+        stateMachineCount: stateMachineModels.length
+      }),
+      "utf8"
+    );
+    await this.writeProjectIndex(project);
   }
 
   private async writeEvaluationConfirmations(set: RequirementSet) {
