@@ -109,6 +109,7 @@ import {
   renderRequirementAnalysisReport,
   renderTestIntentReport
 } from "./reportWriter.js";
+import { buildEvidenceCatalog, renderEvidenceIndex } from "./evidenceCatalog.js";
 import type {
   BusinessScenario,
   ScenarioAssuranceContract,
@@ -2958,7 +2959,8 @@ export class KnowledgeService {
         "## Requirements",
         ...sets.flatMap((item) => [
           `- [[requirements/${item.id}/analysis|${linkTitle(item.title, item.version)} v${item.version}：需求分析报告]]`,
-          `- [[requirements/${item.id}/test-intents|${linkTitle(item.title, item.version)}：测试意图]]`
+          `- [[requirements/${item.id}/test-intents|${linkTitle(item.title, item.version)}：测试意图]]`,
+          `- [[requirements/${item.id}/evidence-index|${linkTitle(item.title, item.version)}：证据索引]]`
         ]),
         "",
         "## Systems",
@@ -3015,6 +3017,28 @@ export class KnowledgeService {
     )
   ) {
     const project = this.getProject(set.knowledgeProjectId);
+    const source = this.getRequirementSource(set.sourceId);
+    const attachmentAnalyses = this.repository.attachmentAnalyses.filter((item) => item.requirementSetId === set.id);
+    const evidenceCatalog = buildEvidenceCatalog({
+      source,
+      analysis,
+      intents,
+      businessScenarios,
+      attachmentAnalyses,
+      workflowModels,
+      stateMachineModels,
+      businessObjectModels,
+      decisionTableModels,
+      additionalTexts: [
+        ...analysis.openQuestions,
+        ...analysis.risks,
+        ...analysis.contradictions,
+        ...analysis.missingBranches,
+        ...evaluation.reasons,
+        ...evaluation.requiredActions,
+        ...evaluationGate.actions.map((action) => action.message)
+      ]
+    });
     const requirementDir = join(this.knowledgeDir, project.key, "requirements", set.id);
     await mkdir(requirementDir, { recursive: true });
     await writeFile(
@@ -3034,7 +3058,8 @@ export class KnowledgeService {
         businessScenarios,
         scenarioAssuranceContracts,
         scenarioTrustRecords,
-        intents
+        intents,
+        evidenceCatalog
       }),
       "utf8"
     );
@@ -3046,8 +3071,14 @@ export class KnowledgeService {
         intents,
         scenarioCount: businessScenarios.filter((item) => item.status !== "stale").length,
         workflowCount: workflowModels.length,
-        stateMachineCount: stateMachineModels.length
+        stateMachineCount: stateMachineModels.length,
+        evidenceCatalog
       }),
+      "utf8"
+    );
+    await writeFile(
+      join(requirementDir, "evidence-index.md"),
+      renderEvidenceIndex({ title: set.title, fallbackTitle: analysis.module, requirementSetId: set.id, catalog: evidenceCatalog }),
       "utf8"
     );
     await this.writeProjectIndex(project);
