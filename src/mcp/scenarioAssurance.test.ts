@@ -93,6 +93,26 @@ describe("scenario assurance facade", () => {
     expect(review.summary.total).toBe(design.businessScenarios.length);
     expect(Object.keys(review.summary.byFamily).length).toBeGreaterThan(0);
 
+    context.repository.conformanceResults.push({
+      id: "conformance:evidence-order",
+      scenarioId: design.businessScenarios[0].id,
+      executionEvidenceId: "evidence-order",
+      verdict: "inconclusive",
+      expectationRefs: ["requirement:order"],
+      observationRefs: ["evidence:order"],
+      executionRefs: ["evidence-order"],
+      reasons: ["The run was limited to process evidence."],
+      createdAt: new Date().toISOString()
+    });
+    const conformanceReview = dataOf(await handleBrainCreatorTool(context, "bc_review", {
+      target: "conformance",
+      knowledgeProjectId: project.id
+    })) as { summary: { total: number; byVerdict: Record<string, number> } };
+    expect(conformanceReview.summary).toEqual(expect.objectContaining({
+      total: 1,
+      byVerdict: expect.objectContaining({ inconclusive: 1 })
+    }));
+
     const mutation = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
       action: "evaluate-mutations",
       mutationThreshold: 0.85,

@@ -88,6 +88,35 @@ describe("assertion assurance", () => {
       )
     ).toBe("limited");
   });
+
+  it("does not call a reporter with extra uncontracted assertions strong", () => {
+    const contracts = buildAssertionContracts([assertionStep()]);
+    expect(
+      determineAssuranceLevel(
+        contracts,
+        reporter({
+          status: "passed",
+          total: 2,
+          passed: 2,
+          assertions: [
+            {
+              id: contracts[0].id,
+              status: "passed",
+              actual: "42",
+              evidenceRefs: ["step-1.png", "trace.zip"]
+            },
+            {
+              id: "uncontracted",
+              status: "passed",
+              actual: "unexpected extra assertion",
+              evidenceRefs: ["step-2.png", "trace.zip"]
+            }
+          ],
+          attachments: ["trace.zip"]
+        })
+      )
+    ).toBe("none");
+  });
 });
 
 function assertionStep(): ExecutableCaseStep {

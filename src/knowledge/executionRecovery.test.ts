@@ -100,4 +100,21 @@ describe("execution recovery and failure classification", () => {
       }
     })).toEqual(expect.objectContaining({ type: "network_failure" }));
   });
+
+  it("classifies structured console errors as automation failures", () => {
+    expect(classifyEvidenceFailure({
+      reporter: {
+        status: "failed",
+        total: 1,
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        assertions: [],
+        attachments: [],
+        consoleErrors: ["TypeError: render failed"],
+        networkFailures: []
+      }
+    })).toEqual(expect.objectContaining({ type: "automation_failure" }));
+  });
 });

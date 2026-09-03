@@ -646,7 +646,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_review",
     title: "Brain Creator review",
     description:
-      "Facade review entry for onboarding plans, document and requirement suite runs, run-ledger timelines, execution diagnoses, cases, execution plans, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain snapshots and semantic bindings, and system exploration runs.",
+      "Facade review entry for onboarding plans, document and requirement suite runs, run-ledger timelines, execution diagnoses, cases, execution plans, conformance results, bugs, gaps, artifacts, requirement quality, historical Requirement Eval accuracy, System Brain snapshots and semantic bindings, and system exploration runs.",
     inputSchema: z.object({
       target: z.enum([
         "evaluation-trial",
@@ -676,6 +676,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "business-scenario",
         "scenario-assurance",
         "scenario-trust",
+        "conformance",
         "case-dependency",
         "stage-eval",
         "source-fidelity",

@@ -13,6 +13,8 @@ import type {
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
 import { buildContextPack } from "./retriever.js";
+import { buildAssertionContracts } from "../execution/assurance.js";
+import { evaluateExecutableCaseReadiness } from "./caseCompiler.js";
 
 type PrepareExecutionInput = {
   knowledgeProjectId: string;
@@ -217,6 +219,25 @@ export class ExecutionPreflightService {
     const authProfile = selectedAuthProfileId
       ? this.repository.authProfiles.find((item) => item.id === selectedAuthProfileId)
       : undefined;
+    const assertionContracts = executableCase.assertionContracts ?? buildAssertionContracts(executableCase.steps);
+    const latestSystemSnapshot = this.repository.systemBrainSnapshots
+      .filter((snapshot) => snapshot.systemId === systemId && snapshot.status === "confirmed")
+      .sort((left, right) => right.revision - left.revision)[0];
+    const scenarioCandidates = this.repository.businessScenarios.filter(
+      (scenario) =>
+        scenario.knowledgeProjectId === executableCase.knowledgeProjectId &&
+        scenario.requirementSetId === executableCase.requirementSetId &&
+        scenario.testIntentIds?.includes(executableCase.testIntentId)
+    );
+    const integrity = {
+      ...(scenarioCandidates.length === 1 ? { scenarioId: scenarioCandidates[0].id } : {}),
+      ...(requirementSet?.contentHash ? { requirementHash: requirementSet.contentHash } : {}),
+      ...(latestSystemSnapshot ? { systemBrainSnapshotHash: latestSystemSnapshot.contentHash } : {}),
+      ...(executableCase.dataPlan
+        ? { dataPlanHash: hash(executableCase.dataPlan) }
+        : {}),
+      assertionContractHash: hash(assertionContracts)
+    };
     const checks: ExecutionPreflightCheck[] = [
       check(
         "requirement",
@@ -242,6 +263,7 @@ export class ExecutionPreflightService {
           : `Executable case is ${executableCase.status}.`,
         [`executable-case:${executableCase.id}`]
       ),
+      this.readinessCheck(executableCase),
       check(
         "open-gaps",
         openGaps.length === 0 ? "pass" : "blocked",
@@ -327,6 +349,7 @@ export class ExecutionPreflightService {
         status: system.status
       },
       executableCase: executableCaseSnapshot(executableCase, systemId),
+      integrity,
       contextPack,
       actorJourney: actorJourneyResolution.steps.length
         ? actorJourneyResolution.steps
@@ -374,6 +397,7 @@ export class ExecutionPreflightService {
         ? actorJourneyResolution.steps
         : undefined,
       steps: clone(executableCase.steps),
+      assertionContracts: clone(assertionContracts),
       pathPlan: clone(executableCase.pathPlan),
       statePlan: clone(executableCase.statePlan),
       dataBindings,
@@ -382,6 +406,7 @@ export class ExecutionPreflightService {
       verdict,
       blockers,
       sourceRefs,
+      integrity,
       snapshotHash: createHash("sha256")
         .update(stableStringify(snapshot))
         .digest("hex"),
@@ -463,6 +488,18 @@ export class ExecutionPreflightService {
         ? "Workflow path is executable."
         : `Workflow path is ${verdict}.`,
       executableCase.pathPlan?.navigationSourceRefs ?? []
+    );
+  }
+
+  private readinessCheck(executableCase: ExecutableCase): ExecutionPreflightCheck {
+    const result = evaluateExecutableCaseReadiness(executableCase);
+    return check(
+      "readiness",
+      result.verdict === "ready" ? "pass" : "blocked",
+      result.verdict === "ready"
+        ? "Executable case passed deterministic readiness checks."
+        : `Executable case is not execution-ready: ${result.reasons.join(" ")}`,
+      result.sourceRefs
     );
   }
 
@@ -664,6 +701,10 @@ function stableStringify(value: unknown): string {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function hash(value: unknown) {
+  return createHash("sha256").update(stableStringify(value)).digest("hex");
 }
 
 function clone<T>(value: T): T {

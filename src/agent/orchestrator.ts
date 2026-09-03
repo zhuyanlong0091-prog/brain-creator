@@ -681,11 +681,24 @@ export function validateHealerMutation(
       reason: `Healer removed assertion(s): ${beforeAssertions} before, ${afterAssertions} after.`
     };
   }
+  const beforeFingerprints = assertionFingerprints(before);
+  const afterFingerprints = assertionFingerprints(after);
+  if (beforeFingerprints.slice().sort().join("\n") !== afterFingerprints.slice().sort().join("\n")) {
+    return {
+      valid: false,
+      reason: "Healer changed the semantic assertion target or expectation."
+    };
+  }
   return { valid: true as const };
 }
 
 function countAssertions(source: string) {
   return (source.match(/\bexpect(?:\.soft)?\s*\(|\bassert(?:\.[A-Za-z]+)?\s*\(/g) ?? []).length;
+}
+
+function assertionFingerprints(source: string) {
+  return [...source.matchAll(/\b(?:expect(?:\.soft)?|assert(?:\.[A-Za-z]+)?)\s*\(([^)]*)\)/g)]
+    .map((match) => match[0].replace(/\s+/g, " ").trim());
 }
 
 function removeSourceComments(source: string) {

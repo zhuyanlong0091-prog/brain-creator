@@ -15,6 +15,68 @@ export type SemanticCompilationResult = {
   processPathSourceRefs: string[];
 };
 
+export type ExecutableCaseReadiness = {
+  verdict: "ready" | "blocked";
+  reasons: string[];
+  sourceRefs: string[];
+};
+
+/**
+ * A persisted `ready` status is not proof that a case can be executed.
+ * Keep this gate deterministic so incomplete cases fail closed before an
+ * agent or browser is started.
+ */
+export function evaluateExecutableCaseReadiness(
+  executableCase: Pick<
+    ExecutableCase,
+    "steps" | "assertionContracts" | "pathPlan" | "statePlan" | "dataPlan"
+  >
+): ExecutableCaseReadiness {
+  const reasons: string[] = [];
+  const sourceRefs = unique([
+    ...executableCase.steps.flatMap((step) => step.sourceRefs),
+    ...(executableCase.pathPlan?.navigationSourceRefs ?? []),
+    ...(executableCase.statePlan?.transitionSourceRefs ?? []),
+    ...(executableCase.dataPlan?.sourceRefs ?? []),
+  ]);
+  if (executableCase.steps.length === 0) reasons.push("Executable case has no steps.");
+  const stepIds = executableCase.steps.map((step) => step.id);
+  if (new Set(stepIds).size !== stepIds.length) reasons.push("Executable case contains duplicate step ids.");
+  if (executableCase.steps.some((step, index) => step.order !== index + 1)) {
+    reasons.push("Executable case step order is not contiguous.");
+  }
+  const provenance = validateStepProvenance(executableCase.steps);
+  if (!provenance.valid) {
+    reasons.push(`Executable case steps lack source provenance: ${provenance.invalidStepIds.join(", ")}.`);
+  }
+
+  const assertionSteps = executableCase.steps.filter((step) => step.action === "assert");
+  const contracts = executableCase.assertionContracts ?? [];
+  const hasDataPreparationStep = executableCase.steps.some((step) => Boolean(step.dataProfileId));
+  if (assertionSteps.length === 0 && !hasDataPreparationStep) {
+    reasons.push("Executable case has no business assertion oracle.");
+  }
+  if (contracts.length !== assertionSteps.length) {
+    reasons.push(
+      `Assertion contract count (${contracts.length}) does not match assertion step count (${assertionSteps.length}).`
+    );
+  }
+  const assertionStepIds = new Set(assertionSteps.map((step) => step.id));
+  for (const contract of contracts) {
+    if (!contract.stepId || !assertionStepIds.has(contract.stepId)) {
+      reasons.push(`Assertion contract ${contract.id} is not bound to an assertion step.`);
+    }
+    if (contract.requirementRefs.length === 0) reasons.push(`Assertion contract ${contract.id} has no requirement source.`);
+    if (contract.evidenceRequirements.length === 0) reasons.push(`Assertion contract ${contract.id} has no evidence requirements.`);
+  }
+  for (const plan of [executableCase.pathPlan, executableCase.statePlan]) {
+    if (plan && !["not-required", "unique"].includes(plan.verdict)) {
+      reasons.push(`Executable case plan is ${plan.verdict}.`);
+    }
+  }
+  return { verdict: reasons.length === 0 ? "ready" : "blocked", reasons, sourceRefs };
+}
+
 export function compileIntentSemanticSteps(input: {
   intent: TestIntent;
   workflowModels: WorkflowModel[];
@@ -78,6 +140,9 @@ export function executableCaseCompileStatus(
   repository: InMemoryBrainCreatorRepository,
   executableCase: ExecutableCase
 ): "ready" | "needs-exploration" | "needs-data" | "ambiguous" | "blocked" {
+  if (executableCase.status === "ready" && evaluateExecutableCaseReadiness(executableCase).verdict === "blocked") {
+    return "blocked";
+  }
   const hasOpenGap = executableCase.gapIds.some((gapId) =>
     repository.gaps.some((gap) => gap.id === gapId && gap.status === "open")
   );

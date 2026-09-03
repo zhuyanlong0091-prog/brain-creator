@@ -134,6 +134,38 @@ describe("Agent executable case compiler", () => {
 
     expect(executableCaseCompileStatus(repository, executableCase)).toBe("needs-exploration");
   });
+
+  it("blocks a case marked ready when it has no executable steps", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const executableCase = {
+      ...executableCaseFixture(),
+      status: "ready" as const,
+      explorationTaskIds: undefined,
+      steps: []
+    };
+
+    expect(executableCaseCompileStatus(repository, executableCase)).toBe("blocked");
+  });
+
+  it("blocks a ready case that has no business oracle", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const executableCase = {
+      ...executableCaseFixture(),
+      status: "ready" as const,
+      explorationTaskIds: undefined,
+      steps: [{
+        id: "step-navigate",
+        order: 1,
+        action: "navigate" as const,
+        instruction: "Open the order page",
+        targetSemantic: "Order page",
+        origin: "source" as const,
+        sourceRefs: ["requirement:order"]
+      }]
+    };
+
+    expect(executableCaseCompileStatus(repository, executableCase)).toBe("blocked");
+  });
 });
 
 function executableCaseFixture(): ExecutableCase {

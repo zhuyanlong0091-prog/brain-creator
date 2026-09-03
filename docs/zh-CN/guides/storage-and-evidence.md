@@ -100,6 +100,8 @@ npx brain-creator export --suite <suite-run-id> --output exports/suite.zip
 
 静态 HTML 报告与 Markdown 证据报告一起生成。即使命令退出码为 0，如果没有完成结构化 Reporter 映射，结果仍为 `none`，不能被描述为强需求验证。报告是离线执行产物，不是新的 Brain Creator UI 入口。
 
+执行完成后，Brain Creator 还会独立写入 `ConformanceResult`，把“过程是否跑完”和“是否有足够证据支持需求符合”分开。只有通过、强断言和完整来源证据才能得到 `conform`；有限证据得到 `inconclusive`，无断言 Oracle 得到 `requirement-review`，确认的产品缺陷得到 `nonconform`。可通过 `bc_review target=conformance` 按系统、需求版本或场景复盘这些结论。
+
 完成执行证据后，系统还会自动评估场景可信状态。首次强证据可见观察运行会将
 已绑定场景推进到 `verified`；连续三次需求、System Brain 和数据版本不变的强
 证据通过后才进入 `trusted`。首次无头通过会停留在 `bound`，等待可见观察证据。

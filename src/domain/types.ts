@@ -1362,6 +1362,7 @@ export type ExecutionPreflightCheck = {
     | "requirement"
     | "system"
     | "executable-case"
+    | "readiness"
     | "open-gaps"
     | "workflow-path"
     | "state-actions"
@@ -1441,8 +1442,18 @@ export type ExecutionPlanDraft = {
   verdict: "ready" | "needs-confirmation" | "blocked";
   blockers: string[];
   sourceRefs: string[];
+  /** Hashes that make the semantic execution contract auditable and immutable. */
+  integrity?: ExecutionPlanIntegrity;
   snapshotHash: string;
   generatedAt: string;
+};
+
+export type ExecutionPlanIntegrity = {
+  scenarioId?: string;
+  requirementHash?: string;
+  systemBrainSnapshotHash?: string;
+  dataPlanHash?: string;
+  assertionContractHash: string;
 };
 
 export type ExecutionPlan = Omit<ExecutionPlanDraft, "verdict"> & {

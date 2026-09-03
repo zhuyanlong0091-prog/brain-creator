@@ -156,7 +156,7 @@ Failure classification is shared between Ledger and review filters: assertion, a
 
 ### 10. Review Evidence
 
-The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, ExecutionPlans, evidence, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge. Coverage review reports required, verified, and missing dimensions for `field`, `workflow`, `state`, `permission`, and `integration`.
+The Agent uses `bc_review` to show requirements, knowledge, coverage, Requirement Eval history, System Brain, system exploration runs, TestIntents, ExecutableCases, ExecutionPlans, evidence, conformance results, bugs, and Gaps. Approved expected knowledge remains separate from observed system knowledge. Coverage review reports required, verified, and missing dimensions for `field`, `workflow`, `state`, `permission`, and `integration`. `bc_review target=conformance` separates a successful process from a requirement claim: only strong, source-backed evidence is `conform`; limited or missing oracles remain `inconclusive` or `requirement-review`.
 
 ## User Entrypoints
 

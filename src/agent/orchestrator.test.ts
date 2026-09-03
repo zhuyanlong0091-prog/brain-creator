@@ -97,6 +97,16 @@ describe("healer mutation guard", () => {
       reason: expect.stringContaining("assertion")
     });
   });
+
+  it("rejects a healer mutation that changes a protected assertion target", () => {
+    const before = `await bc.step("step-create", page, async () => { await expect(page.getByText("Created")).toBeVisible(); });`;
+    const changedTarget = `await bc.step("step-create", page, async () => { await expect(page.getByText("Draft")).toBeVisible(); });`;
+
+    expect(validateHealerMutation(before, changedTarget, ["step-create"])).toEqual({
+      valid: false,
+      reason: expect.stringContaining("semantic assertion")
+    });
+  });
 });
 
 describe("runAgent", () => {

@@ -103,6 +103,7 @@ import {
   evaluateScenarioExecutionTrust,
   type ScenarioExecutionTrustResult
 } from "../execution/trustPromotion.js";
+import { evaluateConformance } from "../execution/conformance.js";
 import { buildCaseDependencyGraph } from "./caseDependencyGraph.js";
 import type {
   BusinessScenario,
@@ -2126,6 +2127,7 @@ export class KnowledgeService {
         .map((gap) => ({ id: gap.id, status: gap.status, reason: gap.reason }))
     });
     evidence.artifactPaths = [...new Set([...evidence.artifactPaths, htmlReportPath])];
+    this.recordConformanceResult(evidence, input.diagnosis);
     this.repository.persist();
     return evidence;
   }
@@ -2134,6 +2136,80 @@ export class KnowledgeService {
     return this.repository.executionEvidence.filter(
       (item) => item.knowledgeProjectId === projectId
     );
+  }
+
+  listConformanceResults(input: {
+    knowledgeProjectId: string;
+    systemId?: string;
+    requirementSetId?: string;
+    scenarioId?: string;
+    verdict?: string;
+  }) {
+    const scenarioIds = new Set(
+      this.repository.businessScenarios
+        .filter((scenario) => scenario.knowledgeProjectId === input.knowledgeProjectId)
+        .filter((scenario) => !input.requirementSetId || scenario.requirementSetId === input.requirementSetId)
+        .filter((scenario) => !input.scenarioId || scenario.id === input.scenarioId)
+        .map((scenario) => scenario.id)
+    );
+    const evidenceById = new Map(this.repository.executionEvidence.map((evidence) => [evidence.id, evidence]));
+    return this.repository.conformanceResults.filter((result) => {
+      if (!scenarioIds.has(result.scenarioId)) return false;
+      if (input.verdict && result.verdict !== input.verdict) return false;
+      if (input.systemId && evidenceById.get(result.executionEvidenceId)?.systemId !== input.systemId) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  private recordConformanceResult(
+    evidence: ExecutionEvidence,
+    diagnosis?: Pick<ExecutionDiagnosis, "verdict" | "failureType">
+  ) {
+    const executableCase = this.repository.executableCases.find(
+      (item) => item.id === evidence.executableCaseId
+    );
+    if (!executableCase || executableCase.systemId !== evidence.systemId) return undefined;
+    const candidates = this.repository.businessScenarios.filter(
+      (scenario) =>
+        scenario.knowledgeProjectId === evidence.knowledgeProjectId &&
+        scenario.requirementSetId === executableCase.requirementSetId &&
+        scenario.testIntentIds?.includes(executableCase.testIntentId)
+    );
+    if (candidates.length !== 1) return undefined;
+    const reporter = evidence.reporterResult;
+    const observationRefs = uniqueStrings([
+      ...(reporter?.attachments ?? []),
+      ...(reporter?.assertions ?? []).flatMap((assertion) => assertion.evidenceRefs),
+      ...(reporter?.steps ?? []).flatMap((step) => step.evidenceRefs ?? []),
+      ...(evidence.consoleErrors.length > 0 ? ["runtime:console-errors"] : []),
+      ...(evidence.networkFailures.length > 0 ? ["runtime:network-failures"] : [])
+    ]);
+    const result = evaluateConformance({
+      scenarioId: candidates[0].id,
+      executionEvidenceId: evidence.id,
+      status: evidence.status === "running" ? "blocked" : evidence.status,
+      assuranceLevel: evidence.assuranceLevel,
+      diagnosisVerdict: diagnosis?.verdict,
+      expectationRefs: uniqueStrings(
+        (evidence.assertionContracts ?? []).flatMap((contract) => contract.requirementRefs)
+      ),
+      observationRefs,
+      executionRefs: uniqueStrings([
+        evidence.id,
+        ...(evidence.chainRunId ? [evidence.chainRunId] : []),
+        ...(evidence.reporterPath ? [evidence.reporterPath] : []),
+        ...evidence.tracePaths,
+        ...evidence.artifactPaths
+      ])
+    });
+    const existingIndex = this.repository.conformanceResults.findIndex(
+      (item) => item.executionEvidenceId === evidence.id
+    );
+    if (existingIndex >= 0) this.repository.conformanceResults[existingIndex] = result;
+    else this.repository.conformanceResults.push(result);
+    return result;
   }
 
   recordScenarioEvidenceRun(input: {

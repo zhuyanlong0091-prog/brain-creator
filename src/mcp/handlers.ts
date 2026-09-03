@@ -5738,6 +5738,25 @@ function knowledgeReview(
       ...paginateReviewItems(items, input)
     };
   }
+  if (target === "conformance") {
+    const items = context.knowledgeService.listConformanceResults({
+      knowledgeProjectId: projectId,
+      systemId: optionalStringArg(input, "systemId"),
+      requirementSetId: optionalStringArg(input, "requirementSetId"),
+      scenarioId: idValue,
+      verdict: optionalStringArg(input, "status")
+    });
+    return {
+      project,
+      summary: {
+        total: items.length,
+        byVerdict: countBy(items, (item) => item.verdict),
+        conform: items.filter((item) => item.verdict === "conform").length,
+        inconclusive: items.filter((item) => item.verdict === "inconclusive").length
+      },
+      ...paginateReviewItems(items, input)
+    };
+  }
   if (target === "stage-eval") {
     const requirementSetIds = new Set(
       context.repository.requirementSets
@@ -10684,6 +10703,7 @@ type KnowledgeReviewTarget =
   | "business-scenario"
   | "scenario-assurance"
   | "scenario-trust"
+  | "conformance"
   | "stage-eval"
   | "source-fidelity"
   | "approval";
@@ -10720,6 +10740,7 @@ function reviewTargetArg(input: Record<string, unknown>, key: string) {
       "business-scenario",
       "scenario-assurance",
       "scenario-trust",
+      "conformance",
       "stage-eval",
       "source-fidelity",
       "approval"
@@ -10813,6 +10834,7 @@ function isKnowledgeReviewTarget(value: ReturnType<typeof reviewTargetArg>): val
     "business-scenario",
     "scenario-assurance",
     "scenario-trust",
+    "conformance",
     "stage-eval",
     "source-fidelity",
     "approval"
