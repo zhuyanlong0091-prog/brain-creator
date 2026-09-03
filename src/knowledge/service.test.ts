@@ -437,6 +437,10 @@ describe("KnowledgeService", () => {
       join(knowledgeDir, "order-coverage", "MOC.md"),
       "utf8"
     );
+    const evidenceIndex = await readFile(
+      join(knowledgeDir, "order-coverage", "requirements", ingested.requirementSet.id, "evidence-index.md"),
+      "utf8"
+    );
 
     expect(design.testIntents).toHaveLength(4);
     expect(design.evaluation.coverage).toEqual(
@@ -450,7 +454,12 @@ describe("KnowledgeService", () => {
     expect(testIntentReport).toContain("验证目标");
     expect(testIntentReport).toContain("预期结果");
     expect(projectIndex).toContain("test-intents");
-    expect(report).toContain(design.analysis.clauses[0].sourceRef);
+    expect(projectIndex).toContain("evidence-index");
+    expect(report).toContain("[REQ-001](evidence-index.md#req-001)");
+    expect(report).not.toContain(design.analysis.clauses[0].sourceRef);
+    expect(testIntentReport).not.toContain(design.analysis.clauses[0].sourceRef);
+    expect(evidenceIndex).toContain("# Requirement：证据索引");
+    expect(evidenceIndex).toContain("REQ-001");
   });
 
   it("writes cross-module clauses into separate module knowledge files and edges", async () => {
@@ -662,7 +671,8 @@ describe("KnowledgeService", () => {
 
   it("reuses an existing design and deprecates impacted nodes only after the new baseline is approved", async () => {
     const repository = new InMemoryBrainCreatorRepository();
-    const service = new KnowledgeService(repository, await tempDir());
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
     const project = await service.createProject({ name: "Orders", key: "orders-impact", defaultLocale: "en-US" });
     const first = await service.ingestRequirement({
       projectId: project.id,
@@ -670,6 +680,10 @@ describe("KnowledgeService", () => {
     });
     const firstDesign = await service.generateTestDesign(first.requirementSet.id);
     const reused = await service.generateTestDesign(first.requirementSet.id);
+    const evidenceIndex = await readFile(
+      join(knowledgeDir, "orders-impact", "requirements", first.requirementSet.id, "evidence-index.md"),
+      "utf8"
+    );
     service.approveRequirementSet(first.requirementSet.id);
     const second = await service.ingestRequirement({
       projectId: project.id,
@@ -678,6 +692,7 @@ describe("KnowledgeService", () => {
     await service.generateTestDesign(second.requirementSet.id);
 
     expect(reused.reused).toBe(true);
+    expect(evidenceIndex).toContain("证据索引");
     expect(repository.testIntents.filter((item) => item.requirementSetId === first.requirementSet.id)).toHaveLength(
       firstDesign.testIntents.length
     );

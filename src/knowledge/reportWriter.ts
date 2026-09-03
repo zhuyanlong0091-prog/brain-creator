@@ -18,6 +18,8 @@ import type {
   RequirementClause,
   RequirementPolicyEvaluation
 } from "./policies.js";
+import type { EvidenceCatalog } from "./evidenceCatalog.js";
+import { evidenceLinks } from "./evidenceCatalog.js";
 
 type DesignCoverage = {
   totalClauses: number;
@@ -42,6 +44,7 @@ export type RequirementAnalysisReportInput = {
   scenarioAssuranceContracts: ScenarioAssuranceContract[];
   scenarioTrustRecords: ScenarioTrustRecord[];
   intents: TestIntent[];
+  evidenceCatalog?: EvidenceCatalog;
 };
 
 export type TestIntentReportInput = {
@@ -51,6 +54,7 @@ export type TestIntentReportInput = {
   scenarioCount: number;
   workflowCount: number;
   stateMachineCount: number;
+  evidenceCatalog?: EvidenceCatalog;
 };
 
 const nodeLabels: Record<string, string> = {
@@ -69,7 +73,6 @@ const techniqueLabels: Record<string, string> = {
 };
 
 export function renderRequirementAnalysisReport(input: RequirementAnalysisReportInput) {
-  const knowledgeGroups = groupBy(input.analysis.nodes, (node) => node.type);
   const coverageRows = input.coverageProfile ? Object.entries(input.coverageProfile.dimensions) : [];
   const scenarios = input.businessScenarios.filter((item) => item.status !== "stale");
   const lines = [
@@ -98,21 +101,23 @@ export function renderRequirementAnalysisReport(input: RequirementAnalysisReport
     "## 三、需求条款", "",
     "| 序号 | 需求内容 | 所属模块 | 识别内容 | 来源证据 |",
     "| ---: | --- | --- | --- | --- |",
-    ...(input.analysis.clauses.length > 0 ? input.analysis.clauses.map(clauseRow) : ["| - | 暂未提取到需求条款 | - | - | - |"]), "",
+    ...(input.analysis.clauses.length > 0 ? input.analysis.clauses.map((clause) => clauseRow(clause, input.evidenceCatalog)) : ["| - | 暂未提取到需求条款 | - | - | - |"]), "",
     "## 四、已理解的业务知识", "",
-    ...(Object.keys(knowledgeGroups).length > 0
-      ? Object.entries(knowledgeGroups).flatMap(([type, nodes]) => [
-          `### ${nodeLabels[type] ?? type}`, "",
-          ...nodes.map((node) => `- **${plainText(node.title)}**：${plainText(node.content)}（来源：${sourceList(node.sourceRefs)}；可信度：${percent(node.confidence)}）`), ""
-        ])
-      : ["- 暂未形成结构化业务知识。", ""]),
+    ...(input.analysis.nodes.length > 0
+      ? [
+          "| 知识类型 | 业务名称 | 业务含义 | 来源证据 | 可信度 | 状态 |",
+          "| --- | --- | --- | --- | ---: | --- |",
+          ...input.analysis.nodes.map((node) => `| ${mdCell(nodeLabels[node.type] ?? node.type)} | ${mdCell(knowledgeName(node.title))} | ${mdCell(node.content)} | ${evidenceLinks(node.sourceRefs, input.evidenceCatalog)} | ${percent(node.confidence)} | ${statusLabel(node.status)} |`),
+          ""
+        ]
+      : ["| 知识类型 | 业务名称 | 业务含义 | 来源证据 | 可信度 | 状态 |", "| --- | --- | --- | --- | ---: | --- |", "| - | 暂未形成结构化业务知识 | - | 暂无来源 | - | 待处理 |", ""]),
     "## 五、业务流程与状态", "",
     ...(input.workflowModels.length + input.stateMachineModels.length + input.businessObjectModels.length + input.decisionTableModels.length > 0
       ? [
-          ...input.businessObjectModels.flatMap(renderBusinessObject),
-          ...input.decisionTableModels.flatMap(renderDecisionTable),
-          ...input.workflowModels.flatMap((model, index) => renderWorkflow(model, index + 1)),
-          ...input.stateMachineModels.flatMap((model, index) => renderStateMachine(model, index + 1))
+          ...input.businessObjectModels.flatMap((model) => renderBusinessObject(model, input.evidenceCatalog)),
+          ...input.decisionTableModels.flatMap((model) => renderDecisionTable(model, input.evidenceCatalog)),
+          ...input.workflowModels.flatMap((model, index) => renderWorkflow(model, index + 1, input.evidenceCatalog)),
+          ...input.stateMachineModels.flatMap((model, index) => renderStateMachine(model, index + 1, input.evidenceCatalog))
         ]
       : ["- 当前没有已确认的业务流程、状态、业务对象或决策模型。", "- 如果需求包含流程图或状态图，应先完成识别和确认。", ""]),
     "## 六、业务场景分析", "",
@@ -124,14 +129,14 @@ export function renderRequirementAnalysisReport(input: RequirementAnalysisReport
       ? [
           "", "| 场景 | 类型 | 风险 | 参与角色 | 前置条件 | 预期业务结果 | 测试数据准备 | 质量门禁 | 状态 | 来源证据 |",
           "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-          ...scenarios.map((scenario) => scenarioRow(scenario, input.scenarioAssuranceContracts, input.scenarioTrustRecords)), ""
+          ...scenarios.map((scenario) => scenarioRow(scenario, input.scenarioAssuranceContracts, input.scenarioTrustRecords, input.evidenceCatalog)), ""
         ]
       : ["", "- 当前没有形成可审核的业务场景。", ""]),
     "## 七、覆盖情况", "",
     `- **总体条款覆盖**：${input.coverage.coveredClauseSourceRefs.length}/${input.coverage.totalClauses}（${percent(input.evaluation.coverage.coverageRate)}）`,
     ...(coverageRows.length > 0
       ? ["", "| 覆盖方面 | 需求依据数 | 已覆盖 | 测试意图数 | 未覆盖依据 |", "| --- | ---: | ---: | ---: | --- |",
-          ...coverageRows.map(([dimension, detail]) => `| ${dimensionLabels[dimension] ?? dimension} | ${detail.requirementRefs.length} | ${detail.coveredRefs.length} | ${detail.intentCount} | ${sourceList(detail.missingRefs)} |`)]
+          ...coverageRows.map(([dimension, detail]) => `| ${dimensionLabels[dimension] ?? dimension} | ${detail.requirementRefs.length} | ${detail.coveredRefs.length} | ${detail.intentCount} | ${evidenceLinks(detail.missingRefs, input.evidenceCatalog)} |`)]
       : ["- 尚未生成分维度覆盖统计。"]), "",
     "## 八、风险与待确认事项", "",
     ...(input.analysis.risks.length > 0 ? ["### 已识别风险", "", ...input.analysis.risks.map((item) => `- ${plainText(item)}`), ""] : ["- 暂未识别到额外风险。", ""]),
@@ -139,7 +144,7 @@ export function renderRequirementAnalysisReport(input: RequirementAnalysisReport
     ...(input.analysis.contradictions.length > 0 ? ["### 需求矛盾", "", ...input.analysis.contradictions.map((item) => `- ${plainText(item)}`), ""] : ["### 需求矛盾", "", "- 暂未发现。", ""]),
     ...(input.analysis.missingBranches.length > 0 ? ["### 可能缺失的分支", "", ...input.analysis.missingBranches.map((item) => `- ${plainText(item)}`), ""] : ["### 可能缺失的分支", "", "- 暂未发现。", ""]),
     ...(input.evaluationGate.actions.length > 0
-      ? ["### 评估门禁要求", "", ...input.evaluationGate.actions.map((action) => `- **${statusLabel(action.status)}**：${plainText(action.message)}（依据：${sourceList(action.sourceRefs)}）`), ""]
+      ? ["### 评估门禁要求", "", ...input.evaluationGate.actions.map((action) => `- **${statusLabel(action.status)}**：${plainText(action.message)}（依据：${evidenceLinks(action.sourceRefs, input.evidenceCatalog)}）`), ""]
       : ["### 评估门禁要求", "", "- 暂无待处理门禁。", ""]),
     "## 九、审核建议", "",
     `- 当前报告建议：${input.evaluationGate.status === "passed" ? "可以进入下一阶段审核。" : "先处理上面的待确认事项，再决定是否接受需求基线。"}`,
@@ -150,7 +155,7 @@ export function renderRequirementAnalysisReport(input: RequirementAnalysisReport
     "- 测试意图进入系统探索和用例编译后，才会补充页面入口、操作步骤、测试数据和断言证据。",
     "- 需求预期、系统观察和执行结果保持分层，任何一层都不会静默覆盖另一层。"
   ];
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n")}\n`;
+  return renderReport(lines, input.evidenceCatalog);
 }
 
 export function renderTestIntentReport(input: TestIntentReportInput) {
@@ -173,57 +178,57 @@ export function renderTestIntentReport(input: TestIntentReportInput) {
     "- 每条意图的前置条件和预期结果是否符合业务逻辑。",
     "- 需要跨角色协作时，角色顺序和身份切换是否正确。",
     "- 来源证据不足、系统入口不唯一或数据无法准备的意图，应保持待确认，不应直接执行。", "",
-    ...(input.intents.length > 0 ? input.intents.flatMap((intent, index) => renderIntent(intent, index + 1)) : ["## 当前没有测试意图", "", "- 请先完成需求分析和测试设计。"])
+    ...(input.intents.length > 0 ? input.intents.flatMap((intent, index) => renderIntent(intent, index + 1, input.evidenceCatalog)) : ["## 当前没有测试意图", "", "- 请先完成需求分析和测试设计。"])
   ];
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n")}\n`;
+  return renderReport(lines, input.evidenceCatalog);
 }
 
-function renderBusinessObject(model: BusinessObjectModel) {
+function renderBusinessObject(model: BusinessObjectModel, catalog?: EvidenceCatalog) {
   return [
     `### 业务对象：${plainText(model.name)}`, "",
     `- **参与角色**：${listText(model.actors)}`,
     `- **关键字段**：${listText(model.fields)}`,
     `- **生命周期状态**：${listText(model.states)}`,
     `- **业务不变量**：${listText(model.invariants)}`,
-    `- **状态**：${statusLabel(model.status)}；**来源证据**：${sourceList(model.sourceRefs)}`, ""
+    `- **状态**：${statusLabel(model.status)}；**来源证据**：${evidenceLinks(model.sourceRefs, catalog)}`, ""
   ];
 }
 
-function renderDecisionTable(model: DecisionTableModel) {
+function renderDecisionTable(model: DecisionTableModel, catalog?: EvidenceCatalog) {
   return [
     `### 条件决策：${plainText(model.title)}`, "",
     `- **判断条件**：${listText(model.conditions)}`,
     `- **执行动作**：${listText(model.actions)}`,
     `- **规则数量**：${model.rules.length}`,
-    ...model.rules.map((rule, index) => `  - 规则 ${index + 1}：${Object.entries(rule.conditionValues).map(([key, value]) => `${key}=${value}`).join("；") || "无条件"} → ${listText(rule.expectedActions)}（依据：${sourceList(rule.sourceRefs)}）`),
-    `- **状态**：${statusLabel(model.status)}；**来源证据**：${sourceList(model.sourceRefs)}`, ""
+    ...model.rules.map((rule, index) => `  - 规则 ${index + 1}：${Object.entries(rule.conditionValues).map(([key, value]) => `${key}=${value}`).join("；") || "无条件"} → ${listText(rule.expectedActions)}（依据：${evidenceLinks(rule.sourceRefs, catalog)}）`),
+    `- **状态**：${statusLabel(model.status)}；**来源证据**：${evidenceLinks(model.sourceRefs, catalog)}`, ""
   ];
 }
 
-function renderWorkflow(model: WorkflowModel, index: number) {
+function renderWorkflow(model: WorkflowModel, index: number, catalog?: EvidenceCatalog) {
   return [
     `### 业务流程 ${index}：${modelTitle(model.title, "业务流程")}`, "",
     `- **参与角色**：${listText(model.actors)}`,
     `- **可信度**：${percent(model.confidence)}；**状态**：${statusLabel(model.status)}`,
     `- **流程步骤**：${model.steps.map((step) => `${humanizeText(step.label)}${step.actor ? `（${humanizeText(step.actor)}）` : ""}`).join(" → ") || "未识别"}`,
     "- **关键转换**：",
-    ...(model.transitions.length > 0 ? model.transitions.map((transition) => `  - ${humanizeText(stepLabel(model.steps, transition.from))} → ${humanizeText(stepLabel(model.steps, transition.to))}${transition.condition ? `；触发条件：${humanizeText(transition.condition)}` : ""}${transition.actor ? `；执行角色：${humanizeText(transition.actor)}` : ""}${transition.preconditions?.length ? `；前置：${listText(transition.preconditions)}` : ""}${transition.sideEffects?.length ? `；副作用：${listText(transition.sideEffects)}` : ""}（依据：${sourceList(transition.sourceRefs)}）`) : ["  - 暂未识别到转换。"]),
-    `- **来源证据**：${sourceList(model.sourceRefs)}`, ""
+    ...(model.transitions.length > 0 ? model.transitions.map((transition) => `  - ${humanizeText(stepLabel(model.steps, transition.from))} → ${humanizeText(stepLabel(model.steps, transition.to))}${transition.condition ? `；触发条件：${humanizeText(transition.condition)}` : ""}${transition.actor ? `；执行角色：${humanizeText(transition.actor)}` : ""}${transition.preconditions?.length ? `；前置：${listText(transition.preconditions)}` : ""}${transition.sideEffects?.length ? `；副作用：${listText(transition.sideEffects)}` : ""}（依据：${evidenceLinks(transition.sourceRefs, catalog)}）`) : ["  - 暂未识别到转换。"]),
+    `- **来源证据**：${evidenceLinks(model.sourceRefs, catalog)}`, ""
   ];
 }
 
-function renderStateMachine(model: StateMachineModel, index: number) {
+function renderStateMachine(model: StateMachineModel, index: number, catalog?: EvidenceCatalog) {
   return [
     `### 状态模型 ${index}：${modelTitle(model.title, "状态模型")}`, "",
     `- **状态集合**：${model.states.map((state) => `${humanizeText(state.label)}${state.initial ? "（初始）" : ""}${state.terminal ? "（终态）" : ""}`).join("、") || "未识别"}`,
     `- **可信度**：${percent(model.confidence)}；**状态**：${statusLabel(model.status)}`,
     "- **允许的状态转换**：",
-    ...(model.transitions.length > 0 ? model.transitions.map((transition) => `  - ${humanizeText(stepLabel(model.states, transition.from))} → ${humanizeText(stepLabel(model.states, transition.to))}${transition.trigger ? `；触发动作：${humanizeText(transition.trigger)}` : ""}${transition.actor ? `；执行角色：${humanizeText(transition.actor)}` : ""}${transition.validity ? `；规则：${validityLabel(transition.validity)}` : ""}（依据：${sourceList(transition.sourceRefs)}）`) : ["  - 暂未识别到转换。"]),
-    `- **来源证据**：${sourceList(model.sourceRefs)}`, ""
+    ...(model.transitions.length > 0 ? model.transitions.map((transition) => `  - ${humanizeText(stepLabel(model.states, transition.from))} → ${humanizeText(stepLabel(model.states, transition.to))}${transition.trigger ? `；触发动作：${humanizeText(transition.trigger)}` : ""}${transition.actor ? `；执行角色：${humanizeText(transition.actor)}` : ""}${transition.validity ? `；规则：${validityLabel(transition.validity)}` : ""}（依据：${evidenceLinks(transition.sourceRefs, catalog)}）`) : ["  - 暂未识别到转换。"]),
+    `- **来源证据**：${evidenceLinks(model.sourceRefs, catalog)}`, ""
   ];
 }
 
-function renderIntent(intent: TestIntent, index: number) {
+function renderIntent(intent: TestIntent, index: number, catalog?: EvidenceCatalog) {
   return [
     `## ${index}. ${plainText(humanizeTitle(intent.title))}`, "",
     `- **优先级**：${intent.priority}`,
@@ -235,28 +240,28 @@ function renderIntent(intent: TestIntent, index: number) {
     `- **预期结果**：${listText(intent.expectedResults)}`,
     `- **覆盖方面**：${intent.coverageDimensions?.map((item) => dimensionLabels[item] ?? item).join("、") || "功能行为"}`,
     `- **设计方法**：${intent.techniques.map((item) => techniqueLabels[item] ?? item).join("、") || "场景法"}`,
-    `- **需求依据**：${sourceList(intent.requirementRefs)}`,
-    `- **业务模型依据**：${sourceList(intent.processModelRefs ?? [])}`,
-    `- **关联业务场景**：${sourceList(intent.scenarioIds ?? [])}`,
-    `- **产生的数据**：${sourceList(intent.producesEntityRefs ?? [])}`,
-    `- **依赖的数据**：${sourceList(intent.consumesEntityRefs ?? [])}`,
+    `- **需求依据**：${evidenceLinks(intent.requirementRefs, catalog)}`,
+    `- **业务模型依据**：${evidenceLinks(intent.processModelRefs ?? [], catalog)}`,
+    `- **关联业务场景**：${evidenceLinks(intent.scenarioIds ?? [], catalog)}`,
+    `- **产生的数据**：${evidenceLinks(intent.producesEntityRefs ?? [], catalog)}`,
+    `- **依赖的数据**：${evidenceLinks(intent.consumesEntityRefs ?? [], catalog)}`,
     `- **角色路径**：${intent.actorJourney?.map(humanizeText).join(" → ") || "未指定"}`,
     `- **内部标识**：${intent.id}`, ""
   ];
 }
 
-function scenarioRow(scenario: BusinessScenario, contracts: ScenarioAssuranceContract[], trusts: ScenarioTrustRecord[]) {
+function scenarioRow(scenario: BusinessScenario, contracts: ScenarioAssuranceContract[], trusts: ScenarioTrustRecord[], catalog?: EvidenceCatalog) {
   const contract = contracts.find((item) => item.scenarioId === scenario.id);
   const trust = trusts.find((item) => item.scenarioId === scenario.id);
   const data = scenario.dataPlan;
   const readiness = data ? `${dataReadinessLabel(data.readiness)}；生命周期：${data.plannedLifecycle.map(lifecycleLabel).join(" → ") || "未指定"}` : "未规划";
   const assurance = contract ? `${contractVerdictLabel(contract.verdict)}；绑定：${bindingLabel(contract.systemBinding)}；断言：${oracleLabel(contract.oracleStrength)}` : "尚未评估";
   const trustText = trust ? `${statusLabel(trust.status)}（强证据运行 ${trust.strongRunCount} 次）` : statusLabel(scenario.status);
-  return `| ${mdCell(scenario.title)} | ${familyLabel(scenario.family)} | ${riskLabel(scenario.risk)} | ${mdCell(listText(scenario.actors))} | ${mdCell(listText(scenario.preconditions))} | ${mdCell(listText(scenario.expectedBusinessOutcomes))} | ${mdCell(readiness)} | ${mdCell(assurance)} | ${mdCell(trustText)} | ${sourceList(scenario.sourceRefs)} |`;
+  return `| ${mdCell(scenario.title)} | ${familyLabel(scenario.family)} | ${riskLabel(scenario.risk)} | ${mdCell(listText(scenario.actors))} | ${mdCell(listText(scenario.preconditions))} | ${mdCell(listText(scenario.expectedBusinessOutcomes))} | ${mdCell(readiness)} | ${mdCell(assurance)} | ${mdCell(trustText)} | ${evidenceLinks(scenario.sourceRefs, catalog)} |`;
 }
 
-function clauseRow(clause: RequirementClause) {
-  return `| ${clause.index} | ${mdCell(clause.text)} | ${mdCell(clause.module)} | ${clause.nodeTypes.map((type) => nodeLabels[type] ?? type).join("、") || "待分类"} | ${sourceList(unique(clause.sourceRefs?.length ? clause.sourceRefs : clause.sourceRef ? [clause.sourceRef] : []))} |`;
+function clauseRow(clause: RequirementClause, catalog?: EvidenceCatalog) {
+  return `| ${clause.index} | ${mdCell(clause.text)} | ${mdCell(clause.module)} | ${clause.nodeTypes.map((type) => nodeLabels[type] ?? type).join("、") || "待分类"} | ${evidenceLinks(unique(clause.sourceRefs?.length ? clause.sourceRefs : clause.sourceRef ? [clause.sourceRef] : []), catalog)} |`;
 }
 
 function scenarioSummary(scenarios: BusinessScenario[]) {
@@ -300,10 +305,12 @@ function lifecycleLabel(value: string) { return { lookup: "查询", create: "创
 function validityLabel(value: string) { return { legal: "允许", forbidden: "禁止", unknown: "未知" }[value] ?? value; }
 function modelTitle(title: string, fallback: string) { return /^workflow from |^state machine from /i.test(title) ? fallback : humanizeText(title); }
 function stepLabel(items: Array<{ id: string; label: string }>, id: string) { return items.find((item) => item.id === id)?.label ?? id; }
-function groupBy<T>(items: T[], key: (item: T) => string) { return items.reduce<Record<string, T[]>>((groups, item) => { const group = key(item); (groups[group] ??= []).push(item); return groups; }, {}); }
 function countBy<T>(items: T[], key: (item: T) => string) { return items.reduce<Record<string, number>>((counts, item) => { const value = key(item); counts[value] = (counts[value] ?? 0) + 1; return counts; }, {}); }
-function sourceList(values: string[]) { return values.length > 0 ? values.map((value) => `\`${mdCell(value)}\``).join("、") : "暂无来源"; }
 function listText(values: string[]) { return values.length > 0 ? values.map(humanizeText).join("；") : "未指定"; }
+function knowledgeName(title: string) {
+  const base = title.split(/\s+(?:requirement|workflow|state|rule|field|actor|object|integration|permission|term|module|data-constraint):/i)[0];
+  return plainText(base || title);
+}
 function plainText(value: string) { return humanizeText(value).replace(/\s+/g, " ").trim(); }
 function mdCell(value: string) { return plainText(value).replace(/\|/g, "\\|").replace(/\r?\n/g, " "); }
 function reportTitle(title: string, analysis: { module?: string }) {
@@ -315,6 +322,8 @@ function reportTitle(title: string, analysis: { module?: string }) {
 function humanizeTitle(value: string) { return humanizeText(value).replace(/cross-role actor journey/gi, "跨角色业务流程").replace(/missing prerequisite/gi, "缺少前置状态").replace(/role mismatch/gi, "角色不匹配").replace(/invalid transition/gi, "非法状态转换"); }
 function humanizeText(value: string) {
   return value
+    .replace(/\b(requirement|workflow|state|rule|field|actor|object|integration|permission|term|module|data-constraint):\s*/gi, "")
+    .replace(/^Requirement\s+(\d+)$/i, "需求条款 $1")
     .replace(/Complete the workflow across roles:/gi, "按角色顺序完成业务流程：")
     .replace(/Module inferred from requirement clauses in .+$/gi, "根据需求条款识别出的业务模块")
     .replace(/Move from (.+?) to (.+?)(?: when (.+))?$/gi, (_, from: string, to: string, condition?: string) =>
@@ -345,3 +354,12 @@ function verdictLabel(value: RequirementPolicyEvaluation["verdict"]) { return ({
 function providerLabel(value: RequirementAnalysis["provider"]) { return value === "host-skill" ? "宿主 Skill 增强分析" : "Brain Creator 内置分析"; }
 function percent(value: number) { return `${Math.round(value * 100)}%`; }
 function unique(values: string[]) { return [...new Set(values.filter(Boolean))]; }
+function renderReport(lines: string[], catalog?: EvidenceCatalog) {
+  let report = lines.join("\n").replace(/\n{3,}/g, "\n\n");
+  if (catalog) {
+    for (const entry of [...catalog.entries].sort((left, right) => right.rawRef.length - left.rawRef.length)) {
+      report = report.split(entry.rawRef).join(evidenceLinks([entry.rawRef], catalog));
+    }
+  }
+  return `${report}\n`;
+}

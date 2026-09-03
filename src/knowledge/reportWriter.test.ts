@@ -9,6 +9,7 @@ import type {
   WorkflowModel
 } from "../domain/types.js";
 import type { BusinessScenario } from "../brain/types.js";
+import type { EvidenceCatalog } from "./evidenceCatalog.js";
 import type { RequirementAnalysis, RequirementPolicyEvaluation } from "./policies.js";
 import { renderRequirementAnalysisReport, renderTestIntentReport } from "./reportWriter.js";
 
@@ -29,12 +30,16 @@ describe("review report writer", () => {
       businessScenarios: [scenarioFixture()],
       scenarioAssuranceContracts: [],
       scenarioTrustRecords: [],
-      intents: [intentFixture()]
+      intents: [intentFixture()],
+      evidenceCatalog: evidenceCatalogFixture()
     });
 
     expect(report).toContain("# 订单审批需求：需求分析报告");
     expect(report).toContain("## 五、业务流程与状态");
     expect(report).toContain("## 六、业务场景分析");
+    expect(report).toContain("| 知识类型 | 业务名称 | 业务含义 | 来源证据 | 可信度 | 状态 |");
+    expect(report).toContain("[REQ-001](evidence-index.md#req-001)");
+    expect(report).not.toContain("`需求:1`");
     expect(report).toContain("订单提交并进入审批");
     expect(report).toContain("跨角色业务流程");
     expect(report).toContain("测试数据准备");
@@ -51,7 +56,8 @@ describe("review report writer", () => {
       intents: [intentFixture()],
       scenarioCount: 1,
       workflowCount: 1,
-      stateMachineCount: 1
+      stateMachineCount: 1,
+      evidenceCatalog: evidenceCatalogFixture()
     });
 
     expect(report).toContain("# 订单审批需求：测试意图");
@@ -78,7 +84,8 @@ describe("review report writer", () => {
       businessScenarios: [],
       scenarioAssuranceContracts: [],
       scenarioTrustRecords: [],
-      intents: []
+      intents: [],
+      evidenceCatalog: evidenceCatalogFixture()
     });
 
     expect(report).toContain("# 订单审批：需求分析报告");
@@ -97,7 +104,7 @@ function analysisFixture(): RequirementAnalysis {
       { id: "clause-1", index: 1, text: "申请人提交订单后进入审批。", sourceRef: "需求:1", sourceRefs: ["需求:1"], module: "订单审批", nodeTypes: ["workflow"], kind: "workflow", origin: "explicit", confidence: 1, status: "confirmed", policyId: "brain-creator.requirement-analysis", policyVersion: "2.2.1" },
       { id: "clause-2", index: 2, text: "金额超过1000元需要经理审批。", sourceRef: "需求:2", sourceRefs: ["需求:2"], module: "订单审批", nodeTypes: ["rule", "data-constraint"], kind: "rule", origin: "explicit", confidence: 1, status: "confirmed", policyId: "brain-creator.requirement-analysis", policyVersion: "2.2.1" }
     ],
-    nodes: [],
+    nodes: [{ knowledgeProjectId: "project-1", requirementSetId: "req-1", type: "object", title: "订单", content: "可提交审批的业务对象", module: "订单审批", sourceRefs: ["需求:1"], origin: "source", confidence: 0.95, status: "confirmed", policyId: "brain-creator.requirement-analysis", policyVersion: "2.2.1" }],
     openQuestions: [],
     risks: [],
     contradictions: [],
@@ -180,4 +187,17 @@ function decisionTableFixture(): DecisionTableModel {
 
 function scenarioFixture(): BusinessScenario {
   return { id: "scenario-1", knowledgeProjectId: "project-1", requirementSetId: "req-1", title: "订单提交并进入审批", objective: "申请人提交订单，经理完成审批", family: "cross-role", actors: ["申请人", "经理"], preconditions: ["订单处于草稿状态"], workflowRefs: ["workflow-1"], stateTransitionRefs: ["state-1:transition-1"], decisionRuleRefs: ["decision-1"], testDataNeeds: ["订单金额"], expectedBusinessOutcomes: ["订单进入审批中", "Move from 草稿 to 审批 when 提交"], sourceRefs: ["需求:1"], testIntentIds: ["intent-1"], risk: "high", status: "draft" };
+}
+
+function evidenceCatalogFixture(): EvidenceCatalog {
+  const rawRefs = ["需求:1", "需求:2", "workflow-1", "state-1:transition-1", "decision-1", "scenario-1", "intent-1"];
+  const entries = rawRefs.map((rawRef, index) => ({
+    id: `REQ-${String(index + 1).padStart(3, "0")}`,
+    rawRef,
+    sourceType: "local-file",
+    location: `正文第 ${index + 1} 行`,
+    summary: `订单审批需求证据 ${index + 1}`,
+    relatedAssetIds: []
+  }));
+  return { entries, byRawRef: new Map(entries.map((entry) => [entry.rawRef, entry])) };
 }
