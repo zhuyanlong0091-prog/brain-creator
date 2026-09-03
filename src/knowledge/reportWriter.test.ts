@@ -104,7 +104,7 @@ function analysisFixture(): RequirementAnalysis {
       { id: "clause-1", index: 1, text: "申请人提交订单后进入审批。", sourceRef: "需求:1", sourceRefs: ["需求:1"], module: "订单审批", nodeTypes: ["workflow"], kind: "workflow", origin: "explicit", confidence: 1, status: "confirmed", policyId: "brain-creator.requirement-analysis", policyVersion: "2.2.1" },
       { id: "clause-2", index: 2, text: "金额超过1000元需要经理审批。", sourceRef: "需求:2", sourceRefs: ["需求:2"], module: "订单审批", nodeTypes: ["rule", "data-constraint"], kind: "rule", origin: "explicit", confidence: 1, status: "confirmed", policyId: "brain-creator.requirement-analysis", policyVersion: "2.2.1" }
     ],
-    nodes: [{ knowledgeProjectId: "project-1", requirementSetId: "req-1", type: "object", title: "订单", content: "可提交审批的业务对象", module: "订单审批", sourceRefs: ["需求:1"], origin: "source", confidence: 0.95, status: "confirmed", policyId: "brain-creator.requirement-analysis", policyVersion: "2.2.1" }],
+    nodes: [{ requirementSetId: "req-1", type: "object", title: "订单", content: "可提交审批的业务对象", module: "订单审批", sourceRefs: ["需求:1"], origin: "source", confidence: 0.95, status: "confirmed", policyId: "brain-creator.requirement-analysis", policyVersion: "2.2.1" }],
     openQuestions: [],
     risks: [],
     contradictions: [],
@@ -197,7 +197,8 @@ function evidenceCatalogFixture(): EvidenceCatalog {
     sourceType: "local-file",
     location: `正文第 ${index + 1} 行`,
     summary: `订单审批需求证据 ${index + 1}`,
-    relatedAssetIds: []
+    relatedAssetIds: [],
+    relatedLabels: []
   }));
   return { entries, byRawRef: new Map(entries.map((entry) => [entry.rawRef, entry])) };
 }
