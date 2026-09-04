@@ -3,6 +3,7 @@ import type { OnboardingPlan } from "../brain/types.js";
 import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ActorJourneyConfig,
+  ExplorationPlan,
   ExplorationPlanAction,
   ExplorationTask,
   RequirementSet
@@ -28,6 +29,14 @@ export type CreateOnboardingPlanInput = {
   cleanupPolicy: OnboardingPlan["cleanupPolicy"];
   maxWrites?: number;
   maxDurationMs?: number;
+};
+
+export type CreateOnboardingPlanResult = {
+  onboardingPlan: OnboardingPlan;
+  explorationPlan: ExplorationPlan;
+  explorationQuestions: ExplorationTask[];
+  reused: boolean;
+  baselineChanged?: boolean;
 };
 
 type ExplorationQuestionDraft = {
@@ -56,7 +65,7 @@ export class OnboardingPlanService {
     private readonly explorationPlans: StatefulExplorationPlanService
   ) {}
 
-  create(input: CreateOnboardingPlanInput) {
+  create(input: CreateOnboardingPlanInput): CreateOnboardingPlanResult {
     const requirementSet = this.requirementSet(input.requirementSetId);
     const project = this.repository.knowledgeProjects.find(
       (item) => item.id === requirementSet.knowledgeProjectId
@@ -75,6 +84,24 @@ export class OnboardingPlanService {
     }
 
     const baseline = baselineSnapshot(this.repository, requirementSet);
+    const existing = this.repository.onboardingPlans.find(
+      (plan) =>
+        plan.requirementSetId === requirementSet.id &&
+        plan.systemId === system.id
+    );
+    if (existing) {
+      const explorationPlan = this.explorationPlans.get(existing.explorationPlanId);
+      const explorationQuestions = explorationTasksForPlan(this.repository, explorationPlan);
+      return {
+        onboardingPlan: existing,
+        explorationPlan,
+        explorationQuestions,
+        reused: true,
+        baselineChanged:
+          !sameStrings(existing.baselineAssetIds, baseline.assetIds) ||
+          Boolean(existing.baselineFingerprint && existing.baselineFingerprint !== baseline.fingerprint)
+      };
+    }
     const questions = requirementExplorationQuestions(this.repository, requirementSet.id);
     if (questions.length === 0) {
       throw new Error("Requirement analysis must produce TestIntents before onboarding");
@@ -109,16 +136,6 @@ export class OnboardingPlanService {
       maxWrites: input.maxWrites ?? 20,
       maxDurationMs: input.maxDurationMs ?? 300_000
     });
-    const existing = this.repository.onboardingPlans.find(
-      (plan) =>
-        plan.explorationPlanId === explorationPlan.id &&
-        plan.requirementSetId === requirementSet.id &&
-        plan.systemId === system.id &&
-        plan.status !== "completed" &&
-        plan.status !== "blocked"
-    );
-    if (existing) return { onboardingPlan: existing, explorationPlan, explorationQuestions };
-
     const onboardingPlan: OnboardingPlan = {
       id: id("onboardingPlan"),
       knowledgeProjectId: project.id,
@@ -139,7 +156,7 @@ export class OnboardingPlanService {
     };
     this.repository.onboardingPlans.push(onboardingPlan);
     this.repository.persist();
-    return { onboardingPlan, explorationPlan, explorationQuestions };
+    return { onboardingPlan, explorationPlan, explorationQuestions, reused: false };
   }
 
   approve(input: {
@@ -453,6 +470,17 @@ function requirementExplorationQuestions(
       write: false
     })));
   return questions;
+}
+
+function explorationTasksForPlan(
+  repository: InMemoryBrainCreatorRepository,
+  plan: ExplorationPlan
+) {
+  return plan.explorationTaskIds.map((taskId) => {
+    const task = repository.explorationTasks.find((item) => item.id === taskId);
+    if (!task) throw new Error(`Onboarding exploration task not found: ${taskId}`);
+    return task;
+  });
 }
 
 function baselineSnapshot(

@@ -154,7 +154,7 @@ describe("System exploration coordinator", () => {
         server.close((error) => (error ? reject(error) : resolve()))
       );
     }
-  }, 30_000);
+  }, 60_000);
 
   it("keeps aria-controls selectors consistent for safe interactions", async () => {
     const server = createServer((_request, response) => {

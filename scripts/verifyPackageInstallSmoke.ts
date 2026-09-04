@@ -23,7 +23,13 @@ try {
   assert(tarballName.endsWith(".tgz"), "npm pack did not create a package tarball");
 
   await writeFile(join(businessDir, "package.json"), "{\"type\":\"module\"}", "utf8");
-  await run("npm", ["install", tarballName], businessDir);
+  await run(
+    "npm",
+    ["install", "--no-audit", "--no-fund", "--prefer-offline", tarballName],
+    businessDir,
+    {},
+    300_000
+  );
 
   const binDir = join(businessDir, "node_modules", ".bin");
   const bin = (name: string) =>
@@ -289,7 +295,8 @@ async function run(
   command: string,
   args: string[],
   cwd: string,
-  env: Record<string, string> = {}
+  env: Record<string, string> = {},
+  timeoutMs = 120_000
 ) {
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -302,7 +309,7 @@ async function run(
     const timeout = setTimeout(() => {
       child.kill();
       reject(new Error(`Command timed out: ${command} ${args.join(" ")}`));
-    }, 120000);
+    }, timeoutMs);
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
     });
