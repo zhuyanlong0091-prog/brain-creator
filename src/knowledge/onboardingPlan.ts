@@ -546,7 +546,8 @@ function buildCoverage(
   addCoverageItem(items, repository, requirementSet, systemId, explorationQuestions, evidence,
     "requirement", requirementSet.id, plainText(requirementSet.title),
     [requirementSet.sourceId], [requirementSet.id],
-    requirementExplorationActions(questions), [], [], [], "需求版本需要绑定真实系统证据");
+    requirementExplorationActions(questions), [], [], [], "需求版本需要绑定真实系统证据",
+    explorationQuestions.map((task) => task.id));
 
   for (const node of repository.knowledgeNodes.filter((item) => item.requirementSetId === requirementSet.id)) {
     addCoverageItem(items, repository, requirementSet, systemId, explorationQuestions, evidence,
@@ -706,7 +707,7 @@ function addCoverageItem(
 ) {
   const relatedTasks = taskIds.length
     ? tasks.filter((task) => taskIds.includes(task.id))
-    : relatedExplorationTasks(tasks, dimension, sourceAssetId);
+    : relatedExplorationTasks(tasks, dimension, sourceAssetId, requirementRefs);
   const relatedEvidence = matchingEvidence(evidence.entries, `${title} ${plannedActions.join(" ")} ${dataNeeds.join(" ")}`);
   const taskEvidence = relatedTasks.flatMap((task) => task.resultSourceRefs);
   const evidenceRefs = unique([...relatedEvidence.map((entry) => entry.ref), ...taskEvidence]);
@@ -746,14 +747,17 @@ function addCoverageItem(
 function relatedExplorationTasks(
   tasks: ExplorationTask[],
   dimension: OnboardingCoverageDimension,
-  sourceAssetId: string
+  sourceAssetId: string,
+  requirementRefs: string[]
 ) {
   if (dimension === "test-intent") {
     return tasks.filter((task) => task.testIntentId === sourceAssetId);
   }
   return tasks.filter((task) =>
     task.query.includes(sourceAssetId) ||
-    task.sourceRefs.some((sourceRef) => sourceRef.includes(sourceAssetId))
+    task.sourceRefs.some((sourceRef) =>
+      sourceRef.includes(sourceAssetId) || requirementRefs.includes(sourceRef)
+    )
   );
 }
 

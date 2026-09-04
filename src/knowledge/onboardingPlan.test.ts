@@ -67,6 +67,10 @@ describe("OnboardingPlanService", () => {
     }));
     expect(created.coverage.items).toEqual(expect.arrayContaining([
       expect.objectContaining({
+        dimension: "requirement",
+        explorationTaskIds: expect.arrayContaining(created.explorationQuestions.map((task) => task.id))
+      }),
+      expect.objectContaining({
         dimension: "workflow",
         sourceAssetId: "workflow-1",
         analysisRefs: ["workflow-1"],
