@@ -231,6 +231,18 @@ describe("requirement onboarding facade", () => {
     }));
     expect(context.repository.requirementSets[0].status).toBe("draft");
 
+    const executionPreview = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "approve-onboarding-plan",
+      onboardingPlanId: created.onboardingPlan.id,
+      approvalStage: "execution",
+      confirm: false
+    }));
+    expect(executionPreview).toEqual(expect.objectContaining({
+      status: "preview",
+      approvalStage: "execution",
+      nextAction: expect.stringContaining("complete coverage")
+    }));
+
     const approved = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
       action: "approve-onboarding-plan",
       onboardingPlanId: created.onboardingPlan.id,

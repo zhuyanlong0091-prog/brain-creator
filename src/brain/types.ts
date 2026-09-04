@@ -346,6 +346,28 @@ export type OnboardingCoverageSummary = {
   unresolvedCount: number;
 };
 
+export type OnboardingApprovalStage = "exploration" | "execution";
+
+export type OnboardingPlanRevision = {
+  revision: number;
+  baselineFingerprint?: string;
+  coverageFingerprint?: string;
+  coverageSummary?: OnboardingCoverageSummary;
+  coverageItemIds: string[];
+  allowedActionNames: string[];
+  capturedAt: string;
+  reason: string;
+};
+
+export type OnboardingApprovalRecord = {
+  stage: OnboardingApprovalStage;
+  approvedBy: string;
+  note: string;
+  coverageFingerprint?: string;
+  coverageSummary?: OnboardingCoverageSummary;
+  approvedAt: string;
+};
+
 export type OnboardingPlan = {
   id: string;
   knowledgeProjectId: string;
@@ -368,6 +390,10 @@ export type OnboardingPlan = {
   systemEvidenceRefs?: string[];
   coverageFingerprint?: string;
   generatedAt?: string;
+  approvalStage?: OnboardingApprovalStage;
+  approvalHistory?: OnboardingApprovalRecord[];
+  revision?: number;
+  revisionHistory?: OnboardingPlanRevision[];
   approvedBy?: string;
   approvedAt?: string;
 };

@@ -97,7 +97,7 @@ Then ask Brain Creator to prepare one reviewable onboarding boundary:
 根据已确认需求创建 OnboardingPlan，展示需求摘要、探索问题、角色、路由、写操作、预算和清理策略；我确认前不要执行。
 ```
 
-After one explicit approval, `approve-onboarding-plan` atomically approves the Requirement baseline and linked bounded ExplorationPlan. `start-onboarding-plan` returns requirement-directed questions and any required TestData tasks. Complex menus and business workflows still require host-Agent page, interaction, or training evidence inside the approved boundary.
+After one explicit exploration approval, `approve-onboarding-plan` atomically approves the Requirement baseline and linked bounded ExplorationPlan. `start-onboarding-plan` returns requirement-directed questions and any required TestData tasks. Complex menus and business workflows still require host-Agent page, interaction, or training evidence inside the approved boundary. Only after the coverage matrix is complete should the Agent preview and confirm `approve-onboarding-plan` with `approvalStage=execution`; that stage is the execution gate and rejects unresolved coverage or evidence-free actions.
 
 **Verify:** `bc_status` shows the active OnboardingPlan and `bc_review target=onboarding-plan` shows its approval boundary. Submitted results produce versioned System Brain page, locator, probe, navigation, state, and side-effect evidence. Login pages, empty evidence, or unsafe transitions create a Gap only after the approved attempts fail.
 

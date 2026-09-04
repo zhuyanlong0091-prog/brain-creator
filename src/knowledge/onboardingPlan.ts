@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
+  OnboardingApprovalRecord,
+  OnboardingApprovalStage,
   OnboardingCoverageDimension,
   OnboardingCoverageItem,
   OnboardingCoverageStatus,
@@ -179,7 +181,7 @@ export class OnboardingPlanService {
     );
     const allowedActions = input.allowedActions?.length
       ? input.allowedActions
-      : explorationActions(questions, allowedRoutes[0], actorJourney);
+      : explorationActions(questions, coverage.items, allowedRoutes[0], actorJourney);
     const explorationPlan = this.explorationPlans.create({
       explorationTaskIds: explorationQuestions.map((task) => task.id),
       actorJourney,
@@ -211,7 +213,10 @@ export class OnboardingPlanService {
       coverageSummary: coverage.summary,
       systemEvidenceRefs: coverage.systemEvidenceRefs,
       coverageFingerprint: coverage.fingerprint,
-      generatedAt: new Date().toISOString()
+      generatedAt: new Date().toISOString(),
+      approvalHistory: [],
+      revision: 1,
+      revisionHistory: []
     };
     this.repository.onboardingPlans.push(onboardingPlan);
     this.repository.persist();
@@ -251,7 +256,7 @@ export class OnboardingPlanService {
     );
     const allowedActions = input.allowedActions?.length
       ? input.allowedActions
-      : explorationActions(questions, allowedRoutes[0], actorJourney);
+      : explorationActions(questions, coverage.items, allowedRoutes[0], actorJourney);
     validateDraftActions(allowedActions, actorJourney);
 
     const actionWithStableIds = stableExplorationActions(
@@ -274,6 +279,36 @@ export class OnboardingPlanService {
       ? unique([...explorationPlan.forbiddenActions, ...input.forbiddenActions])
       : explorationPlan.forbiddenActions;
     const now = new Date().toISOString();
+    const previousRevision = onboardingPlan.revision ?? 1;
+    const previousCoverageFingerprint = onboardingPlan.coverageFingerprint;
+    const previousBaselineFingerprint = onboardingPlan.baselineFingerprint;
+    const previousActionNames = onboardingPlan.allowedActions;
+    const coverageChanged = Boolean(
+      previousCoverageFingerprint && previousCoverageFingerprint !== coverage.fingerprint
+    );
+    const baselineChanged = Boolean(
+      previousBaselineFingerprint && previousBaselineFingerprint !== baseline.fingerprint
+    ) || !sameStrings(onboardingPlan.baselineAssetIds, baseline.assetIds);
+    const actionsChanged = !sameStrings(previousActionNames, actionWithStableIds.map((action) => action.name));
+    const revisionChanged = Boolean(
+      previousCoverageFingerprint || previousBaselineFingerprint || onboardingPlan.revision
+    ) && (coverageChanged || baselineChanged || actionsChanged);
+    onboardingPlan.revision ??= previousRevision;
+    onboardingPlan.revisionHistory ??= [];
+    onboardingPlan.approvalHistory ??= [];
+    if (revisionChanged) {
+      onboardingPlan.revisionHistory.push({
+        revision: onboardingPlan.revision,
+        baselineFingerprint: previousBaselineFingerprint,
+        coverageFingerprint: previousCoverageFingerprint,
+        coverageSummary: onboardingPlan.coverageSummary,
+        coverageItemIds: onboardingPlan.coverageItems?.map((item) => item.id) ?? [],
+        allowedActionNames: [...previousActionNames],
+        capturedAt: now,
+        reason: "草案覆盖范围、基线或允许动作发生变化"
+      });
+      onboardingPlan.revision += 1;
+    }
     explorationPlan.explorationTaskIds = explorationQuestions.map((task) => task.id);
     explorationPlan.actorJourney = actorJourney;
     explorationPlan.allowedRoutes = allowedRoutes;
@@ -307,8 +342,11 @@ export class OnboardingPlanService {
     onboardingPlanId: string;
     note: string;
     approvedBy: string;
+    stage?: OnboardingApprovalStage;
   }) {
     const onboardingPlan = this.get(input.onboardingPlanId);
+    const stage = input.stage ?? "exploration";
+    if (stage === "execution") return this.approveExecution(input);
     if (onboardingPlan.status === "approved") {
       return {
         onboardingPlan,
@@ -345,9 +383,104 @@ export class OnboardingPlanService {
       onboardingPlan.baselineAssetIds = approvedBaseline.assetIds;
       onboardingPlan.baselineFingerprint = approvedBaseline.fingerprint;
       onboardingPlan.status = "approved";
+      onboardingPlan.approvalStage = "exploration";
       onboardingPlan.approvedBy = input.approvedBy.trim();
       onboardingPlan.approvedAt = new Date().toISOString();
+      appendApprovalRecord(onboardingPlan, {
+        stage: "exploration",
+        approvedBy: input.approvedBy.trim(),
+        note: input.note.trim(),
+        coverageFingerprint: onboardingPlan.coverageFingerprint,
+        coverageSummary: onboardingPlan.coverageSummary,
+        approvedAt: onboardingPlan.approvedAt
+      });
       return { onboardingPlan, requirementSet: approvedRequirementSet, explorationPlan };
+    });
+  }
+
+  private approveExecution(input: {
+    onboardingPlanId: string;
+    note: string;
+    approvedBy: string;
+    stage?: OnboardingApprovalStage;
+  }) {
+    const onboardingPlan = this.get(input.onboardingPlanId);
+    if (!["draft", "approved", "completed"].includes(onboardingPlan.status)) {
+      throw new Error(`Onboarding plan is ${onboardingPlan.status}`);
+    }
+    const requirementSet = this.assertBaselineCurrent(onboardingPlan);
+    const explorationPlan = this.explorationPlans.get(onboardingPlan.explorationPlanId);
+    const tasks = explorationTasksForPlan(this.repository, explorationPlan);
+    const questions = requirementExplorationQuestions(this.repository, requirementSet.id);
+    const coverage = buildCoverage(
+      this.repository,
+      requirementSet,
+      onboardingPlan.systemId,
+      questions,
+      tasks
+    );
+    const unresolved = unresolvedQuestions(this.repository, requirementSet);
+    if (unresolved.length > 0) {
+      throw new Error(`Execution approval requires resolved requirement questions: ${unresolved.join("; ")}`);
+    }
+    if (coverage.summary.overallStatus !== "covered") {
+      throw new Error(
+        `Execution approval requires complete onboarding coverage: ${coverage.summary.needsExploration} needs exploration, ${coverage.summary.needsData} needs data, ${coverage.summary.blocked} blocked`
+      );
+    }
+    const actionIssues = explorationPlan.allowedActions.flatMap((action) => [
+      ...(action.requirementRefs?.length ? [] : [`${action.name}: missing requirement evidence`]),
+      ...(action.systemEvidenceRefs?.length ? [] : [`${action.name}: missing system evidence`])
+    ]);
+    if (actionIssues.length > 0) {
+      throw new Error(`Execution approval requires evidence-bound actions: ${actionIssues.join("; ")}`);
+    }
+    if (onboardingPlan.status === "draft") {
+      this.knowledge.validateRequirementSetApproval(onboardingPlan.requirementSetId);
+      this.explorationPlans.validateApproval({
+        planId: onboardingPlan.explorationPlanId,
+        note: input.note,
+        approvedBy: input.approvedBy
+      });
+    }
+    return this.repository.transaction(() => {
+      let approvedRequirementSet = requirementSet;
+      if (onboardingPlan.status === "draft") {
+        approvedRequirementSet = this.knowledge.approveRequirementSet(
+          onboardingPlan.requirementSetId,
+          { persist: false }
+        );
+        this.explorationPlans.approve({
+          planId: onboardingPlan.explorationPlanId,
+          note: input.note,
+          approvedBy: input.approvedBy
+        }, { persist: false });
+        const approvedBaseline = baselineSnapshot(this.repository, approvedRequirementSet);
+        onboardingPlan.baselineAssetIds = approvedBaseline.assetIds;
+        onboardingPlan.baselineFingerprint = approvedBaseline.fingerprint;
+      }
+      onboardingPlan.coverageItems = coverage.items;
+      onboardingPlan.coverageSummary = coverage.summary;
+      onboardingPlan.systemEvidenceRefs = coverage.systemEvidenceRefs;
+      onboardingPlan.coverageFingerprint = coverage.fingerprint;
+      onboardingPlan.approvalStage = "execution";
+      onboardingPlan.approvedBy = input.approvedBy.trim();
+      onboardingPlan.approvedAt = new Date().toISOString();
+      onboardingPlan.approvalHistory ??= [];
+      appendApprovalRecord(onboardingPlan, {
+        stage: "execution",
+        approvedBy: input.approvedBy.trim(),
+        note: input.note.trim(),
+        coverageFingerprint: coverage.fingerprint,
+        coverageSummary: coverage.summary,
+        approvedAt: onboardingPlan.approvedAt
+      });
+      if (onboardingPlan.status === "draft") onboardingPlan.status = "approved";
+      return {
+        onboardingPlan,
+        requirementSet: approvedRequirementSet,
+        explorationPlan: this.explorationPlans.get(onboardingPlan.explorationPlanId)
+      };
     });
   }
 
@@ -546,12 +679,15 @@ function buildCoverage(
   addCoverageItem(items, repository, requirementSet, systemId, explorationQuestions, evidence,
     "requirement", requirementSet.id, plainText(requirementSet.title),
     [requirementSet.sourceId], [requirementSet.id],
-    requirementExplorationActions(questions), [], [], [], "需求版本需要绑定真实系统证据",
+    requirementExplorationActions(questions), [], [],
+    ["完成需求预期与系统观察的全量对账"], "需求版本需要绑定真实系统证据",
     explorationQuestions.map((task) => task.id));
 
   for (const node of repository.knowledgeNodes.filter((item) => item.requirementSetId === requirementSet.id)) {
     addCoverageItem(items, repository, requirementSet, systemId, explorationQuestions, evidence,
-      "knowledge", node.id, plainText(node.title), node.sourceRefs, [node.id], [], [], [], [],
+      "knowledge", node.id, plainText(node.title), node.sourceRefs, [node.id],
+      knowledgeCoverageActions(node.type), [], [],
+      ["确认知识节点对应的页面、动作、规则或状态证据"],
       "知识节点需要在目标系统中完成语义绑定");
   }
   for (const model of repository.businessObjectModels.filter((item) => item.requirementSetId === requirementSet.id)) {
@@ -607,8 +743,32 @@ function buildCoverage(
     ];
     addCoverageItem(items, repository, requirementSet, systemId, explorationQuestions, evidence,
       "test-intent", intent.id, plainText(intent.title), intent.requirementRefs, [intent.id],
-      [plainText(intent.objective)], intent.actorJourney ?? [], dataNeeds, intent.expectedResults,
+      ["绑定入口、控件、角色、数据和可观察结果"], intent.actorJourney ?? [], dataNeeds, intent.expectedResults,
       "测试意图需要绑定页面、数据和断言证据");
+  }
+
+  const intentDimensions = new Set(
+    repository.testIntents
+      .filter((item) => item.requirementSetId === requirementSet.id)
+      .flatMap((item) => item.coverageDimensions ?? [])
+  );
+  const requirementNodes = repository.knowledgeNodes.filter(
+    (item) => item.requirementSetId === requirementSet.id
+  );
+  if (intentDimensions.has("workflow") && repository.workflowModels.every((item) => item.requirementSetId !== requirementSet.id)) {
+    addMissingModelCoverage(items, requirementSet, "workflow", "业务流程计划（待生成）",
+      "需求分析要求流程覆盖，但当前尚无正式业务流程模型", explorationQuestions);
+  }
+  if (intentDimensions.has("state") && repository.stateMachineModels.every((item) => item.requirementSetId !== requirementSet.id)) {
+    addMissingModelCoverage(items, requirementSet, "state", "状态转换计划（待生成）",
+      "需求分析要求状态覆盖，但当前尚无正式状态机模型", explorationQuestions);
+  }
+  if (
+    (intentDimensions.has("workflow") || requirementNodes.some((item) => item.type === "rule")) &&
+    repository.decisionTableModels.every((item) => item.requirementSetId !== requirementSet.id)
+  ) {
+    addMissingModelCoverage(items, requirementSet, "decision", "条件分支计划（待生成）",
+      "需求包含条件规则，但当前尚无正式决策表模型", explorationQuestions);
   }
 
   const profiles = repository.testDataProfiles.filter((item) => item.requirementSetId === requirementSet.id);
@@ -642,7 +802,7 @@ function buildCoverage(
       systemEvidenceRefs: evidence.refs,
       explorationTaskIds: explorationQuestions.map((task) => task.id),
       plannedActions: ["在批准范围内探索目标系统入口、页面、控件、状态和业务副作用"],
-      roles: [],
+      roles: availableSystemRoles(repository, systemId),
       dataNeeds: [],
       expectedOutcomes: ["形成可追溯的页面、动作和状态证据"],
       status: "needs-exploration",
@@ -664,7 +824,7 @@ function buildCoverage(
       systemEvidenceRefs: evidence.refs,
       explorationTaskIds: explorationQuestions.map((task) => task.id),
       plannedActions: ["复核与当前需求相关的页面、导航、控件、状态和接口证据"],
-      roles: [],
+      roles: availableSystemRoles(repository, systemId),
       dataNeeds: [],
       expectedOutcomes: ["确认需求语义与系统实现的对应关系"],
       status: completed ? "covered" : "needs-exploration",
@@ -741,6 +901,36 @@ function addCoverageItem(
     expectedOutcomes: unique(expectedOutcomes),
     status,
     reason: status === "covered" ? undefined : blocked ? "存在未解决的阻塞 Gap" : needsData ? "需要先准备业务实体数据" : defaultReason
+  });
+}
+
+function addMissingModelCoverage(
+  items: OnboardingCoverageItem[],
+  requirementSet: RequirementSet,
+  dimension: "workflow" | "state" | "decision",
+  title: string,
+  reason: string,
+  tasks: ExplorationTask[]
+) {
+  items.push({
+    id: coverageId(dimension, `${requirementSet.id}:missing-model`),
+    dimension,
+    sourceAssetId: `${requirementSet.id}:${dimension}-model`,
+    title,
+    requirementRefs: [requirementSet.sourceId],
+    analysisRefs: [requirementSet.id],
+    systemEvidenceRefs: [],
+    explorationTaskIds: tasks.map((task) => task.id),
+    plannedActions: dimension === "workflow"
+      ? ["生成主流程、关键分支、角色交接和终态计划"]
+      : dimension === "state"
+        ? ["生成状态、合法转换、非法转换和前置条件计划"]
+        : ["生成条件组合、命中规则和未命中规则计划"],
+    roles: [],
+    dataNeeds: [],
+    expectedOutcomes: ["形成可追溯的结构化模型并纳入测试设计"],
+    status: "needs-exploration",
+    reason
   });
 }
 
@@ -878,6 +1068,7 @@ function coverageSummary(items: OnboardingCoverageItem[]): OnboardingCoverageSum
 
 function explorationActions(
   questions: ExplorationQuestionDraft[],
+  coverageItems: OnboardingCoverageItem[],
   route: string,
   actorJourney: ActorJourneyConfig[]
 ) {
@@ -889,13 +1080,19 @@ function explorationActions(
       write: question.write,
       sourceRefs: question.sourceRefs
     }];
+    const linkedCoverage = coverageItems.filter((item) =>
+      item.sourceAssetId === (question.modelId ?? question.testIntentId)
+    );
     for (const action of questionActions) {
       actions.push({
         name: action.name,
         route,
         role: authorizedRole(action.role, actorJourney),
         write: action.write,
-        sourceRefs: action.sourceRefs
+        sourceRefs: action.sourceRefs,
+        requirementRefs: unique(action.sourceRefs),
+        systemEvidenceRefs: unique(linkedCoverage.flatMap((item) => item.systemEvidenceRefs)),
+        coverageItemIds: linkedCoverage.map((item) => item.id)
       });
     }
   }
@@ -906,6 +1103,35 @@ function explorationActions(
     if (!previous || (!previous.write && action.write)) bySignature.set(key, action);
   }
   return [...bySignature.values()];
+}
+
+function knowledgeCoverageActions(type: string) {
+  if (type === "workflow") return ["绑定入口、步骤、分支和终态证据"];
+  if (type === "state") return ["绑定状态、转换、前置条件和副作用证据"];
+  if (type === "rule") return ["绑定条件、命中规则和未命中规则证据"];
+  if (type === "field") return ["绑定字段位置、值域、可见性和交互证据"];
+  if (type === "actor") return ["绑定角色、身份和可执行动作证据"];
+  return ["绑定知识节点对应的系统实现证据"];
+}
+
+function availableSystemRoles(repository: InMemoryBrainCreatorRepository, systemId: string) {
+  return unique(
+    repository.authProfiles
+      .filter((profile) => profile.projectId === systemId && profile.status === "succeeded")
+      .map((profile) => profile.role?.trim())
+      .filter((role): role is string => Boolean(role))
+  );
+}
+
+function appendApprovalRecord(plan: OnboardingPlan, record: OnboardingApprovalRecord) {
+  plan.approvalHistory ??= [];
+  const previous = plan.approvalHistory.at(-1);
+  if (
+    previous?.stage === record.stage &&
+    previous.approvedBy === record.approvedBy &&
+    previous.coverageFingerprint === record.coverageFingerprint
+  ) return;
+  plan.approvalHistory.push(record);
 }
 
 function stableExplorationActions(

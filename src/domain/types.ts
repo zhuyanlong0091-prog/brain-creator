@@ -1121,6 +1121,9 @@ export type ExplorationPlanAction = {
   role?: string;
   write: boolean;
   sourceRefs: string[];
+  requirementRefs?: string[];
+  systemEvidenceRefs?: string[];
+  coverageItemIds?: string[];
 };
 
 export type ExplorationActionEvidence = {
