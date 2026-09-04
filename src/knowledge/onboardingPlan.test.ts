@@ -167,6 +167,114 @@ describe("OnboardingPlanService", () => {
     expect(fixture.repository.onboardingPlans).toHaveLength(1);
   });
 
+  it("keeps one onboarding plan when the same scope is requested with a different budget", () => {
+    const fixture = createFixture();
+    const first = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+
+    const second = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete",
+      maxWrites: 10
+    });
+
+    expect(second.reused).toBe(true);
+    expect(second.onboardingPlan.id).toBe(first.onboardingPlan.id);
+    expect(second.explorationPlan.id).toBe(first.explorationPlan.id);
+    expect(fixture.repository.onboardingPlans).toHaveLength(1);
+    expect(fixture.repository.explorationPlans).toHaveLength(1);
+  });
+
+  it("keeps one onboarding plan after the existing scope reaches a terminal state", () => {
+    const fixture = createFixture();
+    const first = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+    first.onboardingPlan.status = "blocked";
+    first.explorationPlan.status = "blocked";
+
+    const second = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+
+    expect(second.reused).toBe(true);
+    expect(second.onboardingPlan.id).toBe(first.onboardingPlan.id);
+    expect(second.onboardingPlan.status).toBe("blocked");
+    expect(fixture.repository.onboardingPlans).toHaveLength(1);
+    expect(fixture.repository.explorationPlans).toHaveLength(1);
+  });
+
+  it("keeps onboarding plans independent across systems and requirement versions", () => {
+    const fixture = createFixture();
+    fixture.repository.systemProfiles.push({
+      ...fixture.repository.systemProfiles[0],
+      id: "system-2",
+      name: "Orders EU",
+      baseUrl: "https://orders-eu.example.test",
+      urlAllowlist: ["https://orders-eu.example.test"]
+    });
+    fixture.repository.knowledgeProjects[0].systemIds.push("system-2");
+    fixture.repository.requirementSets.push({
+      ...fixture.repository.requirementSets[0],
+      id: "requirement-2",
+      version: 2,
+      title: "Order approval revision",
+      contentHash: "requirement-hash-v2"
+    });
+    fixture.repository.testIntents.push({
+      ...fixture.repository.testIntents[0],
+      id: "intent-2",
+      requirementSetId: "requirement-2",
+      title: "Approve the revised order journey"
+    });
+
+    const first = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+    const second = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-2",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+    const third = fixture.service.create({
+      requirementSetId: "requirement-2",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+
+    expect(new Set([
+      first.onboardingPlan.id,
+      second.onboardingPlan.id,
+      third.onboardingPlan.id
+    ])).toHaveLength(3);
+    expect(fixture.repository.onboardingPlans).toHaveLength(3);
+    expect(fixture.repository.onboardingPlans.map((plan) => [
+      plan.requirementSetId,
+      plan.systemId
+    ])).toEqual(expect.arrayContaining([
+      ["requirement-1", "system-1"],
+      ["requirement-1", "system-2"],
+      ["requirement-2", "system-1"]
+    ]));
+  });
+
   it("approves the requirement baseline and exploration boundary in one operation", () => {
     const fixture = createFixture();
     const created = fixture.service.create({

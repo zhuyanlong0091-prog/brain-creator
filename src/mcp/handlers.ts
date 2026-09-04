@@ -1510,8 +1510,11 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     return {
       status: result.onboardingPlan.status,
       ...result,
-      requiresConfirmation: true,
-      nextAction: "approve-onboarding-plan"
+      requiresConfirmation: result.onboardingPlan.status === "draft" && !result.baselineChanged,
+      nextAction: onboardingCreateNextAction(
+        result.onboardingPlan.status,
+        result.baselineChanged ?? false
+      )
     };
   }
   if (action === "approve-onboarding-plan") {
@@ -11996,6 +11999,16 @@ function responseModeArg(input: Record<string, unknown>) {
     throw new Error("responseMode is invalid");
   }
   return value;
+}
+
+function onboardingCreateNextAction(
+  status: "draft" | "approved" | "completed" | "blocked",
+  baselineChanged: boolean
+) {
+  if (baselineChanged) return "review-onboarding-plan";
+  if (status === "draft") return "approve-onboarding-plan";
+  if (status === "approved") return "start-onboarding-plan";
+  return "review-onboarding-plan";
 }
 
 function gapSeverityArg(input: Record<string, unknown>, key: string) {

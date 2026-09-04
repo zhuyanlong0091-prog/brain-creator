@@ -276,6 +276,42 @@ describe("requirement onboarding facade", () => {
       expect.objectContaining({ id: created.onboardingPlan.id, status: "approved" })
     ]);
   });
+
+  it("returns the existing onboarding scope instead of creating a second plan", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    seedOnboarding(context);
+
+    const first = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "create-onboarding-plan",
+      requirementSetId: "requirement-onboarding",
+      systemId: "system-onboarding",
+      actorJourney: [{ role: "requester", authProfileId: "auth-onboarding" }],
+      cleanupPolicy: "retain-with-label"
+    }));
+    const second = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "create-onboarding-plan",
+      requirementSetId: "requirement-onboarding",
+      systemId: "system-onboarding",
+      actorJourney: [{ role: "requester", authProfileId: "auth-onboarding" }],
+      cleanupPolicy: "retain-with-label",
+      maxWrites: 10
+    }));
+
+    expect(second).toEqual(expect.objectContaining({
+      reused: true,
+      status: "draft",
+      requiresConfirmation: true,
+      nextAction: "approve-onboarding-plan",
+      onboardingPlan: expect.objectContaining({ id: first.onboardingPlan.id }),
+      explorationPlan: expect.objectContaining({ id: first.explorationPlan.id })
+    }));
+    expect(context.repository.onboardingPlans).toHaveLength(1);
+    expect(context.repository.explorationPlans).toHaveLength(1);
+  });
 });
 
 function seed(context: ReturnType<typeof createBrainCreatorMcpContext>) {
