@@ -97,7 +97,7 @@ Brain Creator 应展示：
 根据已确认需求创建 OnboardingPlan，展示需求摘要、探索问题、角色、路由、写操作、预算和清理策略；我确认前不要执行。
 ```
 
-用户一次确认后，`approve-onboarding-plan` 原子批准需求基线和关联的受限 ExplorationPlan。`start-onboarding-plan` 返回需求驱动问题和所需 TestData 任务。复杂菜单和业务流程仍需宿主 Agent 在批准边界内提交页面、交互或训练证据。
+用户一次确认探索后，`approve-onboarding-plan` 原子批准需求基线和关联的受限 ExplorationPlan。`start-onboarding-plan` 返回需求驱动问题和所需 TestData 任务。复杂菜单和业务流程仍需宿主 Agent 在批准边界内提交页面、交互或训练证据。只有覆盖矩阵完整后，Agent 才应预览并携带 `approvalStage=execution` 再次确认；该阶段是执行门禁，会拒绝未覆盖项或没有证据绑定的允许动作。
 
 **验证：** `bc_status` 显示活动 OnboardingPlan，`bc_review target=onboarding-plan` 可查看批准边界。结果提交后，System Brain 包含版本化页面、定位器、探针、导航、状态和副作用证据。登录页、空证据或不安全转换只有在批准的尝试失败后才创建 Gap。
 

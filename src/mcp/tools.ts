@@ -224,13 +224,17 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       explorationTaskIds: z.array(z.string()).default([]),
       explorationPlanId: z.string().optional(),
       onboardingPlanId: z.string().optional(),
+      approvalStage: z.enum(["exploration", "execution"]).optional(),
       allowedRoutes: z.array(z.string().url()).default([]),
       explorationPlanActions: z.array(z.object({
         name: z.string().min(1),
         route: z.string().url(),
         role: z.string().optional(),
         write: z.boolean().default(false),
-        sourceRefs: z.array(z.string()).min(1)
+        sourceRefs: z.array(z.string()).min(1),
+        requirementRefs: z.array(z.string()).default([]),
+        systemEvidenceRefs: z.array(z.string()).default([]),
+        coverageItemIds: z.array(z.string()).default([])
       })).default([]),
       forbiddenActions: z.array(z.string()).default([]),
       cleanupPolicy: z.enum(["delete", "close", "retain-with-label"]).optional(),

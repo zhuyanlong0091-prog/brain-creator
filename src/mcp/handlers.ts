@@ -1521,6 +1521,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     const onboardingPlan = context.onboardingPlans.get(
       stringArg(input, "onboardingPlanId")
     );
+    const approvalStage = onboardingApprovalStageArg(input);
     const explorationPlan = context.statefulExplorationPlans.get(
       onboardingPlan.explorationPlanId
     );
@@ -1529,9 +1530,12 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
         status: "preview",
         onboardingPlan,
         explorationPlan,
+        approvalStage,
         requiresConfirmation: true,
         nextAction:
-          "Present the requirement baseline, unresolved questions, roles, routes, writes, duration, and cleanup policy before one explicit approval."
+          approvalStage === "execution"
+            ? "Present complete coverage, action-level requirement and system evidence, data readiness, and residual risks before execution approval."
+            : "Present the requirement baseline, uncovered items, roles, routes, writes, duration, and cleanup policy before exploration approval."
       };
     }
     return {
@@ -1539,9 +1543,13 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       ...context.onboardingPlans.approve({
         onboardingPlanId: onboardingPlan.id,
         note: stringArg(input, "confirmationNote"),
-        approvedBy: stringArg(input, "confirmedBy")
+        approvedBy: stringArg(input, "confirmedBy"),
+        stage: approvalStage
       }),
-      nextAction: "start-onboarding-plan"
+      approvalStage,
+      nextAction: approvalStage === "execution"
+        ? "run-requirement-suite"
+        : "start-onboarding-plan"
     };
   }
   if (action === "start-onboarding-plan") {
@@ -10617,7 +10625,10 @@ function explorationPlanActionsArg(input: Record<string, unknown>) {
       route: stringArg(record, "route"),
       role: optionalStringArg(record, "role"),
       write: optionalBooleanArg(record, "write"),
-      sourceRefs: stringArrayArg(record, "sourceRefs")
+      sourceRefs: stringArrayArg(record, "sourceRefs"),
+      requirementRefs: stringArrayArg(record, "requirementRefs"),
+      systemEvidenceRefs: stringArrayArg(record, "systemEvidenceRefs"),
+      coverageItemIds: stringArrayArg(record, "coverageItemIds")
     };
   });
 }
@@ -10631,6 +10642,14 @@ function explorationCleanupPolicyArg(
     throw new Error(`${key} is invalid`);
   }
   return value;
+}
+
+function onboardingApprovalStageArg(input: Record<string, unknown>) {
+  const value = optionalStringArg(input, "approvalStage") ?? "exploration";
+  if (value !== "exploration" && value !== "execution") {
+    throw new Error("approvalStage is invalid");
+  }
+  return value as "exploration" | "execution";
 }
 
 function explorationResultArg(input: Record<string, unknown>) {

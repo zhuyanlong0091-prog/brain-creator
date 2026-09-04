@@ -99,7 +99,7 @@ System Brain 证据缺失或歧义时会创建 `ExplorationTask`，它不是最�
 
 首次接入系统时，应在 Requirement Eval 通过、系统已绑定且所有角色鉴权已验证后，调用 `bc_prepare action=create-onboarding-plan`。Brain Creator 会根据已确认的流程、状态机、决策表和 TestIntent 生成具体探索问题，并在 OnboardingPlan 内创建受限的 ExplorationPlan。
 
-先预览 `approve-onboarding-plan`，向用户展示需求摘要、未解决问题、角色、路由、写操作、时长和清理策略，再携带 `confirm=true`、`confirmedBy` 和 `confirmationNote` 确认。该操作会先验证两侧，再原子批准 RequirementSet 和 ExplorationPlan。同一个需求版本和目标系统只允许存在一个 OnboardingPlan；重复创建会返回原计划，即使原计划已经进入终态。若要建立新的接入范围，应创建新的需求版本。使用 `start-onboarding-plan` 启动；通过 `bc_status` 和 `bc_review target=onboarding-plan` 可恢复当前计划。原有分别批准基线和 ExplorationPlan 的流程继续兼容后续补充探索。
+先预览 `approve-onboarding-plan`，向用户展示需求摘要、未解决问题、覆盖矩阵、角色、路由、写操作、时长和清理策略，再携带 `confirm=true`、`confirmedBy` 和 `confirmationNote` 确认。默认 `approvalStage=exploration` 只授权受限证据探索，不代表需求已经具备执行条件。探索完成并刷新覆盖矩阵后，使用 `approvalStage=execution` 进入严格门禁：所有覆盖项必须为 `covered`，所有允许动作必须同时绑定需求来源和系统证据，且不能有未解决问题。同一个需求版本和目标系统只允许存在一个 OnboardingPlan；重复创建会返回原计划，草案刷新会递增 revision 并保留历史。使用 `start-onboarding-plan` 启动探索；通过 `bc_status` 和 `bc_review target=onboarding-plan` 可恢复当前计划。原有分别批准基线和 ExplorationPlan 的流程继续兼容后续补充探索。
 
 只读探索无法发现仅在新建、提交、审批、驳回或关闭后出现的控件。后续出现证据缺口时，从一个或多个待处理 ExplorationTask 创建 `ExplorationPlan`，明确鉴权角色、允许路由、授权动作、写次数、时长和清理策略。
 

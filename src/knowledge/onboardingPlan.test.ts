@@ -96,6 +96,14 @@ describe("OnboardingPlanService", () => {
     expect(created.explorationPlan.allowedActions).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ name: expect.stringContaining("requester submits an order") })
     ]));
+    expect(created.explorationPlan.allowedActions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "submit",
+        requirementRefs: expect.arrayContaining(["source:orders#line:1"]),
+        systemEvidenceRefs: expect.arrayContaining(["page-model:page-order-approval"]),
+        coverageItemIds: expect.arrayContaining(["onboarding-coverage:workflow:workflow-1"])
+      })
+    ]));
   });
 
   it("refreshes an existing draft in place so the same scope exposes current coverage", () => {
@@ -137,6 +145,106 @@ describe("OnboardingPlanService", () => {
       expect.objectContaining({ sourceAssetId: "knowledge-new-rule" })
     ]));
     expect(second.onboardingPlan.coverageFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(second.onboardingPlan.revision).toBe(2);
+    expect(second.onboardingPlan.revisionHistory).toEqual([
+      expect.objectContaining({
+        revision: 1,
+        reason: "草案覆盖范围、基线或允许动作发生变化"
+      })
+    ]);
+  });
+
+  it("rejects execution approval until onboarding coverage is complete", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+
+    expect(() => fixture.service.approve({
+      onboardingPlanId: created.onboardingPlan.id,
+      note: "Approve execution before exploration",
+      approvedBy: "qa-owner",
+      stage: "execution"
+    })).toThrow("complete onboarding coverage");
+    expect(created.onboardingPlan.status).toBe("draft");
+    expect(created.onboardingPlan.approvalStage).toBeUndefined();
+    expect(fixture.repository.requirementSets[0].status).toBe("draft");
+  });
+
+  it("allows execution approval only after every coverage item has evidence", () => {
+    const fixture = createFixture();
+    fixture.repository.pageModels.push({
+      id: "page-order-approval",
+      projectId: "project-1",
+      route: "https://orders.example.test/orders",
+      name: "Order approval",
+      version: 1,
+      domSnapshotId: "dom-order-approval",
+      screenshotId: "screenshot-order-approval",
+      status: "succeeded",
+      createdAt: now(),
+      updatedAt: now()
+    });
+    fixture.repository.locatorPoints.push({
+      id: "locator-submit",
+      pageModelId: "page-order-approval",
+      name: "Submit order",
+      selector: "button[data-action=submit]",
+      role: "button",
+      text: "submit",
+      fallbackSelectors: [],
+      confidence: 0.98
+    });
+    fixture.repository.systemExplorations.push({
+      id: "system-exploration-order",
+      knowledgeProjectId: "project-1",
+      systemId: "system-1",
+      startUrl: "https://orders.example.test/orders",
+      status: "completed",
+      interactionMode: "safe",
+      budget: { maxPages: 10, maxDepth: 2, maxDurationMs: 30_000, maxInteractionsPerPage: 5 },
+      pageModelIds: ["page-order-approval"],
+      navigationEdges: [],
+      interactionTransitions: [],
+      warnings: [],
+      gapIds: [],
+      artifactDir: ".brain-creator/artifacts/orders",
+      createdAt: now(),
+      updatedAt: now(),
+      completedAt: now()
+    });
+    const created = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+    for (const task of fixture.repository.explorationTasks) {
+      task.status = "resolved";
+      task.resultSourceRefs = ["page-model:page-order-approval", "locator:locator-submit"];
+    }
+
+    const approved = fixture.service.approve({
+      onboardingPlanId: created.onboardingPlan.id,
+      note: "Approve the fully evidenced execution scope",
+      approvedBy: "qa-owner",
+      stage: "execution"
+    });
+
+    expect(approved.onboardingPlan).toEqual(expect.objectContaining({
+      status: "approved",
+      approvalStage: "execution"
+    }));
+    expect(approved.onboardingPlan.coverageSummary).toEqual(expect.objectContaining({
+      overallStatus: "covered",
+      unresolvedCount: 0
+    }));
+    expect(approved.onboardingPlan.approvalHistory).toEqual([
+      expect.objectContaining({ stage: "execution", approvedBy: "qa-owner" })
+    ]);
   });
 
   it("turns requirement process models into bounded, traceable exploration questions", () => {
@@ -427,8 +535,12 @@ describe("OnboardingPlanService", () => {
 
     expect(approved.onboardingPlan).toEqual(expect.objectContaining({
       status: "approved",
+      approvalStage: "exploration",
       approvedBy: "qa-owner"
     }));
+    expect(approved.onboardingPlan.approvalHistory).toEqual([
+      expect.objectContaining({ stage: "exploration", approvedBy: "qa-owner" })
+    ]);
     expect(approved.requirementSet.status).toBe("approved");
     expect(approved.explorationPlan.status).toBe("approved");
     expect(fixture.knowledge.validateRequirementSetApproval).toHaveBeenCalledBefore(
