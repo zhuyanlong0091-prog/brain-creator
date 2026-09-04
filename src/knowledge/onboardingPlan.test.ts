@@ -4,6 +4,141 @@ import { StatefulExplorationPlanService } from "./statefulExplorationPlan.js";
 import { OnboardingPlanService } from "./onboardingPlan.js";
 
 describe("OnboardingPlanService", () => {
+  it("builds a reviewable coverage plan from requirement and system evidence", () => {
+    const fixture = createFixture();
+    fixture.repository.pageModels.push({
+      id: "page-order-approval",
+      projectId: "project-1",
+      route: "https://orders.example.test/orders",
+      name: "Order approval",
+      version: 1,
+      domSnapshotId: "dom-order-approval",
+      screenshotId: "screenshot-order-approval",
+      status: "succeeded",
+      createdAt: now(),
+      updatedAt: now()
+    });
+    fixture.repository.locatorPoints.push({
+      id: "locator-submit",
+      pageModelId: "page-order-approval",
+      name: "Submit order",
+      selector: "button[data-action=submit]",
+      role: "button",
+      text: "submit",
+      fallbackSelectors: [],
+      confidence: 0.98
+    });
+    fixture.repository.systemExplorations.push({
+      id: "system-exploration-order",
+      knowledgeProjectId: "project-1",
+      systemId: "system-1",
+      startUrl: "https://orders.example.test/orders",
+      status: "completed",
+      interactionMode: "safe",
+      budget: { maxPages: 10, maxDepth: 2, maxDurationMs: 30_000, maxInteractionsPerPage: 5 },
+      pageModelIds: ["page-order-approval"],
+      navigationEdges: [{
+        fromUrl: "https://orders.example.test",
+        toUrl: "https://orders.example.test/orders",
+        text: "Orders",
+        fromPageModelId: "page-order-approval"
+      }],
+      interactionTransitions: [],
+      warnings: [],
+      gapIds: [],
+      artifactDir: ".brain-creator/artifacts/orders",
+      createdAt: now(),
+      updatedAt: now(),
+      completedAt: now()
+    });
+
+    const created = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+
+    expect(created.coverage.summary).toEqual(expect.objectContaining({
+      total: expect.any(Number),
+      requirementAssetCount: expect.any(Number),
+      systemEvidenceCount: expect.any(Number),
+      overallStatus: "needs-exploration"
+    }));
+    expect(created.coverage.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        dimension: "requirement",
+        explorationTaskIds: expect.arrayContaining(created.explorationQuestions.map((task) => task.id))
+      }),
+      expect.objectContaining({
+        dimension: "workflow",
+        sourceAssetId: "workflow-1",
+        analysisRefs: ["workflow-1"],
+        plannedActions: expect.arrayContaining(["submit", "approve"])
+      }),
+      expect.objectContaining({
+        dimension: "state",
+        sourceAssetId: "state-machine-1",
+        plannedActions: expect.arrayContaining(["approve"])
+      }),
+      expect.objectContaining({
+        dimension: "decision",
+        sourceAssetId: "decision-table-1"
+      }),
+      expect.objectContaining({
+        dimension: "system-observation",
+        status: "covered"
+      })
+    ]));
+    expect(created.onboardingPlan.coverageSummary).toEqual(created.coverage.summary);
+    expect(created.onboardingPlan.requirementSummary).toContain("requester submits an order");
+    expect(created.explorationPlan.allowedActions.every((action) => action.name.length < 180)).toBe(true);
+    expect(created.explorationPlan.allowedActions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: expect.stringContaining("requester submits an order") })
+    ]));
+  });
+
+  it("refreshes an existing draft in place so the same scope exposes current coverage", () => {
+    const fixture = createFixture();
+    const input = {
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete" as const
+    };
+    const first = fixture.service.create(input);
+    delete first.onboardingPlan.coverageItems;
+    delete first.onboardingPlan.coverageSummary;
+    delete first.onboardingPlan.coverageFingerprint;
+    fixture.repository.knowledgeNodes.push({
+      id: "knowledge-new-rule",
+      knowledgeProjectId: "project-1",
+      requirementSetId: "requirement-1",
+      type: "rule",
+      title: "Approved order cannot be edited",
+      content: "An approved order is immutable.",
+      module: "Orders",
+      sourceRefs: ["source:orders#line:4"],
+      origin: "source",
+      confidence: 1,
+      status: "confirmed",
+      createdAt: now(),
+      updatedAt: now()
+    });
+
+    const second = fixture.service.create(input);
+
+    expect(second.reused).toBe(true);
+    expect(second.refreshed).toBe(true);
+    expect(second.coverageChanged).toBe(true);
+    expect(second.onboardingPlan.id).toBe(first.onboardingPlan.id);
+    expect(fixture.repository.onboardingPlans).toHaveLength(1);
+    expect(second.onboardingPlan.coverageItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceAssetId: "knowledge-new-rule" })
+    ]));
+    expect(second.onboardingPlan.coverageFingerprint).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it("turns requirement process models into bounded, traceable exploration questions", () => {
     const fixture = createFixture();
     fixture.repository.testIntents.push({

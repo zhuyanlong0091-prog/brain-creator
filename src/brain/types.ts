@@ -287,6 +287,65 @@ export type ScenarioTrustRecord = {
   updatedAt: string;
 };
 
+export type OnboardingCoverageDimension =
+  | "requirement"
+  | "knowledge"
+  | "business-object"
+  | "workflow"
+  | "state"
+  | "decision"
+  | "scenario"
+  | "test-intent"
+  | "system-observation"
+  | "test-data";
+
+export type OnboardingCoverageStatus =
+  | "covered"
+  | "needs-exploration"
+  | "needs-data"
+  | "blocked";
+
+/**
+ * A reviewable unit in the onboarding scope. It keeps requirement analysis,
+ * observed system evidence and the actions needed to close the evidence gap
+ * together instead of reducing the plan to a list of generic actions.
+ */
+export type OnboardingCoverageItem = {
+  id: string;
+  dimension: OnboardingCoverageDimension;
+  sourceAssetId?: string;
+  title: string;
+  requirementRefs: string[];
+  analysisRefs: string[];
+  systemEvidenceRefs: string[];
+  explorationTaskIds: string[];
+  plannedActions: string[];
+  roles: string[];
+  dataNeeds: string[];
+  expectedOutcomes: string[];
+  status: OnboardingCoverageStatus;
+  reason?: string;
+};
+
+export type OnboardingCoverageSummary = {
+  total: number;
+  covered: number;
+  needsExploration: number;
+  needsData: number;
+  blocked: number;
+  overallStatus: "covered" | "needs-exploration" | "needs-data" | "blocked";
+  byDimension: Partial<Record<OnboardingCoverageDimension, {
+    total: number;
+    covered: number;
+    needsExploration: number;
+    needsData: number;
+    blocked: number;
+  }>>;
+  requirementAssetCount: number;
+  systemEvidenceCount: number;
+  unresolvedCount: number;
+};
+
 export type OnboardingPlan = {
   id: string;
   knowledgeProjectId: string;
@@ -304,6 +363,11 @@ export type OnboardingPlan = {
   maxDurationMs: number;
   cleanupPolicy: "delete" | "close" | "retain-with-label";
   status: "draft" | "approved" | "completed" | "blocked";
+  coverageItems?: OnboardingCoverageItem[];
+  coverageSummary?: OnboardingCoverageSummary;
+  systemEvidenceRefs?: string[];
+  coverageFingerprint?: string;
+  generatedAt?: string;
   approvedBy?: string;
   approvedAt?: string;
 };
