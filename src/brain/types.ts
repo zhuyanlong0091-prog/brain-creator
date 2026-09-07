@@ -352,6 +352,7 @@ export type OnboardingPlanRevision = {
   revision: number;
   baselineFingerprint?: string;
   coverageFingerprint?: string;
+  explorationPlanId?: string;
   coverageSummary?: OnboardingCoverageSummary;
   coverageItemIds: string[];
   allowedActionNames: string[];

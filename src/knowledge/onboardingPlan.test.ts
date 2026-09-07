@@ -286,6 +286,45 @@ describe("OnboardingPlanService", () => {
     expect(created.onboardingPlan.id).toBe(reopened.onboardingPlan.id);
   });
 
+  it("reopens a completed plan with unresolved coverage as a new reviewable revision", () => {
+    const fixture = createFixture();
+    const input = {
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete" as const
+    };
+    const created = fixture.service.create(input);
+    created.onboardingPlan.status = "completed";
+    created.explorationPlan.status = "completed";
+
+    const reopened = fixture.service.create(input);
+    const unresolvedIds = (reopened.onboardingPlan.coverageItems ?? [])
+      .filter((item) => item.status !== "covered")
+      .map((item) => item.id);
+    const plannedCoverageIds = new Set(
+      reopened.explorationPlan.allowedActions.flatMap((action) => action.coverageItemIds ?? [])
+    );
+
+    expect(reopened.reused).toBe(true);
+    expect(reopened.refreshed).toBe(true);
+    expect(reopened.onboardingPlan.id).toBe(created.onboardingPlan.id);
+    expect(reopened.onboardingPlan.status).toBe("draft");
+    expect(reopened.onboardingPlan.revision).toBe(2);
+    expect(reopened.explorationPlan.id).not.toBe(created.explorationPlan.id);
+    expect(reopened.onboardingPlan.revisionHistory).toEqual([
+      expect.objectContaining({
+        revision: 1,
+        explorationPlanId: created.explorationPlan.id,
+        reason: "已完成计划仍存在未覆盖项，重新生成待审批探索草案"
+      })
+    ]);
+    expect(unresolvedIds.length).toBeGreaterThan(0);
+    expect(unresolvedIds.every((id) => plannedCoverageIds.has(id))).toBe(true);
+    expect(fixture.repository.onboardingPlans).toHaveLength(1);
+    expect(fixture.repository.explorationPlans).toHaveLength(2);
+  });
+
   it("allows execution approval only after every coverage item has evidence", () => {
     const fixture = createFixture();
     fixture.repository.pageModels.push({

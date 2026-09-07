@@ -120,6 +120,22 @@ export class OnboardingPlanService {
           questions,
           explorationQuestions
         );
+        if (
+          existing.status === "completed" &&
+          coverage.summary.overallStatus !== "covered"
+        ) {
+          return this.reopenCompleted(
+            input,
+            existing,
+            explorationPlan,
+            requirementSet,
+            system.id,
+            system.baseUrl,
+            questions,
+            baseline,
+            coverage
+          );
+        }
         existing.coverageItems = coverage.items;
         existing.coverageSummary = coverage.summary;
         existing.systemEvidenceRefs = coverage.systemEvidenceRefs;
@@ -223,6 +239,103 @@ export class OnboardingPlanService {
     return { onboardingPlan, explorationPlan, explorationQuestions, coverage, reused: false };
   }
 
+  private reopenCompleted(
+    input: CreateOnboardingPlanInput,
+    onboardingPlan: OnboardingPlan,
+    previousExplorationPlan: ExplorationPlan,
+    requirementSet: RequirementSet,
+    systemId: string,
+    systemBaseUrl: string,
+    questions: ExplorationQuestionDraft[],
+    baseline: ReturnType<typeof baselineSnapshot>,
+    previousCoverage: ReturnType<typeof buildCoverage>
+  ): CreateOnboardingPlanResult {
+    const nextRevision = (onboardingPlan.revision ?? 1) + 1;
+    const explorationQuestions = questions.map((question) =>
+      this.upsertExplorationTask(
+        requirementSet,
+        systemId,
+        question,
+        baseline.fingerprint,
+        new Set()
+      )
+    );
+    const coverage = buildCoverage(
+      this.repository,
+      requirementSet,
+      systemId,
+      questions,
+      explorationQuestions
+    );
+    const allowedRoutes = unique(
+      input.allowedRoutes?.length
+        ? input.allowedRoutes
+        : previousExplorationPlan.allowedRoutes.length
+          ? previousExplorationPlan.allowedRoutes
+          : [systemBaseUrl]
+    );
+    const actorJourney = input.actorJourney ?? previousExplorationPlan.actorJourney;
+    const allowedActions = input.allowedActions?.length
+      ? input.allowedActions
+      : coverageExplorationActions(coverage.items, allowedRoutes[0], actorJourney);
+    validateDraftActions(allowedActions, actorJourney);
+    const explorationPlan = this.explorationPlans.create({
+      explorationTaskIds: explorationQuestions.map((task) => task.id),
+      actorJourney,
+      allowedRoutes,
+      allowedActions,
+      forbiddenActions: input.forbiddenActions?.length
+        ? unique([...previousExplorationPlan.forbiddenActions, ...input.forbiddenActions])
+        : previousExplorationPlan.forbiddenActions,
+      cleanupPolicy: input.cleanupPolicy,
+      maxWrites: input.maxWrites ?? previousExplorationPlan.maxWrites,
+      maxDurationMs: input.maxDurationMs ?? previousExplorationPlan.maxDurationMs
+    });
+    const now = new Date().toISOString();
+    onboardingPlan.revisionHistory ??= [];
+    onboardingPlan.revisionHistory.push({
+      revision: onboardingPlan.revision ?? 1,
+      baselineFingerprint: onboardingPlan.baselineFingerprint,
+      coverageFingerprint: onboardingPlan.coverageFingerprint,
+      explorationPlanId: previousExplorationPlan.id,
+      coverageSummary: previousCoverage.summary,
+      coverageItemIds: previousCoverage.items.map((item) => item.id),
+      allowedActionNames: [...onboardingPlan.allowedActions],
+      capturedAt: now,
+      reason: "已完成计划仍存在未覆盖项，重新生成待审批探索草案"
+    });
+    onboardingPlan.revision = nextRevision;
+    onboardingPlan.explorationPlanId = explorationPlan.id;
+    onboardingPlan.baselineAssetIds = baseline.assetIds;
+    onboardingPlan.baselineFingerprint = baseline.fingerprint;
+    onboardingPlan.allowedRoutes = explorationPlan.allowedRoutes;
+    onboardingPlan.allowedActions = explorationPlan.allowedActions.map((action) => action.name);
+    onboardingPlan.forbiddenActions = explorationPlan.forbiddenActions;
+    onboardingPlan.maxWrites = explorationPlan.maxWrites;
+    onboardingPlan.maxDurationMs = explorationPlan.maxDurationMs;
+    onboardingPlan.cleanupPolicy = explorationPlan.cleanupPolicy;
+    onboardingPlan.coverageItems = coverage.items;
+    onboardingPlan.coverageSummary = coverage.summary;
+    onboardingPlan.systemEvidenceRefs = coverage.systemEvidenceRefs;
+    onboardingPlan.coverageFingerprint = coverage.fingerprint;
+    onboardingPlan.status = "draft";
+    onboardingPlan.approvalStage = undefined;
+    onboardingPlan.approvedBy = undefined;
+    onboardingPlan.approvedAt = undefined;
+    onboardingPlan.generatedAt = now;
+    this.repository.persist();
+    return {
+      onboardingPlan,
+      explorationPlan,
+      explorationQuestions,
+      coverage,
+      reused: true,
+      refreshed: true,
+      coverageChanged: previousCoverage.fingerprint !== coverage.fingerprint,
+      baselineChanged: false
+    };
+  }
+
   private refreshDraft(
     onboardingPlan: OnboardingPlan,
     explorationPlan: ExplorationPlan,
@@ -237,7 +350,13 @@ export class OnboardingPlanService {
       throw new Error(`Draft onboarding requires a draft exploration plan; found ${explorationPlan.status}`);
     }
     const explorationQuestions = questions.map((question) =>
-      this.upsertExplorationTask(requirementSet, systemId, question, baseline.fingerprint)
+      this.upsertExplorationTask(
+        requirementSet,
+        systemId,
+        question,
+        baseline.fingerprint,
+        new Set(explorationPlan.explorationTaskIds)
+      )
     );
     const actorJourney = input.actorJourney ?? explorationPlan.actorJourney;
     const allowedRoutes = unique(
@@ -559,7 +678,8 @@ export class OnboardingPlanService {
     requirementSet: RequirementSet,
     systemId: string,
     question: ExplorationQuestionDraft,
-    baselineFingerprint: string
+    baselineFingerprint: string,
+    reusableTaskIds?: Set<string>
   ) {
     const idempotencyKey = hash({
       requirementSetId: requirementSet.id,
@@ -573,7 +693,10 @@ export class OnboardingPlanService {
       approvedEvidenceScope: question.approvedEvidenceScope
     });
     const existing = this.repository.explorationTasks.find(
-      (task) => task.idempotencyKey === idempotencyKey && task.status === "pending"
+      (task) =>
+        task.idempotencyKey === idempotencyKey &&
+        task.status === "pending" &&
+        (!reusableTaskIds || reusableTaskIds.has(task.id))
     );
     if (existing) return existing;
     const now = new Date().toISOString();
@@ -1117,6 +1240,46 @@ function explorationActions(
     if (!previous || (!previous.write && action.write)) bySignature.set(key, action);
   }
   return [...bySignature.values()];
+}
+
+function coverageExplorationActions(
+  coverageItems: OnboardingCoverageItem[],
+  route: string,
+  actorJourney: ActorJourneyConfig[]
+) {
+  const actions: Array<Omit<ExplorationPlanAction, "id">> = [];
+  for (const item of coverageItems.filter((candidate) => candidate.status !== "covered")) {
+    const plannedActions = item.plannedActions.length
+      ? item.plannedActions
+      : [`检查${plainText(item.title)}`];
+    for (const plannedAction of plannedActions) {
+      const role = actorJourney.length > 0
+        ? authorizedRole(item.roles[0], actorJourney)
+        : undefined;
+      const write = isPotentialWriteAction(plannedAction) && Boolean(role);
+      actions.push({
+        name: truncateActionName(`${item.dimension}：${plainText(item.title)} - ${plainText(plannedAction)}`),
+        route,
+        role,
+        write,
+        sourceRefs: unique([...item.requirementRefs, ...item.analysisRefs]),
+        requirementRefs: unique(item.requirementRefs),
+        systemEvidenceRefs: unique(item.systemEvidenceRefs),
+        coverageItemIds: [item.id]
+      });
+    }
+  }
+  const bySignature = new Map<string, Omit<ExplorationPlanAction, "id">>();
+  for (const action of actions) {
+    const key = `${action.name}\u0000${action.route}\u0000${action.role ?? ""}`;
+    const previous = bySignature.get(key);
+    if (!previous || (!previous.write && action.write)) bySignature.set(key, action);
+  }
+  return [...bySignature.values()];
+}
+
+function truncateActionName(value: string) {
+  return value.length <= 180 ? value : `${value.slice(0, 177)}...`;
 }
 
 function knowledgeCoverageActions(type: string) {
