@@ -1132,6 +1132,7 @@ export type ExplorationActionEvidence = {
   route: string;
   role?: string;
   sourceRefs: string[];
+  systemEvidenceRefs?: string[];
 };
 
 export type ExplorationPlan = {

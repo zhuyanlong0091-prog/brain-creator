@@ -120,13 +120,13 @@ export class OnboardingPlanService {
           questions,
           explorationQuestions
         );
+        existing.coverageItems = coverage.items;
+        existing.coverageSummary = coverage.summary;
+        existing.systemEvidenceRefs = coverage.systemEvidenceRefs;
+        existing.coverageFingerprint = coverage.fingerprint;
+        this.repository.persist();
         return {
-          onboardingPlan: {
-            ...existing,
-            coverageItems: coverage.items,
-            coverageSummary: coverage.summary,
-            systemEvidenceRefs: coverage.systemEvidenceRefs
-          },
+          onboardingPlan: existing,
           explorationPlan,
           explorationQuestions,
           coverage,
@@ -519,6 +519,20 @@ export class OnboardingPlanService {
     );
     if (!onboardingPlan) return undefined;
     const explorationPlan = this.explorationPlans.get(explorationPlanId);
+    const requirementSet = this.requirementSet(onboardingPlan.requirementSetId);
+    const questions = requirementExplorationQuestions(this.repository, requirementSet.id);
+    const tasks = explorationTasksForPlan(this.repository, explorationPlan);
+    const coverage = buildCoverage(
+      this.repository,
+      requirementSet,
+      onboardingPlan.systemId,
+      questions,
+      tasks
+    );
+    onboardingPlan.coverageItems = coverage.items;
+    onboardingPlan.coverageSummary = coverage.summary;
+    onboardingPlan.systemEvidenceRefs = coverage.systemEvidenceRefs;
+    onboardingPlan.coverageFingerprint = coverage.fingerprint;
     if (explorationPlan.status === "completed") onboardingPlan.status = "completed";
     if (explorationPlan.status === "blocked" || explorationPlan.status === "cancelled") {
       onboardingPlan.status = "blocked";

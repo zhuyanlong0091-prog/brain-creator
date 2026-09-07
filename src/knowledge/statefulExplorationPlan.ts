@@ -332,11 +332,31 @@ export class StatefulExplorationPlanService {
       throw new Error("Exploration result exceeded the authorized write count");
     }
     const evidenceRefs = sourceRefs(input.evidenceRefs, "Exploration result");
+    const submittedEvidenceByAction = new Map(
+      input.actionEvidence.map((item) => [item.actionId, item])
+    );
+    for (const item of input.actionEvidence) {
+      const actionEvidenceRefs = item.systemEvidenceRefs ?? [];
+      if (actionEvidenceRefs.some((reference) => !evidenceRefs.includes(reference))) {
+        throw new Error(`Exploration action evidence is outside the submitted exploration evidence: ${item.actionId}`);
+      }
+    }
     this.validateAssets(plan, input);
     const taskEvidence = input.status === "succeeded"
       ? this.validateTaskEvidence(plan, input.taskEvidence, evidenceRefs)
       : new Map<string, string[]>();
     plan.actionEvidence = input.actionEvidence;
+    plan.allowedActions = plan.allowedActions.map((action) => {
+      const submitted = submittedEvidenceByAction.get(action.id);
+      if (!submitted) return action;
+      return {
+        ...action,
+        systemEvidenceRefs: unique([
+          ...(action.systemEvidenceRefs ?? []),
+          ...(submitted.systemEvidenceRefs?.length ? submitted.systemEvidenceRefs : evidenceRefs)
+        ])
+      };
+    });
     plan.evidenceRefs = evidenceRefs;
     plan.pageModelIds = unique(input.pageModelIds);
     plan.systemExplorationIds = unique(input.systemExplorationIds);

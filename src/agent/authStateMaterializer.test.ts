@@ -95,6 +95,28 @@ describe("browser auth state materializer", () => {
       reason: expect.stringContaining("application did not mount")
     }));
   }, 30_000);
+
+  it("waits for a delayed application mount before accepting authentication", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><title>Authenticated</title><body><div id="app"></div><script>
+        setTimeout(() => { document.querySelector('#app').innerHTML = '<span>Ready</span>'; }, 1500);
+      </script></body>`);
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}/`;
+
+    const storageStatePath = join(await tempDir(), "state.json");
+    await writeFile(storageStatePath, JSON.stringify({ cookies: [], origins: [] }), "utf8");
+    await expect(verifyStoredBrowserAuth({
+      storageStatePath,
+      targetUrl: baseUrl,
+      allowedUrls: [baseUrl],
+      timeoutMs: 5_000
+    })).resolves.toEqual(expect.objectContaining({ status: "valid" }));
+  }, 30_000);
 });
 
 async function localFixture() {

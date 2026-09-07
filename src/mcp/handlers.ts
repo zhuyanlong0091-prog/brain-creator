@@ -10684,7 +10684,8 @@ function explorationResultArg(input: Record<string, unknown>) {
         action: stringArg(action, "action"),
         route: stringArg(action, "route"),
         role: optionalStringArg(action, "role"),
-        sourceRefs: stringArrayArg(action, "sourceRefs")
+        sourceRefs: stringArrayArg(action, "sourceRefs"),
+        systemEvidenceRefs: optionalStringArrayArg(action, "systemEvidenceRefs") ?? []
       };
     }),
     evidenceRefs: stringArrayArg(record, "evidenceRefs"),
