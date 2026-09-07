@@ -285,7 +285,8 @@ describe("StatefulExplorationPlanService", () => {
         action: "Submit order",
         route: "https://orders.example.test/orders",
         role: "requester",
-        sourceRefs: ["evidence:submit"]
+        sourceRefs: ["evidence:submit"],
+        systemEvidenceRefs: ["page-model:page-orders"]
       }],
       evidenceRefs: ["page-model:page-orders", "evidence:submit"],
       pageModelIds: ["page-orders"],
@@ -295,6 +296,7 @@ describe("StatefulExplorationPlanService", () => {
     });
 
     expect(completed.plan.status).toBe("completed");
+    expect(completed.plan.allowedActions[0].systemEvidenceRefs).toEqual(["page-model:page-orders"]);
     expect(fixture.port.refreshSystemBrain).toHaveBeenCalledWith("project-1", "system-1");
     expect(fixture.port.resolveExplorationTask).toHaveBeenCalledWith(expect.objectContaining({
       taskId: "exploration-task-1",

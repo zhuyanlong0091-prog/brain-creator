@@ -1162,19 +1162,30 @@ async function collectOpenShadowInteractionCandidates(
       shadowRoot?: { querySelectorAll(selector: string): ArrayLike<ElementLike> } | null;
     };
     const selectors = '[role="tab"], button[aria-expanded], button[aria-controls], select';
-    const stableHostSelector = (element: ElementLike) => {
+    function stableHostSelector(element: ElementLike) {
       const testId = element.getAttribute("data-testid");
       if (testId) return `[data-testid=${JSON.stringify(testId)}]`;
       if (element.id) return `[id=${JSON.stringify(element.id)}]`;
       const name = element.getAttribute("name");
       if (name) return `${element.tagName.toLowerCase()}[name=${JSON.stringify(name)}]`;
       return undefined;
-    };
-    const collect = (
+    }
+    function collect(
       root: { querySelectorAll(selector: string): ArrayLike<ElementLike> },
       inWujie: boolean,
       hostSelectors: string[]
-    ) => {
+    ): Array<{
+      name: string;
+      role: string;
+      selector: string;
+      tag: string;
+      ariaExpanded?: string;
+      ariaControls?: string;
+      currentValue?: string;
+      options?: Array<{ value: string; label: string; disabled: boolean }>;
+      surfaceKind: "shadow-root" | "wujie";
+      hostSelectors: string[];
+    }> {
       const results: Array<{
         name: string;
         role: string;
@@ -1242,7 +1253,7 @@ async function collectOpenShadowInteractionCandidates(
         }
       }
       return results;
-    };
+    }
     const results: ReturnType<typeof collect> = [];
     for (const host of Array.from(documentLike.querySelectorAll("*"))) {
       if (host.shadowRoot) {

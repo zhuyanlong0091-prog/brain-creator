@@ -174,6 +174,118 @@ describe("OnboardingPlanService", () => {
     expect(fixture.repository.requirementSets[0].status).toBe("draft");
   });
 
+  it("recomputes coverage after an exploration result resolves its tasks", () => {
+    const fixture = createFixture();
+    fixture.repository.pageModels.push({
+      id: "page-order-approval",
+      projectId: "system-1",
+      route: "https://orders.example.test/orders",
+      name: "Order approval",
+      version: 1,
+      domSnapshotId: "dom-order-approval",
+      screenshotId: "screenshot-order-approval",
+      status: "succeeded",
+      createdAt: now(),
+      updatedAt: now()
+    });
+    fixture.repository.systemExplorations.push({
+      id: "system-exploration-order",
+      knowledgeProjectId: "project-1",
+      systemId: "system-1",
+      startUrl: "https://orders.example.test/orders",
+      status: "completed",
+      interactionMode: "safe",
+      budget: { maxPages: 10, maxDepth: 2, maxDurationMs: 30_000, maxInteractionsPerPage: 5 },
+      pageModelIds: ["page-order-approval"],
+      navigationEdges: [],
+      interactionTransitions: [],
+      warnings: [],
+      gapIds: [],
+      artifactDir: ".brain-creator/artifacts/orders",
+      createdAt: now(),
+      updatedAt: now(),
+      completedAt: now()
+    });
+    const created = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+    for (const task of fixture.repository.explorationTasks) {
+      task.status = "resolved";
+      task.resultSourceRefs = ["page-model:page-order-approval"];
+    }
+    fixture.repository.explorationPlans[0].status = "completed";
+
+    const synced = fixture.service.syncFromExploration(created.explorationPlan.id)!;
+
+    expect(synced.status).toBe("completed");
+    expect(synced.coverageSummary).toEqual(expect.objectContaining({
+      overallStatus: "covered",
+      unresolvedCount: 0
+    }));
+    expect(synced.coverageItems?.every((item) => item.status === "covered")).toBe(true);
+  });
+
+  it("persists refreshed coverage when a completed plan is reopened", () => {
+    const fixture = createFixture();
+    fixture.repository.pageModels.push({
+      id: "page-order-approval",
+      projectId: "system-1",
+      route: "https://orders.example.test/orders",
+      name: "Order approval",
+      version: 1,
+      domSnapshotId: "dom-order-approval",
+      screenshotId: "screenshot-order-approval",
+      status: "succeeded",
+      createdAt: now(),
+      updatedAt: now()
+    });
+    fixture.repository.systemExplorations.push({
+      id: "system-exploration-order",
+      knowledgeProjectId: "project-1",
+      systemId: "system-1",
+      startUrl: "https://orders.example.test/orders",
+      status: "completed",
+      interactionMode: "safe",
+      budget: { maxPages: 10, maxDepth: 2, maxDurationMs: 30_000, maxInteractionsPerPage: 5 },
+      pageModelIds: ["page-order-approval"],
+      navigationEdges: [],
+      interactionTransitions: [],
+      warnings: [],
+      gapIds: [],
+      artifactDir: ".brain-creator/artifacts/orders",
+      createdAt: now(),
+      updatedAt: now(),
+      completedAt: now()
+    });
+    const input = {
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete" as const
+    };
+    const created = fixture.service.create(input);
+    for (const task of fixture.repository.explorationTasks) {
+      task.status = "resolved";
+      task.resultSourceRefs = ["page-model:page-order-approval"];
+    }
+    fixture.repository.explorationPlans[0].status = "completed";
+    fixture.repository.onboardingPlans[0].status = "completed";
+
+    const reopened = fixture.service.create(input);
+
+    expect(reopened.reused).toBe(true);
+    expect(reopened.onboardingPlan.coverageSummary).toEqual(expect.objectContaining({
+      overallStatus: "covered",
+      unresolvedCount: 0
+    }));
+    expect(fixture.repository.onboardingPlans[0].coverageSummary).toEqual(reopened.onboardingPlan.coverageSummary);
+    expect(fixture.repository.onboardingPlans[0].coverageFingerprint).toBe(reopened.onboardingPlan.coverageFingerprint);
+    expect(created.onboardingPlan.id).toBe(reopened.onboardingPlan.id);
+  });
+
   it("allows execution approval only after every coverage item has evidence", () => {
     const fixture = createFixture();
     fixture.repository.pageModels.push({

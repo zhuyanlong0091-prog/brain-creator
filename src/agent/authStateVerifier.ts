@@ -53,47 +53,15 @@ export const verifyStoredBrowserAuth: AuthStateVerifier = async (input) => {
       .isVisible()
       .catch(() => false);
     const loginRoute = /(?:^|\/)(?:login|sign-in|signin|sso|cas)(?:\/|$)/i.test(final.pathname);
-    const applicationMounted = await page.evaluate(() => {
-      type VisualElement = {
-        tagName: string;
-        querySelectorAll(selector: string): ArrayLike<VisualElement>;
-        getBoundingClientRect(): { width: number; height: number };
-      };
-      const browser = globalThis as unknown as {
-        document: {
-          querySelectorAll(selector: string): ArrayLike<VisualElement>;
-          body: { children: ArrayLike<VisualElement> };
-        };
-        getComputedStyle(element: VisualElement): {
-          display: string;
-          visibility: string;
-          opacity: string;
-        };
-      };
-      const document = browser.document;
-      const shellSelectors = ["#app", "#root", "[data-app-root]", "[data-reactroot]"];
-      const shells = shellSelectors.flatMap((selector) =>
-        Array.from(document.querySelectorAll(selector))
-      );
-      if (shells.length === 0) return true;
-
-      const isVisible = (element: VisualElement) => {
-        if (["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"].includes(element.tagName)) {
-          return false;
-        }
-        const style = browser.getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        return style.display !== "none" && style.visibility !== "hidden" &&
-          style.opacity !== "0" && rect.width > 0 && rect.height > 0;
-      };
-
-      return shells.some((shell) => {
-        if (isVisible(shell)) return true;
-        return [shell, ...Array.from(shell.querySelectorAll("*"))].some(isVisible);
-      }) || Array.from(document.body.children).some((child) =>
-        !shells.includes(child) && isVisible(child)
-      );
-    });
+    const shellSelector = '#app, #root, [data-app-root], [data-reactroot]';
+    const shellCount = await page.locator(shellSelector).count();
+    const mountWaitMs = Math.min(Math.max((input.timeoutMs ?? 15_000) - 1_000, 1_000), 8_000);
+    const applicationMounted = shellCount === 0 ||
+      await page.locator(
+        '#app > *:visible, #root > *:visible, [data-app-root] > *:visible, [data-reactroot] > *:visible,' +
+        ' #app *:visible, #root *:visible, [data-app-root] *:visible, [data-reactroot] *:visible,' +
+        ' body > :not(#app):not(#root):not([data-app-root]):not([data-reactroot]):not(script):not(style):not(noscript):not(template):visible'
+      ).first().waitFor({ state: "visible", timeout: mountWaitMs }).then(() => true).catch(() => false);
 
     await context.close();
     if (!allowedOrigins.has(final.origin) || loginFormVisible || loginRoute) {
