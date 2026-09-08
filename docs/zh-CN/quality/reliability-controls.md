@@ -28,6 +28,8 @@ Brain Creator 将可靠性作为可审计的控制面，而不是把一次绿色
 
 稳定性任务现在提供显式的 claim/lease 控制面：外部定时器或宿主 Agent 可以预览到期任务，使用 `suiteAction=claim-scheduled` 领取，长任务期间续租，失败时释放并写入错误。统一 CLI 的 Runner 还支持 `--max-wall-time-ms` 和 `--lease-renewal-ms`，长任务会后台续租，在墙钟预算耗尽后不再启动下一条用例，并返回耗时与续租次数；失败重试使用有上限的指数退避。租约过期后其他执行者可以恢复领取，进程崩溃不会永久卡住任务。当前仍是可持久化调度元数据，不是后台 Worker；生产定时器和分布式存储仍需按部署环境接入。
 
+仓库提供了 `.github/workflows/brain-creator-runner.yml` 作为 GitHub Actions 外部调度样例。它每 15 分钟或手动触发一次，从 Runner 状态 Artifact 恢复分片仓库，每次最多处理一个到期迭代，再上传更新后的状态和报告。工作流通过 concurrency 组保证只有一个写入者推进样本。该样例用于验证租约、恢复和多轮稳定性，不代表生产系统；生产部署应将 Artifact 状态替换为经过批准的外部存储，并继续使用相同的 claim/renew/release 协议。
+
 ## 执行过程可见性
 
 每条 Run Ledger 记录都会获得运行内稳定序号，并投影为统一的 `ExecutionProgressEvent`。Reporter 回传的步骤会补充步骤 ID、标题、断言摘要、截图、耗时和 trace 标识；敏感值和页面 URL 查询参数会在持久化前脱敏。
