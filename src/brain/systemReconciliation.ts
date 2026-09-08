@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import type {
+  BusinessScenario,
   SemanticBinding,
   SystemBrainChangeSet,
   SystemBrainSnapshot,
-  SystemBrainSnapshotAsset
+  SystemBrainSnapshotAsset,
+  ScenarioTrustRecord
 } from "./types.js";
 import type { ExecutableCase, TestIntent } from "../domain/types.js";
 import type { SemanticConceptKind } from "./types.js";
@@ -210,6 +212,8 @@ export function propagateSystemBrainChangeSet(input: {
   changeSet: SystemBrainChangeSet;
   executableCases: ExecutableCase[];
   testIntents: TestIntent[];
+  businessScenarios?: BusinessScenario[];
+  scenarioTrustRecords?: ScenarioTrustRecord[];
   semanticBindings?: SemanticBinding[];
   persist: () => void;
 }) {
@@ -217,7 +221,8 @@ export function propagateSystemBrainChangeSet(input: {
   if (actionable.length === 0) {
     input.changeSet.affectedTestIntentIds = [];
     input.changeSet.affectedExecutableCaseIds = [];
-    return { affectedTestIntentIds: [], affectedExecutableCaseIds: [] };
+    input.changeSet.affectedBusinessScenarioIds = [];
+    return { affectedTestIntentIds: [], affectedExecutableCaseIds: [], affectedBusinessScenarioIds: [] };
   }
   const changedRefs = new Set(actionable.flatMap((change) => change.sourceRefs));
   const changedSemanticIds = new Set(actionable.map((change) => change.semanticId));
@@ -256,6 +261,15 @@ export function propagateSystemBrainChangeSet(input: {
       )
       .map((intent) => intent.id)
   ])].sort();
+  const affectedBusinessScenarioIds = (input.businessScenarios ?? [])
+    .filter((scenario) =>
+      scenario.testIntentIds?.some((testIntentId) => affectedTestIntentIds.includes(testIntentId)) ||
+      boundRequirementSetIds.has(scenario.requirementSetId) ||
+      [...scenario.workflowRefs, ...scenario.stateTransitionRefs, ...scenario.decisionRuleRefs]
+        .some((ref) => changedRefs.has(ref) || changedSemanticIds.has(ref))
+    )
+    .map((scenario) => scenario.id)
+    .sort();
   const now = new Date().toISOString();
   for (const executableCase of affectedCases) {
     executableCase.status = "stale";
@@ -271,10 +285,28 @@ export function propagateSystemBrainChangeSet(input: {
     if (intent.status !== "blocked") intent.status = "stale";
     intent.updatedAt = now;
   }
+  for (const scenario of (input.businessScenarios ?? [])
+    .filter((item) => affectedBusinessScenarioIds.includes(item.id))) {
+    if (scenario.status !== "blocked") scenario.status = "stale";
+  }
+  for (const record of (input.scenarioTrustRecords ?? [])
+    .filter((item) => affectedBusinessScenarioIds.includes(item.scenarioId))) {
+    if (record.status === "verified" || record.status === "trusted" || record.strongRunCount > 0) {
+      record.status = "bound";
+      record.strongRunCount = 0;
+      record.downgradeReason = "System Brain behavior changed; the scenario requires a fresh observed run.";
+      record.updatedAt = now;
+    }
+  }
   input.changeSet.affectedTestIntentIds = affectedTestIntentIds;
   input.changeSet.affectedExecutableCaseIds = affectedExecutableCaseIds;
-  if (affectedCases.length > 0 || affectedTestIntentIds.length > 0) input.persist();
-  return { affectedTestIntentIds, affectedExecutableCaseIds };
+  input.changeSet.affectedBusinessScenarioIds = affectedBusinessScenarioIds;
+  if (
+    affectedCases.length > 0 ||
+    affectedTestIntentIds.length > 0 ||
+    affectedBusinessScenarioIds.length > 0
+  ) input.persist();
+  return { affectedTestIntentIds, affectedExecutableCaseIds, affectedBusinessScenarioIds };
 }
 
 export function snapshotAssetToFact(asset: SystemBrainSnapshotAsset): ObservedSemanticFact {
