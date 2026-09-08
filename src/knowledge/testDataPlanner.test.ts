@@ -11,6 +11,7 @@ import type {
 } from "../domain/types.js";
 import { KnowledgeService } from "./service.js";
 import {
+  addInheritedEntityOperations,
   applyTestDataResolutions,
   confirmTestDataPlan,
   planTestData
@@ -25,6 +26,38 @@ afterEach(async () => {
 });
 
 describe("Test data planner", () => {
+  it("adds an auditable read-only binding for a cross-case entity", () => {
+    const plan = addInheritedEntityOperations({
+      verdict: "not-required",
+      reasons: [],
+      operations: [],
+      dependencyOrder: [],
+      requiresConfirmation: false,
+      requiresCleanup: false,
+      sourceRefs: []
+    }, [{
+      id: "case-dependency:create-edit-employee",
+      fromTestIntentId: "intent-create-employee",
+      toTestIntentId: "intent-edit-employee",
+      entityReference: "employee:testperson001",
+      relation: "requires",
+      sourceRefs: ["requirement:employee-flow", "entity:employee:testperson001"]
+    }]);
+
+    expect(plan).toEqual(expect.objectContaining({
+      verdict: "ready",
+      dependencyOrder: ["entity:employee%3Atestperson001"],
+      entityReferences: ["employee:testperson001"]
+    }));
+    expect(plan.operations).toEqual([expect.objectContaining({
+      profileId: "entity:employee%3Atestperson001",
+      decision: "reuse",
+      status: "ready",
+      entityReference: "employee:testperson001",
+      cleanup: "none"
+    })]);
+  });
+
   it("generates a deterministic candidate and binds one matching field step", () => {
     const profile = dataProfile({
       id: "data-customer-name",

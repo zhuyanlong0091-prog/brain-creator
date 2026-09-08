@@ -15,6 +15,7 @@ import { id } from "../shared/id.js";
 import { buildContextPack } from "./retriever.js";
 import { buildAssertionContracts } from "../execution/assurance.js";
 import { evaluateExecutableCaseReadiness } from "./caseCompiler.js";
+import { findActiveTestDataLease } from "./dataLeaseResolver.js";
 
 type PrepareExecutionInput = {
   knowledgeProjectId: string;
@@ -547,11 +548,11 @@ export class ExecutionPreflightService {
       (operation) =>
         operation.status !== "ready" ||
         ((operation.decision === "reuse" || operation.decision === "create") &&
-          !this.activeLease(
+          !findActiveTestDataLease(
+            this.repository,
             executableCase,
             systemId,
-            operation.profileId,
-            operation.reference
+            operation
           )) ||
         ((operation.decision === "use-fixed" || operation.decision === "generate") &&
           !operation.value) ||
@@ -576,11 +577,11 @@ export class ExecutionPreflightService {
     return (executableCase.dataPlan?.operations ?? []).map((operation) => {
       const lease =
         operation.decision === "reuse" || operation.decision === "create"
-          ? this.activeLease(
+          ? findActiveTestDataLease(
+              this.repository,
               executableCase,
               systemId,
-              operation.profileId,
-              operation.reference
+              operation
             )
           : undefined;
       return {
@@ -602,23 +603,6 @@ export class ExecutionPreflightService {
         ])
       };
     });
-  }
-
-  private activeLease(
-    executableCase: ExecutableCase,
-    systemId: string,
-    profileId: string,
-    reference?: string
-  ) {
-    return this.repository.testDataLeases.find(
-      (lease) =>
-        lease.knowledgeProjectId === executableCase.knowledgeProjectId &&
-        lease.systemId === systemId &&
-        lease.executableCaseId === executableCase.id &&
-        lease.profileId === profileId &&
-        lease.reference === reference &&
-        lease.status === "active"
-    );
   }
 
   private authCheck(

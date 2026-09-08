@@ -30,6 +30,8 @@ Approve employee      consumes: employee:testperson001
 
 The reference is not a secret and is not a replacement for the value entered into a field. It identifies the same business entity across cases. The compiled case records it in `entityReferenceRequirements`, the data plan, relevant operations, and step bindings.
 
+When a producer case already holds an active lease, a consumer case receives a read-only inherited binding to that exact lease. The binding is accepted only through the declared dependency edge and a unique current producer case; an unrelated case with the same text cannot satisfy it. If the producer has not run or the binding is ambiguous, preparation remains blocked or asks the host to resolve the data.
+
 The dependency graph enforces four outcomes:
 
 - One producer: the consumer is ordered after the producer and the edge is recorded.

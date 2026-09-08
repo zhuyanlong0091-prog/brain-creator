@@ -16,6 +16,88 @@ import type {
 import { ExecutionPreflightService } from "./executionPreflight.js";
 
 describe("ExecutionPreflightService", () => {
+  it("uses a declared producer lease for a consumer case", () => {
+    const fixture = preflightFixture();
+    const producer: ExecutableCase = {
+      ...fixture.executableCase,
+      id: "executable-producer",
+      testIntentId: "intent-create-employee",
+      title: "Create employee"
+    };
+    fixture.repository.executableCases.push(producer);
+    fixture.executableCase.dataPlan = {
+      verdict: "ready",
+      reasons: [],
+      operations: [{
+        profileId: "entity:employee%3Atestperson001",
+        field: "Employee",
+        strategy: "existing-reference",
+        decision: "reuse",
+        status: "ready",
+        entityReference: "employee:testperson001",
+        dependsOnProfileIds: [],
+        dependsOnEntityReferences: [],
+        cleanup: "none",
+        constraints: ["Must be produced by the declared prerequisite case"],
+        sourceRefs: ["requirement:employee-flow"]
+      }],
+      dependencyOrder: ["entity:employee%3Atestperson001"],
+      requiresConfirmation: false,
+      requiresCleanup: false,
+      entityReferences: ["employee:testperson001"],
+      sourceRefs: ["requirement:employee-flow"]
+    };
+    fixture.executableCase.caseDependencyGraph = {
+      requirementSetId: fixture.requirementSet.id,
+      systemId: fixture.system.id,
+      nodes: [],
+      edges: [{
+        id: "edge-create-edit",
+        fromTestIntentId: producer.testIntentId,
+        toTestIntentId: fixture.executableCase.testIntentId,
+        entityReference: "employee:testperson001",
+        relation: "requires",
+        sourceRefs: ["requirement:employee-flow"]
+      }],
+      dependencyOrder: [producer.testIntentId, fixture.executableCase.testIntentId],
+      unresolved: [],
+      verdict: "ready",
+      sourceRefs: ["requirement:employee-flow"],
+      generatedAt: now()
+    };
+    fixture.repository.testDataLeases.push({
+      id: "lease-producer-employee",
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: producer.id,
+      profileId: "profile-employee",
+      taskId: "task-producer-employee",
+      decision: "create",
+      reference: "employee:001",
+      entityReference: "employee:testperson001",
+      cleanup: "delete-created",
+      status: "active",
+      sourceRefs: ["case:create-employee"],
+      createdAt: now(),
+      updatedAt: now()
+    });
+
+    const result = fixture.service.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true
+    });
+
+    expect(result.status).toBe("ready");
+    expect(result.executionPlan?.dataBindings).toEqual([
+      expect.objectContaining({
+        entityReference: "employee:testperson001",
+        leaseId: "lease-producer-employee"
+      })
+    ]);
+  });
+
   it("persists one immutable ready plan for the same snapshot", () => {
     const fixture = preflightFixture();
 

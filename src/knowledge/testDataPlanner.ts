@@ -1,10 +1,58 @@
 import { createHash } from "node:crypto";
 import type {
+  CaseDependencyEdge,
   ExecutableCaseDataOperation,
   ExecutableCaseDataPlan,
   ExecutableCaseStep,
   TestDataProfile
 } from "../domain/types.js";
+
+/**
+ * Make cross-case entities visible to execution as explicit, read-only data
+ * bindings. The producer lease is resolved after the prerequisite case runs.
+ */
+export function addInheritedEntityOperations(
+  plan: ExecutableCaseDataPlan,
+  edges: CaseDependencyEdge[]
+): ExecutableCaseDataPlan {
+  const inherited = edges.filter((edge) =>
+    !plan.operations.some((operation) => operation.entityReference === edge.entityReference)
+  );
+  if (inherited.length === 0) return plan;
+
+  const operations = inherited.map((edge): ExecutableCaseDataOperation => ({
+    profileId: inheritedProfileId(edge.entityReference),
+    field: `Entity ${edge.entityReference}`,
+    strategy: "existing-reference",
+    decision: "reuse",
+    status: "ready",
+    entityReference: edge.entityReference,
+    dependsOnProfileIds: [],
+    dependsOnEntityReferences: [],
+    cleanup: "none",
+    constraints: ["Must be produced by the declared prerequisite case"],
+    sourceRefs: edge.sourceRefs
+  }));
+  const inheritedProfileIds = operations.map((operation) => operation.profileId);
+  return {
+    ...plan,
+    verdict: plan.verdict === "not-required" ? "ready" : plan.verdict,
+    operations: [...plan.operations, ...operations],
+    dependencyOrder: [...plan.dependencyOrder, ...inheritedProfileIds],
+    entityReferences: unique([
+      ...(plan.entityReferences ?? []),
+      ...inherited.map((edge) => edge.entityReference)
+    ]),
+    sourceRefs: unique([
+      ...plan.sourceRefs,
+      ...inherited.flatMap((edge) => edge.sourceRefs)
+    ])
+  };
+}
+
+export function inheritedProfileId(entityReference: string) {
+  return `entity:${encodeURIComponent(entityReference)}`;
+}
 
 export type TestDataResolution = {
   profileId: string;

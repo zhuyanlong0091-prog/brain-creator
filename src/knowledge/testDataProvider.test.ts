@@ -10,6 +10,7 @@ import type {
   Gap,
   KnowledgeProject,
   SystemProfile,
+  TestDataLease,
   TestIntent
 } from "../domain/types.js";
 import {
@@ -28,6 +29,86 @@ afterEach(async () => {
 });
 
 describe("TestDataProviderService", () => {
+  it("reuses an active producer lease for a consumer case without relying on run order", async () => {
+    const fixture = await providerFixture();
+    const producerCase: ExecutableCase = {
+      ...fixture.executableCase,
+      id: "executable-producer",
+      testIntentId: "intent-producer",
+      title: "Create employee",
+      status: "ready",
+      caseDependencyGraph: undefined
+    };
+    fixture.repository.executableCases.push(producerCase);
+    fixture.executableCase.dataPlan = {
+      verdict: "ready",
+      reasons: [],
+      operations: [{
+        profileId: "entity:employee%3Asemantic",
+        field: "Employee",
+        strategy: "existing-reference",
+        decision: "reuse",
+        status: "ready",
+        entityReference: "employee:semantic",
+        dependsOnProfileIds: [],
+        dependsOnEntityReferences: [],
+        cleanup: "none",
+        constraints: ["Must be produced by the declared prerequisite case"],
+        sourceRefs: ["case:edit-employee"]
+      }],
+      dependencyOrder: ["entity:employee%3Asemantic"],
+      requiresConfirmation: false,
+      requiresCleanup: false,
+      entityReferences: ["employee:semantic"],
+      sourceRefs: ["case:edit-employee"]
+    };
+    fixture.executableCase.caseDependencyGraph = {
+      requirementSetId: fixture.executableCase.requirementSetId,
+      systemId: fixture.system.id,
+      nodes: [],
+      edges: [{
+        id: "case-dependency:producer-consumer",
+        fromTestIntentId: producerCase.testIntentId,
+        toTestIntentId: fixture.executableCase.testIntentId,
+        entityReference: "employee:semantic",
+        relation: "requires",
+        sourceRefs: ["case:edit-employee"]
+      }],
+      dependencyOrder: [producerCase.testIntentId, fixture.executableCase.testIntentId],
+      unresolved: [],
+      verdict: "ready",
+      sourceRefs: ["case:edit-employee"],
+      generatedAt: new Date(0).toISOString()
+    };
+    const producerLease: TestDataLease = {
+      id: "lease-employee-producer",
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: producerCase.id,
+      profileId: "profile-employee",
+      taskId: "task-employee-producer",
+      decision: "create",
+      reference: "employee:001",
+      entityReference: "employee:semantic",
+      cleanup: "delete-created",
+      status: "active",
+      sourceRefs: ["case:create-employee"],
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString()
+    };
+    fixture.repository.testDataLeases.push(producerLease);
+
+    const result = await fixture.provider.prepare({
+      knowledgeProjectId: fixture.project.id,
+      systemId: fixture.system.id,
+      executableCaseId: fixture.executableCase.id,
+      confirm: true
+    });
+
+    expect(result).toEqual({ status: "ready", operations: [] });
+    expect(fixture.repository.testDataTasks).toHaveLength(0);
+  });
+
   it("previews unresolved lookup work without creating a task", async () => {
     const fixture = await providerFixture();
 
