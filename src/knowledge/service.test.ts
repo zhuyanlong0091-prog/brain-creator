@@ -916,6 +916,65 @@ describe("KnowledgeService", () => {
     ).toContain("Expected approved status but received draft");
   });
 
+  it("does not accept a passed status when the structured reporter failed", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const knowledgeDir = await tempDir();
+    const service = new KnowledgeService(repository, knowledgeDir);
+    const project = await service.createProject({ name: "Reporter authority", key: "reporter-authority", defaultLocale: "en-US" });
+    repository.systemProfiles.push({
+      id: "system-reporter-authority",
+      name: "Reporter authority",
+      environment: "test",
+      baseUrl: "https://reporter-authority.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://reporter-authority.example.test"],
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    service.bindSystem(project.id, "system-reporter-authority");
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: requirementPackage("reporter-authority", "Users create an order form.")
+    });
+    const design = await service.generateTestDesign(ingested.requirementSet.id);
+    service.approveRequirementSet(ingested.requirementSet.id);
+    const compiled = service.compileExecutableCases(design.testIntents[0].id).executableCase;
+    const evidence = service.createExecutionEvidence({
+      projectId: project.id,
+      systemId: "system-reporter-authority",
+      executableCaseId: compiled.id,
+      testCaseId: "test-reporter-authority",
+      contextPackPath: "context/reporter-authority.json"
+    });
+
+    const completed = await service.completeExecutionEvidence(evidence.id, {
+      status: "passed",
+      actualResult: "Caller reported passed",
+      artifactPaths: [],
+      reporterResult: {
+        status: "failed",
+        total: 0,
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        assertions: [],
+        steps: [],
+        attachments: [],
+        consoleErrors: [],
+        networkFailures: []
+      }
+    });
+
+    expect(completed.status).toBe("failed");
+    expect(completed.evidenceWarnings).toEqual(
+      expect.arrayContaining([
+        "Requested status passed disagreed with structured Reporter status failed; Reporter status was used."
+      ])
+    );
+  });
+
   it("downgrades assurance and records a warning when a declared trace is missing", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const knowledgeDir = await tempDir();

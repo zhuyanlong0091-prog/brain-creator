@@ -85,4 +85,52 @@ describe("Facade execution recovery", () => {
     expect(payload.data.summary.activeRun.executionRecovery.currentPageUrl)
       .toBe("https://orders.example.test/orders/1001?token=%5BREDACTED%5D");
   });
+
+  it("uses persisted requirement-suite state when no ledger has been written yet", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "brain-creator-recovery-state-only-"));
+    tempDirs.push(workDir);
+    const context = createBrainCreatorMcpContext({
+      workDir,
+      dataFilePath: join(workDir, "assets.json")
+    });
+    const system = context.service.createSystemProfile({
+      name: "Orders",
+      environment: "test",
+      baseUrl: "https://orders.example.test",
+      defaultLocale: "en-US",
+      urlAllowlist: ["https://orders.example.test"]
+    });
+    const project = await context.knowledgeService.createProject({
+      name: "Orders knowledge",
+      key: "orders-recovery-state-only",
+      defaultLocale: "en-US"
+    });
+    context.knowledgeService.bindSystem(project.id, system.id);
+    const run = context.requirementSuiteRuns.create({
+      knowledgeProjectId: project.id,
+      systemId: system.id,
+      cases: [{ executableCaseId: "case-state-only", title: "Approve order" }],
+      continueOnBlocked: false
+    });
+    run.status = "waiting-for-agent";
+    run.currentExecutableCaseId = "case-state-only";
+    run.caseRuns[0].status = "waiting-for-agent";
+    run.updatedAt = "2026-09-08T00:00:03.000Z";
+    context.repository.runLedgerEntries = [];
+
+    const response = await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: project.id,
+      responseMode: "full"
+    });
+    const payload = JSON.parse(response.content[0].type === "text" ? response.content[0].text : "{}");
+
+    expect(payload.data.summary.activeRun.executionRecovery).toEqual(expect.objectContaining({
+      runId: run.id,
+      status: "waiting-for-agent",
+      currentCaseId: "case-state-only",
+      currentCaseTitle: "Approve order",
+      recoverySource: "run-state-only",
+      nextAction: "resume-after-checkpoint"
+    }));
+  });
 });
