@@ -137,10 +137,12 @@ describe("incremental System Brain exploration", () => {
     });
 
     expect(result.targetRoutes).toEqual([
+      "https://example.test/orders",
       "https://example.test/orders/1",
       "https://example.test/orders/1/approval"
     ]);
     expect(result.targetPageIdentityIds).toEqual([
+      "identity-page-stable",
       "identity-page-changed",
       "identity-page-low-confidence"
     ]);
@@ -149,7 +151,7 @@ describe("incremental System Brain exploration", () => {
       expect.stringContaining("low-confidence"),
       expect.stringContaining("not covered")
     ]));
-    expect(result.skippedPageCount).toBe(1);
+    expect(result.skippedPageCount).toBe(0);
   });
 
   it("uses a full scope when there is no confirmed baseline", () => {
@@ -164,5 +166,42 @@ describe("incremental System Brain exploration", () => {
     expect(result.mode).toBe("full");
     expect(result.targetRoutes).toEqual(["https://example.test/orders"]);
     expect(result.reason).toContain("confirmed baseline");
+  });
+
+  it("targets a page when a confirmed workflow or state behavior changes", () => {
+    const confirmed = snapshot();
+    confirmed.assets.push({
+      semanticId: "state:/orders:before",
+      kind: "state",
+      label: "订单列表",
+      content: "state-before",
+      contentHash: "state-before",
+      sourceRefs: ["system-exploration:baseline"],
+      metadata: { url: "https://example.test/orders" }
+    });
+
+    const result = planSystemBrainExploration({
+      mode: "incremental",
+      startUrl: "https://example.test/orders",
+      brain: {
+        ...brain(),
+        states: [{
+          id: "state-after",
+          url: "https://example.test/orders",
+          visibleElements: ["订单列表", "审批按钮"],
+          dialogs: [],
+          controlValues: [{ name: "status", value: "pending" }],
+          sourceRefs: ["system-exploration:current"]
+        }]
+      },
+      identities: [identity("page:/orders", "page-stable")],
+      confirmedSnapshot: confirmed
+    });
+
+    expect(result.mode).toBe("incremental");
+    expect(result.targetRoutes).toContain("https://example.test/orders");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([expect.stringContaining("behavior or evidence changed")])
+    );
   });
 });

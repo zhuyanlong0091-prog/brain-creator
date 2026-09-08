@@ -77,7 +77,7 @@ Usage:
   brain-creator artifacts migrate [--target <path>] [--confirm]
   brain-creator artifacts rollback --migration <id> --confirm [--target <path>]
   brain-creator artifacts retention --older-than-days <days> [--system <id>] [--confirm]
-  brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--lease-ms <n>] [--max-runs <n>] [--max-cases <n>]
+  brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--lease-ms <n>] [--lease-renewal-ms <n>] [--max-wall-time-ms <n>] [--max-runs <n>] [--max-cases <n>]
   brain-creator mcp
   brain-creator --version
 
@@ -100,7 +100,7 @@ const commandHelp: Record<string, string> = {
   plugin: `Usage: brain-creator plugin install [--target <path>] [--package-root <path>] [--json]\n\nInstalls the Codex plugin and configures host-agent execution.`,
   export: `Usage: brain-creator export --suite <suite-run-id> [--target <path>] [--output <path>] [--json]\n\nExports a portable Suite archive with evidence manifest and hashes.`,
   artifacts: `Usage:\n  brain-creator artifacts migrate [--target <path>] [--confirm]\n  brain-creator artifacts rollback --migration <id> --confirm [--target <path>]\n  brain-creator artifacts retention --older-than-days <days> [--system <id>] [--target <path>] [--confirm]\n\nMigration and retention are dry-run by default. Mutations require --confirm.`,
-  runner: `Usage: brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--lease-ms <n>] [--max-runs <n>] [--max-cases <n>] [--target <path>] [--json]\n\nClaims due stability suites, continues approved cases through the existing Runner/Facade path, and releases the lease when execution must wait.`,
+  runner: `Usage: brain-creator runner run --owner <name> [--project <id>] [--system <id>] [--lease-ms <n>] [--lease-renewal-ms <n>] [--max-wall-time-ms <n>] [--max-runs <n>] [--max-cases <n>] [--target <path>] [--json]\n\nClaims due stability suites, renews long-running leases, enforces a wall-time budget, continues approved cases through the existing Runner/Facade path, and releases the lease when execution must wait.`,
   mcp: `Usage: brain-creator mcp\n\nStarts the Brain Creator MCP server over stdio.`
 };
 
@@ -392,12 +392,14 @@ async function runRunner(
   const actionArgs = args.slice(1);
   assertAllowedArgs(
     actionArgs,
-    ["--target", "--project", "--system", "--owner", "--lease-ms", "--max-runs", "--max-cases"],
+    ["--target", "--project", "--system", "--owner", "--lease-ms", "--lease-renewal-ms", "--max-wall-time-ms", "--max-runs", "--max-cases"],
     []
   );
   const owner = optionValue(actionArgs, "--owner");
   if (!owner) throw new Error("--owner requires a value");
   const leaseMs = positiveIntegerOption(actionArgs, "--lease-ms");
+  const leaseRenewalMs = positiveIntegerOption(actionArgs, "--lease-renewal-ms");
+  const maxWallTimeMs = positiveIntegerOption(actionArgs, "--max-wall-time-ms");
   const maxRuns = positiveIntegerOption(actionArgs, "--max-runs");
   const maxCasesPerRun = positiveIntegerOption(actionArgs, "--max-cases");
   const result = await dependencies.runRunner({
@@ -406,6 +408,8 @@ async function runRunner(
     systemId: optionValue(actionArgs, "--system"),
     owner,
     leaseMs,
+    leaseRenewalMs,
+    maxWallTimeMs,
     maxRuns,
     maxCasesPerRun
   });
@@ -495,6 +499,8 @@ async function runRunnerFromWorkspace(input: {
   systemId?: string;
   owner: string;
   leaseMs?: number;
+  leaseRenewalMs?: number;
+  maxWallTimeMs?: number;
   maxRuns?: number;
   maxCasesPerRun?: number;
 }) {
@@ -510,6 +516,8 @@ async function runRunnerFromWorkspace(input: {
     systemId: input.systemId,
     maxRuns: input.maxRuns,
     leaseMs: input.leaseMs,
+    leaseRenewalMs: input.leaseRenewalMs,
+    maxWallTimeMs: input.maxWallTimeMs,
     maxCasesPerRun: input.maxCasesPerRun,
     execute: async (runId) => {
       const run = context.requirementSuiteRuns.get(runId);

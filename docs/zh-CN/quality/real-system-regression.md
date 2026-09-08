@@ -12,6 +12,12 @@ Token、业务数据或截图。
 npx vitest run src/quality/realSystemRegression.test.ts
 ```
 
+运行跨系统与多需求黄金回归：
+
+```bash
+npx vitest run src/quality/goldenRegression.test.ts
+```
+
 样本覆盖：
 
 - 从模块入口跨页面进入表单页面；
@@ -48,6 +54,11 @@ B5/E6（测试数据闭环）、E4/E5（多角色与重复稳定性）以及 F5�
 
 该夹具是验收样本，不代表所有真实系统都具有相同的 DOM、鉴权供应商、数据
 接口或业务流程语义。
+
+黄金回归使用真实 Repository、套件对账、System Brain 快照 Diff 和 stale
+传播服务，验证两个系统与多个需求版本可以隔离对账，不会串用用例；当一个
+系统的业务行为发生变化时，只会使该系统关联用例 stale。它仍是确定性测试
+证据，不能替代生产租户回归。
 
 更完整的 L3 交付门禁可运行 `npm run verify:l3-eval`。该命令还会评估脱敏的
 HR、订单审批、图片状态机、跨角色、同系统多需求和合成长周期样本。在部署环境

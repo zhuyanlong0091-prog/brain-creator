@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RequirementSuiteRun } from "../domain/types.js";
+import type { ExecutionEvidence, RequirementSuiteRun } from "../domain/types.js";
 import { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import { RequirementSuiteRunService } from "../knowledge/requirementSuiteRun.js";
 import { runScheduledSuites } from "./runner.js";
@@ -124,6 +124,101 @@ describe("scheduled Runner", () => {
     expect(controller.claimScheduled).not.toHaveBeenCalled();
   });
 
+  it("renews a long-running lease and reports the renewal count", async () => {
+    const run = scheduledRun();
+    const controller = {
+      listDueStabilityRuns: vi.fn(() => [run]),
+      claimScheduled: vi.fn(() => {
+        run.stabilitySchedule = {
+          ...run.stabilitySchedule!,
+          leaseId: "lease-1",
+          leaseOwner: "ci",
+          leaseExpiresAt: new Date(Date.now() + 20).toISOString(),
+          nextRunAt: undefined
+        };
+        return run;
+      }),
+      renewScheduledLease: vi.fn(() => run),
+      get: vi.fn(() => run),
+      releaseScheduledLease: vi.fn()
+    };
+
+    const result = await runScheduledSuites({
+      controller,
+      owner: "ci",
+      leaseMs: 50,
+      leaseRenewalMs: 5,
+      maxWallTimeMs: 200,
+      execute: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        run.status = "completed";
+        run.stabilitySchedule = { status: "completed" };
+      }
+    });
+
+    expect(controller.renewScheduledLease).toHaveBeenCalled();
+    expect(result.runs[0]).toEqual(expect.objectContaining({
+      status: "completed",
+      leaseRenewals: expect.any(Number),
+      durationMs: expect.any(Number)
+    }));
+    expect(result.runs[0].leaseRenewals).toBeGreaterThan(0);
+  });
+
+  it("stops before starting another case when the wall-time budget is exhausted", async () => {
+    const run = scheduledRun();
+    run.total = 2;
+    run.caseRuns.push({
+      executableCaseId: "case-2",
+      title: "Second case",
+      order: 2,
+      status: "queued",
+      gapIds: [],
+      attempts: []
+    });
+    let clockNow = 0;
+    const controller = {
+      listDueStabilityRuns: vi.fn(() => [run]),
+      claimScheduled: vi.fn(() => {
+        run.stabilitySchedule = {
+          ...run.stabilitySchedule!,
+          leaseId: "lease-1",
+          leaseOwner: "ci",
+          leaseExpiresAt: new Date(1000).toISOString(),
+          nextRunAt: undefined
+        };
+        return run;
+      }),
+      get: vi.fn(() => run),
+      releaseScheduledLease: vi.fn((_runId, input) => {
+        run.stabilitySchedule = { status: "active", nextRunAt: input.nextRunAt, lastError: input.lastError };
+        return run;
+      })
+    };
+    const execute = vi.fn(async () => {
+      clockNow = 20;
+      run.status = "running";
+    });
+
+    const result = await runScheduledSuites({
+      controller,
+      owner: "ci",
+      now: new Date(0),
+      maxWallTimeMs: 10,
+      clock: () => clockNow,
+      execute
+    });
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(controller.releaseScheduledLease).toHaveBeenCalledWith(
+      "suite-run-1",
+      expect.objectContaining({ lastError: expect.stringContaining("wall-time") }),
+      expect.any(Date)
+    );
+    expect(result).toEqual(expect.objectContaining({ status: "partial" }));
+    expect(result.runs[0]).toEqual(expect.objectContaining({ budgetExceeded: true }));
+  });
+
   it("completes twenty stability iterations through the real suite service", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const service = new RequirementSuiteRunService(repository);
@@ -139,7 +234,7 @@ describe("scheduled Runner", () => {
         targetIterations: 20,
         minIterations: 20,
         minIntervalMs: 0,
-        requireStrongEvidence: false
+        requireStrongEvidence: true
       }
     });
     let currentRunId = first.id;
@@ -154,6 +249,25 @@ describe("scheduled Runner", () => {
         now: new Date("2026-08-28T00:00:00.000Z"),
         execute: async (runId) => {
           const started = service.beginNext(runId);
+          const evidence: ExecutionEvidence = {
+            id: `evidence-${iteration}`,
+            knowledgeProjectId: "knowledge-long-run",
+            systemId: "system-orders",
+            executableCaseId: started.caseRun!.executableCaseId,
+            testCaseId: `case-${iteration}`,
+            contextPackPath: `context/${iteration}.json`,
+            status: "passed",
+            assuranceLevel: "strong",
+            steps: [],
+            tracePaths: [`trace/${iteration}.zip`],
+            artifactPaths: [`evidence/${iteration}.json`],
+            consoleErrors: [],
+            networkFailures: [],
+            createdAt: new Date().toISOString(),
+            completedAt: new Date().toISOString()
+          };
+          repository.executionEvidence.push(evidence);
+          started.caseRun!.executionEvidenceId = evidence.id;
           service.completeCase(runId, started.caseRun!.executableCaseId, {
             status: "passed",
             chainRunId: `chain-${iteration}`,
@@ -172,5 +286,7 @@ describe("scheduled Runner", () => {
     expect(runs).toHaveLength(20);
     expect(runs.every((run) => run.status === "completed")).toBe(true);
     expect(runs.every((run) => !run.stabilitySchedule?.leaseId)).toBe(true);
+    expect(repository.executionEvidence).toHaveLength(20);
+    expect(repository.executionEvidence.every((evidence) => evidence.assuranceLevel === "strong")).toBe(true);
   });
 });

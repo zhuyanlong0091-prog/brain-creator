@@ -13,6 +13,12 @@ Run the focused sample with:
 npx vitest run src/quality/realSystemRegression.test.ts
 ```
 
+Run the cross-system and multi-requirement golden regression with:
+
+```bash
+npx vitest run src/quality/goldenRegression.test.ts
+```
+
 The sample covers:
 
 - cross-page navigation from a module entry to a form page;
@@ -58,6 +64,12 @@ long-running runs.
 
 The fixture is an acceptance sample, not a claim that every real system has
 the same DOM, authentication provider, data API, or workflow semantics.
+
+The golden regression uses the real repository, suite reconciliation, snapshot
+diff, and stale propagation services. It proves that two systems and multiple
+requirement revisions can be reconciled without cross-system case leakage, and
+that a behavior change only stales cases bound to the changed system. It is
+still deterministic test evidence, not a substitute for a production tenant.
 
 For the broader L3 delivery gate, run `npm run verify:l3-eval`. That command
 also evaluates sanitized HR, order approval, image state-machine, cross-role,

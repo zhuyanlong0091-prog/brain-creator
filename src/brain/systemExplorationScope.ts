@@ -2,6 +2,7 @@ import type { SystemBrain } from "../knowledge/systemBrain.js";
 import { canonicalPageIdentityKey } from "../shared/pageIdentity.js";
 import type { SystemExplorationScope } from "../domain/types.js";
 import type { SystemBrainSnapshot, SystemPageIdentity } from "./types.js";
+import { systemBrainToSnapshotAssets } from "./systemSnapshot.js";
 
 export function planSystemBrainExploration(input: {
   mode: "full" | "incremental";
@@ -36,6 +37,29 @@ export function planSystemBrainExploration(input: {
   const targetPageIdentityIds: string[] = [];
   const targetRoutes: string[] = [];
   const reasons: string[] = [];
+  const currentAssets = new Map(
+    systemBrainToSnapshotAssets(input.brain).map((asset) => [asset.semanticId, asset])
+  );
+  const behaviorChangedRoutes = new Map<string, string[]>();
+  for (const asset of input.confirmedSnapshot.assets) {
+    if (!isBehaviorAsset(asset.kind)) continue;
+    const current = currentAssets.get(asset.semanticId);
+    if (current && current.contentHash === asset.contentHash) continue;
+    const route = snapshotAssetRoute(asset, input.brain, input.startUrl);
+    if (!route) continue;
+    const messages = behaviorChangedRoutes.get(route) ?? [];
+    messages.push(current ? `${asset.kind} evidence changed` : `${asset.kind} evidence was not observed`);
+    behaviorChangedRoutes.set(route, messages);
+  }
+  for (const asset of currentAssets.values()) {
+    if (!isBehaviorAsset(asset.kind)) continue;
+    if (input.confirmedSnapshot.assets.some((candidate) => candidate.semanticId === asset.semanticId)) continue;
+    const route = snapshotAssetRoute(asset, input.brain, input.startUrl);
+    if (!route) continue;
+    const messages = behaviorChangedRoutes.get(route) ?? [];
+    messages.push(`${asset.kind} evidence was added`);
+    behaviorChangedRoutes.set(route, messages);
+  }
   let skippedPageCount = 0;
   const threshold = input.lowConfidenceThreshold ?? 0.8;
   for (const page of input.brain.pages) {
@@ -60,6 +84,8 @@ export function planSystemBrainExploration(input: {
       input.brain.navigationEdges.some((edge) => edge.fromPageModelId === page.pageModelId) ||
       input.brain.stateTransitions.some((transition) => transition.pageModelId === page.pageModelId);
     if (!hasBehaviorEvidence) pageReasons.push("behavior surface is not covered");
+    const behaviorReasons = behaviorChangedRoutes.get(canonicalRoute(page.route));
+    if (behaviorReasons?.length) pageReasons.push("behavior or evidence changed");
     if (pageReasons.length === 0) {
       skippedPageCount += 1;
       continue;
@@ -67,6 +93,12 @@ export function planSystemBrainExploration(input: {
     if (identity) targetPageIdentityIds.push(identity.id);
     targetRoutes.push(page.route);
     reasons.push(`${page.name} (${page.route}): ${pageReasons.join("; ")}`);
+  }
+
+  for (const [route, changedReasons] of behaviorChangedRoutes) {
+    if (targetRoutes.some((candidate) => canonicalRoute(candidate) === route)) continue;
+    targetRoutes.push(route);
+    reasons.push(`${route}: behavior or evidence changed (${changedReasons.join(", ")})`);
   }
 
   if (targetRoutes.length === 0) {
@@ -92,4 +124,44 @@ export function planSystemBrainExploration(input: {
 
 function unique(values: string[]) {
   return [...new Set(values)];
+}
+
+function isBehaviorAsset(kind: ReturnType<typeof systemBrainToSnapshotAssets>[number]["kind"]) {
+  return kind === "navigation" || kind === "state" || kind === "transition" || kind === "workflow" || kind === "api-flow";
+}
+
+function snapshotAssetRoute(
+  asset: ReturnType<typeof systemBrainToSnapshotAssets>[number],
+  brain: SystemBrain,
+  fallback: string
+) {
+  if (asset.kind === "page") {
+    return canonicalRoute(stringValue(asset.metadata.route) ?? asset.semanticId.replace(/^page:/u, ""));
+  }
+  const pageModelId = stringValue(asset.metadata.pageModelId);
+  if (pageModelId) {
+    const page = brain.pages.find((candidate) => candidate.pageModelId === pageModelId);
+    if (page) return canonicalRoute(page.route);
+  }
+  if (asset.kind === "state") {
+    return canonicalRoute(stringValue(asset.metadata.url) ?? fallback);
+  }
+  if (asset.kind === "navigation") {
+    return canonicalRoute(stringValue(asset.metadata.fromUrl) ?? fallback);
+  }
+  return canonicalRoute(fallback);
+}
+
+function canonicalRoute(value: string) {
+  try {
+    const url = new URL(value, "http://brain-creator.local");
+    return `${url.origin === "http://brain-creator.local" ? "" : url.origin}${url.pathname}${url.search}`
+      .replace(/\/$/u, "") || "/";
+  } catch {
+    return value.replace(/\/$/u, "") || "/";
+  }
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
