@@ -264,6 +264,29 @@ describe("Brain Creator CLI", () => {
     });
   });
 
+  it("passes wall-time and lease-renewal controls to the Runner", async () => {
+    const deps = dependencies();
+    await runBrainCreatorCli(
+      [
+        "runner",
+        "run",
+        "--owner",
+        "scheduler",
+        "--max-wall-time-ms",
+        "300000",
+        "--lease-renewal-ms",
+        "30000"
+      ],
+      createIo(),
+      deps
+    );
+
+    expect(deps.runRunner).toHaveBeenCalledWith(expect.objectContaining({
+      maxWallTimeMs: 300000,
+      leaseRenewalMs: 30000
+    }));
+  });
+
   it("exports a Suite archive through the consolidated CLI", async () => {
     const io = createIo();
     const deps = dependencies();

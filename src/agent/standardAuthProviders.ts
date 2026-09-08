@@ -1,7 +1,7 @@
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AuthProfile, SystemProfile } from "../domain/types.js";
-import { decryptSecrets } from "../shared/crypto.js";
+import { decryptSecrets, encryptSecrets } from "../shared/crypto.js";
 import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
 import type {
   AuthRefreshAdapter,
@@ -29,6 +29,9 @@ export type AuthProviderHttpTransport = (
 
 export type StandardAuthProviderOptions = {
   transport?: AuthProviderHttpTransport;
+  onRefreshTokenRotation?: (input: {
+    authProfile: AuthProfile;
+  }) => void | Promise<void>;
 };
 
 /**
@@ -41,13 +44,16 @@ export function createStandardAuthProviderAdapters(
 ): AuthRefreshAdapter[] {
   const transport = options.transport ?? fetchTransport;
   return [
-    createOAuthAdapter(transport),
+    createOAuthAdapter(transport, options.onRefreshTokenRotation),
     createCasAdapter(transport),
     createSamlAdapter(transport)
   ];
 }
 
-function createOAuthAdapter(transport: AuthProviderHttpTransport): AuthRefreshAdapter {
+function createOAuthAdapter(
+  transport: AuthProviderHttpTransport,
+  onRefreshTokenRotation?: StandardAuthProviderOptions["onRefreshTokenRotation"]
+): AuthRefreshAdapter {
   return {
     provider: "oauth",
     supports: (input) => input.authProfile.refreshProvider === "oauth",
@@ -80,6 +86,16 @@ function createOAuthAdapter(transport: AuthProviderHttpTransport): AuthRefreshAd
       const payload = parseJsonResponse(response, "OAuth token endpoint");
       const accessToken = stringValue(payload.access_token);
       if (!accessToken) throw new Error("OAuth token endpoint did not return access_token");
+      const rotatedRefreshToken = stringValue(payload.refresh_token);
+      if (rotatedRefreshToken && rotatedRefreshToken !== secrets.refreshToken) {
+        input.authProfile.encryptedSecrets = encryptSecrets({
+          ...secrets,
+          refreshToken: rotatedRefreshToken
+        });
+        await onRefreshTokenRotation?.({
+          authProfile: input.authProfile
+        });
+      }
       const storageStatePath = await writeTokenStorageState(input, "oauth", accessToken, secrets);
       return {
         provider: "oauth",
@@ -99,20 +115,22 @@ function createCasAdapter(transport: AuthProviderHttpTransport): AuthRefreshAdap
     supports: (input) => input.authProfile.refreshProvider === "cas",
     preflight: async (input) => {
       const secrets = providerSecrets(input.authProfile);
-      requireSecrets(secrets, ["validateEndpoint", "serviceTicket", "serviceUrl"], "CAS");
+      requireSecrets(secrets, ["validateEndpoint", "serviceTicket", "serviceUrl", "sessionEndpoint"], "CAS");
       assertHttpUrl(secrets.validateEndpoint, "CAS validation endpoint");
       assertHttpUrl(secrets.serviceUrl, "CAS service URL");
+      assertHttpUrl(secrets.sessionEndpoint, "CAS session endpoint");
       return {
         provider: "cas",
         status: "ready",
-        checks: ["cas-validation-endpoint-configured", "service-ticket-configured", "service-url-configured"]
+        checks: ["cas-validation-endpoint-configured", "service-ticket-configured", "service-url-configured", "cas-session-endpoint-configured"]
       };
     },
     refresh: async (input) => {
       const secrets = providerSecrets(input.authProfile);
-      requireSecrets(secrets, ["validateEndpoint", "serviceTicket", "serviceUrl"], "CAS");
+      requireSecrets(secrets, ["validateEndpoint", "serviceTicket", "serviceUrl", "sessionEndpoint"], "CAS");
       assertHttpUrl(secrets.validateEndpoint, "CAS validation endpoint");
       assertHttpUrl(secrets.serviceUrl, "CAS service URL");
+      assertHttpUrl(secrets.sessionEndpoint, "CAS session endpoint");
       const url = new URL(secrets.validateEndpoint);
       url.searchParams.set("ticket", secrets.serviceTicket);
       url.searchParams.set("service", secrets.serviceUrl);
@@ -120,7 +138,26 @@ function createCasAdapter(transport: AuthProviderHttpTransport): AuthRefreshAdap
       if (response.status < 200 || response.status >= 300 || !/<(?:cas:)?authenticationSuccess\b/i.test(response.body)) {
         throw new Error(`CAS validation endpoint returned HTTP ${response.status}`);
       }
-      const storageStatePath = await writeTokenStorageState(input, "cas", secrets.serviceTicket, secrets);
+      const sessionUrl = new URL(secrets.sessionEndpoint);
+      sessionUrl.searchParams.set("ticket", secrets.serviceTicket);
+      sessionUrl.searchParams.set("service", secrets.serviceUrl);
+      const sessionResponse = await transport({
+        url: sessionUrl.toString(),
+        method: "GET",
+        headers: { accept: "text/html,application/json,application/xml" }
+      });
+      if (sessionResponse.status < 200 || sessionResponse.status >= 300) {
+        throw new Error(`CAS session endpoint returned HTTP ${sessionResponse.status}`);
+      }
+      const cookies = parseSetCookieHeaders(sessionResponse.headers);
+      const payload = parseMaybeJson(sessionResponse.body);
+      const sessionToken = stringValue(payload?.access_token) ?? extractXmlValue(sessionResponse.body, "SessionToken");
+      if (cookies.length === 0 && !sessionToken) {
+        throw new Error("CAS session exchange did not establish a target session");
+      }
+      const storageStatePath = cookies.length > 0
+        ? await writeCookieStorageState(input, "cas", cookies)
+        : await writeTokenStorageState(input, "cas", sessionToken!, secrets);
       return { provider: "cas", status: "succeeded", storageStatePath };
     }
   };
@@ -153,6 +190,11 @@ function createSamlAdapter(transport: AuthProviderHttpTransport): AuthRefreshAda
       if (response.status < 200 || response.status >= 300) {
         throw new Error(`SAML session endpoint returned HTTP ${response.status}`);
       }
+      const cookies = parseSetCookieHeaders(response.headers);
+      if (cookies.length > 0) {
+        const storageStatePath = await writeCookieStorageState(input, "saml", cookies);
+        return { provider: "saml", status: "succeeded", storageStatePath };
+      }
       const payload = parseMaybeJson(response.body);
       const sessionToken = stringValue(payload?.access_token) ?? extractXmlValue(response.body, "SessionToken");
       if (!sessionToken) throw new Error("SAML session endpoint did not return a session token");
@@ -160,6 +202,78 @@ function createSamlAdapter(transport: AuthProviderHttpTransport): AuthRefreshAda
       return { provider: "saml", status: "succeeded", storageStatePath };
     }
   };
+}
+
+type StorageCookie = {
+  name: string;
+  value: string;
+  url?: string;
+  path?: string;
+  domain?: string;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+  expires?: number;
+};
+
+async function writeCookieStorageState(
+  input: AuthRefreshInput,
+  provider: AuthRefreshProvider,
+  cookies: StorageCookie[]
+) {
+  const secrets = providerSecrets(input.authProfile);
+  const relativePath = secrets.storageStatePath ??
+    join(".brain-creator", "auth", safePart(input.system.id), safePart(input.authProfile.id), `${provider}-storage-state.json`);
+  const outputPath = await resolveProtectedStorageStatePath(input.workDir, relativePath);
+  const scopedCookies = cookies.map((cookie) => {
+    const { url: _placeholderUrl, ...cookieWithoutUrl } = cookie;
+    return cookie.domain
+      ? { ...cookieWithoutUrl, path: cookie.path ?? "/" }
+      : { ...cookieWithoutUrl, url: input.system.baseUrl };
+  });
+  await mkdir(dirname(outputPath), { recursive: true, mode: 0o700 });
+  await chmod(dirname(outputPath), 0o700).catch(() => undefined);
+  await writeFile(outputPath, JSON.stringify({ cookies: scopedCookies, origins: [] }), { encoding: "utf8", mode: 0o600 });
+  await chmod(outputPath, 0o600).catch(() => undefined);
+  return outputPath;
+}
+
+function parseSetCookieHeaders(headers?: Record<string, string>): StorageCookie[] {
+  const value = headers?.["set-cookie"] ?? headers?.["Set-Cookie"];
+  if (!value) return [];
+  return splitSetCookieHeader(value).flatMap((line) => {
+    const [pair, ...attributes] = line.split(";").map((part) => part.trim());
+    const separator = pair.indexOf("=");
+    if (separator <= 0) return [];
+    const name = pair.slice(0, separator).trim();
+    const cookieValue = pair.slice(separator + 1).trim();
+    if (!name || !cookieValue) return [];
+    const cookie: StorageCookie = {
+      name,
+      value: cookieValue,
+      url: "https://brain-creator.invalid/"
+    };
+    for (const attribute of attributes) {
+      const [rawKey, ...rawValue] = attribute.split("=");
+      const key = rawKey.toLowerCase();
+      const normalizedValue = rawValue.join("=").trim();
+      if (key === "path" && normalizedValue) cookie.path = normalizedValue;
+      if (key === "domain" && normalizedValue) cookie.domain = normalizedValue;
+      if (key === "httponly") cookie.httpOnly = true;
+      if (key === "secure") cookie.secure = true;
+      if (key === "samesite" && /^(strict|lax|none)$/i.test(normalizedValue)) {
+        cookie.sameSite = normalizedValue[0].toUpperCase() + normalizedValue.slice(1).toLowerCase() as StorageCookie["sameSite"];
+      }
+      if (key === "max-age" && Number.isFinite(Number(normalizedValue))) {
+        cookie.expires = Math.floor(Date.now() / 1000) + Number(normalizedValue);
+      }
+    }
+    return [cookie];
+  });
+}
+
+function splitSetCookieHeader(value: string) {
+  return value.split(/,(?=\s*[^;,=\s]+=[^;,]*)/u);
 }
 
 async function writeTokenStorageState(

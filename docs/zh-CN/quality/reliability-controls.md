@@ -8,7 +8,7 @@ Brain Creator 将可靠性作为可审计的控制面，而不是把一次绿色
 
 ## 鉴权刷新
 
-鉴权刷新采用统一供应商注册表和适配器协议。Token 和 Cookie 配置可以通过内置适配器重新物化为受保护的 storage state；OAuth 使用标准 refresh-token grant，CAS 校验配置的 service ticket，SAML 将宿主采集的 SAMLResponse 交换为会话。浏览器特定或厂商特定流程继续由 host-agent 适配器承接。供应商凭据与端点通过加密 AuthProfile 提供，刷新有超时限制，结果不会返回明文密钥。
+鉴权刷新采用统一供应商注册表和适配器协议。Token 和 Cookie 配置可以通过内置适配器重新物化为受保护的 storage state；OAuth 使用标准 refresh-token grant，轮换后的 refresh token 只写回加密 AuthProfile；CAS 先校验 service ticket，再强制通过目标系统会话交换；SAML 优先使用会话端点返回的 Cookie，没有 Cookie 时才使用会话令牌。浏览器特定或厂商特定流程继续由 host-agent 适配器承接。供应商凭据与端点通过加密 AuthProfile 提供，刷新有超时限制，结果不会返回明文密钥。CAS 校验成功但没有建立目标会话时，刷新仍视为失败，不能当作可用浏览器状态。
 
 可以先通过 `bc_configure target=auth operation=preflight` 检查供应商 readiness，再用 `operation=refresh` 显式请求刷新。`bc_status` 会展示已注册、已配置和不可用的刷新供应商；缺少或不可用的供应商会创建鉴权预检 Gap，并阻止用例进入 Agent/Playwright 链路。
 
@@ -26,7 +26,7 @@ Brain Creator 将可靠性作为可审计的控制面，而不是把一次绿色
 
 稳定性评估包含目标次数、最小样本、失败率、连续失败、最长耗时、强证据和阻断策略。单次绿色运行仍然是 `insufficient-sample`。配置最小间隔后，下一轮会持久化 `nextRunAt`，不会提前执行；下一次显式调用 `bc_run` 或 resume 且时间到达后才会启动。
 
-稳定性任务现在提供显式的 claim/lease 控制面：外部定时器或宿主 Agent 可以预览到期任务，使用 `suiteAction=claim-scheduled` 领取，长任务期间续租，失败时释放并写入错误。租约过期后其他执行者可以恢复领取，进程崩溃不会永久卡住任务。当前仍是可持久化调度元数据，不是后台 Worker；生产定时器和分布式存储仍需按部署环境接入。
+稳定性任务现在提供显式的 claim/lease 控制面：外部定时器或宿主 Agent 可以预览到期任务，使用 `suiteAction=claim-scheduled` 领取，长任务期间续租，失败时释放并写入错误。统一 CLI 的 Runner 还支持 `--max-wall-time-ms` 和 `--lease-renewal-ms`，长任务会后台续租，在墙钟预算耗尽后不再启动下一条用例，并返回耗时与续租次数；失败重试使用有上限的指数退避。租约过期后其他执行者可以恢复领取，进程崩溃不会永久卡住任务。当前仍是可持久化调度元数据，不是后台 Worker；生产定时器和分布式存储仍需按部署环境接入。
 
 ## 执行过程可见性
 
