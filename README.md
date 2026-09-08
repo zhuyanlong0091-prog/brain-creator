@@ -95,7 +95,7 @@ PR N 增加脱敏 L3 黄金评估：覆盖 HR、订单审批、图片状态机�
 - **源码开发**：克隆本仓库，运行 `npm install`、`npm test` 和 `npm run build`。
 - **全局 CLI**：可运行 `npm install -g brain-creator`，但项目本地安装更容易固定版本。
 
-CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin`、`export`、`artifacts`、`runner` 和 `mcp`。使用 `brain-creator config` 查看脱敏配置；使用 `brain-creator runner run --owner ci --json` 执行已批准且到期的稳定性套件；旧版独立命令仍兼容，可用 `brain-creator help legacy` 查看。
+CLI 只保留少量主命令：`init`、`doctor`、`config`、`plugin`、`export`、`artifacts`、`runner` 和 `mcp`。使用 `brain-creator config` 查看脱敏配置；使用 `brain-creator runner run --owner ci --json` 执行已批准且到期的稳定性套件；旧版独立命令仍兼容，可用 `brain-creator help legacy` 查看。`.github/workflows/brain-creator-runner.yml` 是每 15 分钟或手动触发的合成 Runner 调度样例，生产部署应替换为受控外部状态存储。
 
 默认运行数据使用 `.brain-creator/store/` 下的 schema 21 分片仓库。schema 20、schema 19 和旧的 `.brain-creator/local-assets.json` 会先备份再迁移；迁移不会把历史用例自动标记为 `verified` 或 `trusted`。schema 21 新增隔离评估 Trial、来源快照、投影清单和干预记录。`BRAIN_CREATOR_STORE_DIR` 可指定分片仓库位置。
 
@@ -205,7 +205,7 @@ PR N adds a sanitized L3 golden evaluation covering HR, order approval, image st
 - **Codex plugin:** run `brain-creator plugin install` after installing the npm package.
 - **Source checkout:** clone this repository, then run `npm install`, `npm test`, and `npm run build`.
 - **Global CLI:** `npm install -g brain-creator` is supported, but a project-local install pins the version.
-The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, `export`, `artifacts`, `runner`, and `mcp`. Use `brain-creator runner run --owner ci --json` to claim and continue due, approved stability suites. Compatibility executables remain available under `brain-creator help legacy`.
+The consolidated CLI exposes `init`, `doctor`, `config`, `plugin`, `export`, `artifacts`, `runner`, and `mcp`. Use `brain-creator runner run --owner ci --json` to claim and continue due, approved stability suites. Compatibility executables remain available under `brain-creator help legacy`. The repository includes `.github/workflows/brain-creator-runner.yml` as a synthetic Runner scheduler sample that runs every 15 minutes or on manual dispatch; production deployments should replace it with approved external state storage.
 
 Runtime state is stored by default in the schema 21 sharded repository under `.brain-creator/store/`. Schema 20, schema 19, and legacy `.brain-creator/local-assets.json` stores are backed up before migration; legacy cases are not automatically marked `verified` or `trusted`. Schema 21 adds isolated evaluation Trials, source snapshots, projection manifests, and intervention records. Set `BRAIN_CREATOR_STORE_DIR` to choose another shard directory.
 

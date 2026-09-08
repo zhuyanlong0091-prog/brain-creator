@@ -71,6 +71,12 @@ requirement revisions can be reconciled without cross-system case leakage, and
 that a behavior change only stales cases bound to the changed system. It is
 still deterministic test evidence, not a substitute for a production tenant.
 
+The GitHub Actions Runner workflow is a separate synthetic scheduler sample. It
+advances one due Runner iteration per scheduled invocation and persists its
+sharded state through a GitHub Artifact. It validates external scheduling and
+recovery mechanics, but it does not execute a real system or prove production
+long-run stability.
+
 For the broader L3 delivery gate, run `npm run verify:l3-eval`. That command
 also evaluates sanitized HR, order approval, image state-machine, cross-role,
 multi-requirement, and synthetic long-run samples. It intentionally keeps

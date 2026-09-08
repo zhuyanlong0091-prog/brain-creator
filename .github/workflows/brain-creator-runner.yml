@@ -1,0 +1,93 @@
+name: Brain Creator Runner
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      target_iterations:
+        description: "Total scheduled Runner iterations"
+        required: false
+        default: "20"
+        type: string
+      min_interval_ms:
+        description: "Minimum interval between iterations in milliseconds"
+        required: false
+        default: "0"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: brain-creator-runner-main
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BRAIN_CREATOR_RUNNER_OWNER: github-actions
+      BRAIN_CREATOR_RUNNER_TARGET: ${{ inputs.target_iterations || '20' }}
+      BRAIN_CREATOR_RUNNER_MIN_INTERVAL_MS: ${{ inputs.min_interval_ms || '0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore previous Runner state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .runner-restore
+          previous_run_id="$(gh run list --workflow brain-creator-runner.yml --branch main --status completed --limit 1 --json databaseId --jq '.[0].databaseId // ""')"
+          if [[ -z "${previous_run_id}" ]]; then
+            echo "No previous Runner state artifact; the fixture will initialize its store."
+            exit 0
+          fi
+          gh run download "${previous_run_id}" --name brain-creator-runner-state --dir .runner-restore
+          tar -xzf .runner-restore/runner-state.tgz --no-same-owner
+
+      - name: Execute one due Runner iteration
+        run: npm run verify:runner-cycle -- --workspace "$GITHUB_WORKSPACE"
+
+      - name: Package Runner state
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -d .brain-creator ]]; then
+            echo "Runner state directory is missing; nothing can be restored."
+            exit 1
+          fi
+          archive_inputs=(.brain-creator)
+          if [[ -f runner-report.json ]]; then
+            archive_inputs+=(runner-report.json)
+          fi
+          tar -czf runner-state.tgz "${archive_inputs[@]}"
+
+      - name: Upload Runner state and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brain-creator-runner-state
+          path: |
+            runner-state.tgz
+            runner-report.json
+          if-no-files-found: warn
+          retention-days: 90

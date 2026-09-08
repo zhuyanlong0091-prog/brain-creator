@@ -53,6 +53,7 @@
     "verify:l3-eval": "node --loader ts-node/esm scripts/l3Eval.ts",
     "verify:l3-eval:strict": "node --loader ts-node/esm scripts/l3Eval.ts --strict",
     "verify:l3-eval:json": "node --loader ts-node/esm scripts/l3Eval.ts --json",
+    "verify:runner-cycle": "node --loader ts-node/esm scripts/runnerLongCycle.ts",
     "verify:historical-diagnosis-eval": "node --loader ts-node/esm scripts/historicalDiagnosisEval.ts",
     "verify:package-install": "node --loader ts-node/esm scripts/verifyPackageInstallSmoke.ts",
     "verify:package-contents": "node --loader ts-node/esm scripts/verifyPackageContents.ts",
