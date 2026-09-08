@@ -548,6 +548,7 @@ export type SystemBrainChangeSet = {
   };
   affectedTestIntentIds?: string[];
   affectedExecutableCaseIds?: string[];
+  affectedBusinessScenarioIds?: string[];
   createdAt: string;
 };
 

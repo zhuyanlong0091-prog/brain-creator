@@ -2,7 +2,10 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type {
+  BusinessScenario,
+  ScenarioTrustRecord,
   SemanticBinding,
+  SystemBrainChangeSet,
   SystemBrainSnapshot,
   SystemBrainSnapshotAsset
 } from "./types.js";
@@ -234,6 +237,106 @@ describe("semantic reconciliation", () => {
     expect(result.affectedTestIntentIds).toEqual(["intent-create"]);
     expect(intent.status).toBe("stale");
     expect(repository.persist).toHaveBeenCalled();
+  });
+
+  it("stales linked scenarios and downgrades verified trust after a behavior change", () => {
+    const repository = store();
+    repository.semanticBindings.push({
+      id: "binding-create",
+      requirementSetId: "requirement-orders",
+      systemId: "system-orders",
+      expectedSemanticId: "semantic-requirement-create",
+      observedSemanticId: "transition-create-order",
+      type: "alias",
+      conditions: {},
+      confidence: 0.95,
+      status: "confirmed",
+      evidenceRefs: ["system-exploration:old"]
+    });
+    const scenario: BusinessScenario = {
+      id: "scenario-create-order",
+      knowledgeProjectId: "knowledge-orders",
+      requirementSetId: "requirement-orders",
+      title: "Create an order",
+      objective: "Create an order from the order list",
+      family: "main-flow",
+      actors: ["operator"],
+      preconditions: ["The operator is signed in"],
+      workflowRefs: [],
+      stateTransitionRefs: ["transition-create-order"],
+      decisionRuleRefs: [],
+      testDataNeeds: [],
+      expectedBusinessOutcomes: ["The order is created"],
+      sourceRefs: ["requirement:clause-create"],
+      testIntentIds: ["intent-create"],
+      risk: "medium",
+      status: "approved"
+    };
+    const trust: ScenarioTrustRecord = {
+      scenarioId: scenario.id,
+      status: "trusted",
+      strongRunCount: 3,
+      lastRequirementHash: "requirement-hash",
+      lastSystemSnapshotHash: "snapshot-orders-1",
+      updatedAt: "2026-08-31T00:00:00.000Z"
+    };
+    const intent = {
+      id: "intent-create",
+      knowledgeProjectId: "knowledge-orders",
+      requirementSetId: "requirement-orders",
+      title: "Create order",
+      module: "Orders",
+      priority: "P1" as const,
+      objective: "Create an order",
+      preconditions: [],
+      expectedResults: ["Order is created"],
+      requirementRefs: ["requirement:clause-create"],
+      knowledgeNodeRefs: [],
+      techniques: [],
+      status: "approved" as const,
+      createdAt: "2026-08-31T00:00:00.000Z",
+      updatedAt: "2026-08-31T00:00:00.000Z"
+    };
+    const changeSet: SystemBrainChangeSet = {
+      id: "changeset-orders",
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      fromSnapshotId: "snapshot-orders-1",
+      toSnapshotId: "snapshot-orders-2",
+      status: "needs-review" as const,
+      changes: [{
+        semanticId: "transition-create-order",
+        kind: "transition" as const,
+        changeType: "behavior-changed" as const,
+        confidence: 1,
+        impact: "recompile" as const,
+        status: "needs-review" as const,
+        reasons: ["Observed behavior changed"],
+        sourceRefs: ["system-exploration:new"]
+      }],
+      summary: { added: 0, removed: 0, renamed: 0, locatorChanged: 0, behaviorChanged: 1, evidenceRefreshed: 0 },
+      createdAt: "2026-08-31T00:00:00.000Z"
+    };
+
+    const result = propagateSystemBrainChangeSet({
+      changeSet,
+      executableCases: [],
+      testIntents: [intent],
+      businessScenarios: [scenario],
+      scenarioTrustRecords: [trust],
+      semanticBindings: repository.semanticBindings,
+      persist: repository.persist
+    });
+
+    expect(result.affectedBusinessScenarioIds).toEqual([scenario.id]);
+    expect(changeSet.affectedBusinessScenarioIds).toEqual([scenario.id]);
+    expect(scenario.status).toBe("stale");
+    expect(trust).toEqual(expect.objectContaining({
+      status: "bound",
+      strongRunCount: 0,
+      lastSystemSnapshotHash: "snapshot-orders-1",
+      downgradeReason: expect.stringContaining("System Brain behavior changed")
+    }));
   });
 });
 

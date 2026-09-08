@@ -2651,6 +2651,8 @@ export class KnowledgeService {
       changeSet,
       executableCases: this.repository.executableCases,
       testIntents: this.repository.testIntents,
+      businessScenarios: this.repository.businessScenarios,
+      scenarioTrustRecords: this.repository.scenarioTrustRecords,
       semanticBindings: projectBindings,
       persist: () => this.repository.persist()
     });
