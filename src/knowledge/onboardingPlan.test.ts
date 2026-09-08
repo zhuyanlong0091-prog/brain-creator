@@ -610,6 +610,69 @@ describe("OnboardingPlanService", () => {
     expect(fixture.repository.explorationPlans).toHaveLength(1);
   });
 
+  it("reopens a blocked scope after its exploration gap is resolved", () => {
+    const fixture = createFixture();
+    const first = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+    const previousActionEvidence = {
+      actionId: first.explorationPlan.allowedActions[0].id,
+      action: first.explorationPlan.allowedActions[0].name,
+      route: first.explorationPlan.allowedActions[0].route,
+      role: first.explorationPlan.allowedActions[0].role,
+      sourceRefs: ["browser:previous-attempt"]
+    };
+    first.explorationPlan.status = "blocked";
+    first.explorationPlan.gapIds = ["gap-transfer"];
+    first.explorationPlan.actionEvidence = [previousActionEvidence];
+    first.onboardingPlan.status = "blocked";
+    fixture.repository.gaps.push({
+      id: "gap-transfer",
+      projectId: "system-1",
+      sourceType: "stateful-exploration",
+      sourceId: first.explorationPlan.id,
+      reason: "The first approver could not be selected.",
+      severity: "high",
+      owner: "qa",
+      status: "resolved",
+      createdAt: now(),
+      updatedAt: now()
+    });
+
+    const replacementJourney = [
+      actorJourney()[0],
+      { role: "approver-replacement", authProfileId: "auth-approver" }
+    ];
+    const reopened = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: replacementJourney,
+      cleanupPolicy: "delete"
+    });
+
+    expect(reopened.reused).toBe(true);
+    expect(reopened.refreshed).toBe(true);
+    expect(reopened.onboardingPlan.id).toBe(first.onboardingPlan.id);
+    expect(reopened.onboardingPlan.status).toBe("draft");
+    expect(reopened.onboardingPlan.revision).toBe(2);
+    expect(reopened.explorationPlan.id).not.toBe(first.explorationPlan.id);
+    expect(reopened.explorationPlan.status).toBe("draft");
+    expect(reopened.explorationPlan.actorJourney).toEqual(replacementJourney);
+    expect(first.explorationPlan.status).toBe("blocked");
+    expect(first.explorationPlan.actionEvidence).toEqual([previousActionEvidence]);
+    expect(reopened.onboardingPlan.revisionHistory).toEqual([
+      expect.objectContaining({
+        revision: 1,
+        explorationPlanId: first.explorationPlan.id,
+        reason: "阻塞缺口已解决，保留历史证据并重新生成待审批探索草案"
+      })
+    ]);
+    expect(fixture.repository.explorationPlans).toHaveLength(2);
+  });
+
   it("keeps onboarding plans independent across systems and requirement versions", () => {
     const fixture = createFixture();
     fixture.repository.systemProfiles.push({

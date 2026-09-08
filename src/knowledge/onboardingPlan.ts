@@ -120,11 +120,15 @@ export class OnboardingPlanService {
           questions,
           explorationQuestions
         );
+        const blockedScopeRecovered =
+          existing.status === "blocked" &&
+          explorationPlan.status === "blocked" &&
+          resolvedExplorationGaps(this.repository, explorationPlan);
         if (
-          existing.status === "completed" &&
+          (existing.status === "completed" || blockedScopeRecovered) &&
           coverage.summary.overallStatus !== "covered"
         ) {
-          return this.reopenCompleted(
+          return this.reopenTerminal(
             input,
             existing,
             explorationPlan,
@@ -133,7 +137,8 @@ export class OnboardingPlanService {
             system.baseUrl,
             questions,
             baseline,
-            coverage
+            coverage,
+            blockedScopeRecovered
           );
         }
         existing.coverageItems = coverage.items;
@@ -239,7 +244,7 @@ export class OnboardingPlanService {
     return { onboardingPlan, explorationPlan, explorationQuestions, coverage, reused: false };
   }
 
-  private reopenCompleted(
+  private reopenTerminal(
     input: CreateOnboardingPlanInput,
     onboardingPlan: OnboardingPlan,
     previousExplorationPlan: ExplorationPlan,
@@ -248,7 +253,8 @@ export class OnboardingPlanService {
     systemBaseUrl: string,
     questions: ExplorationQuestionDraft[],
     baseline: ReturnType<typeof baselineSnapshot>,
-    previousCoverage: ReturnType<typeof buildCoverage>
+    previousCoverage: ReturnType<typeof buildCoverage>,
+    recoveredBlockedScope = false
   ): CreateOnboardingPlanResult {
     const nextRevision = (onboardingPlan.revision ?? 1) + 1;
     const explorationQuestions = questions.map((question) =>
@@ -302,7 +308,9 @@ export class OnboardingPlanService {
       coverageItemIds: previousCoverage.items.map((item) => item.id),
       allowedActionNames: [...onboardingPlan.allowedActions],
       capturedAt: now,
-      reason: "已完成计划仍存在未覆盖项，重新生成待审批探索草案"
+      reason: recoveredBlockedScope
+        ? "阻塞缺口已解决，保留历史证据并重新生成待审批探索草案"
+        : "已完成计划仍存在未覆盖项，重新生成待审批探索草案"
     });
     onboardingPlan.revision = nextRevision;
     onboardingPlan.explorationPlanId = explorationPlan.id;
@@ -1529,6 +1537,17 @@ function unresolvedQuestions(repository: InMemoryBrainCreatorRepository, require
       )
       .map((gap) => gap.reason)
   ]);
+}
+
+function resolvedExplorationGaps(
+  repository: InMemoryBrainCreatorRepository,
+  explorationPlan: ExplorationPlan
+) {
+  if (explorationPlan.gapIds.length === 0) return false;
+  return explorationPlan.gapIds.every((gapId) => {
+    const gap = repository.gaps.find((item) => item.id === gapId);
+    return gap?.status === "resolved" || gap?.status === "dismissed";
+  });
 }
 
 function actionName(question: ExplorationQuestionDraft) {
