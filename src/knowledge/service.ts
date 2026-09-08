@@ -49,6 +49,7 @@ import {
 } from "./systemBrain.js";
 import { planStateActions } from "./stateActionPlanner.js";
 import {
+  addInheritedEntityOperations,
   applyTestDataResolutions,
   confirmTestDataPlan,
   planTestData,
@@ -1033,7 +1034,7 @@ export class KnowledgeService {
     const inheritedEntityReferences = inheritedDependencyEdges.map(
       (edge) => edge.entityReference
     );
-    const plannedDataPlan: ExecutableCase["dataPlan"] = {
+    let plannedDataPlan: ExecutableCase["dataPlan"] = {
       ...dataPlanned.plan,
       sourceRefs: uniqueStrings([
         ...dataPlanned.plan.sourceRefs,
@@ -1048,6 +1049,10 @@ export class KnowledgeService {
           }
         : {})
     };
+    plannedDataPlan = addInheritedEntityOperations(
+      plannedDataPlan,
+      inheritedDependencyEdges
+    );
     const plannedEntityReferences = new Set(plannedDataPlan.entityReferences ?? []);
     const missingEntityReferences = requiredEntityReferences.filter(
       (reference) =>

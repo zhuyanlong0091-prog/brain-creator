@@ -1355,6 +1355,8 @@ export type TestDataLease = {
   value?: string;
   cleanup: "none" | "delete-created" | "restore";
   status: "active" | "released" | "cleanup-failed";
+  /** Lease created for a consumer case by reusing a producer case's entity. */
+  reusedFromLeaseId?: string;
   sourceRefs: string[];
   createdAt: string;
   updatedAt: string;

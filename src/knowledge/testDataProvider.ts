@@ -12,6 +12,7 @@ import type { TestDataBrainService } from "../brain/testdata.js";
 import { id } from "../shared/id.js";
 import type { KnowledgeService } from "./service.js";
 import { executableCaseCompileStatus } from "./caseCompiler.js";
+import { findActiveTestDataLease } from "./dataLeaseResolver.js";
 
 type PrepareInput = {
   knowledgeProjectId: string;
@@ -37,6 +38,7 @@ type PrepareOperation = {
   profileId: string;
   field: string;
   entityReference?: string;
+  reference?: string;
   lookupQuery?: string;
   cleanup: TestDataTask["cleanup"];
   allowedDecisions: Array<"reuse" | "create">;
@@ -250,13 +252,25 @@ export class TestDataProviderService {
     this.resolveProviderGaps(task, now);
     this.refreshCaseStatus(resolved.executableCase, now);
     this.assertDependencyLeases(resolved.executableCase, task);
+    const operation = resolved.executableCase.dataPlan?.operations.find(
+      (candidate) => candidate.profileId === task.profileId
+    );
+    const reusedFromLease = input.decision === "reuse" && operation
+      ? findActiveTestDataLease(
+          this.repository,
+          resolved.executableCase,
+          task.systemId,
+          { ...operation, reference: input.reference.trim() }
+        )
+      : undefined;
     const lease = this.createOrReuseLease({
       task,
       decision: input.decision,
       reference: input.reference.trim(),
       value: input.value?.trim() || undefined,
       sourceRefs,
-      now
+      now,
+      ...(reusedFromLease ? { reusedFromLeaseId: reusedFromLease.id } : {})
     });
     this.recordExternalData(resolved.executableCase, task, lease, sourceRefs);
     task.leaseId = lease.id;
@@ -292,14 +306,11 @@ export class TestDataProviderService {
         (operation.decision === "lookup" &&
           operation.status === "needs-resolution") ||
         ((operation.decision === "reuse" || operation.decision === "create") &&
-          !this.repository.testDataLeases.some(
-            (lease) =>
-              lease.knowledgeProjectId === executableCase.knowledgeProjectId &&
-              lease.systemId === executableCase.systemId &&
-              lease.executableCaseId === executableCase.id &&
-              lease.profileId === operation.profileId &&
-              lease.reference === operation.reference &&
-              lease.status === "active"
+          !findActiveTestDataLease(
+            this.repository,
+            executableCase,
+            executableCase.systemId!,
+            operation
           ))
     );
   }
@@ -334,6 +345,7 @@ export class TestDataProviderService {
       ...(operation.entityReference
         ? { entityReference: operation.entityReference }
         : {}),
+      ...(operation.reference ? { reference: operation.reference } : {}),
       lookupQuery: operation.lookupQuery,
       cleanup: operation.cleanup,
       allowedDecisions:
@@ -463,6 +475,7 @@ export class TestDataProviderService {
     value?: string;
     sourceRefs: string[];
     now: string;
+    reusedFromLeaseId?: string;
   }) {
     const existing = this.repository.testDataLeases.find(
       (item) =>
@@ -486,6 +499,9 @@ export class TestDataProviderService {
       value: input.value,
       cleanup: input.decision === "create" ? input.task.cleanup : "none",
       status: "active",
+      ...(input.reusedFromLeaseId
+        ? { reusedFromLeaseId: input.reusedFromLeaseId }
+        : {}),
       sourceRefs: input.sourceRefs,
       createdAt: input.now,
       updatedAt: input.now

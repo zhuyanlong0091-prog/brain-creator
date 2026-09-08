@@ -300,6 +300,17 @@ describe("KnowledgeService", () => {
     expect(compiled.executableCase.dataPlan?.entityReferences).toEqual([
       "employee:testperson001"
     ]);
+    expect(compiled.executableCase.dataPlan?.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          profileId: "entity:employee%3Atestperson001",
+          decision: "reuse",
+          status: "ready",
+          entityReference: "employee:testperson001",
+          cleanup: "none"
+        })
+      ])
+    );
     expect(compiled.executableCase.assertionContracts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
