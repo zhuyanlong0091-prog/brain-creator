@@ -2007,7 +2007,8 @@ export class KnowledgeService {
     const evidence = this.repository.executionEvidence.find((item) => item.id === evidenceId);
     if (!evidence) throw new Error("Execution evidence not found");
     const redact = executionSecretRedactor(this.repository, evidence.systemId);
-    evidence.status = input.status;
+    const effectiveStatus = effectiveEvidenceStatus(input.status, input.reporterResult);
+    evidence.status = effectiveStatus;
     evidence.chainRunId = input.chainRunId;
     evidence.actualResult = input.actualResult === undefined ? undefined : redact(input.actualResult);
     evidence.artifactPaths = [...new Set([...evidence.artifactPaths, ...input.artifactPaths])];
@@ -2053,6 +2054,9 @@ export class KnowledgeService {
       })
     ).then((paths) => paths.filter((path): path is string => Boolean(path)));
     evidence.evidenceWarnings = [
+      ...(effectiveStatus !== input.status
+        ? [`Requested status ${input.status} disagreed with structured Reporter status ${input.reporterResult?.status}; Reporter status was used.`]
+        : []),
       ...(missingAssurance.length
         ? [`Assurance evidence incomplete: ${missingAssurance.join(", ")}`]
         : []),
@@ -2095,10 +2099,10 @@ export class KnowledgeService {
         if (assertion.actual !== undefined) step.actual = redact(assertion.actual);
       } else {
         step.assertionStatus =
-          input.status === "passed"
+          effectiveStatus === "passed"
             ? "passed"
             : step.action === "assert"
-              ? input.status
+              ? effectiveStatus
               : "blocked";
         if (step.action === "assert") {
           step.actual = input.actualResult === undefined ? undefined : redact(input.actualResult);
@@ -2107,7 +2111,7 @@ export class KnowledgeService {
     }
     if (reporterSteps !== undefined) {
       const requiredCoverage = evidence.coverage?.required ?? ["workflow"];
-      const verifiedCoverage = verifiedCoverageDimensions(evidence, input.status);
+      const verifiedCoverage = verifiedCoverageDimensions(evidence, effectiveStatus);
       evidence.coverage = {
         required: requiredCoverage,
         verified: verifiedCoverage,
@@ -2117,7 +2121,7 @@ export class KnowledgeService {
         evidence.assuranceLevel = "limited";
       }
     }
-    if (input.status !== "blocked") {
+    if (effectiveStatus !== "blocked") {
       const executableCase = this.repository.executableCases.find(
         (item) => item.id === evidence.executableCaseId
       );
@@ -3777,6 +3781,16 @@ function executionSecretRedactor(
     (result, secret) => result.split(secret).join("[REDACTED]"),
     value
   );
+}
+
+function effectiveEvidenceStatus(
+  requestedStatus: Exclude<ExecutionEvidence["status"], "running">,
+  reporter?: ExecutionEvidence["reporterResult"]
+): Exclude<ExecutionEvidence["status"], "running"> {
+  if (requestedStatus === "passed" && reporter && reporter.status !== "passed") {
+    return reporter.status;
+  }
+  return requestedStatus;
 }
 
 function redactReporterResult(

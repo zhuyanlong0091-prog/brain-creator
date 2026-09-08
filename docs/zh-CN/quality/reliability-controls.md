@@ -32,6 +32,10 @@ Brain Creator 将可靠性作为可审计的控制面，而不是把一次绿色
 
 每条 Run Ledger 记录都会获得运行内稳定序号，并投影为统一的 `ExecutionProgressEvent`。Reporter 回传的步骤会补充步骤 ID、标题、断言摘要、截图、耗时和 trace 标识；敏感值和页面 URL 查询参数会在持久化前脱敏。
 
-调用方提供 progress token 时，`bc_run` 和 `bc_submit_agent_output` 会发送 MCP Progress Notification。通知属于尽力而为通道，发送失败不改变执行结果，持久化 Ledger 始终是权威来源。`bc_status` 返回当前事件；活动事件超过阈值时显示 `possiblyStalled`，终态事件不会误报卡住。每条用例完成后都会增量重写静态 Suite 报告，测试工程师无需等待整套结束即可查看证据。
+恢复时会合并两层持久化状态：持久化的 Suite 状态负责运行终态和当前用例，Run Ledger 负责步骤级进度和证据细节。如果进程已经写入 Suite 状态但还没来得及写入最后一条 Ledger 事件，`bc_status` 会以 Suite 结果为准，并标记为已对账恢复，不会把旧步骤继续显示成当前步骤。如果还没有 Ledger，系统仍会根据持久化状态显示等待中的用例和下一步；如果只有 Ledger 证据，则会明确标记为仅账本来源。
+
+调用方提供 progress token 时，`bc_run` 和 `bc_submit_agent_output` 会发送 MCP Progress Notification。通知属于尽力而为通道，发送失败不改变执行结果；恢复时会对账持久化 Suite 状态和 Run Ledger。`bc_status` 返回当前事件；活动事件超过阈值时显示 `possiblyStalled`，终态事件不会误报卡住。每条用例完成后都会增量重写静态 Suite 报告，测试工程师无需等待整套结束即可查看证据。
+
+如果调用方传入的状态与结构化 Playwright Reporter 结果不一致，Reporter 的非通过结果会优先于调用方的 `passed`，同时保留状态冲突警告。这样可以避免调用方的绿色路径掩盖实际失败或阻塞。
 
 执行新增显式的 `browserMode=headless|observe` 契约。无头模式仍是无人值守默认值；观察模式会向 Playwright 传入 `--headed`、保持单 Worker、随 Suite/AgentTask 持久化，并显示在状态和静态报告中。无法打开窗口时能力检查会直接阻断，不存在隐藏降级。浏览器可见性用于增强测试工程师的过程信任，但不会提升断言验证强度，也不能替代结构化证据。

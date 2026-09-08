@@ -2070,8 +2070,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     )
       ? context.runLedger.summary(activeDocumentSuite.suiteId)
       : undefined;
-  const activeDocumentExecutionRecovery = activeDocumentLedgerSummary
-    ? recoverExecutionState(context.repository, activeDocumentSuite!.suiteId)
+  const activeDocumentExecutionRecovery = activeDocumentSuite
+    ? recoverExecutionState(context.repository, activeDocumentSuite.suiteId)
     : undefined;
   const nextAction = facadeNextAction({
     bridgeOk: snapshot.bridge.ok,
@@ -2107,9 +2107,11 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
               waitReason: activeDocumentLedgerSummary.waitReason,
               possiblyStalled: activeDocumentLedgerSummary.possiblyStalled,
               latestEvent: activeDocumentLedgerSummary.latestEvent,
-              traceId: activeDocumentLedgerSummary.traceId,
-              executionRecovery: activeDocumentExecutionRecovery
+              traceId: activeDocumentLedgerSummary.traceId
             }
+          : {}),
+        ...(activeDocumentExecutionRecovery
+          ? { executionRecovery: activeDocumentExecutionRecovery }
           : {}),
         activeTask: activeDocumentSuite.activeTask
           ? {
@@ -5265,14 +5267,8 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         item.status === "blocked"
     )
     .at(-1);
-  const activeRequirementRunHasLedger = Boolean(
-    activeRequirementSuiteRun &&
-      runLedgerEntries.some(
-        (entry) => entry.requirementSuiteRunId === activeRequirementSuiteRun.id
-      )
-  );
-  const activeRequirementExecutionRecovery = activeRequirementRunHasLedger
-    ? recoverExecutionState(context.repository, activeRequirementSuiteRun!.id)
+  const activeRequirementExecutionRecovery = activeRequirementSuiteRun
+    ? recoverExecutionState(context.repository, activeRequirementSuiteRun.id)
     : undefined;
   const testDataTasks = context.repository.testDataTasks.filter(
     (item) => item.knowledgeProjectId === projectId
@@ -5420,11 +5416,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
             )
               ? context.runLedger.summary(activeRequirementSuiteRun.id).currentProgress
               : undefined,
-            possiblyStalled: runLedgerEntries.some(
-              (entry) => entry.requirementSuiteRunId === activeRequirementSuiteRun.id
-            )
-              ? context.runLedger.summary(activeRequirementSuiteRun.id).possiblyStalled
-              : false,
+            possiblyStalled: activeRequirementExecutionRecovery?.possiblyStalled ?? false,
             executionRecovery: activeRequirementExecutionRecovery
           }
         : undefined
