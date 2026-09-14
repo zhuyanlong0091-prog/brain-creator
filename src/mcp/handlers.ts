@@ -63,6 +63,10 @@ import {
 } from "../storage/artifactWorkspace.js";
 import { writeStaticSuiteExecutionReport } from "../execution/staticSuiteReport.js";
 import { writeStaticDocumentSuiteReport } from "../execution/staticDocumentSuiteReport.js";
+import type {
+  ExecutionPostconditionVerifier,
+  PostconditionVerification
+} from "../execution/postconditionVerifier.js";
 import {
   browserObservationCapability,
   playwrightTestArgs
@@ -214,6 +218,7 @@ export type BrainCreatorMcpContext = {
   authStateMaterializer: AuthStateMaterializer;
   authStateRefresher?: AuthStateRefresher;
   authRefreshRegistry: AuthStateRefreshRegistry;
+  postconditionVerifier?: ExecutionPostconditionVerifier;
   authVerificationCache: Map<string, number>;
   feishuReader?: RequirementSourceReader;
   runtimeConfiguration?: RuntimeConfiguration;
@@ -247,6 +252,7 @@ type CreateContextInput = {
   authRefreshRegistry?: AuthStateRefreshRegistry;
   authRefreshAdapters?: AuthRefreshAdapter[];
   testDataProviders?: TestDataProvider[];
+  postconditionVerifier?: ExecutionPostconditionVerifier;
   knowledgeDir?: string;
   feishuReader?: RequirementSourceReader;
   systemExplorer?: SystemExplorer;
@@ -390,6 +396,7 @@ export function createBrainCreatorMcpContext(
     authStateMaterializer,
     authStateRefresher: input.authStateRefresher,
     authRefreshRegistry: input.authRefreshRegistry ?? createRuntimeAuthRefreshRegistry(),
+    postconditionVerifier: input.postconditionVerifier,
     authVerificationCache: new Map(),
     feishuReader: input.feishuReader ?? configuredFeishuReader(initialRuntimeEnvironment),
     runtimeConfiguration: initialRuntimeConfiguration,
@@ -2009,7 +2016,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
   };
 }
 
-function recordExecutionActionFacade(
+async function recordExecutionActionFacade(
   context: BrainCreatorMcpContext,
   input: Record<string, unknown>,
   operation: "record-execution-action" | "reconcile-execution-action"
@@ -2056,6 +2063,9 @@ function recordExecutionActionFacade(
     : executionActionPhaseArg(input, "actionPhase");
   const actionKey = stringArg(input, "actionKey");
   const actionSemantic = stringArg(input, "actionSemantic");
+  let actionPostcondition = optionalStringArg(input, "actionPostcondition");
+  let actionEvidenceRefs = stringArrayArg(input, "actionEvidenceRefs");
+  let postconditionVerification: PostconditionVerification | undefined;
   if (operation === "reconcile-execution-action") {
     if (
       requestedPhase &&
@@ -2077,17 +2087,86 @@ function recordExecutionActionFacade(
         nextAction: "Confirm the postcondition evidence before allowing the suite to continue."
       };
     }
-    if (stringArrayArg(input, "actionEvidenceRefs").length === 0) {
+    const runId = requirementSuiteRunId ?? caseSuiteId!;
+    const previousAction = context.runLedger.latestAction(runId, actionKey);
+    actionPostcondition = actionPostcondition ?? previousAction?.actionPostcondition;
+    if (optionalBooleanArg(input, "autoVerify")) {
+      if (!actionPostcondition) {
+        throw new Error("Automatic reconciliation requires actionPostcondition or a pending action postcondition");
+      }
+      const verification = context.postconditionVerifier
+        ? await context.postconditionVerifier({
+            systemId: resolvedSystemId,
+            requirementSuiteRunId,
+            caseSuiteId,
+            executableCaseId,
+            caseNo,
+            actionKey,
+            actionSemantic,
+            entityReference: optionalStringArg(input, "entityReference"),
+            postcondition: actionPostcondition
+          }).catch((error) => ({
+            status: "unavailable" as const,
+            reason: error instanceof Error ? error.message : String(error)
+          }))
+        : {
+            status: "unavailable" as const,
+            reason: "No postcondition verifier is configured for this runtime."
+          };
+      const safeVerification = redactPostconditionVerification(
+        context,
+        resolvedSystemId,
+        verification
+      );
+      postconditionVerification = safeVerification;
+      if (safeVerification.status !== "confirmed") {
+        const entry = context.runLedger.recordAction({
+          runType: run ? "requirement-suite" : "document-suite",
+          knowledgeProjectId: run?.knowledgeProjectId,
+          systemId: resolvedSystemId,
+          requirementSuiteRunId,
+          caseSuiteId,
+          caseSourceId: suite?.sourceId,
+          executableCaseId,
+          caseNo,
+          stepId: optionalStringArg(input, "actionStepId"),
+          stepTitle: optionalStringArg(input, "actionStepTitle"),
+          actionKey,
+          phase: "reconciliation-required",
+          actionSemantic,
+          entityReference: optionalStringArg(input, "entityReference"),
+          postcondition: actionPostcondition,
+          evidenceRefs: safeVerification.evidenceRefs ?? [],
+          operator: optionalStringArg(input, "operator"),
+          provider: optionalStringArg(input, "provider"),
+          sessionId: optionalStringArg(input, "sessionId"),
+          traceId: optionalStringArg(input, "traceId")
+        });
+        return {
+          status: "waiting",
+          action: entry,
+          verification: safeVerification,
+          pendingAction: {
+            actionKey: entry.actionKey,
+            phase: entry.actionPhase,
+            nextAction: "reconcile-action"
+          },
+          nextAction: "reconcile-action"
+        };
+      }
+      actionEvidenceRefs = safeVerification.evidenceRefs ?? [];
+      if (actionEvidenceRefs.length === 0) {
+        throw new Error("Confirmed postcondition verification must return action evidence references");
+      }
+    } else if (actionEvidenceRefs.length === 0) {
       throw new Error("Action reconciliation requires actionEvidenceRefs");
     }
-    if (!optionalStringArg(input, "actionPostcondition")) {
-      throw new Error("Action reconciliation requires actionPostcondition");
-    }
+    if (!actionPostcondition) throw new Error("Action reconciliation requires actionPostcondition");
   } else if (phase === "confirmed") {
     if (!optionalStringArg(input, "actionPostcondition")) {
       throw new Error("Confirmed execution action requires actionPostcondition");
     }
-    if (stringArrayArg(input, "actionEvidenceRefs").length === 0) {
+    if (actionEvidenceRefs.length === 0) {
       throw new Error("Confirmed execution action requires actionEvidenceRefs");
     }
   } else if (phase === "reconciled") {
@@ -2109,8 +2188,8 @@ function recordExecutionActionFacade(
     phase: operation === "reconcile-execution-action" ? "reconciled" : phase,
     actionSemantic,
     entityReference: optionalStringArg(input, "entityReference"),
-    postcondition: optionalStringArg(input, "actionPostcondition"),
-    evidenceRefs: stringArrayArg(input, "actionEvidenceRefs"),
+    postcondition: actionPostcondition,
+    evidenceRefs: actionEvidenceRefs,
     operator: optionalStringArg(input, "operator"),
     provider: optionalStringArg(input, "provider"),
     sessionId: optionalStringArg(input, "sessionId"),
@@ -2123,6 +2202,7 @@ function recordExecutionActionFacade(
   return {
     status: operation === "reconcile-execution-action" ? "reconciled" : waiting ? "waiting" : "recorded",
     action: entry,
+    ...(postconditionVerification ? { verification: postconditionVerification } : {}),
     ...(waiting ? {
       pendingAction: {
         actionKey: entry.actionKey,
@@ -8637,6 +8717,23 @@ function redactHostAgentText(
   text: string
 ) {
   return redactSensitiveText(text, protectedSecretsForSystem(context, systemId));
+}
+
+function redactPostconditionVerification(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  verification: PostconditionVerification
+) {
+  const redact = (value?: string) =>
+    value === undefined
+      ? undefined
+      : redactSensitiveText(value, protectedSecretsForSystem(context, systemId));
+  return {
+    ...verification,
+    actualResult: redact(verification.actualResult),
+    reason: redact(verification.reason),
+    evidenceRefs: verification.evidenceRefs?.map((reference) => redact(reference)!)
+  };
 }
 
 function assertWorkspaceOutputPaths(workDir: string, paths: string[] | undefined) {

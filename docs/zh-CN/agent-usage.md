@@ -161,7 +161,7 @@ Planner、Generator、Reporter 和 Suite 产物统一归属到 `.brain-creator/a
 
 文档用例套件也使用同一套离线产物约定。报告位于 `.brain-creator/artifacts/<system>/document-<source>/<suite>/report/suite-report.html`，`bc_run` 和 `bc_status` 会返回 `reportPath`；套件等待或恢复时，报告仍会保留待执行用例及其未执行原因。
 
-所有可能改变业务状态的浏览器或接口动作，都要使用稳定的 `actionKey` 记录生命周期：发送前记录 `planned`，请求发出后记录 `sent`，只有观察到后置状态后才能记录 `confirmed` 或 `reconciliation-required`。如果在 `sent` 之后进程或浏览器中断，Brain Creator 会在 `bc_status.executionTasks.active.pendingAction` 中展示待核对动作，并让 `bc_run` 停在 `reconcile-action`，不会直接重复提交。查询目标系统后，使用 `bc_prepare action=reconcile-execution-action confirm=true`，提交 `actionPostcondition` 和不含敏感信息的 `actionEvidenceRefs`。响应丢失本身既不能证明成功，也不能证明失败。
+所有可能改变业务状态的浏览器或接口动作，都要使用稳定的 `actionKey` 记录生命周期：发送前记录 `planned`，请求发出后记录 `sent`，只有观察到后置状态后才能记录 `confirmed` 或 `reconciliation-required`。如果在 `sent` 之后进程或浏览器中断，Brain Creator 会在 `bc_status.executionTasks.active.pendingAction` 中展示待核对动作，并让 `bc_run` 停在 `reconcile-action`，不会直接重复提交。查询目标系统后，使用 `bc_prepare action=reconcile-execution-action confirm=true`，提交 `actionPostcondition` 和不含敏感信息的 `actionEvidenceRefs`。响应丢失本身既不能证明成功，也不能证明失败。运行时可以注入后置条件验证器，使用同一动作并传入 `autoVerify=true` 自动核对；如果没有配置验证器，或验证器无法以证据确认后置状态，动作会继续等待人工复核，不会被标记为成功。
 
 `observationMode` 只控制进度消息粒度，不会打开浏览器窗口。用户明确要求旁观时，预览和确认执行都传入 `browserMode=observe`。运行中的 Suite 不允许切换模式；Host Agent 续跑、Healer 重试、文档套件续跑和 Bug 回归都会继承已选模式。观察模式必须运行在交互式桌面会话中；CI、Windows 服务会话或缺少 `DISPLAY/WAYLAND_DISPLAY` 的 Linux 会返回可操作的能力阻断，不会静默降级。可见窗口只能辅助判断执行轨迹，最终结论仍以 Reporter、断言、截图和 trace 为准。
 

@@ -97,6 +97,154 @@ describe("execution action facade", () => {
       .toHaveLength(2);
   });
 
+  it("reconciles a pending action after an injected postcondition verifier confirms it", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.requirementSuiteRuns.push({
+      id: "suite-orders",
+      knowledgeProjectId: "project-orders",
+      systemId: "system-orders",
+      status: "running",
+      currentExecutableCaseId: "case-submit",
+      continueOnBlocked: false,
+      allowCreateTestData: false,
+      total: 1,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: [{
+        executableCaseId: "case-submit",
+        title: "Submit order",
+        order: 1,
+        status: "running",
+        gapIds: [],
+        attempts: []
+      }],
+      createdAt: "2026-09-14T00:00:00.000Z",
+      updatedAt: "2026-09-14T00:00:01.000Z"
+    });
+    const context = contextFor(repository);
+    const postconditionCalls: string[] = [];
+    context.postconditionVerifier = async (input) => {
+      postconditionCalls.push(input.postcondition);
+      return {
+        status: "confirmed",
+        actualResult: "Order status is submitted",
+        evidenceRefs: ["evidence:order-submitted"],
+        checkedAt: "2026-09-14T00:00:02.000Z"
+      };
+    };
+
+    context.runLedger.recordAction({
+      runType: "requirement-suite",
+      knowledgeProjectId: "project-orders",
+      systemId: "system-orders",
+      requirementSuiteRunId: "suite-orders",
+      executableCaseId: "case-submit",
+      actionKey: "plan-submit:step-submit",
+      phase: "sent",
+      actionSemantic: "Submit order",
+      postcondition: "Order status is submitted"
+    });
+
+    const result = readResult(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "reconcile-execution-action",
+      responseMode: "full",
+      confirm: true,
+      autoVerify: true,
+      requirementSuiteRunId: "suite-orders",
+      systemId: "system-orders",
+      executableCaseId: "case-submit",
+      actionKey: "plan-submit:step-submit",
+      actionSemantic: "Submit order"
+    }));
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual(expect.objectContaining({
+      status: "reconciled",
+      nextAction: "continue-requirement-suite",
+      verification: expect.objectContaining({
+        status: "confirmed",
+        evidenceRefs: ["evidence:order-submitted"]
+      })
+    }));
+    expect(postconditionCalls).toEqual(["Order status is submitted"]);
+    expect(context.runLedger.latestUnresolvedAction("suite-orders")).toBeUndefined();
+    expect(repository.runLedgerEntries.at(-1)).toEqual(expect.objectContaining({
+      actionPhase: "reconciled",
+      actionEvidenceRefs: ["evidence:order-submitted"]
+    }));
+  });
+
+  it("keeps a pending action blocked when automatic postcondition verification is unavailable", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.requirementSuiteRuns.push({
+      id: "suite-orders",
+      knowledgeProjectId: "project-orders",
+      systemId: "system-orders",
+      status: "running",
+      continueOnBlocked: false,
+      allowCreateTestData: false,
+      total: 1,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: [{
+        executableCaseId: "case-submit",
+        title: "Submit order",
+        order: 1,
+        status: "running",
+        gapIds: [],
+        attempts: []
+      }],
+      createdAt: "2026-09-14T00:00:00.000Z",
+      updatedAt: "2026-09-14T00:00:01.000Z"
+    });
+    const context = contextFor(repository);
+    context.runLedger.recordAction({
+      runType: "requirement-suite",
+      knowledgeProjectId: "project-orders",
+      systemId: "system-orders",
+      requirementSuiteRunId: "suite-orders",
+      executableCaseId: "case-submit",
+      actionKey: "plan-submit:step-submit",
+      phase: "sent",
+      actionSemantic: "Submit order",
+      postcondition: "Order status is submitted"
+    });
+
+    const result = readResult(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "reconcile-execution-action",
+      responseMode: "full",
+      confirm: true,
+      autoVerify: true,
+      requirementSuiteRunId: "suite-orders",
+      systemId: "system-orders",
+      executableCaseId: "case-submit",
+      actionKey: "plan-submit:step-submit",
+      actionSemantic: "Submit order"
+    }));
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual(expect.objectContaining({
+      status: "waiting",
+      nextAction: "reconcile-action",
+      verification: expect.objectContaining({
+        status: "unavailable",
+        reason: "No postcondition verifier is configured for this runtime."
+      })
+    }));
+    expect(context.runLedger.latestUnresolvedAction("suite-orders")).toEqual(
+      expect.objectContaining({
+        actionKey: "plan-submit:step-submit",
+        actionPhase: "reconciliation-required"
+      })
+    );
+  });
+
   it("rejects actions that claim another system or case", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     repository.requirementSuiteRuns.push({

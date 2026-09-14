@@ -266,6 +266,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       actionStepTitle: z.string().max(500).optional(),
       actionPostcondition: z.string().max(1000).optional(),
       actionEvidenceRefs: z.array(z.string()).default([]),
+      autoVerify: z.boolean().default(false),
       requirementSuiteRunId: z.string().optional(),
       caseSuiteId: z.string().optional(),
       caseNo: z.string().optional(),
