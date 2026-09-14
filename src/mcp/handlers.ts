@@ -94,6 +94,10 @@ import {
   recoverExecutionState
 } from "../knowledge/executionRecovery.js";
 import {
+  projectExecutionTasks,
+  type UnifiedExecutionTask
+} from "../knowledge/executionTaskProjection.js";
+import {
   classifyExecutionFailure as classifyFailure
 } from "../knowledge/failureClassifier.js";
 import {
@@ -133,10 +137,12 @@ import {
   type MutationOutcome
 } from "../brain/scenarioAssurance.js";
 import { EvaluationIntegrityService } from "../evaluation/evaluationIntegrity.js";
+import { calculateEvaluationTrialMetrics } from "../evaluation/evaluationMetrics.js";
 import { RequirementGateService } from "../evaluation/requirementGate.js";
 import { parseCaseSource, summarizeDocumentCases, type ParsedCaseSource } from "../caseSource/parser.js";
 import { writeXlsxCaseSourceResults } from "../caseSource/writeBack.js";
 import { id } from "../shared/id.js";
+import { readRuntimeIdentity } from "../shared/runtimeIdentity.js";
 import { resolveProtectedStorageStatePath } from "../shared/authStorage.js";
 import { decryptSecrets } from "../shared/crypto.js";
 import { redactSensitiveText, scanSensitivePatterns, scanSensitiveValues } from "../shared/secretScan.js";
@@ -450,7 +456,11 @@ export async function handleBrainCreatorTool(
       case "bc_intent_preview":
         return textResult(intentPreviewFacade(context, input));
       case "bc_status":
-        return facadeTextResult(await statusFacade(context, input), input);
+        return facadeTextResult({
+          ...await statusFacade(context, input),
+          runtimeIdentity: readRuntimeIdentity({ workspace: context.workDir, schemaVersion: context.repository.schemaVersion,
+            provider: context.agentBridge?.provider ?? context.runtimeConfiguration?.bridgeProvider ?? "disabled", processKind: "mcp" })
+        }, input);
       case "bc_run":
         return facadeTextResult(
           await runWithProgress(context, input, request),
@@ -973,17 +983,30 @@ function intentPreviewFacade(context: BrainCreatorMcpContext, input: Record<stri
 
 async function prepareFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const action = prepareActionArg(input, "action");
+  if (action === "record-execution-action" || action === "reconcile-execution-action") {
+    return recordExecutionActionFacade(context, input, action);
+  }
   if (action === "start-evaluation-trial") {
+    const requirementSourceId = stringArg(input, "requirementSourceId");
+    const source = context.repository.requirementSources.find((item) => item.id === requirementSourceId);
+    const approvalReceiptId = optionalStringArg(input, "approvalReceiptId");
+    if (approvalReceiptId) {
+      if (!source?.latestRequirementSetId) throw new Error("Evaluation trial approval requires a source requirement set");
+      context.requirementGate.verifyApprovalReceipt(source.latestRequirementSetId, approvalReceiptId);
+    }
     return context.evaluationIntegrity.startTrial({
       comparisonGroupId: stringArg(input, "comparisonGroupId"),
       knowledgeProjectId: stringArg(input, "knowledgeProjectId"),
       systemId: optionalStringArg(input, "systemId"),
-      requirementSourceId: stringArg(input, "requirementSourceId"),
+      requirementSourceId,
       provider: evaluationProviderArg(input, "evaluationProvider"),
       workspacePath: stringArg(input, "evaluationWorkspacePath"),
       storePath: stringArg(input, "evaluationStorePath"),
       codeRevision: stringArg(input, "codeRevision"),
-      runtimeVersions: recordArg(input, "runtimeVersions")
+      runtimeVersions: recordArg(input, "runtimeVersions"),
+      runtimeBuildIdentity: evaluationRuntimeBuildIdentity(context),
+      businessScenarioIds: stringArrayArg(input, "businessScenarioIds"),
+      approvalReceiptId
     });
   }
   if (action === "checkpoint-evaluation-trial") {
@@ -1000,6 +1023,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
       {
         codeRevision: stringArg(input, "codeRevision"),
         runtimeVersions: recordArg(input, "runtimeVersions")
+        ,runtimeBuildIdentity: evaluationRuntimeBuildIdentity(context)
       }
     );
   }
@@ -1007,7 +1031,8 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     return context.evaluationIntegrity.completeTrial(
       stringArg(input, "evaluationTrialId"),
       stringArg(input, "codeRevision"),
-      recordArg(input, "runtimeVersions")
+      recordArg(input, "runtimeVersions"),
+      evaluationRuntimeBuildIdentity(context)
     );
   }
   if (action === "record-evaluation-intervention") {
@@ -1983,6 +2008,131 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
   };
 }
 
+function recordExecutionActionFacade(
+  context: BrainCreatorMcpContext,
+  input: Record<string, unknown>,
+  operation: "record-execution-action" | "reconcile-execution-action"
+) {
+  const requirementSuiteRunId = optionalStringArg(input, "requirementSuiteRunId");
+  const caseSuiteId = optionalStringArg(input, "caseSuiteId");
+  if (Boolean(requirementSuiteRunId) === Boolean(caseSuiteId)) {
+    throw new Error(
+      "Execution action requires exactly one of requirementSuiteRunId or caseSuiteId"
+    );
+  }
+
+  const run = requirementSuiteRunId
+    ? context.repository.requirementSuiteRuns.find((item) => item.id === requirementSuiteRunId)
+    : undefined;
+  const suite = caseSuiteId
+    ? context.repository.caseSuites.find((item) => item.id === caseSuiteId)
+    : undefined;
+  const systemId = optionalStringArg(input, "systemId");
+  const resolvedSystemId = run?.systemId ?? suite?.systemId;
+  if (!resolvedSystemId) {
+    throw new Error("Execution suite was not found");
+  }
+  if (systemId && systemId !== resolvedSystemId) {
+    throw new Error("Execution action system does not match the suite system");
+  }
+  if (requirementSuiteRunId && !run) throw new Error("Requirement suite run not found");
+  if (caseSuiteId && !suite) throw new Error("Document suite not found");
+
+  const executableCaseId = optionalStringArg(input, "executableCaseId");
+  const caseNo = optionalStringArg(input, "caseNo");
+  if (run && executableCaseId && !run.caseRuns.some((item) => item.executableCaseId === executableCaseId)) {
+    throw new Error("Execution action case does not belong to the requirement suite");
+  }
+  if (suite && caseNo && !suite.selectedCaseNos.includes(caseNo)) {
+    throw new Error("Execution action case does not belong to the document suite");
+  }
+  if (run && caseNo) throw new Error("Requirement suite actions must use executableCaseId");
+  if (suite && executableCaseId) throw new Error("Document suite actions must use caseNo");
+
+  const requestedPhase = optionalStringArg(input, "actionPhase");
+  const phase = operation === "reconcile-execution-action"
+    ? "reconciled" as const
+    : executionActionPhaseArg(input, "actionPhase");
+  const actionKey = stringArg(input, "actionKey");
+  const actionSemantic = stringArg(input, "actionSemantic");
+  if (operation === "reconcile-execution-action") {
+    if (
+      requestedPhase &&
+      requestedPhase !== "sent" &&
+      requestedPhase !== "reconciliation-required"
+    ) {
+      throw new Error("Reconciliation must resolve a sent or reconciliation-required action");
+    }
+    if (optionalBooleanArg(input, "confirm") !== true) {
+      return {
+        status: "preview",
+        actionKey,
+        actionSemantic,
+        requirementSuiteRunId,
+        caseSuiteId,
+        executableCaseId,
+        caseNo,
+        requiresConfirmation: true,
+        nextAction: "Confirm the postcondition evidence before allowing the suite to continue."
+      };
+    }
+    if (stringArrayArg(input, "actionEvidenceRefs").length === 0) {
+      throw new Error("Action reconciliation requires actionEvidenceRefs");
+    }
+    if (!optionalStringArg(input, "actionPostcondition")) {
+      throw new Error("Action reconciliation requires actionPostcondition");
+    }
+  } else if (phase === "confirmed") {
+    if (!optionalStringArg(input, "actionPostcondition")) {
+      throw new Error("Confirmed execution action requires actionPostcondition");
+    }
+    if (stringArrayArg(input, "actionEvidenceRefs").length === 0) {
+      throw new Error("Confirmed execution action requires actionEvidenceRefs");
+    }
+  } else if (phase === "reconciled") {
+    throw new Error("Use reconcile-execution-action for the reconciled phase");
+  }
+
+  const entry = context.runLedger.recordAction({
+    runType: run ? "requirement-suite" : "document-suite",
+    knowledgeProjectId: run?.knowledgeProjectId,
+    systemId: resolvedSystemId,
+    requirementSuiteRunId,
+    caseSuiteId,
+    caseSourceId: suite?.sourceId,
+    executableCaseId,
+    caseNo,
+    stepId: optionalStringArg(input, "actionStepId"),
+    stepTitle: optionalStringArg(input, "actionStepTitle"),
+    actionKey,
+    phase: operation === "reconcile-execution-action" ? "reconciled" : phase,
+    actionSemantic,
+    entityReference: optionalStringArg(input, "entityReference"),
+    postcondition: optionalStringArg(input, "actionPostcondition"),
+    evidenceRefs: stringArrayArg(input, "actionEvidenceRefs"),
+    operator: optionalStringArg(input, "operator"),
+    provider: optionalStringArg(input, "provider"),
+    sessionId: optionalStringArg(input, "sessionId"),
+    traceId: optionalStringArg(input, "traceId")
+  });
+  const waiting = entry.actionPhase === "sent" || entry.actionPhase === "reconciliation-required";
+  const continuationAction = run
+    ? "continue-requirement-suite"
+    : "continue-case-source-suite";
+  return {
+    status: operation === "reconcile-execution-action" ? "reconciled" : waiting ? "waiting" : "recorded",
+    action: entry,
+    ...(waiting ? {
+      pendingAction: {
+        actionKey: entry.actionKey,
+        phase: entry.actionPhase,
+        nextAction: "reconcile-action"
+      }
+    } : {}),
+    nextAction: waiting ? "reconcile-action" : continuationAction
+  };
+}
+
 async function statusFacade(context: BrainCreatorMcpContext, input: Record<string, unknown>) {
   const knowledgeProjectId = optionalStringArg(input, "knowledgeProjectId");
   if (knowledgeProjectId) {
@@ -2018,6 +2168,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
   const requirementSuiteRuns = context.repository.requirementSuiteRuns.filter(
     (run) => run.systemId === systemId
   );
+  const executionTasks = projectExecutionTasks(context.repository, { systemId });
   const scheduledRuns = requirementSuiteRuns
     .filter((run) => Boolean(run.stabilitySchedule))
     .map((run) => {
@@ -2132,7 +2283,8 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     openGaps: snapshot.openGaps.length,
     unfinishedSuites: unfinishedSuites.length,
     nextAction,
-    activeSuite: activeSuiteSummary
+    activeSuite: activeSuiteSummary,
+    activeExecutionTask: executionTasks.active
   });
   return {
     ...snapshot,
@@ -2206,6 +2358,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
         (item) => item.role === "evaluator" && item.available
       )
     },
+    executionTasks,
     brainRuntime: brainRuntimeStatus(context, systemId),
     requirementSuiteRuns: {
       total: requirementSuiteRuns.length,
@@ -2620,6 +2773,44 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     context.service.enableCaseSuiteContinueOnBlocked(suite.id);
   }
   ensureDocumentSuiteLedger(context, suite);
+  const pendingAction = context.runLedger.latestUnresolvedAction(suite.id);
+  if (pendingAction) {
+    const pendingCase = pendingAction.caseNo
+      ? parsed.cases.find((documentCase) => documentCase.caseNo === pendingAction.caseNo)
+      : undefined;
+    const waitingSuite = suite.status === "waiting-for-agent"
+      ? suite
+      : context.service.updateCaseSuiteStatus(suite.id, "waiting-for-agent");
+    return {
+      mode: "case-source-suite",
+      status: "waiting",
+      source: caseSource,
+      authState,
+      suite: waitingSuite,
+      currentCase: pendingCase
+        ? {
+            caseNo: pendingCase.caseNo,
+            title: pendingCase.title,
+            status: "waiting-for-agent",
+            gapIds: []
+          }
+        : undefined,
+      pendingAction: {
+        actionKey: pendingAction.actionKey,
+        phase: pendingAction.actionPhase,
+        stepId: pendingAction.stepId,
+        actionSemantic: pendingAction.actionSemantic,
+        entityReference: pendingAction.entityReference,
+        postcondition: pendingAction.actionPostcondition,
+        evidenceRefs: pendingAction.actionEvidenceRefs ?? [],
+        nextAction: "reconcile-action"
+      },
+      waitReason:
+        "A write action was sent but its result was not confirmed. Query the postcondition before retrying.",
+      progress: caseSuiteProgress(context, waitingSuite),
+      nextAction: "reconcile-action"
+    };
+  }
   if (requestedSuiteId && optionalBooleanArg(input, "resume")) {
     recordDocumentSuiteLedger(context, suite, {
       event: "suite-resumed",
@@ -3861,6 +4052,24 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     };
   }
   const requestedSuiteRunId = optionalStringArg(input, "suiteId");
+  const requestedEvaluationTrialId = optionalStringArg(input, "evaluationTrialId");
+  if (requestedEvaluationTrialId && !selectedSystemId) {
+    throw new Error("An evaluation trial requirement suite requires a business system");
+  }
+  const requestedRequirementSetIds = stringArrayArg(input, "requirementSetIds");
+  const requestedEvaluationBinding = requestedEvaluationTrialId
+    ? context.evaluationIntegrity.validateExecutionBinding({
+        trialId: requestedEvaluationTrialId,
+        knowledgeProjectId: projectId,
+        systemId: selectedSystemId!,
+        executableCaseIds: candidates.map((item) => item.id),
+        requirementSetIds: requestedRequirementSetIds,
+        runtimeBuildIdentity: evaluationRuntimeBuildIdentity(context)
+      })
+    : undefined;
+  if (requestedEvaluationBinding && !requestedEvaluationBinding.valid) {
+    throw new Error(`Evaluation trial binding is invalid: ${requestedEvaluationBinding.reasons.join("; ")}`);
+  }
   const activeRequirementSuiteRun = requestedSuiteRunId
     ? context.requirementSuiteRuns.get(requestedSuiteRunId)
     : context.requirementSuiteRuns
@@ -3889,6 +4098,22 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
       throw new Error(
         "Requirement suite run belongs to another business system"
       );
+    }
+    if (requestedEvaluationTrialId && activeRequirementSuiteRun.evaluationTrialId !== requestedEvaluationTrialId) {
+      throw new Error("Requirement suite run belongs to another evaluation trial");
+    }
+    if (!requestedEvaluationTrialId && activeRequirementSuiteRun.evaluationTrialId) {
+      const existingBinding = context.evaluationIntegrity.validateExecutionBinding({
+        trialId: activeRequirementSuiteRun.evaluationTrialId,
+        knowledgeProjectId: projectId,
+        systemId: activeRequirementSuiteRun.systemId,
+        executableCaseIds: activeRequirementSuiteRun.caseRuns.map((item) => item.executableCaseId),
+        requirementSetIds: activeRequirementSuiteRun.requirementSetIds,
+        runtimeBuildIdentity: evaluationRuntimeBuildIdentity(context)
+      });
+      if (!existingBinding.valid) {
+        throw new Error(`Evaluation trial binding is invalid: ${existingBinding.reasons.join("; ")}`);
+      }
     }
     if (
       authProfileId &&
@@ -4062,7 +4287,17 @@ async function runRequirementSuite(context: BrainCreatorMcpContext, input: Recor
     sessionId: optionalStringArg(input, "sessionId"),
     actorJourney,
     browserMode,
-    requirementSetIds: stringArrayArg(input, "requirementSetIds"),
+    requirementSetIds: requestedRequirementSetIds,
+    ...(requestedEvaluationBinding
+      ? {
+          evaluationTrialId: requestedEvaluationBinding.trial.id,
+          evaluationSourceRevision: requestedEvaluationBinding.trial.sourceRevision,
+          evaluationSourceHash: requestedEvaluationBinding.trial.sourceHash,
+          ...(requestedEvaluationBinding.trial.runtimeBuildIdentity
+            ? { evaluationRuntimeBuildIdentity: requestedEvaluationBinding.trial.runtimeBuildIdentity }
+            : {})
+        }
+      : {}),
     cases: candidates.map((candidate) => ({
       executableCaseId: candidate.id,
       title: candidate.title
@@ -4103,6 +4338,24 @@ async function controlRequirementSuite(
     | "release-scheduled",
   input: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
+  const requestedEvaluationTrialId = optionalStringArg(input, "evaluationTrialId");
+  const validateScheduledEvaluation = (run: RequirementSuiteRun) => {
+    if (requestedEvaluationTrialId && run.evaluationTrialId !== requestedEvaluationTrialId) {
+      throw new Error("Requirement suite run belongs to another evaluation trial");
+    }
+    if (!run.evaluationTrialId) return;
+    const binding = context.evaluationIntegrity.validateExecutionBinding({
+      trialId: run.evaluationTrialId,
+      knowledgeProjectId: run.knowledgeProjectId,
+      systemId: run.systemId,
+      executableCaseIds: run.caseRuns.map((item) => item.executableCaseId),
+      requirementSetIds: run.requirementSetIds,
+      runtimeBuildIdentity: evaluationRuntimeBuildIdentity(context)
+    });
+    if (!binding.valid) {
+      throw new Error(`Evaluation trial binding is invalid: ${binding.reasons.join("; ")}`);
+    }
+  };
   if (action === "claim-next-scheduled") {
     const scheduleOwner = optionalStringArg(input, "scheduleOwner");
     if (!scheduleOwner) throw new Error("scheduleOwner is required for schedule control");
@@ -4110,6 +4363,7 @@ async function controlRequirementSuite(
     const dueRuns = context.requirementSuiteRuns
       .listDueStabilityRuns(projectId)
       .filter((item) => !systemId || item.systemId === systemId)
+      .filter((item) => !requestedEvaluationTrialId || item.evaluationTrialId === requestedEvaluationTrialId)
       .sort((left, right) => left.id.localeCompare(right.id));
     if (!optionalBooleanArg(input, "confirm")) {
       return {
@@ -4134,6 +4388,7 @@ async function controlRequirementSuite(
         nextAction: "Poll again when a scheduled stability run is due."
       };
     }
+    validateScheduledEvaluation(next);
     const claimed = context.requirementSuiteRuns.claimScheduled(next.id, {
       owner: scheduleOwner,
       leaseMs: optionalNumberArg(input, "scheduleLeaseMs")
@@ -4153,6 +4408,7 @@ async function controlRequirementSuite(
     const dueRuns = context.requirementSuiteRuns
       .listDueStabilityRuns(projectId)
       .filter((item) => !systemId || item.systemId === systemId)
+      .filter((item) => !requestedEvaluationTrialId || item.evaluationTrialId === requestedEvaluationTrialId)
       .sort((left, right) => left.id.localeCompare(right.id));
     if (!optionalBooleanArg(input, "confirm")) {
       return {
@@ -4177,6 +4433,7 @@ async function controlRequirementSuite(
         nextAction: "Poll again when a scheduled stability run is due."
       };
     }
+    validateScheduledEvaluation(next);
     const claimed = context.requirementSuiteRuns.claimScheduled(next.id, {
       owner: scheduleOwner,
       leaseMs: optionalNumberArg(input, "scheduleLeaseMs")
@@ -4285,6 +4542,7 @@ async function controlRequirementSuite(
         : "No blocked requirement suite case is available to skip"
     );
   }
+  validateScheduledEvaluation(run);
   if (!optionalBooleanArg(input, "confirm")) {
     return {
       mode: "requirement-suite",
@@ -4334,6 +4592,43 @@ async function executeNextRequirementSuiteCase(
   let requirementSuiteRun = context.requirementSuiteRuns.get(
     requirementSuiteRunId
   );
+  if (requirementSuiteRun.evaluationTrialId) {
+    const binding = context.evaluationIntegrity.validateExecutionBinding({
+      trialId: requirementSuiteRun.evaluationTrialId,
+      knowledgeProjectId: requirementSuiteRun.knowledgeProjectId,
+      systemId: requirementSuiteRun.systemId,
+      executableCaseIds: requirementSuiteRun.caseRuns.map((item) => item.executableCaseId),
+      requirementSetIds: requirementSuiteRun.requirementSetIds,
+      runtimeBuildIdentity: evaluationRuntimeBuildIdentity(context)
+    });
+    if (!binding.valid) {
+      throw new Error(`Evaluation trial binding is invalid: ${binding.reasons.join("; ")}`);
+    }
+  }
+  const pendingAction = context.runLedger.latestUnresolvedAction(
+    requirementSuiteRunId
+  );
+  if (pendingAction) {
+    return {
+      mode: "requirement-suite",
+      status: "waiting",
+      requirementSuiteRun,
+      currentExecutableCaseId: pendingAction.executableCaseId,
+      pendingAction: {
+        actionKey: pendingAction.actionKey,
+        phase: pendingAction.actionPhase,
+        stepId: pendingAction.stepId,
+        actionSemantic: pendingAction.actionSemantic,
+        entityReference: pendingAction.entityReference,
+        postcondition: pendingAction.actionPostcondition,
+        evidenceRefs: pendingAction.actionEvidenceRefs ?? [],
+        nextAction: "reconcile-action"
+      },
+      waitReason:
+        "A write action was sent but its result was not confirmed. Query the postcondition before retrying.",
+      nextAction: "reconcile-action"
+    };
+  }
   const activeCase = requirementSuiteRun.caseRuns.find(
     (item) =>
       item.status === "running" ||
@@ -5243,6 +5538,9 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
     (item) => item.knowledgeProjectId === projectId
   );
   const requirementSuiteRuns = context.requirementSuiteRuns.list(projectId);
+  const executionTasks = projectExecutionTasks(context.repository, {
+    knowledgeProjectId: projectId
+  });
   const stability = summarizeStabilityRuns(
     requirementSuiteRuns,
     context.repository.executionEvidence
@@ -5405,6 +5703,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       activeExplorationTaskId: pendingExplorationTasks.at(-1)?.id,
       activeExplorationPlanId: activeExplorationPlan?.id,
       activeOnboardingPlanId: activeOnboardingPlan?.id,
+      activeExecutionTask: executionTasks.active,
       activeRun: activeRequirementSuiteRun
         ? {
             runId: activeRequirementSuiteRun.id,
@@ -5565,7 +5864,8 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
       brainRuntime: brainRuntimeStatus(
         context,
         project.systemIds.length === 1 ? project.systemIds[0] : undefined
-      )
+      ),
+      executionTasks
     },
     evaluationIntegrity: {
       total: evaluationTrials.length,
@@ -5577,6 +5877,7 @@ function knowledgeStatus(context: BrainCreatorMcpContext, projectId: string) {
         .map((item) => item.id)
     },
     connectors: connectorStatus(context, projectId),
+    executionTasks,
     latestCompileRunId: projectCompileRuns.at(-1)?.id,
     activeExplorationTaskId: pendingExplorationTasks.at(-1)?.id,
     activeExplorationPlanId: activeExplorationPlan?.id,
@@ -5604,8 +5905,15 @@ function knowledgeReview(
         comparisonGroupId: optionalStringArg(input, "comparisonGroupId")
       })
       .filter((item) => !idValue || item.id === idValue);
-    const items = trials.map((trial) => ({
+    const items = trials.map((trial) => {
+      const validation = context.evaluationIntegrity.validateTrial(trial.id, {
+        codeRevision: trial.codeRevision, runtimeVersions: trial.runtimeVersions,
+        runtimeBuildIdentity: evaluationRuntimeBuildIdentity(context)
+      }, false);
+      return ({
       ...trial,
+      validation: { valid: validation.valid, reasons: validation.reasons },
+      approvalReadiness: trial.executionScope?.approvalScopeRef && validation.valid ? "verified-baseline-receipt" : "unverified",
       sourceSnapshot: context.repository.sourceSnapshots.find(
         (item) => item.id === trial.sourceSnapshotId
       ),
@@ -5614,15 +5922,27 @@ function knowledgeReview(
       ),
       interventions: context.repository.interventionRecords.filter(
         (item) => item.trialId === trial.id
-      )
-    }));
+      ),
+      metrics: calculateEvaluationTrialMetrics({
+        trial: validation.valid ? trial : { ...trial, status: "invalidated" },
+        runs: context.repository.requirementSuiteRuns,
+        evidence: context.repository.executionEvidence,
+        conformanceResults: context.repository.conformanceResults,
+        scenarios: context.repository.businessScenarios.filter(
+          (item) => item.knowledgeProjectId === projectId
+        ),
+        executableCases: context.repository.executableCases,
+        interventions: context.repository.interventionRecords
+      })
+    }); });
     return {
       project,
       summary: {
         total: items.length,
         active: items.filter((item) => item.status === "active").length,
         invalidated: items.filter((item) => item.status === "invalidated").length,
-        completed: items.filter((item) => item.status === "completed").length
+        completed: items.filter((item) => item.status === "completed").length,
+        trials: items.map((item) => ({ id: item.id, metrics: item.metrics, approvalReadiness: item.approvalReadiness, validation: item.validation }))
       },
       ...paginateReviewItems(items, input)
     };
@@ -9146,6 +9466,19 @@ function statusUserSummary(state: {
   openGaps: number;
   unfinishedSuites: number;
   nextAction: string;
+  activeExecutionTask?: Pick<
+    UnifiedExecutionTask,
+    | "id"
+    | "kind"
+    | "status"
+    | "stage"
+    | "currentCaseTitle"
+    | "currentStepTitle"
+    | "currentPageUrl"
+    | "waitReason"
+    | "nextAction"
+    | "possiblyStalled"
+  >;
   activeSuite?: {
     suiteId: string;
     status: string;
@@ -9185,6 +9518,9 @@ function statusUserSummary(state: {
     nextAction: state.nextAction,
     nextCommand: nextCommandForAction(state.nextAction),
     nextStep: nextStepForAction(state.nextAction),
+    ...(state.activeExecutionTask
+      ? { activeExecutionTask: state.activeExecutionTask }
+      : {}),
     ...(state.activeSuite ? { activeSuite: state.activeSuite } : {}),
     counts: {
       authProfiles: state.authProfiles,
@@ -9238,6 +9574,25 @@ function statusMarkdown(summary: ReturnType<typeof statusUserSummary>) {
             : []),
           ...(summary.activeSuite.traceId
             ? [`- Active suite trace: ${summary.activeSuite.traceId}`]
+            : [])
+        ]
+      : []),
+    ...(summary.activeExecutionTask
+      ? [
+          `- Active task: ${summary.activeExecutionTask.kind} ${summary.activeExecutionTask.id} (${summary.activeExecutionTask.status})`,
+          `- Active task stage: ${summary.activeExecutionTask.stage}`,
+          ...(summary.activeExecutionTask.currentCaseTitle
+            ? [`- Active task case: ${summary.activeExecutionTask.currentCaseTitle}`]
+            : []),
+          ...(summary.activeExecutionTask.currentStepTitle
+            ? [`- Active task step: ${summary.activeExecutionTask.currentStepTitle}`]
+            : []),
+          ...(summary.activeExecutionTask.waitReason
+            ? [`- Active task waiting: ${summary.activeExecutionTask.waitReason}`]
+            : []),
+          `- Active task next action: ${summary.activeExecutionTask.nextAction}`,
+          ...(summary.activeExecutionTask.possiblyStalled
+            ? ["- Active task warning: possibly stalled"]
             : [])
         ]
       : []),
@@ -10017,6 +10372,7 @@ function compactFacadePayload(data: unknown) {
     ...(typeof record.mode === "string" ? { mode: record.mode } : {}),
     ...(typeof record.stage === "string" ? { stage: record.stage } : {}),
     summary: preferredSummary,
+    ...(record.runtimeIdentity ? { runtimeIdentity: record.runtimeIdentity } : {}),
     ...(typeof record.nextAction === "string" ? { nextAction: record.nextAction } : {}),
     ...(typeof record.requiresConfirmation === "boolean"
       ? { requiresConfirmation: record.requiresConfirmation }
@@ -11391,6 +11747,8 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
       "prepare-test-data",
       "submit-test-data",
       "prepare-execution",
+      "record-execution-action",
+      "reconcile-execution-action",
       "record-observation",
       "record-page-evidence",
       "record-interaction-evidence",
@@ -11443,6 +11801,8 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "prepare-test-data"
     | "submit-test-data"
     | "prepare-execution"
+    | "record-execution-action"
+    | "reconcile-execution-action"
     | "record-observation"
     | "record-page-evidence"
     | "record-interaction-evidence"
@@ -11453,6 +11813,30 @@ function prepareActionArg(input: Record<string, unknown>, key: string) {
     | "reconcile-system-brain"
     | "confirm-semantic-binding"
     | "recompile-stale-cases";
+}
+
+function executionActionPhaseArg(
+  input: Record<string, unknown>,
+  key: string
+) {
+  const value = stringArg(input, key);
+  if (
+    ![
+      "planned",
+      "sent",
+      "confirmed",
+      "reconciliation-required",
+      "reconciled"
+    ].includes(value)
+  ) {
+    throw new Error(`${key} is invalid`);
+  }
+  return value as
+    | "planned"
+    | "sent"
+    | "confirmed"
+    | "reconciliation-required"
+    | "reconciled";
 }
 
 function evaluationProviderArg(input: Record<string, unknown>, key: string) {
@@ -12021,6 +12405,16 @@ function onboardingCreateNextAction(
   if (status === "draft") return "approve-onboarding-plan";
   if (status === "approved") return "start-onboarding-plan";
   return "review-onboarding-plan";
+}
+
+function evaluationRuntimeBuildIdentity(context: BrainCreatorMcpContext) {
+  const identity = readRuntimeIdentity({
+    workspace: context.workDir,
+    schemaVersion: context.repository.schemaVersion,
+    provider: context.agentBridge?.provider ?? context.runtimeConfiguration?.bridgeProvider ?? "disabled",
+    processKind: "mcp"
+  });
+  return identity.buildId;
 }
 
 function gapSeverityArg(input: Record<string, unknown>, key: string) {

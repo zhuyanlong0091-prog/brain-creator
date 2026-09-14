@@ -2,6 +2,7 @@ import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ExecutionProgressEvent,
   ExecutionProgressStatus,
+  RunLedgerActionPhase,
   RunLedgerEntry
 } from "../domain/types.js";
 import { randomUUID } from "node:crypto";
@@ -29,6 +30,30 @@ type AppendExecutionProgressInput = {
   screenshotPath?: string;
   assertionSummary?: string;
   waitReason?: string;
+  operator?: string;
+  provider?: string;
+  sessionId?: string;
+  traceId?: string;
+};
+
+export type RecordExecutionActionInput = {
+  runType?: "requirement-suite" | "document-suite";
+  knowledgeProjectId?: string;
+  systemId: string;
+  requirementSuiteRunId?: string;
+  caseSuiteId?: string;
+  caseSourceId?: string;
+  executableCaseId?: string;
+  caseNo?: string;
+  caseTitle?: string;
+  stepId?: string;
+  stepTitle?: string;
+  actionKey: string;
+  phase: RunLedgerActionPhase;
+  actionSemantic: string;
+  entityReference?: string;
+  postcondition?: string;
+  evidenceRefs?: string[];
   operator?: string;
   provider?: string;
   sessionId?: string;
@@ -64,6 +89,10 @@ export class RunLedgerService {
     const assertionSummary = redact(input.assertionSummary);
     const waitReason = redact(input.waitReason);
     const screenshotPath = redact(input.screenshotPath);
+    const actionSemantic = redact(input.actionSemantic);
+    const entityReference = redact(input.entityReference);
+    const actionPostcondition = redact(input.actionPostcondition);
+    const actionEvidenceRefs = input.actionEvidenceRefs?.map((reference) => redact(reference)!);
     const pageUrl = input.pageUrl
       ? sanitizePageUrl(redact(input.pageUrl)!)
       : undefined;
@@ -98,6 +127,10 @@ export class RunLedgerService {
       ...(assertionSummary === undefined ? {} : { assertionSummary }),
       ...(waitReason === undefined ? {} : { waitReason }),
       ...(screenshotPath === undefined ? {} : { screenshotPath }),
+      ...(actionSemantic === undefined ? {} : { actionSemantic }),
+      ...(entityReference === undefined ? {} : { entityReference }),
+      ...(actionPostcondition === undefined ? {} : { actionPostcondition }),
+      ...(actionEvidenceRefs === undefined ? {} : { actionEvidenceRefs }),
       ...(pageUrl === undefined ? {} : { pageUrl }),
       createdAt
     };
@@ -117,6 +150,58 @@ export class RunLedgerService {
     }));
   }
 
+  recordAction(input: RecordExecutionActionInput): RunLedgerEntry {
+    const actionKey = input.actionKey.trim();
+    const actionSemantic = input.actionSemantic.trim();
+    if (!actionKey) throw new Error("Execution action requires actionKey");
+    if (!actionSemantic) throw new Error("Execution action requires actionSemantic");
+    if (input.evidenceRefs?.some((reference) => !reference.trim())) {
+      throw new Error("Execution action evidence references cannot be empty");
+    }
+    if (
+      (input.phase === "confirmed" || input.phase === "reconciled") &&
+      (!input.postcondition?.trim() || !input.evidenceRefs?.length)
+    ) {
+      throw new Error(`${input.phase} execution action requires postcondition and evidenceRefs`);
+    }
+
+    const previous = this.latestActionForRun(runIdFromInput(input), actionKey);
+    validateActionTransition(previous?.actionPhase, input.phase);
+
+    const event = actionEvent(input.phase);
+    const waiting = input.phase === "sent" || input.phase === "reconciliation-required";
+    return this.append({
+      runType: input.runType,
+      knowledgeProjectId: input.knowledgeProjectId,
+      systemId: input.systemId,
+      requirementSuiteRunId: input.requirementSuiteRunId,
+      caseSuiteId: input.caseSuiteId,
+      caseSourceId: input.caseSourceId,
+      executableCaseId: input.executableCaseId,
+      caseNo: input.caseNo,
+      caseTitle: input.caseTitle,
+      stepId: input.stepId,
+      stepTitle: input.stepTitle,
+      actionKey,
+      actionPhase: input.phase,
+      actionSemantic,
+      entityReference: input.entityReference,
+      actionPostcondition: input.postcondition,
+      actionEvidenceRefs: input.evidenceRefs,
+      event,
+      scope: input.executableCaseId || input.caseNo ? "case" : "suite",
+      stage: "execution",
+      toStatus: waiting ? "waiting-for-action-reconciliation" : "running",
+      progressStatus: waiting ? "waiting" : "running",
+      waitReason: waiting
+        ? "A write action was sent but its result was not confirmed. Query the postcondition before retrying."
+        : undefined,
+      message: waiting
+        ? `Action ${actionKey} was sent; reconcile its postcondition before retrying.`
+        : `Action ${actionKey} is ${input.phase}.`
+    });
+  }
+
   list(filter: RunLedgerFilter = {}): RunLedgerEntry[] {
     return this.repository.runLedgerEntries.filter(
       (entry) =>
@@ -131,6 +216,34 @@ export class RunLedgerService {
           entry.executableCaseId === filter.executableCaseId) &&
         (!filter.caseNo || entry.caseNo === filter.caseNo)
     );
+  }
+
+  latestAction(runId: string, actionKey: string) {
+    return this.latestActionForRun(runId, actionKey);
+  }
+
+  latestUnresolvedAction(runId: string) {
+    const latestByKey = new Map<string, RunLedgerEntry>();
+    for (const entry of this.repository.runLedgerEntries) {
+      if (runIdOf(entry) !== runId || !entry.actionKey || !entry.actionPhase) continue;
+      latestByKey.set(entry.actionKey, entry);
+    }
+    return [...latestByKey.values()]
+      .filter((entry) =>
+        entry.actionPhase === "sent" || entry.actionPhase === "reconciliation-required"
+      )
+      .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0))
+      .at(-1);
+  }
+
+  private latestActionForRun(runId: string, actionKey: string) {
+    return this.repository.runLedgerEntries
+      .filter((entry) =>
+        runIdOf(entry) === runId &&
+        entry.actionKey === actionKey &&
+        entry.actionPhase !== undefined
+      )
+      .at(-1);
   }
 
   summary(runId: string) {
@@ -251,6 +364,38 @@ function runTypeOf(entry: RunLedgerEntry) {
 
 function runIdOf(entry: RunLedgerEntry) {
   return entry.caseSuiteId ?? entry.requirementSuiteRunId;
+}
+
+function runIdFromInput(input: Pick<RunLedgerEntry, "requirementSuiteRunId" | "caseSuiteId">) {
+  const runId = input.caseSuiteId ?? input.requirementSuiteRunId;
+  if (!runId) throw new Error("Execution action requires a suite run identity");
+  return runId;
+}
+
+function actionEvent(phase: RunLedgerActionPhase): RunLedgerEntry["event"] {
+  if (phase === "planned") return "action-planned";
+  if (phase === "sent") return "action-sent";
+  if (phase === "confirmed") return "action-confirmed";
+  if (phase === "reconciliation-required") return "action-reconciliation-required";
+  return "action-reconciled";
+}
+
+function validateActionTransition(
+  previous: RunLedgerActionPhase | undefined,
+  next: RunLedgerActionPhase
+) {
+  if (!previous) {
+    if (next === "planned" || next === "sent") return;
+    throw new Error(`Execution action cannot start in phase ${next}`);
+  }
+  if (previous === "planned") {
+    if (next === "planned" || next === "sent") return;
+    throw new Error(`Execution action cannot transition from planned to ${next}`);
+  }
+  if (previous === "sent" || previous === "reconciliation-required") {
+    if (next === "confirmed" || next === "reconciliation-required" || next === "reconciled") return;
+  }
+  throw new Error(`Execution action ${previous} is terminal or cannot transition to ${next}`);
 }
 
 function sameRun(

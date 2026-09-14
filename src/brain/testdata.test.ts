@@ -4,11 +4,35 @@ import type { TestDataProfile } from "../domain/types.js";
 import {
   buildScenarioDataPlan,
   InMemoryTestDataProvider,
-  TestDataBrainService
+  TestDataBrainService,
+  type TestDataProvider
 } from "./testdata.js";
 import type { BusinessScenario } from "./types.js";
 
 describe("Testdata Brain", () => {
+  it("does not release an entity when cleanup returns another entity or only a lookup result", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const provider: TestDataProvider = new InMemoryTestDataProvider("fixture-provider");
+    const service = new TestDataBrainService(repository, [provider]);
+    const entity = await service.create({ systemId: "system-orders", entityType: "order", key: "order-1" });
+    provider.cleanup = async () => ({ status: "cleaned", reference: "system-orders:order:other", sourceRefs: [] });
+    await expect(service.cleanup({ systemId: "system-orders", reference: entity.reference })).rejects.toThrow(/reference/i);
+    expect(repository.businessEntityInstances[0].status).toBe("active");
+    provider.cleanup = async () => ({ status: "found", reference: entity.reference, sourceRefs: [] });
+    await expect(service.cleanup({ systemId: "system-orders", reference: entity.reference })).rejects.toThrow(/status/i);
+    expect(repository.businessEntityInstances[0].status).toBe("active");
+    expect(repository.businessEntityInstances[0].lifecycleEvents?.map((event) => event.operation)).toEqual(["create"]);
+  });
+
+  it("does not accept a verified label when the returned business values contradict the request", async () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    const provider: TestDataProvider = new InMemoryTestDataProvider("fixture-provider");
+    const service = new TestDataBrainService(repository, [provider]);
+    const entity = await service.create({ systemId: "system-orders", entityType: "order", key: "order-1", values: { status: "pending" } });
+    provider.verify = async () => ({ status: "verified", reference: entity.reference, values: { status: "pending" }, sourceRefs: [] });
+    await expect(service.verify({ systemId: "system-orders", reference: entity.reference, expected: { status: "approved" } })).rejects.toThrow(/expected/i);
+    expect(repository.businessEntityInstances[0].lifecycleEvents?.map((event) => event.operation)).toEqual(["create"]);
+  });
   it("keeps entity dependencies explicit and executes the provider lifecycle", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const provider = new InMemoryTestDataProvider("fixture-provider");

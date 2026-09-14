@@ -84,6 +84,26 @@ describe("Facade execution recovery", () => {
     }));
     expect(payload.data.summary.activeRun.executionRecovery.currentPageUrl)
       .toBe("https://orders.example.test/orders/1001?token=%5BREDACTED%5D");
+    expect(payload.data.executionTasks.active).toEqual(expect.objectContaining({
+      id: run.id,
+      kind: "requirement-suite",
+      currentStepId: "step-approval",
+      nextAction: "resume-after-checkpoint"
+    }));
+
+    const summaryResponse = await handleBrainCreatorTool(context, "bc_status", {
+      knowledgeProjectId: project.id,
+      responseMode: "summary"
+    });
+    const summaryPayload = JSON.parse(
+      summaryResponse.content[0].type === "text" ? summaryResponse.content[0].text : "{}"
+    );
+    expect(summaryPayload.data.summary.activeExecutionTask).toEqual(expect.objectContaining({
+      id: run.id,
+      status: "waiting",
+      currentStepTitle: "Waiting for approver",
+      nextAction: "resume-after-checkpoint"
+    }));
   });
 
   it("uses persisted requirement-suite state when no ledger has been written yet", async () => {

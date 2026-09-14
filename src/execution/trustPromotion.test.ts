@@ -9,6 +9,18 @@ import {
 } from "./trustPromotion.js";
 
 describe("scenario execution trust promotion", () => {
+  it("rejects a green reporter whose actual value contradicts the oracle", () => {
+    const value = evidence();
+    value.reporterResult!.assertions[0].actual = "rejected";
+    const result = evaluateScenarioExecutionTrust(input({ evidence: value }));
+    expect(result.record.status).toBe("quarantined");
+    expect(result.reasons).toContain("Business conformance is nonconform; it cannot promote trust.");
+  });
+  it("does not promote a synthetic passing run", () => {
+    const result = evaluateScenarioExecutionTrust(input({ evidence: { ...evidence(), provenance: "synthetic" } }));
+    expect(result.record.status).not.toBe("verified");
+    expect(result.assuranceLevel).toBe("none");
+  });
   it("promotes the first strong observed run to verified", () => {
     const result = evaluateScenarioExecutionTrust(input());
 
@@ -95,15 +107,18 @@ function record(): ScenarioTrustRecord {
   };
 }
 
-function evidence(): Pick<ExecutionEvidence, "status" | "assuranceLevel" | "assertionContracts" | "reporterResult" | "evidenceWarnings" | "coverage" | "steps"> {
+function evidence(): Pick<ExecutionEvidence, "status" | "artifactValidation" | "assuranceLevel" | "assertionContracts" | "reporterResult" | "evidenceWarnings" | "coverage" | "steps"> {
   return {
+    artifactValidation: { status: "valid", files: ["step-01.png", "trace.zip"].map((path) => ({ path, sha256: "a".repeat(64) })), reasons: [] },
     status: "passed",
     assuranceLevel: "strong",
     assertionContracts: [{
       id: "assert-1",
+      stepId: "step-1",
       type: "workflow",
       strength: "strong",
       expected: "approved",
+      oracle: { operator: "equals", expected: "approved", applicable: true, applicabilityRefs: ["requirement:approval"] },
       requirementRefs: ["requirement:approval"],
       evidenceRequirements: ["actual-value", "screenshot", "trace"]
     }],
@@ -116,6 +131,7 @@ function evidence(): Pick<ExecutionEvidence, "status" | "assuranceLevel" | "asse
       durationMs: 10,
       assertions: [{
         id: "assert-1",
+        stepId: "step-1",
         status: "passed",
         actual: "approved",
         evidenceRefs: ["step-01.png", "trace.zip"]

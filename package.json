@@ -32,7 +32,7 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/writeBuildIdentity.mjs",
     "prepack": "npm run build",
     "mcp": "npm run build && node dist/cli/brainCreatorMcp.js",
     "dev:mcp": "node --loader ts-node/esm src/mcp/server.ts",

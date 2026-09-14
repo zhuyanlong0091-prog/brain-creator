@@ -1201,6 +1201,7 @@ export type ExecutableCaseStep = {
     type: AssertionContractType;
     strength?: AssertionStrength;
     expected?: string;
+    oracle?: BusinessOracle;
   };
   pageModelId?: string;
   locatorPointId?: string;
@@ -1554,6 +1555,10 @@ export type RequirementSuiteRun = {
   stabilityPolicy?: StabilityPolicy;
   stabilitySchedule?: StabilitySchedule;
   requirementSetIds?: string[];
+  evaluationTrialId?: string;
+  evaluationSourceRevision?: number;
+  evaluationSourceHash?: string;
+  evaluationRuntimeBuildIdentity?: string;
   reconciliation?: RequirementReconciliation;
   coverageSnapshot?: RequirementCoverageSnapshot;
   total: number;
@@ -1680,6 +1685,12 @@ export type ExecutionStepEvidence = {
 };
 
 export type ExecutionEvidence = {
+  provenance?: "real-system" | "synthetic" | "unknown";
+  artifactValidation?: {
+    status: "valid" | "invalid";
+    files: Array<{ path: string; sha256: string }>;
+    reasons: string[];
+  };
   id: string;
   knowledgeProjectId: string;
   systemId: string;
@@ -1735,6 +1746,7 @@ export type AssertionContract = {
   type: AssertionContractType;
   strength: AssertionStrength;
   expected?: string;
+  oracle?: BusinessOracle;
   requirementRefs: string[];
   evidenceRequirements: Array<"actual-value" | "screenshot" | "trace" | "network" | "console">;
 };
@@ -1744,8 +1756,18 @@ export type StructuredReporterAssertion = {
   stepId?: string;
   status: "passed" | "failed" | "skipped" | "unknown";
   actual?: string;
+  previousActual?: string;
   expected?: string;
   evidenceRefs: string[];
+};
+
+export type BusinessOracle = {
+  operator: "equals" | "visibility" | "transition" | "changed";
+  expected: string;
+  previous?: string;
+  entityReference?: string;
+  applicable: boolean;
+  applicabilityRefs: string[];
 };
 
 export type StructuredReporterStep = {
@@ -1864,6 +1886,13 @@ export type ExecutionDiagnosisReview = {
   createdAt: string;
 };
 
+export type RunLedgerActionPhase =
+  | "planned"
+  | "sent"
+  | "confirmed"
+  | "reconciliation-required"
+  | "reconciled";
+
 export type RunLedgerEntry = {
   id: string;
   runType?: "requirement-suite" | "document-suite";
@@ -1891,6 +1920,11 @@ export type RunLedgerEntry = {
     | "case-skipped"
     | "schedule-claimed"
     | "progress"
+    | "action-planned"
+    | "action-sent"
+    | "action-confirmed"
+    | "action-reconciliation-required"
+    | "action-reconciled"
     | "suite-cancelled"
     | "suite-completed";
   scope: "suite" | "case";
@@ -1920,6 +1954,12 @@ export type RunLedgerEntry = {
   assertionSummary?: string;
   waitReason?: string;
   currentStep?: string;
+  actionKey?: string;
+  actionPhase?: RunLedgerActionPhase;
+  actionSemantic?: string;
+  entityReference?: string;
+  actionPostcondition?: string;
+  actionEvidenceRefs?: string[];
   message?: string;
   references?: {
     testCaseId?: string;

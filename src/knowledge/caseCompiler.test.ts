@@ -86,6 +86,7 @@ describe("Agent executable case compiler", () => {
     expect(assertion).toEqual(expect.objectContaining({
       assertion: expect.objectContaining({
         type: "visibility",
+        strength: "limited",
         expected: "当是否占编=是时，应显示：需求部门、需求职位、编制编码；当是否占编=否时，应隐藏：编制编码"
       })
     }));
@@ -107,6 +108,259 @@ describe("Agent executable case compiler", () => {
     expect(result.source).toBe("workflow");
     expect(result.steps.map((step) => step.sourceRefs.length > 0)).not.toContain(false);
     expect(result.processPathSourceRefs).toContain(model.transitions[0].sourceRefs[0]);
+  });
+
+  it("returns bounded ambiguity instead of selecting the first edge that shares a source ref", () => {
+    const model = stateModel();
+    const sharedRef = "attachment-analysis:shared#edge:1";
+    const ambiguousModel: StateMachineModel = {
+      ...model,
+      states: [
+        ...model.states,
+        { id: "rejected", label: "Rejected", initial: false, terminal: true, sourceRefs: [sharedRef] }
+      ],
+      transitions: [
+        { ...model.transitions[0], id: "transition-submit", to: "submitted", sourceRefs: [sharedRef] },
+        { ...model.transitions[0], id: "transition-reject", to: "rejected", trigger: "reject", sourceRefs: [sharedRef] }
+      ]
+    };
+
+    const result = compileIntentSemanticSteps({
+      intent: intent({ requirementRefs: [sharedRef], processModelRefs: [ambiguousModel.id] }),
+      workflowModels: [],
+      stateMachineModels: [ambiguousModel],
+      additionalSourceRefs: []
+    });
+
+    expect(result.steps).toEqual([]);
+    expect(result.ambiguity).toEqual(expect.objectContaining({
+      reason: expect.stringContaining("Multiple confirmed process transitions"),
+      sourceRefs: expect.arrayContaining([
+        sharedRef,
+        "state-machine:state-model-1#transition:transition-submit",
+        "state-machine:state-model-1#transition:transition-reject"
+      ])
+    }));
+  });
+
+  it("honors an explicit transition identity when its source ref is shared", () => {
+    const model = stateModel();
+    const sharedRef = "attachment-analysis:shared#edge:1";
+    const selectedModel: StateMachineModel = {
+      ...model,
+      states: [
+        ...model.states,
+        { id: "rejected", label: "Rejected", initial: false, terminal: true, sourceRefs: [sharedRef] }
+      ],
+      transitions: [
+        { ...model.transitions[0], id: "transition-submit", sourceRefs: [sharedRef] },
+        { ...model.transitions[0], id: "transition-reject", to: "rejected", trigger: "reject", sourceRefs: [sharedRef] }
+      ]
+    };
+
+    const result = compileIntentSemanticSteps({
+      intent: intent({
+        requirementRefs: [sharedRef, "transition-reject"],
+        processModelRefs: [selectedModel.id]
+      }),
+      workflowModels: [],
+      stateMachineModels: [selectedModel],
+      additionalSourceRefs: []
+    });
+
+    expect(result.ambiguity).toBeUndefined();
+    expect(result.steps[1]).toEqual(expect.objectContaining({
+      instruction: expect.stringContaining("Draft to Rejected using reject")
+    }));
+  });
+
+  it("uses an explicit model ref when multiple confirmed models share the same edge evidence", () => {
+    const sharedRef = "attachment-analysis:shared#edge:1";
+    const firstModel = stateModel();
+    const selectedModel: StateMachineModel = {
+      ...stateModel(),
+      id: "state-model-2",
+      states: [
+        { id: "draft", label: "Queued", initial: true, terminal: false, sourceRefs: [sharedRef] },
+        { id: "submitted", label: "Accepted", initial: false, terminal: true, sourceRefs: [sharedRef] }
+      ],
+      transitions: [{
+        ...stateModel().transitions[0],
+        id: "transition-accepted",
+        trigger: "accept",
+        sourceRefs: [sharedRef]
+      }]
+    };
+
+    const result = compileIntentSemanticSteps({
+      intent: intent({ requirementRefs: [sharedRef], processModelRefs: [selectedModel.id] }),
+      workflowModels: [],
+      stateMachineModels: [firstModel, selectedModel],
+      additionalSourceRefs: []
+    });
+
+    expect(result.ambiguity).toBeUndefined();
+    expect(result.source).toBe("state-machine");
+    expect(result.steps[1]).toEqual(expect.objectContaining({
+      instruction: expect.stringContaining("Queued to Accepted using accept")
+    }));
+    expect(result.processPathSourceRefs).toContain("state-machine:state-model-2");
+  });
+
+  it("does not prefer a state edge when a workflow edge is an equally supported candidate", () => {
+    const sharedRef = "attachment-analysis:shared#edge:1";
+    const state = { ...stateModel(), transitions: [{ ...stateModel().transitions[0], sourceRefs: [sharedRef] }] };
+    const workflow = { ...workflowModel(), transitions: [{ ...workflowModel().transitions[0], sourceRefs: [sharedRef] }] };
+
+    const result = compileIntentSemanticSteps({
+      intent: intent({
+        requirementRefs: [sharedRef],
+        processModelRefs: [state.id, workflow.id]
+      }),
+      workflowModels: [workflow],
+      stateMachineModels: [state],
+      additionalSourceRefs: []
+    });
+
+    expect(result.steps).toEqual([]);
+    expect(result.ambiguity?.sourceRefs).toEqual(expect.arrayContaining([
+      "state-machine:state-model-1",
+      "workflow:workflow-model-1",
+      "state-machine:state-model-1#transition:transition-1",
+      "workflow:workflow-model-1#transition:workflow-transition-1"
+    ]));
+  });
+
+  it("does not compile an explicitly referenced model from another project or requirement set", () => {
+    const model = stateModel();
+    const mismatchedProject = { ...model, knowledgeProjectId: "other-project" };
+    const mismatchedRequirement = { ...model, id: "state-model-2", requirementSetId: "other-requirement" };
+
+    const result = compileIntentSemanticSteps({
+      intent: intent({
+        requirementRefs: [model.transitions[0].sourceRefs[0]],
+        processModelRefs: [mismatchedProject.id, mismatchedRequirement.id]
+      }),
+      workflowModels: [],
+      stateMachineModels: [mismatchedProject, mismatchedRequirement],
+      additionalSourceRefs: []
+    });
+
+    expect(result.steps).toEqual([]);
+    expect(result.ambiguity).toEqual(expect.objectContaining({
+      reason: expect.stringContaining("unresolved explicit process model references"),
+      sourceRefs: expect.arrayContaining([
+        "process-model:state-model-1",
+        "process-model:state-model-2"
+      ])
+    }));
+  });
+
+  it("rejects a partial explicit model scope when one reference is unresolved", () => {
+    const model = stateModel();
+    const unresolvedModelRef = "missing-state-model";
+
+    const result = compileIntentSemanticSteps({
+      intent: intent({
+        requirementRefs: [model.transitions[0].sourceRefs[0]],
+        processModelRefs: [model.id, unresolvedModelRef]
+      }),
+      workflowModels: [],
+      stateMachineModels: [model],
+      additionalSourceRefs: []
+    });
+
+    expect(result.steps).toEqual([]);
+    expect(result.ambiguity).toEqual(expect.objectContaining({
+      reason: expect.stringContaining(unresolvedModelRef),
+      sourceRefs: expect.arrayContaining([`process-model:${unresolvedModelRef}`])
+    }));
+  });
+
+  it("does not compile a unique state edge when either endpoint is missing", () => {
+    const model = stateModel();
+    const incompleteModel: StateMachineModel = {
+      ...model,
+      states: [model.states[0]],
+      transitions: [{ ...model.transitions[0], sourceRefs: ["attachment-analysis:incomplete#edge:1"] }]
+    };
+
+    const result = compileIntentSemanticSteps({
+      intent: intent({
+        requirementRefs: [incompleteModel.transitions[0].sourceRefs[0]],
+        processModelRefs: [incompleteModel.id]
+      }),
+      workflowModels: [],
+      stateMachineModels: [incompleteModel],
+      additionalSourceRefs: []
+    });
+
+    expect(result.steps).toEqual([]);
+    expect(result.ambiguity).toEqual(expect.objectContaining({
+      reason: expect.stringContaining("missing state endpoint"),
+      sourceRefs: expect.arrayContaining([
+        incompleteModel.transitions[0].sourceRefs[0],
+        "state-machine:state-model-1#transition:transition-1"
+      ])
+    }));
+  });
+
+  it("does not compile a unique workflow edge when either step endpoint is missing", () => {
+    const model = workflowModel();
+    const incompleteModel: WorkflowModel = {
+      ...model,
+      steps: [model.steps[0]],
+      transitions: [model.transitions[0]]
+    };
+
+    const result = compileIntentSemanticSteps({
+      intent: intent({
+        requirementRefs: [incompleteModel.transitions[0].sourceRefs[0]],
+        processModelRefs: [incompleteModel.id]
+      }),
+      workflowModels: [incompleteModel],
+      stateMachineModels: [],
+      additionalSourceRefs: []
+    });
+
+    expect(result.steps).toEqual([]);
+    expect(result.ambiguity).toEqual(expect.objectContaining({
+      reason: expect.stringContaining("missing workflow step endpoint"),
+      sourceRefs: expect.arrayContaining([
+        "workflow:workflow-model-1#transition:workflow-transition-1"
+      ])
+    }));
+  });
+
+  it("keeps every ambiguous edge traceable beyond the bounded candidate display size", () => {
+    const model = stateModel();
+    const sharedRef = "attachment-analysis:many#edge:1";
+    const states = Array.from({ length: 11 }, (_, index) => ({
+      id: `target-${index}`,
+      label: `Target ${index}`,
+      initial: false,
+      terminal: true,
+      sourceRefs: [sharedRef]
+    }));
+    const transitions = states.map((state, index) => ({
+      ...model.transitions[0],
+      id: `transition-${index}`,
+      to: state.id,
+      sourceRefs: [sharedRef]
+    }));
+    const manyEdgesModel: StateMachineModel = { ...model, states: [...model.states, ...states], transitions };
+
+    const result = compileIntentSemanticSteps({
+      intent: intent({ requirementRefs: [sharedRef], processModelRefs: [manyEdgesModel.id] }),
+      workflowModels: [],
+      stateMachineModels: [manyEdgesModel],
+      additionalSourceRefs: []
+    });
+
+    expect(result.steps).toEqual([]);
+    expect(result.ambiguity?.sourceRefs).toContain(
+      "state-machine:state-model-1#transition:transition-10"
+    );
   });
 
   it("does not promote a case while its System Brain exploration is pending", () => {

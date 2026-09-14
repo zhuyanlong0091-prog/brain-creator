@@ -1,6 +1,7 @@
 import type { ExecutionEvidence, ExecutionDiagnosis } from "../domain/types.js";
 import type { ScenarioTrustRecord } from "../brain/types.js";
 import { determineAssuranceLevel } from "./assurance.js";
+import { evaluateConformance } from "./conformance.js";
 import {
   updateScenarioTrust,
   type ScenarioTrustUpdate
@@ -11,6 +12,8 @@ export type ScenarioExecutionTrustInput = {
   evidence: Pick<
     ExecutionEvidence,
     | "status"
+    | "provenance"
+    | "artifactValidation"
     | "assuranceLevel"
     | "assertionContracts"
     | "reporterResult"
@@ -42,13 +45,29 @@ export function evaluateScenarioExecutionTrust(
 ): ScenarioExecutionTrustResult {
   // Never trust a caller-provided assurance label. The structured reporter is
   // the source of truth for whether assertions were actually observed.
-  const assuranceLevel = input.evidence.reporterResult
+  const assuranceLevel = input.evidence.provenance !== "synthetic" && input.evidence.reporterResult
     ? determineAssuranceLevel(
         input.evidence.assertionContracts ?? [],
         input.evidence.reporterResult
       )
     : "none";
   const reasons: string[] = [];
+  const conformance = evaluateConformance({
+    scenarioId: input.record.scenarioId,
+    executionEvidenceId: "trust-evaluation",
+    status: input.evidence.status === "running" ? "blocked" : input.evidence.status,
+    assuranceLevel,
+    contracts: input.evidence.assertionContracts,
+    reporter: input.evidence.reporterResult,
+    artifactValidation: input.evidence.artifactValidation,
+    provenance: input.evidence.provenance,
+    expectationRefs: (input.evidence.assertionContracts ?? []).flatMap((contract) => contract.requirementRefs),
+    observationRefs: [],
+    executionRefs: []
+  });
+  if (conformance.verdict !== "conform") reasons.push(`Business conformance is ${conformance.verdict}; it cannot promote trust.`);
+  if (input.evidence.artifactValidation?.status !== "valid") reasons.push("Artifact files have not passed integrity validation.");
+  if (input.evidence.provenance === "synthetic") reasons.push("Synthetic evidence cannot promote a real scenario.");
   const changed = input.record.lastRequirementHash !== input.requirementHash ||
     input.record.lastSystemSnapshotHash !== input.systemSnapshotHash ||
     input.record.lastDataPlanHash !== input.dataPlanHash;

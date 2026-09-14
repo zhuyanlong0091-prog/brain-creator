@@ -1199,14 +1199,14 @@ describe("KnowledgeService", () => {
     });
 
     expect(completed.assuranceLevel).toBe("limited");
-    expect(completed.evidenceWarnings).toEqual([
+    expect(completed.evidenceWarnings).toEqual(expect.arrayContaining([
       expect.stringContaining("Assurance evidence incomplete: actual-value, screenshot, trace"),
       expect.stringContaining("Missing structured Reporter evidence for step(s):")
-    ]);
+    ]));
     expect(completed.evidenceWarnings?.some((warning) => warning.includes("Missing trace artifact"))).toBe(false);
   });
 
-  it("records field and workflow coverage only from step evidence", async () => {
+  it("does not verify field or workflow coverage from unreadable step artifacts", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const knowledgeDir = await tempDir();
     await mkdir(join(knowledgeDir, "evidence"), { recursive: true });
@@ -1272,15 +1272,16 @@ describe("KnowledgeService", () => {
     });
 
     expect(completed.coverage?.required).toEqual(expect.arrayContaining(["field", "workflow"]));
-    expect(completed.coverage?.verified).toEqual(expect.arrayContaining(["field", "workflow"]));
-    expect(completed.coverage?.missing).toEqual([]);
-    expect(completed.assuranceLevel).toBe("strong");
+    expect(completed.coverage?.verified).toEqual([]);
+    expect(completed.coverage?.missing).toEqual(expect.arrayContaining(["field", "workflow"]));
+    expect(completed.assuranceLevel).toBe("limited");
+    expect(completed.artifactValidation?.status).toBe("invalid");
     expect(completed.steps.filter((step) => step.action === "assert").map((step) => step.actual)).toEqual(
       (evidence.assertionContracts ?? []).map((_, index) => `Observed value ${index + 1}`)
     );
   });
 
-  it("persists a separate conformance result for a uniquely bound strong execution", async () => {
+  it("does not claim conformance for legacy paths without files or an oracle", async () => {
     const repository = new InMemoryBrainCreatorRepository();
     const service = new KnowledgeService(repository, await tempDir());
     const project = await service.createProject({ name: "Conformance", key: "conformance", defaultLocale: "en-US" });
@@ -1349,11 +1350,11 @@ describe("KnowledgeService", () => {
       }
     });
 
-    expect(completed.assuranceLevel).toBe("strong");
+    expect(completed.assuranceLevel).toBe("limited");
     expect(repository.conformanceResults).toEqual([
       expect.objectContaining({
         executionEvidenceId: evidence.id,
-        verdict: "conform",
+        verdict: "inconclusive",
         expectationRefs: expect.arrayContaining(executableCase.assertionContracts?.[0].requirementRefs ?? [])
       })
     ]);
@@ -1438,7 +1439,7 @@ describe("KnowledgeService", () => {
       }
     });
     expect(repository.executionEvidence.find((item) => item.id === passEvidence.id)?.assuranceLevel).toBe(
-      passEvidence.assertionContracts?.length ? "strong" : "none"
+      passEvidence.assertionContracts?.length ? "limited" : "none"
     );
 
     const bugCase = service.compileExecutableCases(design.testIntents[0].id).executableCase;
@@ -1522,24 +1523,24 @@ describe("KnowledgeService", () => {
       expect.objectContaining({
         totalEvidence: 5,
         executionPassed: 2,
-        strongVerified: 1,
-        limitedOrUnassuredPassed: 1,
-        validated: 2,
+        strongVerified: 0,
+        limitedOrUnassuredPassed: 2,
+        validated: 1,
         contradicted: 1,
-        inconclusive: 2,
-        accuracyRate: 2 / 3,
+        inconclusive: 3,
+        accuracyRate: 1 / 2,
         systemConformanceRate: 2 / 3,
-        strongVerificationRate: 1 / 5,
+        strongVerificationRate: 0,
         traceabilityRate: 1
       })
     );
     expect(service.requirementEvalAccuracy(project.id).byRequirementSet).toEqual([
       expect.objectContaining({
         requirementSetId: ingested.requirementSet.id,
-        validated: 2,
+        validated: 1,
         contradicted: 1,
-        inconclusive: 2,
-        strongVerified: 1
+        inconclusive: 3,
+        strongVerified: 0
       })
     ]);
   });

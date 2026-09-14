@@ -241,6 +241,7 @@ export class TestDataBrainService {
     const startedAt = new Date().toISOString();
     const result = await provider.lookup(normalized);
     if (!result) throw new Error(`No test data found for ${input.entityType}:${input.key ?? input.reference ?? "unknown"}`);
+    validateProviderResult(normalized, result, "found");
     const enriched = { ...result, provider: provider.name };
     const entityId = this.upsertEntity(normalized, enriched, "lookup", startedAt);
     return { ...enriched, entityId };
@@ -251,7 +252,8 @@ export class TestDataBrainService {
     const provider = this.provider(normalized);
     const startedAt = new Date().toISOString();
     const result = await provider.create(normalized);
-    const enriched = { ...result, provider: provider.name, status: "created" as const };
+    validateProviderResult(normalized, result, "created");
+    const enriched = { ...result, provider: provider.name };
     const entityId = this.upsertEntity(normalized, enriched, "create", startedAt);
     return { ...enriched, entityId };
   }
@@ -262,6 +264,7 @@ export class TestDataBrainService {
     const provider = this.provider(normalized);
     const startedAt = new Date().toISOString();
     const result = await provider.transition(normalized);
+    validateProviderResult(normalized, result, "transitioned");
     const enriched = { ...result, provider: provider.name };
     this.upsertEntity(normalized, enriched, "transition", startedAt);
     return enriched;
@@ -273,6 +276,10 @@ export class TestDataBrainService {
     const provider = this.provider(normalized);
     const startedAt = new Date().toISOString();
     const result = await provider.verify(normalized);
+    validateProviderResult(normalized, result, "verified");
+    if (Object.entries(input.expected ?? {}).some(([key, value]) => result.values?.[key] !== value)) {
+      throw new Error("Test data verification did not return the expected business values");
+    }
     const enriched = { ...result, provider: provider.name };
     const entityId = this.upsertEntity(normalized, enriched, "verify", startedAt);
     return { ...enriched, entityId };
@@ -284,6 +291,7 @@ export class TestDataBrainService {
     const provider = this.provider(normalized);
     const startedAt = new Date().toISOString();
     const result = await provider.cleanup(normalized);
+    validateProviderResult(normalized, result, "cleaned");
     const enriched = { ...result, provider: provider.name };
     const entity = this.repository.businessEntityInstances.find(
       (item) => item.systemId === input.systemId && item.entityKey === input.reference
@@ -430,6 +438,16 @@ export class TestDataBrainService {
       completedAt
     };
     entity.lifecycleEvents = [...(entity.lifecycleEvents ?? []), event];
+  }
+}
+
+function validateProviderResult(input: TestDataProviderRequest, result: TestDataProviderResult, expectedStatus: TestDataProviderResult["status"]) {
+  if (result.status !== expectedStatus) throw new Error(`Test data provider returned an invalid ${expectedStatus} status`);
+  if (!result.reference?.trim() || (input.reference && input.reference !== result.reference) || !sameSystemReference(input.systemId, result.reference)) {
+    throw new Error("Test data provider returned an invalid entity reference");
+  }
+  if (input.entityReference && result.entityReference && input.entityReference !== result.entityReference) {
+    throw new Error("Test data provider returned a different semantic entity reference");
   }
 }
 

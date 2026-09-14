@@ -16,8 +16,9 @@ export function buildAssertionContracts(
       id: id("assertionContract"),
       stepId: step.id,
       type: step.assertion?.type ?? assertionType(step),
-      strength: step.assertion?.strength ?? "strong",
+      strength: step.assertion?.strength ?? "limited",
       expected: step.assertion?.expected ?? step.expected,
+      ...(step.assertion?.oracle ? { oracle: step.assertion.oracle } : {}),
       requirementRefs: [...new Set([...requirementRefs, ...step.sourceRefs])],
       evidenceRequirements: ["actual-value", "screenshot", "trace"] as const
     }));
@@ -39,17 +40,17 @@ export function determineAssuranceLevel(
     reporter.skipped !== 0
   ) return "none";
   const results = new Map(reporter.assertions.map((assertion) => [assertion.id, assertion]));
+  if (results.size !== reporter.assertions.length || new Set(contracts.map((contract) => contract.id)).size !== contracts.length) return "none";
   const exactMatches = contracts.filter((contract) => results.has(contract.id));
   const mapped = exactMatches.length === contracts.length
     ? contracts.map((contract) => results.get(contract.id))
-    : reporter.assertions.length === contracts.length
-      ? reporter.assertions
-      : [];
+    : [];
   if (mapped.length !== contracts.length || mapped.some((assertion) => assertion?.status !== "passed")) return "none";
+  if (contracts.some((contract) => !contract.stepId || results.get(contract.id)?.stepId !== contract.stepId)) return "limited";
   if (contracts.some((contract) => contract.strength === "limited")) return "limited";
   if (reporter.status !== "passed") return "none";
   const completeEvidence = contracts.every((contract) => {
-    const assertion = mapped.find((item) => item?.id === contract.id) ?? mapped[contracts.indexOf(contract)];
+    const assertion = results.get(contract.id);
     if (!assertion) return false;
     const refs = assertion.evidenceRefs ?? [];
     const hasActual = typeof assertion.actual === "string" && assertion.actual.length > 0;
@@ -74,9 +75,9 @@ export function missingAssuranceEvidence(
 ) {
   if (!reporter) return ["structured-reporter"];
   const results = new Map(reporter.assertions.map((assertion) => [assertion.id, assertion]));
-  const mapped = contracts.map((contract, index) => results.get(contract.id) ?? reporter.assertions[index]);
+  const mapped = contracts.map((contract) => results.get(contract.id));
   const missing = new Set<string>();
-  if (mapped.length !== contracts.length) missing.add("assertion-mapping");
+  if (mapped.some((assertion) => !assertion) || results.size !== reporter.assertions.length) missing.add("assertion-mapping");
   for (const [index, contract] of contracts.entries()) {
     const assertion = mapped[index];
     if (!assertion) continue;

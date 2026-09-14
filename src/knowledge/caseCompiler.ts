@@ -13,6 +13,10 @@ export type SemanticCompilationResult = {
   steps: ExecutableCaseStep[];
   source: "state-machine" | "workflow" | "requirement-clause";
   processPathSourceRefs: string[];
+  ambiguity?: {
+    reason: string;
+    sourceRefs: string[];
+  };
 };
 
 export type ExecutableCaseReadiness = {
@@ -84,41 +88,136 @@ export function compileIntentSemanticSteps(input: {
   additionalSourceRefs: string[];
 }): SemanticCompilationResult {
   const sourceRefs = unique([...input.intent.requirementRefs, ...input.additionalSourceRefs]);
-  const stateMatch = matchingStateTransition(input.intent, input.stateMachineModels);
-  if (stateMatch) {
-    const from = stateMatch.model.states.find((state) => state.id === stateMatch.transition.from)?.label ?? stateMatch.transition.from;
-    const to = stateMatch.model.states.find((state) => state.id === stateMatch.transition.to)?.label ?? stateMatch.transition.to;
-    const transitionRefs = unique([...sourceRefs, ...stateMatch.transition.sourceRefs, `state-machine:${stateMatch.model.id}`]);
+  const candidates = [
+    ...confirmedStateTransitions(input.intent, input.stateMachineModels),
+    ...confirmedWorkflowTransitions(input.intent, input.workflowModels)
+  ];
+  const explicitModelRefs = unique(input.intent.processModelRefs ?? []);
+  const confirmedModelIds = new Set([
+    ...confirmedModels(input.intent, input.stateMachineModels),
+    ...confirmedModels(input.intent, input.workflowModels)
+  ].map((model) => model.id));
+  const unresolvedModelRefs = explicitModelRefs.filter((modelRef) => !confirmedModelIds.has(modelRef));
+  if (unresolvedModelRefs.length > 0) {
+    const missingModelRefs = unique([
+      ...sourceRefs,
+      ...unresolvedModelRefs.map((modelRef) => `process-model:${modelRef}`)
+    ]);
+    return {
+      source: "requirement-clause",
+      processPathSourceRefs: missingModelRefs,
+      steps: [],
+      ambiguity: {
+        reason: `The intent has unresolved explicit process model references: ${unresolvedModelRefs.join(", ")}; the compiler cannot compile a process action with a partial model scope.`,
+        sourceRefs: missingModelRefs
+      }
+    };
+  }
+  const matches = matchingIntentTransitions(input.intent, candidates);
+  if (matches.length > 1) {
+    const ambiguousSourceRefs = unique([
+      ...sourceRefs,
+      ...matches.flatMap((match) => [
+        ...match.transition.sourceRefs,
+        modelSourceRef(match),
+        transitionSourceRef(match)
+      ])
+    ]);
+    const missingStateEndpoint = matches.some(
+      (match) => match.source === "state-machine" && (
+        !match.model.states.some((state) => state.id === match.transition.from) ||
+        !match.model.states.some((state) => state.id === match.transition.to)
+      )
+    );
+    return {
+      source: compilationSourceFor(matches),
+      processPathSourceRefs: ambiguousSourceRefs,
+      steps: [],
+      ambiguity: {
+        reason: [
+          `Multiple confirmed process transitions match the intent; an explicit model and transition reference or a unique confirmed path is required (${matches.length} candidates).`,
+          "The compiler resolves directly referenced edges only and does not select a path by keyword scoring.",
+          ...(missingStateEndpoint
+            ? ["At least one candidate state transition has an endpoint missing from the model; endpoint inference is outside this compiler."]
+            : [])
+        ].join(" "),
+        sourceRefs: ambiguousSourceRefs
+      }
+    };
+  }
+
+  const match = matches[0];
+  if (match?.source === "state-machine") {
+    const from = match.model.states.find((state) => state.id === match.transition.from)?.label ?? match.transition.from;
+    const to = match.model.states.find((state) => state.id === match.transition.to)?.label ?? match.transition.to;
+    const transitionRefs = unique([...sourceRefs, ...match.transition.sourceRefs, modelSourceRef(match)]);
+    if (missingStateEndpoint(match)) {
+      return {
+        source: "state-machine",
+        processPathSourceRefs: transitionRefs,
+        steps: [],
+        ambiguity: {
+          reason: `The confirmed state transition ${match.transition.id} references a missing state endpoint; the compiler does not infer incomplete state paths.`,
+          sourceRefs: unique([...transitionRefs, transitionSourceRef(match)])
+        }
+      };
+    }
     return {
       source: "state-machine",
       processPathSourceRefs: transitionRefs,
       steps: processSteps({
         module: input.intent.module,
-        action: transitionAction(stateMatch.transition.trigger),
-        actionInstruction: `Trigger the confirmed state transition from ${from} to ${to}${stateMatch.transition.trigger ? ` using ${stateMatch.transition.trigger}` : ""}`,
-        targetSemantic: stateMatch.transition.trigger || `transition to ${to}`,
+        action: transitionAction(match.transition.trigger),
+        actionInstruction: `Trigger the confirmed state transition from ${from} to ${to}${match.transition.trigger ? ` using ${match.transition.trigger}` : ""}`,
+        targetSemantic: match.transition.trigger || `transition to ${to}`,
         expected: input.intent.expectedResults[0] || `State becomes ${to}`,
         sourceRefs: transitionRefs
       })
     };
   }
 
-  const workflowMatch = matchingWorkflowTransition(input.intent, input.workflowModels);
-  if (workflowMatch) {
-    const from = workflowMatch.model.steps.find((step) => step.id === workflowMatch.transition.from)?.label ?? workflowMatch.transition.from;
-    const to = workflowMatch.model.steps.find((step) => step.id === workflowMatch.transition.to)?.label ?? workflowMatch.transition.to;
-    const transitionRefs = unique([...sourceRefs, ...workflowMatch.transition.sourceRefs, `workflow:${workflowMatch.model.id}`]);
+  if (match?.source === "workflow") {
+    const from = match.model.steps.find((step) => step.id === match.transition.from)?.label ?? match.transition.from;
+    const to = match.model.steps.find((step) => step.id === match.transition.to)?.label ?? match.transition.to;
+    const transitionRefs = unique([...sourceRefs, ...match.transition.sourceRefs, modelSourceRef(match)]);
+    if (missingWorkflowEndpoint(match)) {
+      return {
+        source: "workflow",
+        processPathSourceRefs: transitionRefs,
+        steps: [],
+        ambiguity: {
+          reason: `The confirmed workflow transition ${match.transition.id} references a missing workflow step endpoint; the compiler does not infer incomplete workflow paths.`,
+          sourceRefs: unique([...transitionRefs, transitionSourceRef(match)])
+        }
+      };
+    }
     return {
       source: "workflow",
       processPathSourceRefs: transitionRefs,
       steps: processSteps({
         module: input.intent.module,
-        action: transitionAction(workflowMatch.transition.condition),
-        actionInstruction: `Follow the confirmed workflow from ${from} to ${to}${workflowMatch.transition.condition ? ` when ${workflowMatch.transition.condition}` : ""}`,
-        targetSemantic: workflowMatch.transition.condition || to,
+        action: transitionAction(match.transition.condition),
+        actionInstruction: `Follow the confirmed workflow from ${from} to ${to}${match.transition.condition ? ` when ${match.transition.condition}` : ""}`,
+        targetSemantic: match.transition.condition || to,
         expected: input.intent.expectedResults[0] || `Workflow reaches ${to}`,
         sourceRefs: transitionRefs
       })
+    };
+  }
+
+  if (explicitModelRefs.length > 0) {
+    const explicitModelSourceRefs = unique([
+      ...sourceRefs,
+      ...explicitModelRefs.map((modelRef) => `process-model:${modelRef}`)
+    ]);
+    return {
+      source: "requirement-clause",
+      processPathSourceRefs: explicitModelSourceRefs,
+      steps: [],
+      ambiguity: {
+        reason: "The explicitly referenced confirmed process model has no transition matching the intent source evidence; the compiler cannot choose a process action.",
+        sourceRefs: explicitModelSourceRefs
+      }
     };
   }
 
@@ -248,16 +347,16 @@ function deriveAssertion(content: string): ExecutableCaseStep["assertion"] {
     .filter((value): value is string => Boolean(value));
 
   if (branches.length > 0) {
-    return { type: "visibility", strength: "strong", expected: branches.join("；") };
+    return { type: "visibility", strength: "limited", expected: branches.join("；") };
   }
   if (/显示|隐藏|可见|visible|shown|hidden/i.test(normalized)) {
-    return { type: "visibility", strength: "strong", expected: normalized };
+    return { type: "visibility", strength: "limited", expected: normalized };
   }
   if (/状态|state|启用|禁用|draft|approved|rejected/i.test(normalized)) {
-    return { type: "state", strength: "strong", expected: normalized };
+    return { type: "state", strength: "limited", expected: normalized };
   }
   if (/流程|审批|驳回|workflow|approved|rejected/i.test(normalized)) {
-    return { type: "workflow", strength: "strong", expected: normalized };
+    return { type: "workflow", strength: "limited", expected: normalized };
   }
   return undefined;
 }
@@ -291,20 +390,86 @@ function step(
   return { id: id("step"), order, action, instruction, targetSemantic, sourceRefs, origin };
 }
 
-function matchingStateTransition(intent: TestIntent, models: StateMachineModel[]) {
-  for (const model of models.filter((item) => intent.processModelRefs?.includes(item.id))) {
-    const transition = model.transitions.find((item) => item.sourceRefs.some((ref) => intent.requirementRefs.includes(ref)));
-    if (transition) return { model, transition };
-  }
-  return undefined;
+type StateTransitionMatch = {
+  source: "state-machine";
+  model: StateMachineModel;
+  transition: StateMachineModel["transitions"][number];
+};
+
+type WorkflowTransitionMatch = {
+  source: "workflow";
+  model: WorkflowModel;
+  transition: WorkflowModel["transitions"][number];
+};
+
+type SemanticTransitionMatch = StateTransitionMatch | WorkflowTransitionMatch;
+
+function confirmedStateTransitions(intent: TestIntent, models: StateMachineModel[]): StateTransitionMatch[] {
+  return confirmedModels(intent, models).flatMap((model) =>
+    model.transitions.map((transition) => ({
+      source: "state-machine" as const,
+      model,
+      transition
+    }))
+  );
 }
 
-function matchingWorkflowTransition(intent: TestIntent, models: WorkflowModel[]) {
-  for (const model of models.filter((item) => intent.processModelRefs?.includes(item.id))) {
-    const transition = model.transitions.find((item) => item.sourceRefs.some((ref) => intent.requirementRefs.includes(ref)));
-    if (transition) return { model, transition };
-  }
-  return undefined;
+function confirmedWorkflowTransitions(intent: TestIntent, models: WorkflowModel[]): WorkflowTransitionMatch[] {
+  return confirmedModels(intent, models).flatMap((model) =>
+    model.transitions.map((transition) => ({
+      source: "workflow" as const,
+      model,
+      transition
+    }))
+  );
+}
+
+function confirmedModels<T extends StateMachineModel | WorkflowModel>(intent: TestIntent, models: T[]): T[] {
+  const explicitModelRefs = new Set(intent.processModelRefs ?? []);
+  return models.filter((model) =>
+    model.status === "confirmed" &&
+    model.knowledgeProjectId === intent.knowledgeProjectId &&
+    model.requirementSetId === intent.requirementSetId &&
+    (explicitModelRefs.size === 0 || explicitModelRefs.has(model.id))
+  );
+}
+
+function missingStateEndpoint(match: StateTransitionMatch) {
+  return !match.model.states.some((state) => state.id === match.transition.from) ||
+    !match.model.states.some((state) => state.id === match.transition.to);
+}
+
+function missingWorkflowEndpoint(match: WorkflowTransitionMatch) {
+  return !match.model.steps.some((step) => step.id === match.transition.from) ||
+    !match.model.steps.some((step) => step.id === match.transition.to);
+}
+
+function matchingIntentTransitions(
+  intent: TestIntent,
+  candidates: SemanticTransitionMatch[]
+): SemanticTransitionMatch[] {
+  const references = new Set([...intent.requirementRefs, ...intent.knowledgeNodeRefs]);
+  const explicitTransitionMatches = candidates.filter(({ transition }) => references.has(transition.id));
+  const selected = explicitTransitionMatches.length > 0
+    ? explicitTransitionMatches
+    : candidates.filter(({ transition }) =>
+      transition.sourceRefs.some((ref) => intent.requirementRefs.includes(ref))
+      );
+  return selected;
+}
+
+function compilationSourceFor(matches: SemanticTransitionMatch[]): SemanticCompilationResult["source"] {
+  if (matches.every((match) => match.source === "state-machine")) return "state-machine";
+  if (matches.every((match) => match.source === "workflow")) return "workflow";
+  return "requirement-clause";
+}
+
+function modelSourceRef(match: SemanticTransitionMatch) {
+  return `${match.source}:${match.model.id}`;
+}
+
+function transitionSourceRef(match: SemanticTransitionMatch) {
+  return `${modelSourceRef(match)}#transition:${match.transition.id}`;
 }
 
 function transitionAction(trigger?: string): "click" | "select" {

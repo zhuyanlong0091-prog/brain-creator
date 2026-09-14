@@ -1,5 +1,11 @@
 # Brain Creator Agent 使用指南
 
+## 确认运行版本与证据
+
+升级后先查看 `bc_status.runtimeIdentity`，确认 MCP 进程实际加载的构建。`doctor` 展示的是自身 CLI 进程，不能据此认定 MCP 已更新；旧包缺少身份记录时显示未知。
+
+Reporter 必须准确引用断言合同和步骤。执行完成时检查实际文件、hash、截图解码和 trace 内容。业务符合性另行比较有来源的预期和实际业务值，不能仅凭通过标签晋升可信。合成浏览器测试不计入真实业务完成度；当前限制见[交付台账](../quality/trust-convergence.md)。
+
 用户只需在 Claude Code 或 Codex 中描述测试目标；Agent 选择 Facade MCP 工具，并保持审批边界可见。
 
 ## 推荐第一条请求
@@ -151,7 +157,9 @@ Planner、Generator、Reporter 和 Suite 产物统一归属到 `.brain-creator/a
 
 `bc_run` 默认使用 `observationMode=summary`，每次操作返回一条有界进度；用户明确要求逐步观察时使用 `observationMode=step-by-step`。宿主提供 MCP progress token 时，Brain Creator 会发送尽力而为的 Progress Notification；宿主不支持通知或连接中断时，带序号的 Run Ledger 仍是权威恢复来源。
 
-`bc_status` 会显示当前用例、步骤、页面、耗时、最后更新时间、等待原因和 `possiblyStalled`。卡住告警只表示超过更新时间阈值，不会把用例自动判为失败。每条用例结束后，Brain Creator 都会增量更新运行目录中的离线 `suite-report.html`，无需等到整个 Suite 终态。
+`bc_status` 会显示当前用例、步骤、页面、耗时、最后更新时间、等待原因和 `possiblyStalled`，并通过统一的 `executionTasks` 投影区分当前 Suite、等待宿主任务和等待测试数据的子任务，为新会话给出一个明确的下一动作。卡住告警只表示超过更新时间阈值，不会把用例自动判为失败。每条用例结束后，Brain Creator 都会增量更新运行目录中的离线 `suite-report.html`，无需等到整个 Suite 终态。
+
+所有可能改变业务状态的浏览器或接口动作，都要使用稳定的 `actionKey` 记录生命周期：发送前记录 `planned`，请求发出后记录 `sent`，只有观察到后置状态后才能记录 `confirmed` 或 `reconciliation-required`。如果在 `sent` 之后进程或浏览器中断，Brain Creator 会在 `bc_status.executionTasks.active.pendingAction` 中展示待核对动作，并让 `bc_run` 停在 `reconcile-action`，不会直接重复提交。查询目标系统后，使用 `bc_prepare action=reconcile-execution-action confirm=true`，提交 `actionPostcondition` 和不含敏感信息的 `actionEvidenceRefs`。响应丢失本身既不能证明成功，也不能证明失败。
 
 `observationMode` 只控制进度消息粒度，不会打开浏览器窗口。用户明确要求旁观时，预览和确认执行都传入 `browserMode=observe`。运行中的 Suite 不允许切换模式；Host Agent 续跑、Healer 重试、文档套件续跑和 Bug 回归都会继承已选模式。观察模式必须运行在交互式桌面会话中；CI、Windows 服务会话或缺少 `DISPLAY/WAYLAND_DISPLAY` 的 Linux 会返回可操作的能力阻断，不会静默降级。可见窗口只能辅助判断执行轨迹，最终结论仍以 Reporter、断言、截图和 trace 为准。
 
@@ -205,3 +213,7 @@ npm run verify:host-agent-document-suite
 不能直接记为产品 Bug 或可信回归。使用 `bc_status` 查看当前步骤和恢复状态，
 打开离线报告查看白话说明：理解了什么、观察到什么、使用了哪些数据，以及
 结果为什么可以或不可以支持需求符合性判断。
+
+## 固定范围的 Trial 测量
+
+新需求套件可通过 `evaluationTrialId` 显式绑定固定系统、需求版本和选定业务场景，不能把旧的未绑定套件事后挂入新 Trial。阻塞与未执行场景保留在分母中，合成或未知来源证据不计真实成功；新一轮等待状态不能沿用旧成功结果。一个场景包含多条用例时，在完整聚合能力补齐前保持“结论不足”。没有完整人工介入记录时，自主率显示“未测量”。这些控制仍是部分实现，详见[交付台账](../quality/trust-convergence.md)和[公开开发决策](../quality/development-collaboration.md)。

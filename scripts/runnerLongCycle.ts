@@ -99,6 +99,7 @@ export async function runRunnerCycle(input: RunnerCycleOptions): Promise<RunnerC
         testCaseId: `github-actions-runner-test-${iteration}`,
         contextPackPath: `synthetic/context-${iteration}.json`,
         status: "passed",
+        provenance: "synthetic",
         assuranceLevel: "strong",
         steps: [{
           stepId: `${CASE_ID}-step`,

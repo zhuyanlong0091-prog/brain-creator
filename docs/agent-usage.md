@@ -1,5 +1,11 @@
 # Brain Creator Agent Usage Guide
 
+## Running Build And Evidence
+
+Read `bc_status.runtimeIdentity` before evaluating an upgraded MCP. The build identity is pinned when the process starts; a successful CLI doctor run identifies only that CLI process. Unknown legacy provenance is reported explicitly.
+
+Use exact assertion-contract and step IDs in Reporter output. Completion checks actual files, hashes, image decoding and readable trace events. A green result without a source-backed business Oracle cannot establish conformance or promote trust. Synthetic tests validate implementation only. See the [current delivery limits](quality/trust-convergence.md).
+
 Brain Creator is used through one sentence in Claude Code or Codex. Users describe the testing goal; the Agent chooses the Facade MCP tools and keeps approval boundaries visible.
 
 ## Recommended First Request
@@ -123,9 +129,11 @@ After the current case's data is ready, Brain Creator freezes its ExecutionPlan.
 
 Only one RequirementSuiteRun case may prepare data, wait for an Agent, execute, or clean up at a time. A Host Agent terminal submission performs cleanup before starting the next queued case. Business mismatches create BugReports and continue; data, cleanup, and other technical failures create Gaps and stop unless the user explicitly resumes with `resume=true` and `continueOnBlocked=true`. Data-phase resume retries the same phase rather than skipping the case. Repeating a confirmed run returns the current TestDataTask or AgentTask instead of creating a duplicate. Inspect progress with `bc_status` or `bc_review target=requirement-suite-run`.
 
-Set `observationMode=summary` on `bc_run` for one bounded update per operation, or `observationMode=step-by-step` when the user explicitly wants detailed progress. If the MCP client supplies a progress token, Brain Creator emits best-effort MCP Progress Notifications. The ordered Run Ledger is authoritative even when notifications are unsupported or disconnected. `bc_status` exposes the current case, step, page, elapsed time, last update, wait reason, and `possiblyStalled`; a stalled warning is diagnostic and does not convert the case to failed. Each completed case incrementally rewrites the offline Suite HTML report.
+Set `observationMode=summary` on `bc_run` for one bounded update per operation, or `observationMode=step-by-step` when the user explicitly wants detailed progress. If the MCP client supplies a progress token, Brain Creator emits best-effort MCP Progress Notifications. The ordered Run Ledger is authoritative even when notifications are unsupported or disconnected. `bc_status` exposes the current case, step, page, elapsed time, last update, wait reason, and `possiblyStalled`; its `executionTasks` projection also identifies the active Suite, pending host-agent or test-data child task, and one next action for a new session. A stalled warning is diagnostic and does not convert the case to failed. Each completed case incrementally rewrites the offline Suite HTML report.
 
 `observationMode` controls progress-message detail; it does not open a browser window. When the user explicitly asks to watch the browser, pass `browserMode=observe` to the preview and confirmed `bc_run`. The selected mode is immutable for a running Suite and is reused by Host Agent continuations, Healer retries, document-suite continuation, and Bug regression. Observe mode requires an interactive desktop and fails with an actionable capability result in CI, Windows service sessions, or Linux without `DISPLAY/WAYLAND_DISPLAY`. Never present a visible window as proof of correctness; use Reporter evidence and assertions for the verdict.
+
+For any browser or API action that can change business state, use a stable `actionKey` and record its lifecycle through `bc_prepare`: `planned` before dispatch, `sent` after dispatch, and `confirmed` or `reconciliation-required` only when the caller knows whether the postcondition was observed. If execution stops after `sent`, Brain Creator exposes `pendingAction` and returns `reconcile-action`; it will not repeat the write. Query the target system, then call `bc_prepare action=reconcile-execution-action confirm=true` with `actionPostcondition` and non-secret `actionEvidenceRefs`. A missing response is not evidence of either success or failure.
 For a controlled stability check, add `repeatCount` from 2 to 5 to the same `bc_run mode=requirement-suite` request. Brain Creator creates isolated linked SuiteRuns with separate evidence and ledger entries. Review `bc_review target=coverage` after all iterations; one green run is never treated as stability proof.
 
 Brain Creator writes an offline `suite-report.html` under the system/requirement/run artifact directory and updates it after every completed case, including running Suites. The report summarizes current progress, every case, status, assurance level, actual result, artifact paths, BugReports, and Gaps, and supports client-side search. For large coverage ledgers, pass `limit` and `offset` to `bc_review target=coverage`; the response keeps complete counts and returns `itemPage.nextOffset` for the next page.
@@ -284,3 +292,7 @@ headless pass remains `bound`, and three unchanged strong runs are required for
 `trusted`. Hash changes reset trust; failures and technical blockers stay
 quarantined or blocked. Use `bc_status` and the offline report to explain the
 current step, data, diagnosis, evidence strength, and next action.
+
+## Frozen Trial Measurements
+
+For a new requirement suite, `evaluationTrialId` explicitly binds the run to a frozen system, requirement version and selected business scenarios. An old unbound suite cannot be attached retroactively. Keep blocked and unexecuted scenarios in the denominator; synthetic or unknown evidence does not count as real success. A pending retry supersedes earlier success. Multiple cases for one scenario remain inconclusive until complete aggregation is supported. Autonomy remains `not-measured` without complete intervention capture. These controls are partial; see the [delivery register](quality/trust-convergence.md) and [public development decisions](quality/development-collaboration.md).

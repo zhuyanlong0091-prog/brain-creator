@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -92,11 +92,13 @@ describe("execution evidence and scenario trust integration", () => {
     });
 
     const executionEvidence = evidence(project.id);
+    await writeFile(join(knowledgeDir, "actual-value"), JSON.stringify({ status: "approved" }));
     repository.executionEvidence.push(executionEvidence);
     const result = await service.completeExecutionEvidence(executionEvidence.id, {
       status: "passed",
       artifactPaths: [],
       reporterResult: executionEvidence.reporterResult,
+      evidenceRootDir: knowledgeDir,
       observationMode: "observe"
     });
 
@@ -127,8 +129,11 @@ function evidence(knowledgeProjectId: string): ExecutionEvidence {
     assuranceLevel: "strong",
     assertionContracts: [{
       id: "assert-approval",
+      stepId: "step-approval",
       type: "workflow",
       strength: "strong",
+      expected: "approved",
+      oracle: { operator: "equals", expected: "approved", applicable: true, applicabilityRefs: ["requirement:approval"] },
       requirementRefs: ["requirement:approval"],
       evidenceRequirements: ["actual-value"]
     }],
@@ -141,6 +146,7 @@ function evidence(knowledgeProjectId: string): ExecutionEvidence {
       durationMs: 10,
       assertions: [{
         id: "assert-approval",
+        stepId: "step-approval",
         status: "passed",
         actual: "approved",
         evidenceRefs: ["actual-value"]

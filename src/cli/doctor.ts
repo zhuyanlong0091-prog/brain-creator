@@ -9,6 +9,8 @@ import {
 } from "../shared/workspace.js";
 import { inspectStoreHealth, type StoreHealth } from "../storage/storeDoctor.js";
 import { isCliEntryPoint } from "./entrypoint.js";
+import { readRuntimeIdentity } from "../shared/runtimeIdentity.js";
+import { CURRENT_REPOSITORY_SCHEMA_VERSION } from "../domain/repository.js";
 
 type DoctorEnv = Record<string, string | undefined>;
 type SupportedBridgeProvider = "auto" | "claude" | "codex" | "host-agent" | "disabled";
@@ -28,6 +30,7 @@ export type DoctorAgentBridge = {
 };
 
 export type DoctorReport = {
+  runtimeIdentity: ReturnType<typeof readRuntimeIdentity>;
   ok: boolean;
   workspace: string;
   dataFile: string;
@@ -101,6 +104,7 @@ export function buildDoctorReport(options: DoctorOptions = {}): DoctorReport {
 
   return {
     ok: checks.every((check) => check.status !== "fail"),
+    runtimeIdentity: readRuntimeIdentity({ workspace, schemaVersion: CURRENT_REPOSITORY_SCHEMA_VERSION, provider: agentBridge.provider }),
     workspace,
     dataFile,
     storeDir,
@@ -116,6 +120,8 @@ export function formatDoctorReport(report: DoctorReport) {
   const lines = [
     `Brain Creator doctor: ${report.ok ? "ready" : "action required"}`,
     `Workspace: ${report.workspace}`,
+    `Runtime: ${report.runtimeIdentity.packageVersion}; commit=${report.runtimeIdentity.commit}; build=${report.runtimeIdentity.buildId}; dirty=${report.runtimeIdentity.dirty}`,
+    `Process: ${report.runtimeIdentity.processKind}; PID=${report.runtimeIdentity.pid}; started=${report.runtimeIdentity.startedAt}; schema=${report.runtimeIdentity.schemaVersion}`,
     `Data file: ${report.dataFile}`,
     `Store directory: ${report.storeDir}`,
     `Knowledge directory: ${report.knowledgeDir}`,

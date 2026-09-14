@@ -121,6 +121,17 @@ describe("authorized exploration facade", () => {
 });
 
 describe("requirement onboarding facade", () => {
+  it("does not confirm a conflicted workflow when approving its baseline", async () => {
+    const workDir = await tempDir();
+    const context = createBrainCreatorMcpContext({ workDir, dataFilePath: join(workDir, "assets.json") });
+    seedOnboarding(context);
+    context.repository.workflowModels[0].status = "conflicted";
+    expect(() => context.knowledgeService.approveRequirementSet("requirement-onboarding"))
+      .toThrow("Conflicted process models");
+    expect(context.repository.requirementSets[0].status).toBe("draft");
+    expect(context.repository.workflowModels[0].status).toBe("conflicted");
+  });
+
   it("recommends onboarding for an evaluated draft with a bound system", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({
@@ -187,6 +198,7 @@ describe("requirement onboarding facade", () => {
       action: "start-onboarding-plan",
       onboardingPlanId: created.onboardingPlan.id
     }));
+    expect(context.repository.workflowModels.find((item) => item.id === "workflow-onboarding")?.status).toBe("confirmed");
     expect(started.status).toBe("needs-data");
 
     const status = dataOf(await handleBrainCreatorTool(context, "bc_status", {

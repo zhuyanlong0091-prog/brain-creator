@@ -59,6 +59,7 @@ import { planWorkflowPath } from "./workflowPathPlanner.js";
 import { buildAssertionContracts, determineAssuranceLevel, missingAssuranceEvidence } from "../execution/assurance.js";
 import { buildExecutionNarrative } from "../execution/executionNarrative.js";
 import { writeStaticExecutionReport } from "../execution/staticReport.js";
+import { validateExecutionArtifacts } from "../execution/artifactValidation.js";
 import { decryptSecrets } from "../shared/crypto.js";
 import {
   RequirementAttachmentPipeline,
@@ -720,6 +721,14 @@ export class KnowledgeService {
     requirementSet.status = "approved";
     requirementSet.approvedAt = timestamp();
     requirementSet.updatedAt = requirementSet.approvedAt;
+    for (const model of [...this.repository.workflowModels, ...this.repository.stateMachineModels].filter(
+      (item) => item.requirementSetId === requirementSet.id && item.knowledgeProjectId === requirementSet.knowledgeProjectId
+    )) {
+      if (model.status === "draft") {
+        model.status = "confirmed";
+        model.updatedAt = requirementSet.updatedAt;
+      }
+    }
     for (const node of this.repository.knowledgeNodes.filter(
       (item) => item.requirementSetId === requirementSet.id
     )) {
@@ -749,6 +758,11 @@ export class KnowledgeService {
 
   validateRequirementSetApproval(requirementSetId: string) {
     const requirementSet = this.getRequirementSet(requirementSetId);
+    if ([...this.repository.workflowModels, ...this.repository.stateMachineModels].some(
+      (item) => item.requirementSetId === requirementSet.id && item.status === "conflicted"
+    )) {
+      throw new Error("Conflicted process models must be resolved before approval");
+    }
     if (!requirementSet.evaluationGate) {
       throw new Error("Requirement Eval must be generated before approval");
     }
@@ -850,11 +864,11 @@ export class KnowledgeService {
     const explorationTaskIds: string[] = [];
     const compilationStages: CompilationStageResult[] = [{
       stage: "requirement-path",
-      verdict: "ready",
-      reason: `Semantic steps compiled from ${semantic.source}`,
+      verdict: semantic.ambiguity ? "ambiguous" : "ready",
+      reason: semantic.ambiguity?.reason ?? `Semantic steps compiled from ${semantic.source}`,
       sourceRefs: semantic.processPathSourceRefs
     }];
-    let compileStatus: "ready" | "needs-exploration" | "needs-data" | "ambiguous" | "blocked" = "ready";
+    let compileStatus: "ready" | "needs-exploration" | "needs-data" | "ambiguous" | "blocked" = semantic.ambiguity ? "ambiguous" : "ready";
     const executableCaseId = id("executableCase");
     let pathPlan: ExecutableCase["pathPlan"];
     let statePlan: ExecutableCase["statePlan"];
@@ -891,6 +905,19 @@ export class KnowledgeService {
       if (!project.systemIds.includes(systemId)) {
         throw new Error("Business system must be bound before compiling executable cases");
       }
+      if (semantic.ambiguity) {
+        const task = this.createExplorationTask({
+          executableCaseId, intent, systemId, kind: "state-action",
+          reason: semantic.ambiguity.reason,
+          query: `${intent.module} ${intent.title} ${intent.objective}`,
+          candidatePageModelIds: [],
+          requestedEvidence: ["confirmed requirement transition", "starting state and target state", "role and branch conditions"],
+          sourceRefs: semantic.ambiguity.sourceRefs, compileKey
+        });
+        explorationTaskIds.push(task.id);
+        statePlan = { verdict: "ambiguous", reason: task.reason, candidateCount: 0, candidates: [], transitionSourceRefs: task.sourceRefs };
+        compilationStages.push({ stage: "system-brain", verdict: "ambiguous", reason: task.reason, sourceRefs: task.sourceRefs });
+      } else {
       const brain = buildSystemBrain(this.repository, project.id, systemId);
       const contextQuery = `${intent.module} ${intent.title} ${intent.objective}`;
       const confirmedBinding = [...this.repository.pageBindingDecisions]
@@ -1011,6 +1038,7 @@ export class KnowledgeService {
           }
         }
       }
+      }
     } else {
       compilationStages.push({
         stage: "system-brain",
@@ -1105,6 +1133,10 @@ export class KnowledgeService {
         verdict: "ready",
         sourceRefs: plannedDataPlan.sourceRefs
       });
+    }
+    if (semantic.ambiguity) {
+      steps = [];
+      if (compileStatus !== "blocked") compileStatus = "ambiguous";
     }
     const provenance = validateStepProvenance(steps);
     if (!provenance.valid) {
@@ -2067,13 +2099,21 @@ export class KnowledgeService {
         ? [`Missing trace artifact(s): ${missingTraceEvidence.join(", ")}`]
         : [])
     ];
+    const referencedArtifacts = uniqueStrings([
+      ...(evidence.reporterResult?.attachments ?? []),
+      ...(evidence.reporterResult?.assertions ?? []).flatMap((item) => item.evidenceRefs),
+      ...(reporterSteps ?? []).flatMap((item) => [...item.evidenceRefs, ...(item.traceRefs ?? [])]),
+      ...evidence.tracePaths
+    ]);
+    evidence.artifactValidation = await validateExecutionArtifacts(
+      input.evidenceRootDir, referencedArtifacts,
+      Object.fromEntries((evidence.artifactValidation?.files ?? []).map((item) => [item.path, item.sha256]))
+    );
+    evidence.evidenceWarnings.push(...evidence.artifactValidation.reasons);
+    if (evidence.artifactValidation.status !== "valid" && evidence.assuranceLevel === "strong") evidence.assuranceLevel = "limited";
     if ((missingStepEvidence.length || missingTraceEvidence.length) && evidence.assuranceLevel === "strong") {
       evidence.assuranceLevel = "limited";
     }
-    const assertionSteps = evidence.steps.filter((item) => item.action === "assert");
-    const unboundAssertions = (evidence.reporterResult?.assertions ?? []).filter(
-      (assertion) => !assertion.stepId
-    );
     for (const step of evidence.steps) {
       const screenshot = evidence.artifactPaths.find((path) =>
         path.toLowerCase().includes(`step-${String(step.order).padStart(2, "0")}`)
@@ -2082,10 +2122,8 @@ export class KnowledgeService {
       const reporterStep = reporterSteps?.find((reported) => reported.id === step.stepId);
       if (reporterStep?.pageUrl) step.pageUrl = redact(reporterStep.pageUrl);
       const assertion = step.action === "assert"
-        ? evidence.reporterResult?.assertions.find((item) => item.stepId === step.stepId) ??
-          (unboundAssertions.length === assertionSteps.length
-            ? unboundAssertions[assertionSteps.indexOf(step)]
-            : undefined)
+        ? evidence.reporterResult?.assertions.find((item) => item.stepId === step.stepId &&
+            evidence.assertionContracts?.some((contract) => contract.id === item.id && contract.stepId === step.stepId))
         : undefined;
       step.evidenceRefs = [...new Set([...(step.evidenceRefs ?? []), ...(reporterStep?.evidenceRefs ?? [])])];
       step.traceRefs = [...new Set(reporterStep?.traceRefs ?? evidence.tracePaths)];
@@ -2099,10 +2137,10 @@ export class KnowledgeService {
         if (assertion.actual !== undefined) step.actual = redact(assertion.actual);
       } else {
         step.assertionStatus =
-          effectiveStatus === "passed"
+          reporterStep?.status === "passed" && step.action !== "assert"
             ? "passed"
             : step.action === "assert"
-              ? effectiveStatus
+              ? effectiveStatus === "failed" ? "failed" : "blocked"
               : "blocked";
         if (step.action === "assert") {
           step.actual = input.actualResult === undefined ? undefined : redact(input.actualResult);
@@ -2111,7 +2149,9 @@ export class KnowledgeService {
     }
     if (reporterSteps !== undefined) {
       const requiredCoverage = evidence.coverage?.required ?? ["workflow"];
-      const verifiedCoverage = verifiedCoverageDimensions(evidence, effectiveStatus);
+      const verifiedCoverage = evidence.artifactValidation.status === "valid"
+        ? verifiedCoverageDimensions(evidence, effectiveStatus)
+        : [];
       evidence.coverage = {
         required: requiredCoverage,
         verified: verifiedCoverage,
@@ -2232,6 +2272,10 @@ export class KnowledgeService {
       status: evidence.status === "running" ? "blocked" : evidence.status,
       assuranceLevel: evidence.assuranceLevel,
       diagnosisVerdict: diagnosis?.verdict,
+      contracts: evidence.assertionContracts,
+      reporter: evidence.reporterResult,
+      artifactValidation: evidence.artifactValidation,
+      provenance: evidence.provenance,
       expectationRefs: uniqueStrings(
         (evidence.assertionContracts ?? []).flatMap((contract) => contract.requirementRefs)
       ),
@@ -3706,7 +3750,7 @@ function executableCaseCompileKey(
   return createHash("sha256")
     .update(
       JSON.stringify({
-        compilerVersion: 5,
+        compilerVersion: 6,
         testIntentId: intent.id,
         systemId: systemId ?? null,
         requirementHash: requirementSet.contentHash,
