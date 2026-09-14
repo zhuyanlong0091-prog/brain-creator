@@ -62,6 +62,7 @@ import {
   type ArtifactRunLayout
 } from "../storage/artifactWorkspace.js";
 import { writeStaticSuiteExecutionReport } from "../execution/staticSuiteReport.js";
+import { writeStaticDocumentSuiteReport } from "../execution/staticDocumentSuiteReport.js";
 import {
   browserObservationCapability,
   playwrightTestArgs
@@ -2239,6 +2240,7 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
         suiteId: activeDocumentSuite.suiteId,
         status: activeDocumentSuite.status,
         browserMode: activeDocumentSuiteAsset?.browserMode ?? "headless",
+        reportPath: activeDocumentSuiteAsset?.reportPath,
         totalCases: activeDocumentSuite.totalCases,
         attempted: activeDocumentSuite.attemptedCaseNos.length,
         passed: activeDocumentSuite.passedCaseNos.length,
@@ -2538,7 +2540,7 @@ async function runFacade(context: BrainCreatorMcpContext, input: Record<string, 
   if (mode === "case-source-suite") {
     if (suiteActionArg(input) === "cancel") {
       return {
-        ...(cancelCaseSourceSuite(context, inputWithSystem)),
+        ...(await cancelCaseSourceSuite(context, inputWithSystem)),
         systemResolution: resolution
       };
     }
@@ -2553,7 +2555,7 @@ async function runFacade(context: BrainCreatorMcpContext, input: Record<string, 
   };
 }
 
-function cancelCaseSourceSuite(
+async function cancelCaseSourceSuite(
   context: BrainCreatorMcpContext,
   input: Record<string, unknown>
 ) {
@@ -2572,11 +2574,13 @@ function cancelCaseSourceSuite(
   ensureDocumentSuiteLedger(context, suite);
   const cancelledSuite = context.service.cancelCaseSuite(suite.id);
   completeDocumentSuiteLedger(context, cancelledSuite, "cancelled");
+  const reportPath = await writeDocumentSuiteReport(context, cancelledSuite, []);
   return {
     mode: "case-source-suite",
     status: "cancelled",
     suite: cancelledSuite,
     progress: caseSuiteProgress(context, cancelledSuite),
+    reportPath,
     nextAction: "Run a new preview and confirm the document suite again."
   };
 }
@@ -2773,6 +2777,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     context.service.enableCaseSuiteContinueOnBlocked(suite.id);
   }
   ensureDocumentSuiteLedger(context, suite);
+  let reportPath = await writeDocumentSuiteReport(context, suite, parsed.cases);
   const pendingAction = context.runLedger.latestUnresolvedAction(suite.id);
   if (pendingAction) {
     const pendingCase = pendingAction.caseNo
@@ -2808,6 +2813,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
       waitReason:
         "A write action was sent but its result was not confirmed. Query the postcondition before retrying.",
       progress: caseSuiteProgress(context, waitingSuite),
+      reportPath,
       nextAction: "reconcile-action"
     };
   }
@@ -2856,20 +2862,23 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
           gapIds: []
         },
         progress: caseSuiteProgress(context, waitingSuite),
-        documentCase: currentCase
+        documentCase: currentCase,
+        reportPath
       };
     }
     const documentCase = casesToRun[0];
     if (!documentCase) {
       const completedSuite = context.service.updateCaseSuiteStatus(suite.id, "completed");
       completeDocumentSuiteLedger(context, completedSuite, "completed");
+      reportPath = await writeDocumentSuiteReport(context, completedSuite, parsed.cases);
       return {
         mode: "case-source-suite",
         status: "completed",
         source: caseSource,
         authState,
         suite: completedSuite,
-        progress: caseSuiteProgress(context, completedSuite)
+        progress: caseSuiteProgress(context, completedSuite),
+        reportPath
       };
     }
     const result = await executeDocumentCase(context, {
@@ -2883,6 +2892,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     });
     if (result.taskPackage) {
       const waitingSuite = context.service.updateCaseSuiteStatus(suite.id, "waiting-for-agent");
+      reportPath = await writeDocumentSuiteReport(context, waitingSuite, parsed.cases);
       return {
         ...result.taskPackage,
         mode: "case-source-suite",
@@ -2891,7 +2901,8 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
         source: caseSource,
         suite: waitingSuite,
         currentCase: result.caseResult,
-        progress: caseSuiteProgress(context, waitingSuite)
+        progress: caseSuiteProgress(context, waitingSuite),
+        reportPath
       };
     }
   }
@@ -2942,14 +2953,6 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     gapIds,
     completedAt: new Date().toISOString()
   });
-  const artifactManifest = await writeArtifactManifest({
-    workDir: context.workDir,
-    systemId,
-    suiteRunId: suiteRun.id,
-    artifactPaths: suiteRun.artifactPaths,
-    sourceRefs: [caseSource.id, suite.id],
-    protectedSecrets: protectedSecretsForSystem(context, systemId)
-  });
   context.service.updateCaseSuiteStatus(
     suite.id,
     allSuiteCasesPassed ? "completed" : "failed"
@@ -2959,6 +2962,16 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     suite,
     allSuiteCasesPassed ? "completed" : "failed"
   );
+  reportPath = await writeDocumentSuiteReport(context, suite, parsed.cases);
+  const artifactManifest = await writeArtifactManifest({
+    workDir: context.workDir,
+    systemId,
+    suiteRunId: suiteRun.id,
+    artifactPaths: [...suiteRun.artifactPaths, reportPath],
+    sourceRefs: [caseSource.id, suite.id],
+    ownershipDirectory: dirname(dirname(reportPath)),
+    protectedSecrets: protectedSecretsForSystem(context, systemId)
+  });
   const bugs = context.service.listBugReports({ systemId }).filter((bug) =>
     bugReportIds.includes(bug.id)
   );
@@ -2979,6 +2992,7 @@ async function runCaseSourceSuite(context: BrainCreatorMcpContext, input: Record
     suite,
     suiteRun,
     artifactManifest,
+    reportPath,
     progress: caseSuiteProgress(context, suite),
     bugs,
     writeBack
@@ -8203,13 +8217,15 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     if (suite.selectedCaseNos.every((caseNo) => passed.has(caseNo))) {
       const completedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "completed");
       completeDocumentSuiteLedger(context, completedSuite, "completed");
+      const reportPath = await writeDocumentSuiteReport(context, completedSuite);
       return {
         ...result,
         status: "completed",
         chainRun,
         suiteRun,
         suite: completedSuite,
-        testResult
+        testResult,
+        reportPath
       };
     }
     if (
@@ -8219,13 +8235,15 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
     ) {
       const blockedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, "blocked");
       completeDocumentSuiteLedger(context, blockedSuite, "blocked");
+      const reportPath = await writeDocumentSuiteReport(context, blockedSuite);
       return {
         ...result,
         status: "blocked",
         chainRun,
         suiteRun,
         suite: blockedSuite,
-        testResult
+        testResult,
+        reportPath
       };
     }
     const nextTask = await prepareNextHostAgentSuiteTask(
@@ -8234,6 +8252,7 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
       result.task.chainContext?.maxHealAttempts
     );
     if (nextTask) {
+      const reportPath = await writeDocumentSuiteReport(context, nextTask.suite);
       return {
         ...result,
         submittedTask: result.task,
@@ -8241,19 +8260,22 @@ async function submitAgentOutput(context: BrainCreatorMcpContext, input: Record<
         chainRun,
         suiteRun,
         testResult,
+        reportPath,
         ...nextTask
       };
     }
     const finalStatus = hostAgentSuiteFailureStatus(context, suite);
     const failedSuite = context.service.updateCaseSuiteStatus(suiteRun.suiteId, finalStatus);
     completeDocumentSuiteLedger(context, failedSuite, finalStatus);
+    const reportPath = await writeDocumentSuiteReport(context, failedSuite);
     return {
       ...result,
       status: finalStatus,
       chainRun,
       suiteRun,
       suite: failedSuite,
-      testResult
+      testResult,
+      reportPath
     };
   }
   if (result.task.regressionContext) {
@@ -9132,6 +9154,88 @@ function caseSuiteProgress(context: BrainCreatorMcpContext, suite: CaseSuite) {
   };
 }
 
+async function writeDocumentSuiteReport(
+  context: BrainCreatorMcpContext,
+  suite: CaseSuite,
+  cases?: DocumentCase[]
+) {
+  const source = context.service
+    .listCaseSources(suite.systemId)
+    .find((candidate) => candidate.id === suite.sourceId);
+  const reportCases = cases ?? (source ? (await parseCaseSource(source.source)).cases : []);
+  const system = context.repository.systemProfiles.find((item) => item.id === suite.systemId);
+  const layout = resolveArtifactRunLayout({
+    workDir: context.workDir,
+    systemKey: system?.name ?? suite.systemId,
+    requirementKey: `document-${source?.id ?? suite.sourceId}`,
+    suiteRunId: suite.id
+  });
+  const reportPath = join(layout.reportDir, "suite-report.html");
+  const runs = context.service
+    .listCaseSuiteRuns(suite.systemId)
+    .filter((run) => run.suiteId === suite.id);
+  const bugIds = new Set(runs.flatMap((run) => run.bugReportIds));
+  const gapIds = new Set(runs.flatMap((run) => run.gapIds));
+  const progressEntries = context.runLedger.list({
+    runType: "document-suite",
+    systemId: suite.systemId,
+    caseSuiteId: suite.id
+  });
+  const progress = progressEntries.length > 0
+    ? context.runLedger.progress(suite.id)
+    : undefined;
+  await writeStaticDocumentSuiteReport({
+    outputPath: reportPath,
+    title: `Brain Creator document suite ${suite.id}`,
+    suite,
+    cases: reportCases,
+    runs,
+    locale: system?.defaultLocale,
+    progress,
+    bugs: context.repository.bugReports
+      .filter((bug) =>
+        bug.systemId === suite.systemId &&
+        (bugIds.has(bug.id) || bug.sourceId === suite.sourceId)
+      )
+      .map((bug) => ({
+        id: bug.id,
+        status: bug.status,
+        caseNo: bug.caseNo,
+        actualResult: bug.actualResult
+      })),
+    gaps: context.repository.gaps
+      .filter((gap) =>
+        gap.projectId === suite.systemId &&
+        (gapIds.has(gap.id) || gap.sourceId === suite.sourceId || gap.sourceId.startsWith(`${suite.sourceId}:`))
+      )
+      .map((gap) => ({
+        id: gap.id,
+        status: gap.status,
+        caseNo: gap.sourceId.startsWith(`${suite.sourceId}:`)
+          ? gap.sourceId.slice(suite.sourceId.length + 1)
+          : undefined,
+        reason: gap.reason
+      }))
+  });
+  await writeArtifactManifest({
+    workDir: context.workDir,
+    systemId: suite.systemId,
+    suiteRunId: suite.id,
+    artifactPaths: [
+      reportPath,
+      ...runs.flatMap((run) => run.artifactPaths)
+    ],
+    sourceRefs: [suite.sourceId, suite.id],
+    ownershipDirectory: layout.root,
+    protectedSecrets: protectedSecretsForSystem(context, suite.systemId)
+  });
+  if (suite.reportPath !== reportPath) {
+    suite.reportPath = reportPath;
+    context.repository.persist();
+  }
+  return reportPath;
+}
+
 function ensureDocumentSuiteLedger(
   context: BrainCreatorMcpContext,
   suite: CaseSuite
@@ -9256,6 +9360,7 @@ function unfinishedCaseSuites(context: BrainCreatorMcpContext, systemId: string)
         source: sourcesById.get(suite.sourceId)?.source,
         status: suite.status,
         totalCases: suite.totalCases,
+        reportPath: suite.reportPath,
         ...progress,
         lastRunId: lastRun?.id,
         updatedAt: suite.updatedAt

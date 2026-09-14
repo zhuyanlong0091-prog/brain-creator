@@ -138,6 +138,8 @@ For a controlled stability check, add `repeatCount` from 2 to 5 to the same `bc_
 
 Brain Creator writes an offline `suite-report.html` under the system/requirement/run artifact directory and updates it after every completed case, including running Suites. The report summarizes current progress, every case, status, assurance level, actual result, artifact paths, BugReports, and Gaps, and supports client-side search. For large coverage ledgers, pass `limit` and `offset` to `bc_review target=coverage`; the response keeps complete counts and returns `itemPage.nextOffset` for the next page.
 
+Document case suites use the same offline artifact contract. Their report is stored under `.brain-creator/artifacts/<system>/document-<source>/<suite>/report/suite-report.html`, is exposed as `reportPath` by `bc_run` and `bc_status`, and keeps pending cases and their not-executed reasons visible while the suite is waiting or being resumed.
+
 Use the existing `bc_run` facade for explicit Suite controls. Always preview with `confirm=false`, show the affected run/case, and wait for approval before `confirm=true`:
 
 - `suiteAction=cancel` cancels unfinished cases and pending Agent/TestData tasks. It preserves completed results and does not create a Gap. Any created-data cleanup obligation remains due.

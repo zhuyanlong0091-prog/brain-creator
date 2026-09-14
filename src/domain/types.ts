@@ -562,6 +562,7 @@ export type CaseSuite = {
   selectedCaseNos: string[];
   continueOnBlocked?: boolean;
   browserMode?: BrowserExecutionMode;
+  reportPath?: string;
   createdAt: string;
   updatedAt: string;
 };

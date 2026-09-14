@@ -7,7 +7,7 @@ This register tracks the six-package business-closure plan. Implementation, real
 | A: Runtime and baseline | Partial | Process-pinned build identity; explicit Trial/Suite binding; frozen scenario scope; fixed-denominator metrics excluding synthetic results | Real Trial execution; all scheduling/control entrypoints; intervention and recovery instrumentation; controlled projection checkpoints |
 | B: Evidence and conformance | Partial | Exact assertion IDs; step binding for strong assurance; file/hash/image/trace validation; Oracle comparison; synthetic and nonconforming trust guards | Full immutable semantic freeze, per-run ownership and historical re-evaluation; end-to-end package validation |
 | C: Paths and data | Partial | Ambiguous/missing process references fail closed; approved baseline confirms draft process models; Provider result identity, status and expected values checked | Complete path solving; multi-case scenario aggregation; actual entity lifecycle and recovery |
-| D: Continuity and recovery | Partial | Existing recovery plus unified `executionTasks` projection in `bc_status`, including current case/step, page, wait reason, related data/agent task and next action; write-action lifecycle now records planned/sent/confirmed/reconciled phases and blocks repeat sends after interruption | Continuous human-readable report and end-to-end interruption replay |
+| D: Continuity and recovery | Partial | Existing recovery plus unified `executionTasks` projection in `bc_status`, including current case/step, page, wait reason, related data/agent task and next action; write-action lifecycle now records planned/sent/confirmed/reconciled phases and blocks repeat sends after interruption; document suites now persist and incrementally rewrite a searchable offline HTML report | Browser/process interruption replay with automatic postcondition querying; real-system continuity |
 | E: Real business evaluation | Open | No new real run claimed | Three authorized rounds, order fixture, second real system dependency |
 | F: Delivery | Open | Usage guidance updated with current limits | Measured comparison, full acceptance and install validation |
 
@@ -23,19 +23,28 @@ Accepted packages: **0/6**. Real business completion and autonomous completion: 
 
 ## 中文进度
 
-当前为 A、B、C 三包部分实现，D 已补齐统一任务投影的第一步，验收完成 **0/6**。已补显式 Trial/Suite 绑定、固定场景分母、保守指标、流程/实体校验，以及 `bc_status` 的统一任务恢复视图。尚未建立本轮真实测量，缺少完整人工介入采集时自主率仍为“未测量”；幂等写恢复、连续报告和三轮真实执行仍未完成。本页不得用于宣称 L3 或真实业务通过率。
+当前为 A、B、C 三包部分实现，D 已补齐统一任务投影、写动作恢复和文档套件离线报告的第一版，验收完成 **0/6**。已补显式 Trial/Suite 绑定、固定场景分母、保守指标、流程/实体校验，以及 `bc_status` 的统一任务恢复视图。尚未建立本轮真实测量，缺少完整人工介入采集时自主率仍为“未测量”；浏览器/进程中断后的真实系统回放和自动后置状态查询仍未完成。本页不得用于宣称 L3 或真实业务通过率。
 
 Trial metrics currently reuse the persisted artifact validation record. Review-time disk/hash revalidation and consistent Trial checks across scheduling/control branches remain open. Multiple cases for one scenario remain inconclusive until a complete aggregation contract exists; a final passing case cannot prove the entire scenario passed.
 
 ## 2026-09-14 Verification
 
-- Full Vitest regression: **131 test files, 963 tests passed** with file parallelism disabled for deterministic cleanup.
+- Focused recovery/report regression: **2 test files, 7 tests passed**.
+- Full Vitest regression: **132 test files, 964 tests passed, 2 existing fixture failures**. The failures are `systemExplorer.test.ts` popup transition and its Windows cleanup/timeout behavior, plus the unrelated temporary-directory cleanup failure in `systemBrainSnapshot.test.ts`; they are outside this change.
 - Vitest file-level parallelism is disabled in the repository test configuration because Windows can hold sharded-store files briefly during cleanup; this keeps the default `npm test` deterministic without changing product runtime behavior.
 - TypeScript check, production build, and VitePress documentation build passed.
 - Package contents, packed install, Codex plugin install, and Codex-native entry smoke passed.
 - Repository hygiene passed for 322 tracked files.
 - The release readiness check remains blocked only by local npm authentication; npm publish was not attempted.
 - This verification is still synthetic/local. No real business Trial, three-round real-system measurement, or autonomous-completion claim is made.
+
+## 2026-09-14 Document Suite Report
+
+- Document suites persist `reportPath` on `CaseSuite` and expose it from `bc_run` and the active `bc_status` summary.
+- Reports are written to `.brain-creator/artifacts/<system>/document-<source>/<suite>/report/suite-report.html` and include selected cases, pending/not-executed reasons, progress, BugReports, Gaps, related run IDs, and client-side search.
+- The report is regenerated after suite creation, pending-action recovery, host-agent continuation, case completion, cancellation, and terminal suite transitions.
+- A report is a Suite-level artifact; it is included in the Suite manifest without being mislabeled as per-case evidence.
+- Fresh-context persistence coverage proves an unresolved sent action remains waiting and no new test case is dispatched. Browser/process interruption replay and automatic postcondition querying remain unmeasured.
 
 ## 2026-09-14 Unified Task Projection
 
