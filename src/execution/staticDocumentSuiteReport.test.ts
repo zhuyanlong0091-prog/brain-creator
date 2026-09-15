@@ -79,6 +79,42 @@ describe("static document suite report", () => {
     expect(html).toContain("搜索报告");
     expect(html).toContain('<html lang="zh-CN">');
   });
+
+  it("redacts protected values from execution details", () => {
+    const protectedPath = ".brain-creator/auth/refreshed.json";
+    const html = renderStaticDocumentSuiteReport({
+      title: "Auth refresh",
+      suite: suite(),
+      cases: [documentCase("TC-001", "刷新鉴权", "鉴权")],
+      runs: [{
+        id: "suite-run-1",
+        systemId: "system-1",
+        suiteId: "suite-1",
+        sourceId: "source-1",
+        status: "blocked",
+        total: 1,
+        passed: 0,
+        failed: 0,
+        blocked: 1,
+        caseResults: [{
+          caseNo: "TC-001",
+          title: "刷新鉴权",
+          status: "blocked",
+          error: `Unable to read ${protectedPath}`,
+          gapIds: []
+        }],
+        artifactPaths: [],
+        bugReportIds: [],
+        gapIds: [],
+        createdAt: "2026-09-14T00:00:00.000Z"
+      }],
+      gaps: [{ id: "gap-1", status: "open", reason: `Retry ${protectedPath}` }],
+      protectedSecrets: { storageStatePath: protectedPath }
+    });
+
+    expect(html).not.toContain(protectedPath);
+    expect(html).toContain("[REDACTED]");
+  });
 });
 
 function suite() {

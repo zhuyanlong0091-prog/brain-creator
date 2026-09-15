@@ -9312,7 +9312,8 @@ async function writeDocumentSuiteReport(
           ? gap.sourceId.slice(suite.sourceId.length + 1)
           : undefined,
         reason: gap.reason
-      }))
+      })),
+    protectedSecrets: protectedSecretsForSystem(context, suite.systemId)
   });
   await writeArtifactManifest({
     workDir: context.workDir,
