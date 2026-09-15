@@ -265,6 +265,75 @@ describe("execution recovery and failure classification", () => {
     expect(recovered.currentStepId).toBeUndefined();
   });
 
+  it("requires postcondition reconciliation after an uncertain write", () => {
+    const repository = new InMemoryBrainCreatorRepository();
+    repository.requirementSuiteRuns.push({
+      id: "run-action-recovery",
+      knowledgeProjectId: "knowledge-orders",
+      systemId: "system-orders",
+      status: "running",
+      currentExecutableCaseId: "case-submit",
+      continueOnBlocked: false,
+      allowCreateTestData: false,
+      total: 1,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+      cancelled: 0,
+      caseRuns: [{
+        executableCaseId: "case-submit",
+        title: "Submit order",
+        order: 1,
+        status: "running",
+        gapIds: [],
+        attempts: []
+      }],
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:00:01.000Z"
+    });
+    const ledger = new RunLedgerService(repository, () => "2026-08-27T00:00:02.000Z");
+    ledger.recordAction({
+      requirementSuiteRunId: "run-action-recovery",
+      systemId: "system-orders",
+      executableCaseId: "case-submit",
+      stepId: "step-submit",
+      actionKey: "plan-submit:step-submit",
+      phase: "sent",
+      actionSemantic: "Submit order",
+      entityReference: "order:order-001",
+      postcondition: "Order status is submitted"
+    });
+
+    const waiting = recoverExecutionState(repository, "run-action-recovery");
+    expect(waiting).toEqual(expect.objectContaining({
+      status: "waiting",
+      currentCaseId: "case-submit",
+      currentStepId: "step-submit",
+      nextAction: "reconcile-action",
+      pendingAction: expect.objectContaining({
+        actionKey: "plan-submit:step-submit",
+        phase: "sent",
+        nextAction: "reconcile-action"
+      })
+    }));
+
+    ledger.recordAction({
+      requirementSuiteRunId: "run-action-recovery",
+      systemId: "system-orders",
+      executableCaseId: "case-submit",
+      stepId: "step-submit",
+      actionKey: "plan-submit:step-submit",
+      phase: "reconciled",
+      actionSemantic: "Submit order",
+      postcondition: "Order status is submitted",
+      evidenceRefs: ["evidence:order-submitted"]
+    });
+    const resumed = recoverExecutionState(repository, "run-action-recovery");
+    expect(resumed.nextAction).toBe("continue-run");
+    expect(resumed.pendingAction).toBeUndefined();
+  });
+
   it("classifies missing reporter, assertion, network, and automation failures", () => {
     expect(classifyEvidenceFailure({ stderr: "Structured Playwright Reporter output was missing" }).type)
       .toBe("execution_failure");

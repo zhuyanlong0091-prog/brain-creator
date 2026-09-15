@@ -135,7 +135,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_prepare",
     title: "Brain Creator prepare requirement",
     description:
-      "Requirement-first facade for ingesting sources, running staged Requirement Eval, approving a baseline with a verified receipt, bounded first-system onboarding, reviewing or rolling back historical execution diagnoses, exploring and reconciling System Brain evidence, incrementally recompiling stale cases, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, and confirming immutable execution preflight snapshots.",
+      "Requirement-first facade for ingesting sources, running staged Requirement Eval, approving a baseline with a verified receipt, bounded first-system onboarding, reviewing or rolling back historical execution diagnoses, exploring and reconciling System Brain evidence, incrementally recompiling stale cases, compiling evidence-bound cases, resolving compilation exploration tasks, preparing test data, recording and reconciling idempotent write actions, and confirming immutable execution preflight snapshots.",
     inputSchema: z.object({
       action: z.enum([
         "start-evaluation-trial",
@@ -175,6 +175,8 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
         "prepare-test-data",
         "submit-test-data",
         "prepare-execution",
+        "record-execution-action",
+        "reconcile-execution-action",
         "record-observation",
         "record-page-evidence",
         "record-interaction-evidence",
@@ -193,6 +195,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       evaluationWorkspacePath: z.string().optional(),
       evaluationStorePath: z.string().optional(),
       codeRevision: z.string().optional(),
+      businessScenarioIds: z.array(z.string()).default([]),
       runtimeVersions: z.record(z.string(), z.string()).default({}),
       previousProjectionManifestId: z.string().optional(),
       checkpointOperation: z.string().optional(),
@@ -249,6 +252,24 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       systemSnapshotHash: z.string().optional(),
       dataPlanHash: z.string().optional(),
       executionEvidenceId: z.string().optional(),
+      actionKey: z.string().min(1).max(200).optional(),
+      actionPhase: z.enum([
+        "planned",
+        "sent",
+        "confirmed",
+        "reconciliation-required",
+        "reconciled"
+      ]).optional(),
+      actionSemantic: z.string().max(500).optional(),
+      entityReference: z.string().max(300).optional(),
+      actionStepId: z.string().max(200).optional(),
+      actionStepTitle: z.string().max(500).optional(),
+      actionPostcondition: z.string().max(1000).optional(),
+      actionEvidenceRefs: z.array(z.string()).default([]),
+      autoVerify: z.boolean().default(false),
+      requirementSuiteRunId: z.string().optional(),
+      caseSuiteId: z.string().optional(),
+      caseNo: z.string().optional(),
       observationMode: z.enum(["observe", "headless"]).optional(),
       runPassed: z.boolean().optional(),
       strongEvidence: z.boolean().optional(),
@@ -567,7 +588,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
     name: "bc_status",
     title: "Brain Creator status",
     description:
-      "Facade status entry for agents. Resolves by systemId or systemName and returns system, auth, bridge, cases, suites, bugs, gaps, artifacts, user summary, quick commands, and next action.",
+      "Facade status entry for agents. Resolves by systemId or systemName and returns system, auth, bridge, cases, suites, bugs, gaps, artifacts, unified execution tasks, user summary, quick commands, and next action.",
     inputSchema: z.object({
       systemId: z.string().optional(),
       knowledgeProjectId: z.string().optional(),
@@ -640,6 +661,7 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       operator: z.string().optional(),
       provider: z.string().optional(),
       sessionId: z.string().optional(),
+      evaluationTrialId: z.string().optional(),
       evidenceMode: z.enum(["strict", "compatibility"]).optional(),
       browserMode: z.enum(["headless", "observe"]).optional(),
       observationMode: z.enum(["summary", "step-by-step"]).default("summary"),

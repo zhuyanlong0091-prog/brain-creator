@@ -11,6 +11,8 @@ import type {
   StabilitySchedule
 } from "../domain/types.js";
 import { id } from "../shared/id.js";
+import { EvaluationIntegrityService } from "../evaluation/evaluationIntegrity.js";
+import { readRuntimeIdentity } from "../shared/runtimeIdentity.js";
 import { RunLedgerService } from "./runLedger.js";
 import {
   reconcileRequirementCases,
@@ -48,6 +50,10 @@ type CreateRequirementSuiteRunInput = {
   stabilityTarget?: number;
   stabilityPolicy?: StabilityPolicy;
   requirementSetIds?: string[];
+  evaluationTrialId?: string;
+  evaluationSourceRevision?: number;
+  evaluationSourceHash?: string;
+  evaluationRuntimeBuildIdentity?: string;
 };
 
 type CompleteRequirementSuiteCaseInput = RequirementSuiteCaseOutcome;
@@ -83,6 +89,11 @@ export class RequirementSuiteRunService {
       }
     }
     const executableCaseIds = cases.map((item) => item.executableCaseId);
+    if (input.evaluationTrialId) {
+      const binding = this.validateEvaluation(input.evaluationTrialId, input.knowledgeProjectId, input.systemId, executableCaseIds);
+      input = { ...input, evaluationSourceRevision: binding.trial.sourceRevision,
+        evaluationSourceHash: binding.trial.sourceHash, evaluationRuntimeBuildIdentity: binding.trial.runtimeBuildIdentity };
+    }
     const executableCases = executableCaseIds.flatMap((caseId) => {
       const executableCase = this.repository.executableCases.find((item) => item.id === caseId);
       return executableCase ? [executableCase] : [];
@@ -113,9 +124,10 @@ export class RequirementSuiteRunService {
     });
     const existing = this.repository.requirementSuiteRuns.find(
       (run) =>
-        run.knowledgeProjectId === input.knowledgeProjectId &&
+      run.knowledgeProjectId === input.knowledgeProjectId &&
         run.systemId === input.systemId &&
         run.authProfileId === input.authProfileId &&
+        run.evaluationTrialId === input.evaluationTrialId &&
         !isTerminal(run.status) &&
         sameItems(
           run.caseRuns.map((item) => item.executableCaseId),
@@ -146,6 +158,10 @@ export class RequirementSuiteRunService {
       stabilityPolicy: input.stabilityPolicy,
       stabilitySchedule: stabilitySchedule(input.stabilityPolicy),
       requirementSetIds,
+      ...(input.evaluationTrialId ? { evaluationTrialId: input.evaluationTrialId } : {}),
+      ...(input.evaluationSourceRevision === undefined ? {} : { evaluationSourceRevision: input.evaluationSourceRevision }),
+      ...(input.evaluationSourceHash ? { evaluationSourceHash: input.evaluationSourceHash } : {}),
+      ...(input.evaluationRuntimeBuildIdentity ? { evaluationRuntimeBuildIdentity: input.evaluationRuntimeBuildIdentity } : {}),
       reconciliation,
       ...(coverageSnapshot ? { coverageSnapshot } : {}),
       total: cases.length,
@@ -322,6 +338,7 @@ export class RequirementSuiteRunService {
     caseRun?: RequirementSuiteCaseRun;
   } {
     const run = this.get(runId);
+    this.validateEvaluationRun(run);
     const active = run.caseRuns.find(
       (item) =>
         item.status === "running" ||
@@ -584,6 +601,7 @@ export class RequirementSuiteRunService {
     input: { continueOnBlocked: boolean }
   ): RequirementSuiteRun {
     const run = this.get(runId);
+    this.validateEvaluationRun(run);
     if (run.status !== "blocked") return run;
     if (!input.continueOnBlocked) {
       throw new Error("Blocked requirement suite requires continueOnBlocked");
@@ -704,6 +722,7 @@ export class RequirementSuiteRunService {
     executableCaseId: string
   ): RequirementSuiteRun {
     const run = this.get(runId);
+    this.validateEvaluationRun(run);
     const caseRun = this.caseById(run, executableCaseId);
     if (caseRun.status !== "failed" && caseRun.status !== "blocked") {
       throw new Error(
@@ -1025,6 +1044,8 @@ export class RequirementSuiteRunService {
   }
 
   private createStabilityRun(previous: RequirementSuiteRun): RequirementSuiteRun {
+    if (previous.evaluationTrialId) this.validateEvaluation(previous.evaluationTrialId, previous.knowledgeProjectId,
+      previous.systemId, previous.caseRuns.map((item) => item.executableCaseId));
     const nextIteration = (previous.stabilityIteration ?? 1) + 1;
     const next: RequirementSuiteRun = {
       id: id("requirementSuiteRun"),
@@ -1053,6 +1074,10 @@ export class RequirementSuiteRunService {
           )
         : undefined,
       requirementSetIds: previous.requirementSetIds,
+      ...(previous.evaluationTrialId ? { evaluationTrialId: previous.evaluationTrialId } : {}),
+      ...(previous.evaluationSourceRevision === undefined ? {} : { evaluationSourceRevision: previous.evaluationSourceRevision }),
+      ...(previous.evaluationSourceHash ? { evaluationSourceHash: previous.evaluationSourceHash } : {}),
+      ...(previous.evaluationRuntimeBuildIdentity ? { evaluationRuntimeBuildIdentity: previous.evaluationRuntimeBuildIdentity } : {}),
       reconciliation: previous.reconciliation,
       total: previous.caseRuns.length,
       passed: 0,
@@ -1082,6 +1107,21 @@ export class RequirementSuiteRunService {
       message: `Stability iteration ${nextIteration}/${next.stabilityTarget}`
     });
     return next;
+  }
+
+  private validateEvaluation(trialId: string, knowledgeProjectId: string, systemId: string, executableCaseIds: string[]) {
+    const identity = readRuntimeIdentity({ workspace: "", schemaVersion: this.repository.schemaVersion, provider: "unknown" });
+    const binding = new EvaluationIntegrityService(this.repository).validateExecutionBinding({
+      trialId, knowledgeProjectId, systemId, executableCaseIds,
+      runtimeBuildIdentity: identity.buildId
+    });
+    if (!binding.valid) throw new Error(`Evaluation trial binding is invalid: ${binding.reasons.join("; ")}`);
+    return binding;
+  }
+
+  private validateEvaluationRun(run: RequirementSuiteRun) {
+    if (run.evaluationTrialId) this.validateEvaluation(run.evaluationTrialId, run.knowledgeProjectId,
+      run.systemId, run.caseRuns.map((item) => item.executableCaseId));
   }
 }
 

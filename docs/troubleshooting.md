@@ -151,6 +151,11 @@ Install Playwright Chromium:
 npx playwright install chromium
 ```
 
+When the managed Playwright Chromium is installed, Brain Creator prefers it for
+automation so browser extensions and local enterprise policies do not add
+unrelated requests. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` when a deployment
+explicitly requires a trusted Chrome or Edge executable.
+
 Or point Brain Creator to a supported local Chrome or Edge executable:
 
 ```text

@@ -7,11 +7,11 @@ Brain Creator has **No Web UI**. The conversation in Claude Code or Codex is the
 [中文](#中文) | [English](#english) | [Documentation](https://zhuyanlong0091-prog.github.io/brain-creator/) | [中文文档](https://zhuyanlong0091-prog.github.io/brain-creator/zh-CN/) | [npm](https://www.npmjs.com/package/brain-creator)
 
 ## 中文
+开发中：`bc_status.runtimeIdentity` 确认 MCP 实际构建，`doctor` 仅代表 CLI 进程。强证据需校验文件、hash 和合同/步骤绑定；可信晋升还需业务 Oracle 对账，不能依赖通过标签或合成结果。本改动尚未发布、未完成真实回归，见[收敛交付台账](docs/quality/trust-convergence.md)。
 
 Brain Creator 无 Web UI；Claude Code 或 Codex 中的对话就是用户入口。
 
 ### 五分钟开始
-
 **前置条件**
 
 - Node.js 20 或更高版本
@@ -122,9 +122,9 @@ npx brain-creator artifacts retention --older-than-days 90 --confirm
 - [故障排查](docs/troubleshooting.md)：按症状定位 provider、浏览器、鉴权和连接器问题。
 
 ## English
+In development: `bc_status.runtimeIdentity` identifies the MCP build; doctor identifies only its CLI process. Strong evidence requires validated files, hashes and exact contract/step binding. Trust also requires a source-backed business Oracle, not passing labels or synthetic results. This unreleased work has not passed real-system acceptance; see the [delivery register](docs/quality/trust-convergence.md).
 
 ### Get started in five minutes
-
 **Prerequisites**
 
 - Node.js 20 or later

@@ -8,7 +8,12 @@ describe("GitHub Actions Runner long-cycle fixture", () => {
   const directories: string[] = [];
 
   afterEach(async () => {
-    await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+    await Promise.all(directories.splice(0).map((directory) => rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100
+    })));
   });
 
   it("persists and resumes scheduled iterations through the sharded repository", async () => {

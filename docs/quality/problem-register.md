@@ -1,5 +1,7 @@
 # Brain Creator execution quality problem register
 
+The current runtime identity and evidence-gate work is tracked in [Trust Convergence](trust-convergence.md). It is partial implementation, not real-system acceptance; existing issue statuses are not automatically closed by these changes.
+
 This sanitized register is derived from a real end-to-end execution review. The source material remains outside this repository because it contains environment-specific evidence. The original summary said 34 problems; the numbered inventory contains **41 problems**: A1-G4.
 
 Status meanings:

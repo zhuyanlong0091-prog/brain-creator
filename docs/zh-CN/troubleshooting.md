@@ -143,6 +143,8 @@ npx brain-creator config write --provider host-agent
 npx playwright install chromium
 ```
 
+如果已安装 Playwright 自带的 Chromium，Brain Creator 会优先使用它执行自动化，避免个人浏览器扩展和本机企业策略产生无关请求。部署明确要求使用受信任的 Chrome 或 Edge 时，再设置 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`。
+
 或者设置：
 
 ```text

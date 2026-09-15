@@ -11,6 +11,9 @@ The recommended entrypoint is a requirement document or link. Existing Excel/Mar
 
 ## Core Rules
 
+- Check `bc_status.runtimeIdentity` to identify the running MCP build. Doctor identifies its own CLI process; disk files alone do not prove the MCP was upgraded.
+- Never infer business conformance from `passed + strong`. Require exact contract/step IDs, validated files and a source-backed Oracle comparison. Synthetic runs and legacy paths alone cannot promote real scenario trust.
+
 - Keep every knowledge asset and execution asset isolated by `knowledgeProjectId` or `systemId`.
 - Keep approved requirement expectations separate from observed system behavior and test results.
 - Do not approve a baseline with unresolved clarification Gaps.
@@ -71,6 +74,8 @@ Real Playwright execution uses strict structured evidence by default. `evidenceM
 | Prepare test data | `bc_prepare action=prepare-test-data` | Preview first; deterministic generated/unique values may use `automatic=true` only after the data plan is confirmed; reuse is default and create requires explicit `allowCreate=true` |
 | Submit data or cleanup evidence | `bc_prepare action=submit-test-data` | Require stable references and non-empty `sourceRefs`; never expose secrets |
 | Prepare execution | `bc_prepare action=prepare-execution` | Persist only a ready immutable plan; blocked and needs-confirmation drafts cannot start Generator |
+| Record a write action | `bc_prepare action=record-execution-action` | Use one stable `actionKey`; record `planned` before dispatch and `sent` immediately after dispatch |
+| Reconcile an uncertain write | `bc_prepare action=reconcile-execution-action confirm=true` | Supply the verified postcondition and evidence; never repeat the write after a lost response |
 | Configure auth | `bc_configure target=auth operation=create|verify|archive` or `bc_configure target=checkpoint` | Verify only through a fresh browser context; never expose secrets |
 | Execute approved requirement cases | `bc_run mode=requirement-suite` | Preview first, then `confirm: true`; `automaticTestData=true` may resolve only confirmed deterministic generated/unique values |
 | Execute an existing test document | `bc_run mode=case-source-suite confirm=false`, then `bc_run mode=case-source-suite confirm=true` | Explicit confirmation required |
@@ -161,7 +166,7 @@ Subprocess modes may use Claude or Codex. Check bridge readiness with `bc_status
 
 Generator writes Playwright tests, Playwright executes them, and Healer performs bounded repairs. Business mismatches create BugReports. Auth, environment, locator, network, and missing-evidence blockers create Gaps.
 
-Treat `bc_status.readiness` as a three-state signal: `ready`, `action-required`, or `blocked`. Pending AgentTasks, unfinished suites, open BugReports, and open Gaps are `action-required`; Bridge or manual auth blockers are `blocked`. When suite progress includes an `activeTask`, continue that task before relying on an older failed case in `remainingCaseNos`.
+Treat `bc_status.readiness` as a three-state signal: `ready`, `action-required`, or `blocked`. Pending AgentTasks, unfinished suites, open BugReports, and open Gaps are `action-required`; Bridge or manual auth blockers are `blocked`. When `bc_status.executionTasks.active` exists, use its current case, step, wait reason, related task IDs, and next action as the recovery source before relying on an older failed case in `remainingCaseNos`; the legacy `activeTask` remains compatible but is not the preferred source.
 
 After the bounded Healer attempt, rely on the persisted ExecutionDiagnosis verdict. Create a BugReport only for `product_bug`; generated test syntax, parser, index, locator, missing-element, data, auth, environment, network, execution, and unknown failures remain typed Gaps. Review the diagnosis instead of reclassifying raw stderr.
 
@@ -178,6 +183,8 @@ Requirement and Document Suites share `bc_review target=run-ledger`. Use `knowle
 Use `observationMode=summary` for normal `bc_run` calls. Use `step-by-step` only when the user asks to watch detailed execution. MCP Progress Notifications are best-effort; always treat the ordered Run Ledger as the recovery source. Report the current case, step, page, elapsed time, wait reason, and `possiblyStalled` warning from `bc_status`. A stalled warning is not a failed assertion. Point the user to the incrementally updated offline Suite report for assurance, screenshots, traces, Bugs, and Gaps.
 
 `observationMode` controls progress detail. When the user explicitly asks to watch the live browser, pass `browserMode=observe` to both preview and confirmed `bc_run`; otherwise keep the default `headless`. Do not switch a running Suite's browser mode. If observe mode reports no interactive desktop, explain the capability blocker instead of silently falling back. A visible browser is an observation aid, not execution evidence.
+
+Write actions use the Run Ledger as an idempotency boundary. Give each side effect a stable key such as `<executionPlanId>:<stepId>`, record `planned` before dispatch, then `sent` after dispatch. If execution stops after `sent`, `bc_status.executionTasks.active.pendingAction` and `bc_run` stop at `reconcile-action`; query the business postcondition first. Confirm it with `bc_prepare action=reconcile-execution-action confirm=true`, including non-secret evidence references. A runtime with a target-specific postcondition verifier may pass `autoVerify=true`; only a verifier result of `confirmed` with evidence can clear the pending action. Without that verifier, or when it cannot confirm the postcondition, keep the action waiting for manual review. Do not send the same action again, and do not treat a lost response as a failure or success until the postcondition is observed.
 
 Brain Creator-generated files belong under `.brain-creator/artifacts/<system>/<requirement>-v<revision>/<suite-run>/`; do not write new specs or tests to root `specs/` or `tests/generated/`. Use `brain-creator artifacts migrate` as a dry-run before asking the user to confirm historical migration. Rollback and retention always require explicit `--confirm`; never clean an active or latest run. Use `brain-creator export --suite <id>` for a complete, secret-scanned Suite archive.
 

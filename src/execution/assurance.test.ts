@@ -5,6 +5,16 @@ import { buildAssertionContracts, determineAssuranceLevel } from "./assurance.js
 import type { ExecutableCaseStep, StructuredReporterResult } from "../domain/types.js";
 
 describe("assertion assurance", () => {
+  it("does not give strong assurance to a correct contract on the wrong step", () => {
+    const contracts = buildAssertionContracts([assertionStep()]);
+    expect(determineAssuranceLevel(contracts, reporter({ assertions: [{
+      id: contracts[0].id, stepId: "another-step", status: "passed", actual: "42", evidenceRefs: ["step.png", "trace.zip"]
+    }] }))).toBe("limited");
+  });
+  it("rejects positional assertion pairing even with equal counts and green results", () => {
+    const contracts = buildAssertionContracts([assertionStep()]);
+    expect(determineAssuranceLevel(contracts, reporter({ assertions: [{ id: "unrelated", status: "passed", actual: "42", evidenceRefs: ["step.png", "trace.zip"] }] }))).toBe("none");
+  });
   it("builds typed contracts with requirement and evidence references", () => {
     const contracts = buildAssertionContracts([
       {
@@ -22,7 +32,7 @@ describe("assertion assurance", () => {
     expect(contracts).toEqual([
       expect.objectContaining({
         type: "workflow",
-        strength: "strong",
+        strength: "limited",
         requirementRefs: ["requirement:order.status"],
         evidenceRequirements: expect.arrayContaining(["actual-value", "screenshot", "trace"])
       })
@@ -62,6 +72,7 @@ describe("assertion assurance", () => {
           status: "passed",
           assertions: [{
             id: contracts[0].id,
+            stepId: contracts[0].stepId,
             status: "passed",
             actual: "42",
             evidenceRefs: ["step-1.png", "trace.zip"]
@@ -81,6 +92,7 @@ describe("assertion assurance", () => {
           status: "passed",
           assertions: [{
             id: contracts[0].id,
+            stepId: contracts[0].stepId,
             status: "passed",
             evidenceRefs: ["step-1.png"]
           }]
@@ -127,6 +139,7 @@ function assertionStep(): ExecutableCaseStep {
     instruction: "Check order amount",
     targetSemantic: "Order amount",
     expected: "42",
+    assertion: { type: "value", strength: "strong", expected: "42" },
     origin: "source",
     sourceRefs: ["requirement:amount"]
   };

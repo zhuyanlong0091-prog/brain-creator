@@ -2,6 +2,7 @@ import type { InMemoryBrainCreatorRepository } from "../domain/repository.js";
 import type {
   ExecutionFailureType,
   ExecutionProgressEvent,
+  RunLedgerActionPhase,
   StructuredReporterResult
 } from "../domain/types.js";
 import { classifyExecutionFailure } from "./failureClassifier.js";
@@ -27,7 +28,22 @@ export type RecoveredExecutionState = {
     | "reconciled"
     | "run-state-only"
     | "ledger-only";
-  nextAction: "resume-after-checkpoint" | "inspect-failure" | "continue-run" | "review-result";
+  pendingAction?: {
+    actionKey: string;
+    phase: Extract<RunLedgerActionPhase, "sent" | "reconciliation-required">;
+    stepId?: string;
+    actionSemantic?: string;
+    entityReference?: string;
+    postcondition?: string;
+    evidenceRefs: string[];
+    nextAction: "reconcile-action";
+  };
+  nextAction:
+    | "resume-after-checkpoint"
+    | "inspect-failure"
+    | "continue-run"
+    | "review-result"
+    | "reconcile-action";
 };
 
 export function recoverExecutionState(
@@ -42,6 +58,7 @@ export function recoverExecutionState(
   const summary = ledgerEntries.length > 0 ? ledger.summary(runId) : undefined;
   const progress = ledgerEntries.length > 0 ? ledger.progress(runId) : undefined;
   const ledgerCurrent = progress?.current;
+  const unresolvedAction = ledger.latestUnresolvedAction(runId);
   const requirementRun = repository.requirementSuiteRuns.find((run) => run.id === runId);
   const documentSuite = repository.caseSuites.find((suite) => suite.id === runId);
   const documentRun = repository.caseSuiteRuns.find((run) => run.id === runId) ??
@@ -107,10 +124,23 @@ export function recoverExecutionState(
     documentSuite?.updatedAt;
   const updatedAt = persistedUpdatedAt ?? summary?.updatedAt ?? ledgerCurrent?.createdAt;
   if (!updatedAt) throw new Error("Run recovery has no persisted timestamp");
+  const pendingAction = unresolvedAction
+    ? {
+        actionKey: unresolvedAction.actionKey!,
+        phase: unresolvedAction.actionPhase as Extract<RunLedgerActionPhase, "sent" | "reconciliation-required">,
+        stepId: unresolvedAction.stepId,
+        actionSemantic: unresolvedAction.actionSemantic,
+        entityReference: unresolvedAction.entityReference,
+        postcondition: unresolvedAction.actionPostcondition,
+        evidenceRefs: unresolvedAction.actionEvidenceRefs ?? [],
+        nextAction: "reconcile-action" as const
+      }
+    : undefined;
+  const pendingActionCaseId = unresolvedAction?.executableCaseId ?? unresolvedAction?.caseNo;
   return {
     runId,
     status,
-    currentCaseId,
+    currentCaseId: currentCaseId ?? pendingActionCaseId,
     currentCaseTitle: persistedCase?.title ?? matchingLedgerProgress?.caseTitle,
     currentStepId: matchingLedgerProgress?.stepId,
     currentStepTitle: matchingLedgerProgress?.stepTitle,
@@ -124,13 +154,16 @@ export function recoverExecutionState(
     ),
     recoverySource,
     consistency,
-    nextAction: status.startsWith("waiting")
-      ? "resume-after-checkpoint"
-      : status === "failed"
-        ? "inspect-failure"
-        : status === "running"
-          ? "continue-run"
-          : "review-result"
+    ...(pendingAction ? { pendingAction } : {}),
+    nextAction: pendingAction
+      ? "reconcile-action"
+      : status.startsWith("waiting")
+        ? "resume-after-checkpoint"
+        : status === "failed"
+          ? "inspect-failure"
+          : status === "running"
+            ? "continue-run"
+            : "review-result"
   };
 }
 

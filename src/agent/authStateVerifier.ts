@@ -93,8 +93,18 @@ export const verifyStoredBrowserAuth: AuthStateVerifier = async (input) => {
 };
 
 export function browserExecutablePath() {
+  const configured = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+  if (configured && existsSync(configured)) return configured;
+
+  // Keep automation isolated from extensions and policies installed in a user's browser.
+  try {
+    if (existsSync(chromium.executablePath())) return undefined;
+  } catch {
+    // Fall back to an installed Chromium-compatible browser below.
+  }
+
   const candidates = [
-    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+    configured,
     process.platform === "win32"
       ? `${process.env.PROGRAMFILES ?? "C:\\Program Files"}\\Google\\Chrome\\Application\\chrome.exe`
       : undefined,

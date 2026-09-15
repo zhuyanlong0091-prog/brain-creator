@@ -559,6 +559,14 @@ export type EvaluationProvider =
   | "claude"
   | "codex";
 
+export type EvaluationExecutionScope = {
+  businessScenarioIds: string[];
+  baselineHash?: string;
+  scopeHash?: string;
+  approvalScopeRef?: string;
+  approvalScopeHash?: string;
+};
+
 export type EvaluationTrial = {
   id: string;
   comparisonGroupId: string;
@@ -568,11 +576,14 @@ export type EvaluationTrial = {
   sourceSnapshotId: string;
   sourceRevision: number;
   sourceHash: string;
+  requirementSetId?: string;
   provider: EvaluationProvider;
   workspacePath: string;
   storePath: string;
   codeRevision: string;
   runtimeVersions: Record<string, string>;
+  runtimeBuildIdentity?: string;
+  executionScope?: EvaluationExecutionScope;
   latestProjectionManifestId: string;
   status: "active" | "invalidated" | "completed";
   invalidationReasons: string[];
