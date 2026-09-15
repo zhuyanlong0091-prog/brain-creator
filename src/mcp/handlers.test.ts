@@ -3704,14 +3704,17 @@ describe("handleBrainCreatorTool", () => {
     );
     await handleBrainCreatorTool(context, "bc_verify_auth", { id: auth.id });
 
-    const result = dataOf(
-      await handleBrainCreatorTool(context, "bc_run", {
+    const response = await handleBrainCreatorTool(context, "bc_run", {
         mode: "case-source-suite",
         systemId: system.id,
         source,
         confirm: true
-      })
-    );
+      });
+    if (response.isError) {
+      const errorContent = response.content[0];
+      throw new Error(errorContent.type === "text" ? errorContent.text : "Brain Creator returned a non-text error.");
+    }
+    const result = dataOf(response);
 
     expect(result.authState).toEqual(expect.objectContaining({
       status: "valid",
