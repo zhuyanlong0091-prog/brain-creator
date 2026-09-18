@@ -216,6 +216,12 @@ export const BRAIN_CREATOR_TOOLS: ToolDefinition[] = [
       requirementSourceId: z.string().optional(),
       attachmentId: z.string().optional(),
       attachmentIds: z.array(z.string()).default([]),
+      hostDownloadedAttachments: z.array(z.object({
+        attachmentId: z.string().min(1),
+        localPath: z.string().min(1),
+        contentHash: z.string().optional(),
+        mimeType: z.string().optional()
+      })).default([]),
       attachmentAnalysisId: z.string().optional(),
       testIntentId: z.string().optional(),
       testIntentIds: z.array(z.string()).default([]),

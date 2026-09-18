@@ -35,6 +35,14 @@ export type RequirementAttachmentDownloader = (
   attachment: RequirementAttachment
 ) => Promise<{ data: Buffer; mimeType?: string }>;
 
+/** A host connector may download an attachment before handing it to Brain Creator. */
+export type HostDownloadedAttachment = {
+  attachmentId: string;
+  localPath: string;
+  contentHash?: string;
+  mimeType?: string;
+};
+
 export class RequirementAttachmentPipeline {
   constructor(
     private readonly repository: InMemoryBrainCreatorRepository,
@@ -45,11 +53,13 @@ export class RequirementAttachmentPipeline {
   async prepare(input: {
     sourceId: string;
     attachmentIds?: string[];
+    hostDownloadedAttachments?: HostDownloadedAttachment[];
     fetcher?: typeof fetch;
     downloader?: RequirementAttachmentDownloader;
     analyzer?: RequirementVisualAnalyzer;
   }) {
     const source = this.source(input.sourceId);
+    await this.adoptHostDownloads(source, input.hostDownloadedAttachments ?? []);
     const selected = source.attachments.filter(
       (attachment) =>
         !input.attachmentIds?.length ||
@@ -125,6 +135,79 @@ export class RequirementAttachmentPipeline {
     }
     this.repository.persist();
     return { attachments: selected, analyses, recognitionRequests, gaps };
+  }
+
+  private async adoptHostDownloads(
+    source: RequirementSource,
+    downloads: HostDownloadedAttachment[]
+  ) {
+    for (const download of downloads) {
+      const attachment = source.attachments.find((item) => item.id === download.attachmentId);
+      if (!attachment) throw new Error(`Requirement attachment not found: ${download.attachmentId}`);
+      if (!download.localPath.trim()) throw new Error("Host attachment localPath is required");
+
+      const workspaceRoot = resolve(this.sourceBaseDir);
+      const candidate = resolve(workspaceRoot, download.localPath);
+      const relativePath = relative(workspaceRoot, candidate);
+      if (
+        relativePath === ".." ||
+        relativePath.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+        isAbsolute(relativePath)
+      ) {
+        throw new Error("Host attachment path must stay inside the Brain Creator workspace");
+      }
+
+      const data = await readFile(candidate);
+      if (data.byteLength > MAX_ATTACHMENT_BYTES) {
+        throw new Error(`attachment exceeds ${MAX_ATTACHMENT_BYTES} bytes`);
+      }
+      const mimeType = download.mimeType ?? attachment.mimeType ?? mimeTypeFromName(attachment.name);
+      if (!isSupportedVisualContent(mimeType, attachment)) {
+        throw new Error("host attachment is not a supported image or PDF");
+      }
+      const contentHash = createHash("sha256").update(data).digest("hex");
+      if (download.contentHash && download.contentHash !== contentHash) {
+        throw new Error(`host attachment hash mismatch for ${attachment.id}`);
+      }
+
+      const directory = join(this.rootDir, "sources", source.id, "attachments");
+      await mkdir(directory, { recursive: true });
+      const path = join(directory, `${attachment.id}-${safeName(attachment.name)}`);
+      await writeFile(path, data);
+      attachment.localPath = path;
+      attachment.mimeType = mimeType;
+      attachment.contentHash = contentHash;
+      attachment.status = "downloaded";
+      attachment.attempts = (attachment.attempts ?? 0) + 1;
+      attachment.failureReason = undefined;
+
+      for (const gap of this.repository.gaps.filter(
+        (item) =>
+          item.sourceType === "requirement-attachment" &&
+          item.sourceId === attachment.id &&
+          item.status === "open"
+      )) {
+        gap.status = "resolved";
+        gap.lifecycle = [
+          ...(gap.lifecycle ?? []),
+          {
+            operation: "resolve",
+            note: "Recovered by a host-provided, hash-verified attachment download.",
+            evidenceRefs: [
+              `requirement-source:${source.id}`,
+              `attachment:${attachment.id}`,
+              `sha256:${contentHash}`
+            ],
+            createdAt: new Date().toISOString()
+          }
+        ];
+        gap.updatedAt = new Date().toISOString();
+      }
+    }
+    if (downloads.length > 0) {
+      source.updatedAt = new Date().toISOString();
+      this.repository.persist();
+    }
   }
 
   submit(input: {
