@@ -2466,6 +2466,14 @@ describe("handleBrainCreatorTool", () => {
       expect.objectContaining({
         systemName: "HRMS",
         readiness: "ready",
+        testReadiness: expect.objectContaining({
+          status: "not-ready",
+          reasons: expect.arrayContaining([
+            "requirement-baseline-missing",
+            "system-brain-snapshot-not-confirmed",
+            "ready-executable-case-missing"
+          ])
+        }),
         nextAction: "configure_or_generate_plan",
         nextCommand: `/bc run "<path>"`,
         nextStep: "Add a requirement or preview a test case document suite."
@@ -2481,6 +2489,8 @@ describe("handleBrainCreatorTool", () => {
     );
     expect(status.statusMarkdown).toContain("# Brain Creator Status: HRMS");
     expect(status.statusMarkdown).toContain("- Readiness: ready");
+    expect(status.statusMarkdown).toContain("- Test readiness: not-ready");
+    expect(status.statusMarkdown).toContain("requirement-baseline-missing");
     expect(status.statusMarkdown).toContain("- Auth profiles: 1");
     expect(status.statusMarkdown).toContain("- Open bugs: 0");
     expect(status.statusMarkdown).toContain("- Open gaps: 0");
