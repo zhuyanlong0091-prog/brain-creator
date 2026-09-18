@@ -2364,6 +2364,10 @@ async function statusFacade(context: BrainCreatorMcpContext, input: Record<strin
     openBugs: openBugs.length,
     openGaps: snapshot.openGaps.length,
     unfinishedSuites: unfinishedSuites.length,
+    testReadiness: testReadinessForSystem(context, systemId, {
+      approvedCases: snapshot.cases.byStatus.approved,
+      caseSources: caseSources.length
+    }),
     nextAction,
     activeSuite: activeSuiteSummary,
     activeExecutionTask: executionTasks.active
@@ -9659,6 +9663,94 @@ function facadeNextAction(state: {
   return "configure_or_generate_plan";
 }
 
+type TestReadiness = {
+  status: "not-ready" | "action-required" | "ready";
+  reasons: string[];
+  counts: {
+    requirementProjects: number;
+    requirementBaselines: number;
+    approvedRequirementBaselines: number;
+    confirmedSystemSnapshots: number;
+    executableCases: number;
+    readyExecutableCases: number;
+    caseSources: number;
+  };
+};
+
+function testReadinessForSystem(
+  context: BrainCreatorMcpContext,
+  systemId: string,
+  input: { approvedCases: number; caseSources: number }
+): TestReadiness {
+  const projectIds = new Set(
+    context.repository.knowledgeProjects
+      .filter((project) => project.systemIds.includes(systemId))
+      .map((project) => project.id)
+  );
+  const requirementBaselines = context.repository.requirementSets.filter(
+    (requirementSet) =>
+      projectIds.has(requirementSet.knowledgeProjectId) &&
+      requirementSet.status !== "superseded"
+  );
+  const approvedRequirementBaselines = requirementBaselines.filter(
+    (requirementSet) => requirementSet.status === "approved"
+  );
+  const confirmedSystemSnapshots = context.repository.systemBrainSnapshots.filter(
+    (snapshot) => snapshot.systemId === systemId && snapshot.status === "confirmed"
+  );
+  const executableCases = context.repository.executableCases.filter(
+    (executableCase) => executableCase.systemId === systemId
+  );
+  const readyExecutableCases = executableCases.filter(
+    (executableCase) => executableCase.status === "ready"
+  );
+  const counts = {
+    requirementProjects: projectIds.size,
+    requirementBaselines: requirementBaselines.length,
+    approvedRequirementBaselines: approvedRequirementBaselines.length,
+    confirmedSystemSnapshots: confirmedSystemSnapshots.length,
+    executableCases: executableCases.length,
+    readyExecutableCases: readyExecutableCases.length,
+    caseSources: input.caseSources
+  };
+
+  // Document suites have a separate compatibility path and can be previewed
+  // without a Requirement Brain baseline.
+  if (input.caseSources > 0 || input.approvedCases > 0) {
+    const reasons: string[] = [];
+    if (input.approvedCases === 0 && input.caseSources > 0) {
+      reasons.push("document-suite-requires-confirmation");
+    }
+    if (input.approvedCases > 0 && readyExecutableCases.length === 0) {
+      reasons.push("approved-cases-have-no-ready-executable-case");
+    }
+    return {
+      status: reasons.length === 0 ? "ready" : "action-required",
+      reasons,
+      counts
+    };
+  }
+
+  const reasons: string[] = [];
+  if (requirementBaselines.length === 0) {
+    reasons.push("requirement-baseline-missing");
+  } else if (approvedRequirementBaselines.length === 0) {
+    reasons.push("requirement-baseline-not-approved");
+  }
+  if (confirmedSystemSnapshots.length === 0) {
+    reasons.push("system-brain-snapshot-not-confirmed");
+  }
+  if (readyExecutableCases.length === 0) {
+    reasons.push("ready-executable-case-missing");
+  }
+
+  return {
+    status: reasons.length === 0 ? "ready" : "not-ready",
+    reasons,
+    counts
+  };
+}
+
 function statusUserSummary(state: {
   systemName: string;
   bridgeOk: boolean;
@@ -9668,6 +9760,7 @@ function statusUserSummary(state: {
   openBugs: number;
   openGaps: number;
   unfinishedSuites: number;
+  testReadiness: TestReadiness;
   nextAction: string;
   activeExecutionTask?: Pick<
     UnifiedExecutionTask,
@@ -9721,6 +9814,7 @@ function statusUserSummary(state: {
     nextAction: state.nextAction,
     nextCommand: nextCommandForAction(state.nextAction),
     nextStep: nextStepForAction(state.nextAction),
+    testReadiness: state.testReadiness,
     ...(state.activeExecutionTask
       ? { activeExecutionTask: state.activeExecutionTask }
       : {}),
@@ -9747,6 +9841,10 @@ function statusMarkdown(summary: ReturnType<typeof statusUserSummary>) {
     `- Open bugs: ${summary.counts.openBugs}`,
     `- Open gaps: ${summary.counts.openGaps}`,
     `- Unfinished suites: ${summary.counts.unfinishedSuites}`,
+    `- Test readiness: ${summary.testReadiness.status}`,
+    ...(summary.testReadiness.reasons.length > 0
+      ? [`- Test readiness reasons: ${summary.testReadiness.reasons.join(", ")}`]
+      : []),
     ...(summary.activeSuite
       ? [
           `- Active suite: ${summary.activeSuite.suiteId} (${summary.activeSuite.status})`,
