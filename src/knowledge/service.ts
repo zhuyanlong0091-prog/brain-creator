@@ -64,6 +64,7 @@ import { decryptSecrets } from "../shared/crypto.js";
 import {
   RequirementAttachmentPipeline,
   type AttachmentAnalysisDraft,
+  type HostDownloadedAttachment,
   type RequirementAttachmentDownloader,
   type RequirementVisualAnalyzer
 } from "./attachmentPipeline.js";
@@ -255,6 +256,7 @@ export class KnowledgeService {
   async prepareRequirementAttachments(input: {
     sourceId: string;
     attachmentIds?: string[];
+    hostDownloadedAttachments?: HostDownloadedAttachment[];
     fetcher?: typeof fetch;
     downloader?: RequirementAttachmentDownloader;
     analyzer?: RequirementVisualAnalyzer;

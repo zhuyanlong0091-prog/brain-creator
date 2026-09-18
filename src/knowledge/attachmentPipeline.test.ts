@@ -72,6 +72,77 @@ describe("requirement attachment pipeline", () => {
     expect(prepared.gaps).toEqual([]);
   });
 
+  it("accepts a host-downloaded attachment through the controlled workspace boundary", async () => {
+    const root = await tempDir();
+    const downloadedPath = join(root, "feishu-image.png");
+    await writeFile(downloadedPath, Buffer.from("host-image"));
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, join(root, "knowledge"), root);
+    const project = await service.createProject({ name: "Feishu", key: "feishu-host", defaultLocale: "zh-CN" });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: {
+        title: "Feishu flow",
+        content: "A request requires approval.",
+        blocks: [{ type: "paragraph", text: "A request requires approval." }],
+        attachments: [{ name: "flow.png", fileToken: "file-token" }],
+        source: "https://example.larkenterprise.com/wiki/demo",
+        sourceType: "feishu",
+        contentHash: "feishu-host-download",
+        warnings: []
+      }
+    });
+    const attachment = ingested.source.attachments[0];
+
+    const prepared = await service.prepareRequirementAttachments({
+      sourceId: ingested.source.id,
+      hostDownloadedAttachments: [{
+        attachmentId: attachment.id!,
+        localPath: downloadedPath,
+        mimeType: "image/png"
+      }]
+    });
+
+    expect(prepared.gaps).toEqual([]);
+    expect(prepared.recognitionRequests).toEqual([
+      expect.objectContaining({ attachmentId: attachment.id, localPath: expect.stringContaining("knowledge") })
+    ]);
+    expect(attachment.status).toBe("downloaded");
+    expect(attachment.contentHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("rejects a host attachment outside the Brain Creator workspace", async () => {
+    const root = await tempDir();
+    const outside = await tempDir();
+    const outsidePath = join(outside, "outside.png");
+    await writeFile(outsidePath, Buffer.from("secret"));
+    const repository = new InMemoryBrainCreatorRepository();
+    const service = new KnowledgeService(repository, join(root, "knowledge"), root);
+    const project = await service.createProject({ name: "Feishu", key: "feishu-path", defaultLocale: "zh-CN" });
+    const ingested = await service.ingestRequirement({
+      projectId: project.id,
+      contentPackage: {
+        title: "Feishu flow",
+        content: "A request requires approval.",
+        blocks: [{ type: "paragraph", text: "A request requires approval." }],
+        attachments: [{ name: "flow.png", fileToken: "file-token" }],
+        source: "https://example.larkenterprise.com/wiki/path",
+        sourceType: "feishu",
+        contentHash: "feishu-host-path",
+        warnings: []
+      }
+    });
+
+    await expect(service.prepareRequirementAttachments({
+      sourceId: ingested.source.id,
+      hostDownloadedAttachments: [{
+        attachmentId: ingested.source.attachments[0].id!,
+        localPath: outsidePath,
+        mimeType: "image/png"
+      }]
+    })).rejects.toThrow("inside the Brain Creator workspace");
+  });
+
   it("retries visual recognition once before creating a Gap", async () => {
     const { service, sourceId } = await fixtureWithAttachment();
     const analyzer = vi
