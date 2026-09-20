@@ -2780,7 +2780,8 @@ export class KnowledgeService {
           requirementSetId: analysis.requirementSetId,
           sourceRefs: [clause.sourceRef],
           confidence: 0.9,
-          status: "draft"
+          status: "draft",
+          persist: false
         });
       }
     }

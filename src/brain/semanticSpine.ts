@@ -50,6 +50,7 @@ export type UpsertSemanticConceptInput = {
   sourceRefs?: string[];
   confidence?: number;
   status?: SemanticAssetStatus;
+  persist?: boolean;
 };
 
 export class SemanticSpineService {
@@ -90,9 +91,16 @@ export class SemanticSpineService {
     concept.updatedAt = now;
     if (!existing) this.store.semanticConcepts.push(concept);
     for (const alias of concept.aliases) {
-      this.upsertAlias(concept.id, alias, input.sourceRefs ?? [], input.confidence ?? concept.confidence, concept.status);
+      this.upsertAlias(
+        concept.id,
+        alias,
+        input.sourceRefs ?? [],
+        input.confidence ?? concept.confidence,
+        concept.status,
+        input.persist !== false
+      );
     }
-    this.store.persist();
+    if (input.persist !== false) this.store.persist();
     return concept;
   }
 
@@ -101,7 +109,8 @@ export class SemanticSpineService {
     alias: string,
     sourceRefs: string[] = [],
     confidence = 0.8,
-    status: SemanticAssetStatus = "draft"
+    status: SemanticAssetStatus = "draft",
+    persist = true
   ): SemanticAlias {
     const normalizedAlias = normalizeSemanticTerm(alias);
     if (!normalizedAlias) throw new Error("Semantic alias cannot be empty");
@@ -128,7 +137,7 @@ export class SemanticSpineService {
     if (!existing) this.store.semanticAliases.push(semanticAlias);
     const concept = this.store.semanticConcepts.find((item) => item.id === conceptId);
     if (concept && !concept.aliases.includes(alias.trim())) concept.aliases.push(alias.trim());
-    this.store.persist();
+    if (persist) this.store.persist();
     return semanticAlias;
   }
 
@@ -139,6 +148,7 @@ export class SemanticSpineService {
     sourceRefs?: string[];
     confidence?: number;
     status?: SemanticAssetStatus;
+    persist?: boolean;
   }): SemanticRelation {
     const existing = this.store.semanticRelations.find(
       (item) =>
@@ -163,7 +173,7 @@ export class SemanticSpineService {
     relation.status = input.status ?? relation.status;
     relation.updatedAt = now;
     if (!existing) this.store.semanticRelations.push(relation);
-    this.store.persist();
+    if (input.persist !== false) this.store.persist();
     return relation;
   }
 
