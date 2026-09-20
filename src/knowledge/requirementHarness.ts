@@ -667,9 +667,9 @@ function buildContextPack(
     `source:${source.id}#line:${index + 1} ${line}`
   );
   const structured = JSON.stringify({
-    documentMap: outputs["document-mapper"],
-    clauseAnalysis: outputs["clause-analyst"],
-    businessModels: outputs["business-modeler"]
+    documentMap: compactStructuredOutput(outputs["document-mapper"]),
+    clauseAnalysis: compactStructuredOutput(outputs["clause-analyst"]),
+    businessModels: compactStructuredOutput(outputs["business-modeler"])
   }, null, 2);
   const attachmentEvidence = JSON.stringify(attachmentAnalyses.map((analysis) => ({
     ref: `attachment-analysis:${analysis.id}`,
@@ -751,6 +751,22 @@ function compactRequirementBlock(block: RequirementContentBlock) {
 function compactText(value: string | undefined, limit: number) {
   if (!value) return value;
   return value.length <= limit ? value : `${value.slice(0, limit)}… [full content in source lines]`;
+}
+
+function compactStructuredOutput(value: unknown): unknown {
+  if (typeof value === "string") return compactText(value, 240);
+  if (Array.isArray(value)) return value.map((item) => compactStructuredOutput(item));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      isSourceReferenceKey(key) ? item : compactStructuredOutput(item)
+    ])
+  );
+}
+
+function isSourceReferenceKey(key: string) {
+  return key === "sourceRef" || key === "sourceRefs" || key === "evidenceRefs" || key === "attachmentRefs";
 }
 
 function stagePrompt(stage: RequirementHarnessStage, context: BrainContextPack) {

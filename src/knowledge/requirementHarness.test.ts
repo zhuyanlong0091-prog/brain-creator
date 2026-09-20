@@ -167,6 +167,44 @@ describe("RequirementAnalysisHostHarness", () => {
       ref: "source:req-source#line:1"
     }));
   });
+
+  it("keeps later harness stages within budget after structured output is added", async () => {
+    const fixture = await createFixture();
+    fixture.repository.requirementSources[0].content = Array.from(
+      { length: 180 },
+      (_, index) => `Requirement line ${index + 1}: ${"x".repeat(500)}`
+    ).join("\n");
+    const coordinator = new RequirementAnalysisHostHarness(
+      fixture.repository,
+      new HarnessRuntime(fixture.repository),
+      fixture.knowledgeDir
+    );
+
+    const mapper = await coordinator.start(fixture.requirementSet.id);
+    const analystOutput = {
+      module: "Orders",
+      clauses: Array.from({ length: 40 }, (_, index) => ({
+        id: `clause-${index + 1}`,
+        index: index + 1,
+        text: `${"long clause ".repeat(80)} ${index + 1}`,
+        sourceRefs: [`source:req-source#line:${(index % 180) + 1}`],
+        module: "Orders",
+        kind: "rule" as const,
+        origin: "explicit" as const,
+        confidence: 0.9,
+        status: "draft" as const,
+        nodeTypes: ["rule" as const]
+      })),
+      openQuestions: []
+    };
+    const analyst = await coordinator.submit({ taskId: mapper.task.id, output: documentMap() });
+    const modeler = await coordinator.submit({ taskId: analyst.task.id, output: analystOutput });
+
+    expect(modeler.stage).toBe("business-modeler");
+    expect(modeler.task.contextPack!.estimatedChars).toBeLessThanOrEqual(50_000);
+    expect(modeler.task.contextPack!.content).toContain("clause-1");
+    expect(modeler.task.contextPack!.content).toContain("source:req-source#line:1");
+  });
 });
 
 async function createFixture(options: { attachmentStatus?: "downloaded" | "confirmed"; includeAnalysis?: boolean } = {}) {
