@@ -27,6 +27,25 @@ describe("SemanticSpineService", () => {
     expect(canonicalActionAlias("Address details")).toBe("addressdetails");
   });
 
+  it("can defer persistence while indexing a requirement in a batch", () => {
+    const repository = store();
+    const spine = new SemanticSpineService(repository);
+
+    spine.upsertConcept({
+      identityKey: "requirement:requirement-1:action:create",
+      kind: "action",
+      canonicalName: "create",
+      aliases: ["新增"],
+      requirementSetId: "requirement-1",
+      sourceRefs: ["requirement:clause-1"],
+      persist: false
+    });
+
+    expect(repository.persist).not.toHaveBeenCalled();
+    expect(repository.semanticConcepts).toHaveLength(1);
+    expect(repository.semanticAliases).toHaveLength(1);
+  });
+
   it("keeps one semantic action when requirement and system labels differ", () => {
     const repository = store();
     const spine = new SemanticSpineService(repository);

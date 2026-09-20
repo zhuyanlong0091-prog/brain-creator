@@ -133,6 +133,78 @@ describe("RequirementAnalysisHostHarness", () => {
       ref: "source:req-source#line:200"
     }));
   });
+
+  it("keeps a large document block AST within budget without dropping block anchors", async () => {
+    const fixture = await createFixture();
+    fixture.repository.requirementSources[0].blocks = Array.from({ length: 240 }, (_, index) => ({
+      id: `block-${index + 1}`,
+      type: index % 3 === 0 ? "table" : "paragraph",
+      text: `Long block ${index + 1}: ${"x".repeat(900)}`,
+      level: index % 4,
+      order: index + 1,
+      sourceRef: `source:req-source#block:${index + 1}`,
+      sourceRefs: [`source:req-source#block:${index + 1}`],
+      table: index % 3 === 0
+        ? {
+            headers: ["条件", "结果"],
+            rows: Array.from({ length: 40 }, (_, row) => ["condition", `${row} ${"y".repeat(200)}`])
+          }
+        : undefined
+    }));
+    const coordinator = new RequirementAnalysisHostHarness(
+      fixture.repository,
+      new HarnessRuntime(fixture.repository),
+      fixture.knowledgeDir
+    );
+
+    const mapper = await coordinator.start(fixture.requirementSet.id);
+
+    expect(mapper.task.contextPack!.estimatedChars).toBeLessThanOrEqual(50_000);
+    expect(mapper.task.contextPack!.content).toContain("sourceRef");
+    expect(mapper.task.contextPack!.content).toContain("source:req-source#block:1");
+    expect(mapper.task.contextPack!.content).not.toContain("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+    expect(mapper.task.contextPack!.references).toContainEqual(expect.objectContaining({
+      ref: "source:req-source#line:1"
+    }));
+  });
+
+  it("keeps later harness stages within budget after structured output is added", async () => {
+    const fixture = await createFixture();
+    fixture.repository.requirementSources[0].content = Array.from(
+      { length: 180 },
+      (_, index) => `Requirement line ${index + 1}: ${"x".repeat(500)}`
+    ).join("\n");
+    const coordinator = new RequirementAnalysisHostHarness(
+      fixture.repository,
+      new HarnessRuntime(fixture.repository),
+      fixture.knowledgeDir
+    );
+
+    const mapper = await coordinator.start(fixture.requirementSet.id);
+    const analystOutput = {
+      module: "Orders",
+      clauses: Array.from({ length: 40 }, (_, index) => ({
+        id: `clause-${index + 1}`,
+        index: index + 1,
+        text: `${"long clause ".repeat(80)} ${index + 1}`,
+        sourceRefs: [`source:req-source#line:${(index % 180) + 1}`],
+        module: "Orders",
+        kind: "rule" as const,
+        origin: "explicit" as const,
+        confidence: 0.9,
+        status: "draft" as const,
+        nodeTypes: ["rule" as const]
+      })),
+      openQuestions: []
+    };
+    const analyst = await coordinator.submit({ taskId: mapper.task.id, output: documentMap() });
+    const modeler = await coordinator.submit({ taskId: analyst.task.id, output: analystOutput });
+
+    expect(modeler.stage).toBe("business-modeler");
+    expect(modeler.task.contextPack!.estimatedChars).toBeLessThanOrEqual(50_000);
+    expect(modeler.task.contextPack!.content).toContain("clause-1");
+    expect(modeler.task.contextPack!.content).toContain("source:req-source#line:1");
+  });
 });
 
 async function createFixture(options: { attachmentStatus?: "downloaded" | "confirmed"; includeAnalysis?: boolean } = {}) {

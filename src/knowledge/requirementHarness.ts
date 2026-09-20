@@ -667,9 +667,9 @@ function buildContextPack(
     `source:${source.id}#line:${index + 1} ${line}`
   );
   const structured = JSON.stringify({
-    documentMap: outputs["document-mapper"],
-    clauseAnalysis: outputs["clause-analyst"],
-    businessModels: outputs["business-modeler"]
+    documentMap: compactStructuredOutput(outputs["document-mapper"]),
+    clauseAnalysis: compactStructuredOutput(outputs["clause-analyst"]),
+    businessModels: compactStructuredOutput(outputs["business-modeler"])
   }, null, 2);
   const attachmentEvidence = JSON.stringify(attachmentAnalyses.map((analysis) => ({
     ref: `attachment-analysis:${analysis.id}`,
@@ -679,17 +679,14 @@ function buildContextPack(
     edges: analysis.edges,
     sourceRefs: analysis.sourceRefs
   })), null, 2);
-  const documentBlocks = JSON.stringify(source.blocks.map((block) => ({
-    id: block.id,
-    type: block.type,
-    text: block.text,
-    level: block.level,
-    order: block.order,
-    sourceRef: block.sourceRef,
-    sourceRefs: block.sourceRefs,
-    table: block.table,
-    image: block.image
-  })), null, 2);
+  const documentBlocks = outputs["business-modeler"]
+    ? JSON.stringify({
+        omittedAfterModeling: true,
+        blockCount: source.blocks.length,
+        sourceLineCount: source.content.split(/\r?\n/).length,
+        sourceRefsRemainInContextReferences: true
+      })
+    : JSON.stringify(source.blocks.map((block) => compactRequirementBlock(block, source.id)));
   const fixed = [
     `Requirement: ${source.title}`,
     `Stage: ${stage}`,
@@ -705,11 +702,15 @@ function buildContextPack(
       "Structured requirement context exceeds the Harness budget; key flows and sourceRefs will not be silently truncated"
     );
   }
-  const sourceBudget = Math.max(0, MAX_CONTEXT_CHARS - fixed.length - 64);
+  const sourceBudget = outputs["business-modeler"]
+    ? 0
+    : Math.max(0, MAX_CONTEXT_CHARS - fixed.length - 64);
   const fullSource = sourceLines.join("\n");
-  const truncated = fullSource.length > sourceBudget;
+  const truncated = Boolean(outputs["business-modeler"]) || fullSource.length > sourceBudget;
   const sourceContent = truncated
-    ? `${fullSource.slice(0, sourceBudget)}\n[cold requirement content truncated]`
+    ? outputs["business-modeler"]
+      ? "[source content omitted after structured modeling; use source references and structured outputs above]"
+      : `${fullSource.slice(0, sourceBudget)}\n[cold requirement content truncated]`
     : fullSource;
   const content = `${fixed}\nSource content:\n${sourceContent}`;
   const references = unique([
@@ -725,6 +726,63 @@ function buildContextPack(
     estimatedChars: content.length,
     truncated
   };
+}
+
+const TABLE_PREVIEW_CELL_CHARS = 32;
+const IMAGE_ALT_PREVIEW_CHARS = 120;
+
+function compactRequirementBlock(block: RequirementContentBlock, sourceId: string) {
+  return {
+    id: block.id,
+    type: block.type,
+    level: block.level,
+    parentId: block.parentId,
+    order: block.order,
+    sourceRef: compactBlockSourceRef(block.sourceRef, sourceId),
+    table: block.table
+      ? {
+          headers: block.table.headers.map((cell) => compactText(cell, TABLE_PREVIEW_CELL_CHARS)),
+          rowCount: block.table.rows.length,
+          previewRows: block.table.rows.slice(0, 1).map((row) =>
+            row.map((cell) => compactText(cell, TABLE_PREVIEW_CELL_CHARS))
+          )
+        }
+      : undefined,
+    image: block.image
+      ? {
+          alt: compactText(block.image.alt, IMAGE_ALT_PREVIEW_CHARS),
+          reference: block.image.reference,
+          attachmentId: block.image.attachmentId
+        }
+      : undefined
+  };
+}
+
+function compactBlockSourceRef(value: string | undefined, sourceId: string) {
+  if (!value) return value;
+  const line = value.match(/#line[-:](\d+)$/)?.[1];
+  return line ? `source:${sourceId}#line:${line}` : compactText(value, 160);
+}
+
+function compactText(value: string | undefined, limit: number) {
+  if (!value) return value;
+  return value.length <= limit ? value : `${value.slice(0, limit)}… [full content in source lines]`;
+}
+
+function compactStructuredOutput(value: unknown): unknown {
+  if (typeof value === "string") return compactText(value, 240);
+  if (Array.isArray(value)) return value.map((item) => compactStructuredOutput(item));
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      isSourceReferenceKey(key) ? item : compactStructuredOutput(item)
+    ])
+  );
+}
+
+function isSourceReferenceKey(key: string) {
+  return key === "sourceRef" || key === "sourceRefs" || key === "evidenceRefs" || key === "attachmentRefs";
 }
 
 function stagePrompt(stage: RequirementHarnessStage, context: BrainContextPack) {
