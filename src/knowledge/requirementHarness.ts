@@ -728,7 +728,6 @@ function compactRequirementBlock(block: RequirementContentBlock) {
     parentId: block.parentId,
     order: block.order,
     sourceRef: block.sourceRef,
-    sourceRefs: block.sourceRefs,
     table: block.table
       ? {
           headers: block.table.headers.map((cell) => compactText(cell, TABLE_PREVIEW_CELL_CHARS)),
