@@ -733,6 +733,9 @@ function compactRequirementBlock(block: RequirementContentBlock) {
       ? {
           headers: block.table.headers.map((cell) => compactText(cell, TABLE_PREVIEW_CELL_CHARS)),
           rowCount: block.table.rows.length,
+          previewRows: block.table.rows.slice(0, 1).map((row) =>
+            row.map((cell) => compactText(cell, TABLE_PREVIEW_CELL_CHARS))
+          )
         }
       : undefined,
     image: block.image
