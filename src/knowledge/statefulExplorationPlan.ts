@@ -564,7 +564,7 @@ function normalizedSearch(url: URL) {
 }
 
 function isSafeExplorationEnvironment(environment: string) {
-  return /^(?:test\d*|testing|qa\d*|staging|stage|uat|dev\d*|development|sandbox|local|测试|预发|开发)$/i
+  return /^(?:test(?:\d*|[-_][a-z0-9]+)|testing|qa(?:\d*|[-_][a-z0-9]+)|staging|stage|uat(?:[-_][a-z0-9]+)?|dev\d*|development|sandbox|local|测试|预发|开发)$/i
     .test(environment.trim());
 }
 

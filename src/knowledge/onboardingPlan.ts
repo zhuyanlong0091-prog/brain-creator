@@ -1572,8 +1572,12 @@ function actionName(question: ExplorationQuestionDraft) {
 }
 
 function authorizedRole(role: string | undefined, actorJourney: ActorJourneyConfig[]) {
-  if (role) return role;
-  return actorJourney.length === 1 ? actorJourney[0].role : undefined;
+  // With one explicitly approved actor, the authenticated account is the
+  // execution authority for the bounded exploration. Requirement actor labels
+  // remain in the source/model evidence, but must not be mistaken for a second
+  // unbound credential. Multi-actor plans still preserve the semantic role so
+  // each action must match its own authorized journey entry.
+  return actorJourney.length === 1 ? actorJourney[0].role : role;
 }
 
 function isPotentialWriteAction(value: string) {

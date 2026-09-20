@@ -458,6 +458,20 @@ describe("OnboardingPlanService", () => {
     expect(created.onboardingPlan.baselineFingerprint).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("binds all generated actions to the sole approved actor when one actor is configured", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: [{ role: "requester", authProfileId: "auth-requester" }],
+      cleanupPolicy: "delete"
+    });
+
+    expect(created.explorationPlan.allowedActions
+      .filter((action) => action.role)
+      .every((action) => action.role === "requester")).toBe(true);
+  });
+
   it("rejects onboarding for archived projects and cancelled systems", () => {
     const archived = createFixture();
     archived.repository.knowledgeProjects[0].status = "archived";
