@@ -458,6 +458,20 @@ describe("OnboardingPlanService", () => {
     expect(created.onboardingPlan.baselineFingerprint).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("binds all generated actions to the sole approved actor when one actor is configured", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: [{ role: "requester", authProfileId: "auth-requester" }],
+      cleanupPolicy: "delete"
+    });
+
+    expect(created.explorationPlan.allowedActions
+      .filter((action) => action.role)
+      .every((action) => action.role === "requester")).toBe(true);
+  });
+
   it("rejects onboarding for archived projects and cancelled systems", () => {
     const archived = createFixture();
     archived.repository.knowledgeProjects[0].status = "archived";
@@ -845,6 +859,75 @@ describe("OnboardingPlanService", () => {
 
     expect(approved.onboardingPlan.status).toBe("approved");
     expect(approved.onboardingPlan.unresolvedQuestions).toEqual([]);
+  });
+
+  it("approves bounded exploration before unresolved requirement questions are closed", () => {
+    const fixture = createFixture({ pendingEval: true });
+    const created = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+
+    const approved = fixture.service.approve({
+      onboardingPlanId: created.onboardingPlan.id,
+      note: "Approve only the authorized exploration boundary",
+      approvedBy: "qa-owner",
+      stage: "exploration"
+    });
+
+    expect(approved.onboardingPlan).toEqual(expect.objectContaining({
+      status: "approved",
+      approvalStage: "exploration",
+      unresolvedQuestions: ["Confirm who may approve an order"]
+    }));
+    expect(approved.requirementSet.status).toBe("draft");
+    expect(approved.explorationPlan.status).toBe("approved");
+    expect(fixture.knowledge.validateRequirementSetApproval).not.toHaveBeenCalled();
+    expect(fixture.knowledge.approveRequirementSet).not.toHaveBeenCalled();
+
+    const started = fixture.service.start(created.onboardingPlan.id);
+
+    expect(started.status).toBe("needs-agent-execution");
+    expect(started.workPackage).toEqual(expect.objectContaining({
+      requirementQuestions: expect.arrayContaining([
+        expect.objectContaining({ query: expect.any(String) })
+      ])
+    }));
+  });
+
+  it("keeps execution approval blocked until the requirement baseline is approved", () => {
+    const fixture = createFixture({ pendingEval: true });
+    const created = fixture.service.create({
+      requirementSetId: "requirement-1",
+      systemId: "system-1",
+      actorJourney: actorJourney(),
+      cleanupPolicy: "delete"
+    });
+    fixture.service.approve({
+      onboardingPlanId: created.onboardingPlan.id,
+      note: "Approve exploration",
+      approvedBy: "qa-owner",
+      stage: "exploration"
+    });
+    for (const task of fixture.repository.explorationTasks) {
+      task.status = "resolved";
+      task.resultSourceRefs = ["page-model:page-order-approval"];
+    }
+    fixture.repository.explorationPlans[0].status = "completed";
+    const evaluationGate = fixture.repository.requirementSets[0].evaluationGate!;
+    evaluationGate.actions[0].status = "confirmed";
+    evaluationGate.status = "passed";
+    evaluationGate.verdict = "pass";
+
+    expect(() => fixture.service.approve({
+      onboardingPlanId: created.onboardingPlan.id,
+      note: "Attempt execution before baseline approval",
+      approvedBy: "qa-owner",
+      stage: "execution"
+    })).toThrow("approved requirement baseline");
+    expect(fixture.repository.requirementSets[0].status).toBe("draft");
   });
 
   it("starts an approved onboarding with requirement questions and active data leases", () => {
