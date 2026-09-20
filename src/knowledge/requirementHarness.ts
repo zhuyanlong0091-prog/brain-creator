@@ -679,7 +679,14 @@ function buildContextPack(
     edges: analysis.edges,
     sourceRefs: analysis.sourceRefs
   })), null, 2);
-  const documentBlocks = JSON.stringify(source.blocks.map(compactRequirementBlock));
+  const documentBlocks = outputs["business-modeler"]
+    ? JSON.stringify({
+        omittedAfterModeling: true,
+        blockCount: source.blocks.length,
+        sourceLineCount: source.content.split(/\r?\n/).length,
+        sourceRefsRemainInContextReferences: true
+      })
+    : JSON.stringify(source.blocks.map((block) => compactRequirementBlock(block, source.id)));
   const fixed = [
     `Requirement: ${source.title}`,
     `Stage: ${stage}`,
@@ -695,11 +702,15 @@ function buildContextPack(
       "Structured requirement context exceeds the Harness budget; key flows and sourceRefs will not be silently truncated"
     );
   }
-  const sourceBudget = Math.max(0, MAX_CONTEXT_CHARS - fixed.length - 64);
+  const sourceBudget = outputs["business-modeler"]
+    ? 0
+    : Math.max(0, MAX_CONTEXT_CHARS - fixed.length - 64);
   const fullSource = sourceLines.join("\n");
-  const truncated = fullSource.length > sourceBudget;
+  const truncated = Boolean(outputs["business-modeler"]) || fullSource.length > sourceBudget;
   const sourceContent = truncated
-    ? `${fullSource.slice(0, sourceBudget)}\n[cold requirement content truncated]`
+    ? outputs["business-modeler"]
+      ? "[source content omitted after structured modeling; use source references and structured outputs above]"
+      : `${fullSource.slice(0, sourceBudget)}\n[cold requirement content truncated]`
     : fullSource;
   const content = `${fixed}\nSource content:\n${sourceContent}`;
   const references = unique([
@@ -720,14 +731,14 @@ function buildContextPack(
 const TABLE_PREVIEW_CELL_CHARS = 32;
 const IMAGE_ALT_PREVIEW_CHARS = 120;
 
-function compactRequirementBlock(block: RequirementContentBlock) {
+function compactRequirementBlock(block: RequirementContentBlock, sourceId: string) {
   return {
     id: block.id,
     type: block.type,
     level: block.level,
     parentId: block.parentId,
     order: block.order,
-    sourceRef: block.sourceRef,
+    sourceRef: compactBlockSourceRef(block.sourceRef, sourceId),
     table: block.table
       ? {
           headers: block.table.headers.map((cell) => compactText(cell, TABLE_PREVIEW_CELL_CHARS)),
@@ -745,6 +756,12 @@ function compactRequirementBlock(block: RequirementContentBlock) {
         }
       : undefined
   };
+}
+
+function compactBlockSourceRef(value: string | undefined, sourceId: string) {
+  if (!value) return value;
+  const line = value.match(/#line[-:](\d+)$/)?.[1];
+  return line ? `source:${sourceId}#line:${line}` : compactText(value, 160);
 }
 
 function compactText(value: string | undefined, limit: number) {
