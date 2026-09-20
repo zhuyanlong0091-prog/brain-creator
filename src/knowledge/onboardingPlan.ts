@@ -486,21 +486,27 @@ export class OnboardingPlanService {
     }
     const requirementSet = this.assertBaselineCurrent(onboardingPlan);
     onboardingPlan.unresolvedQuestions = unresolvedQuestions(this.repository, requirementSet);
-    if (onboardingPlan.unresolvedQuestions.length > 0) {
-      throw new Error("Onboarding plan has unresolved requirement questions");
+    // Exploration approval authorizes only the bounded system discovery plan. It
+    // must not be confused with approval of the requirement baseline: unresolved
+    // questions are precisely what the approved exploration is meant to clarify.
+    // Execution approval remains strict and still requires a fully approved,
+    // covered requirement baseline.
+    const canApproveRequirementBaseline = onboardingPlan.unresolvedQuestions.length === 0;
+    if (canApproveRequirementBaseline) {
+      this.knowledge.validateRequirementSetApproval(onboardingPlan.requirementSetId);
     }
-
-    this.knowledge.validateRequirementSetApproval(onboardingPlan.requirementSetId);
     this.explorationPlans.validateApproval({
       planId: onboardingPlan.explorationPlanId,
       note: input.note,
       approvedBy: input.approvedBy
     });
     return this.repository.transaction(() => {
-      const approvedRequirementSet = this.knowledge.approveRequirementSet(
-        onboardingPlan.requirementSetId,
-        { persist: false }
-      );
+      const approvedRequirementSet = canApproveRequirementBaseline
+        ? this.knowledge.approveRequirementSet(
+          onboardingPlan.requirementSetId,
+          { persist: false }
+        )
+        : requirementSet;
       const explorationPlan = this.explorationPlans.approve({
         planId: onboardingPlan.explorationPlanId,
         note: input.note,
@@ -536,6 +542,9 @@ export class OnboardingPlanService {
       throw new Error(`Onboarding plan is ${onboardingPlan.status}`);
     }
     const requirementSet = this.assertBaselineCurrent(onboardingPlan);
+    if (onboardingPlan.status !== "draft" && requirementSet.status !== "approved") {
+      throw new Error("Execution approval requires an approved requirement baseline");
+    }
     const explorationPlan = this.explorationPlans.get(onboardingPlan.explorationPlanId);
     const tasks = explorationTasksForPlan(this.repository, explorationPlan);
     const questions = requirementExplorationQuestions(this.repository, requirementSet.id);
@@ -616,8 +625,14 @@ export class OnboardingPlanService {
     if (onboardingPlan.status !== "approved") {
       throw new Error(`Onboarding plan is ${onboardingPlan.status}`);
     }
-    this.assertBaselineCurrent(onboardingPlan);
-    this.bindExecutableCases(onboardingPlan);
+    const requirementSet = this.assertBaselineCurrent(onboardingPlan);
+    // Exploration may be approved before the requirement baseline is complete.
+    // In that state there is no safe executable case to compile yet; start only
+    // the bounded exploration and let execution approval enforce the baseline
+    // gate after its questions and coverage are resolved.
+    if (requirementSet.status === "approved") {
+      this.bindExecutableCases(onboardingPlan);
+    }
     const result = this.explorationPlans.start(onboardingPlan.explorationPlanId);
     if (result.status !== "needs-agent-execution") return result;
     return {
