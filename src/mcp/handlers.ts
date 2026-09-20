@@ -54,6 +54,7 @@ import {
   type RequirementSourceReader
 } from "../knowledge/sourceAdapters.js";
 import { FeishuOpenApiAdapter } from "../knowledge/feishuAdapter.js";
+import type { HostDownloadedAttachment } from "../knowledge/attachmentPipeline.js";
 import { writeArtifactManifest } from "../storage/artifactArchive.js";
 import {
   artifactFileName,
@@ -1186,6 +1187,7 @@ async function prepareFacade(context: BrainCreatorMcpContext, input: Record<stri
     const result = await context.knowledgeService.prepareRequirementAttachments({
       sourceId,
       attachmentIds: stringArrayArg(input, "attachmentIds"),
+      hostDownloadedAttachments: hostDownloadedAttachmentsArg(input, "hostDownloadedAttachments"),
       downloader
     });
     return {
@@ -12279,6 +12281,36 @@ function requirementContentPackageArg(
     throw new Error(`${key}.blocks contains an invalid document block`);
   }
   return candidate;
+}
+
+function hostDownloadedAttachmentsArg(
+  input: Record<string, unknown>,
+  key: string
+): HostDownloadedAttachment[] {
+  const value = input[key];
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`${key} must be an array`);
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`${key}[${index}] is invalid`);
+    }
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.attachmentId !== "string" || typeof candidate.localPath !== "string") {
+      throw new Error(`${key}[${index}] requires attachmentId and localPath`);
+    }
+    if (candidate.contentHash !== undefined && typeof candidate.contentHash !== "string") {
+      throw new Error(`${key}[${index}].contentHash is invalid`);
+    }
+    if (candidate.mimeType !== undefined && typeof candidate.mimeType !== "string") {
+      throw new Error(`${key}[${index}].mimeType is invalid`);
+    }
+    return {
+      attachmentId: candidate.attachmentId,
+      localPath: candidate.localPath,
+      contentHash: candidate.contentHash,
+      mimeType: candidate.mimeType
+    };
+  });
 }
 
 function explorationTaskOutcomeArg(

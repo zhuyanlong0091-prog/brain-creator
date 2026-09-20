@@ -1467,6 +1467,45 @@ describe("Brain Creator requirement-first facade", () => {
     expect(confirmed.status).toBe("confirmed");
   });
 
+  it("accepts a host connector download through the bc_prepare facade", async () => {
+    const workDir = await tempDir();
+    const imagePath = join(workDir, "host-flow.png");
+    await writeFile(imagePath, Buffer.from("host-image"));
+    const context = createBrainCreatorMcpContext({ workDir, dataFilePath: join(workDir, "assets.json") });
+    const project = dataOf(await handleBrainCreatorTool(context, "bc_configure", {
+      target: "knowledge-project", name: "Host package", key: "host-package"
+    }));
+    const ingested = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "ingest-requirement",
+      knowledgeProjectId: project.id,
+      source: join(workDir, "requirement.md"),
+      contentPackage: {
+        title: "Host package",
+        content: "The flow requires approval.",
+        blocks: [{ type: "paragraph", text: "The flow requires approval." }],
+        attachments: [{ name: "host-flow.png", fileToken: "host-file-token" }],
+        source: join(workDir, "requirement.md"),
+        sourceType: "feishu",
+        contentHash: "host-package-attachment",
+        warnings: []
+      }
+    }));
+
+    const prepared = dataOf(await handleBrainCreatorTool(context, "bc_prepare", {
+      action: "analyze-attachments",
+      requirementSourceId: ingested.source.id,
+      hostDownloadedAttachments: [{
+        attachmentId: ingested.source.attachments[0].id,
+        localPath: imagePath,
+        mimeType: "image/png"
+      }]
+    }));
+
+    expect(prepared.status).toBe("needs-host-vision");
+    expect(prepared.recognitionRequests[0].localPath).toContain("sources");
+    expect(context.repository.gaps).toEqual([]);
+  });
+
   it("adds knowledge status and review without requiring a bound runtime system", async () => {
     const workDir = await tempDir();
     const context = createBrainCreatorMcpContext({ workDir, dataFilePath: join(workDir, "assets.json") });
