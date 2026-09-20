@@ -679,17 +679,7 @@ function buildContextPack(
     edges: analysis.edges,
     sourceRefs: analysis.sourceRefs
   })), null, 2);
-  const documentBlocks = JSON.stringify(source.blocks.map((block) => ({
-    id: block.id,
-    type: block.type,
-    text: block.text,
-    level: block.level,
-    order: block.order,
-    sourceRef: block.sourceRef,
-    sourceRefs: block.sourceRefs,
-    table: block.table,
-    image: block.image
-  })), null, 2);
+  const documentBlocks = JSON.stringify(source.blocks.map(compactRequirementBlock));
   const fixed = [
     `Requirement: ${source.title}`,
     `Stage: ${stage}`,
@@ -725,6 +715,39 @@ function buildContextPack(
     estimatedChars: content.length,
     truncated
   };
+}
+
+const TABLE_PREVIEW_CELL_CHARS = 32;
+const IMAGE_ALT_PREVIEW_CHARS = 120;
+
+function compactRequirementBlock(block: RequirementContentBlock) {
+  return {
+    id: block.id,
+    type: block.type,
+    level: block.level,
+    parentId: block.parentId,
+    order: block.order,
+    sourceRef: block.sourceRef,
+    sourceRefs: block.sourceRefs,
+    table: block.table
+      ? {
+          headers: block.table.headers.map((cell) => compactText(cell, TABLE_PREVIEW_CELL_CHARS)),
+          rowCount: block.table.rows.length,
+        }
+      : undefined,
+    image: block.image
+      ? {
+          alt: compactText(block.image.alt, IMAGE_ALT_PREVIEW_CHARS),
+          reference: block.image.reference,
+          attachmentId: block.image.attachmentId
+        }
+      : undefined
+  };
+}
+
+function compactText(value: string | undefined, limit: number) {
+  if (!value) return value;
+  return value.length <= limit ? value : `${value.slice(0, limit)}… [full content in source lines]`;
 }
 
 function stagePrompt(stage: RequirementHarnessStage, context: BrainContextPack) {
